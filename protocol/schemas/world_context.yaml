@@ -1,0 +1,59 @@
+$schema: "http://json-schema.org/draft-07/schema#"
+type: object
+properties:
+  scenario_tags:
+    type: array
+    items:
+      type: string
+    description: "Tags describing the scenario context"
+  initiator_faction:
+    type: object
+    properties:
+      id:
+        type: string
+      name:
+        type: string
+      traits:
+        type: object
+        additionalProperties:
+          type:
+            - string
+            - number
+            - boolean
+    required:
+      - id
+      - name
+  counterpart_faction:
+    type: object
+    properties:
+      id:
+        type: string
+      name:
+        type: string
+      traits:
+        type: object
+        additionalProperties:
+          type:
+            - string
+            - number
+            - boolean
+    required:
+      - id
+      - name
+  current_state:
+    type: object
+    properties:
+      relations:
+        type: number
+        minimum: -100
+        maximum: 100
+      trade_balance:
+        type: number
+      military_tension:
+        type: number
+        minimum: 0
+        maximum: 100
+required:
+  - scenario_tags
+  - initiator_faction
+  - counterpart_faction

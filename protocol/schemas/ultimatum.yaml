@@ -1,0 +1,29 @@
+$schema: "http://json-schema.org/draft-07/schema#"
+type: object
+properties:
+  type:
+    type: string
+    const: ultimatum
+  speaker_id:
+    type: string
+  content:
+    type: string
+    description: "The ultimatum content"
+  deadline:
+    type: string
+    format: date-time
+    description: "When the ultimatum expires"
+  consequences:
+    type: array
+    items:
+      type: string
+  timestamp:
+    type: string
+    format: date-time
+required:
+  - type
+  - speaker_id
+  - content
+  - deadline
+  - consequences
+  - timestamp

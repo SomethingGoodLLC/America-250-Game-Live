@@ -1,0 +1,27 @@
+$schema: "http://json-schema.org/draft-07/schema#"
+type: object
+properties:
+  is_safe:
+    type: boolean
+  flags:
+    type: array
+    items:
+      type: string
+      enum:
+        - hate_speech
+        - violence
+        - profanity
+        - personal_information
+        - inappropriate_content
+        - off_topic
+  severity:
+    type: string
+    enum:
+      - low
+      - medium
+      - high
+      - critical
+  reason:
+    type: string
+required:
+  - is_safe

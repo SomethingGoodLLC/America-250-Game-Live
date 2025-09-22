@@ -1,0 +1,32 @@
+$schema: "http://json-schema.org/draft-07/schema#"
+type: object
+properties:
+  type:
+    type: string
+    const: concession
+  speaker_id:
+    type: string
+  content:
+    type: string
+    description: "The concession content"
+  concession_type:
+    type: string
+    enum:
+      - territorial
+      - economic
+      - military
+      - political
+  value:
+    type: number
+    minimum: 0
+    maximum: 100
+    description: "Relative value of the concession"
+  timestamp:
+    type: string
+    format: date-time
+required:
+  - type
+  - speaker_id
+  - content
+  - concession_type
+  - timestamp

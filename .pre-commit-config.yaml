@@ -1,0 +1,76 @@
+# Pre-commit hooks configuration
+# Install with: pre-commit install
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-added-large-files
+        args: ['--maxkb=1000']  # Prevent files larger than 1MB
+      - id: check-merge-conflict
+      - id: check-case-conflict
+      - id: detect-private-key
+      - id: check-executables-have-shebangs
+
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.4.0
+    hooks:
+      - id: detect-secrets
+        args: ['--baseline', '.secrets.baseline']
+        exclude: |
+          (?x)^(
+              .*\.lock$|
+              .*\.log$|
+              .*/tests/.*|
+              .*\.example$
+          )$
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.1.6
+    hooks:
+      - id: ruff
+        args: [--fix, --exit-non-zero-on-fix]
+      - id: ruff-format
+
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.7.1
+    hooks:
+      - id: mypy
+        additional_dependencies: [types-all]
+        args: [--ignore-missing-imports]
+
+  - repo: local
+    hooks:
+      - id: no-env-files
+        name: Check for .env files
+        entry: bash -c 'if find . -name "*.env" -not -path "./.git/*" | grep -q .; then echo "Error: .env files found. Use env.example instead."; exit 1; fi'
+        language: system
+        pass_filenames: false
+
+      - id: no-secrets-in-code
+        name: Check for secrets in code
+        entry: bash -c 'if git diff --cached | grep -iE "(api_key|secret|password|token|private_key)" | grep -v "example\|template\|placeholder"; then echo "Error: Potential secrets found in staged files"; exit 1; fi'
+        language: system
+        pass_filenames: false
+
+      - id: yaml-schema-validation
+        name: Validate YAML schemas
+        entry: python -c "
+import sys
+from pathlib import Path
+from ruamel.yaml import YAML
+yaml = YAML()
+for file in sys.argv[1:]:
+    if file.endswith('.yaml'):
+        try:
+            with open(file) as f:
+                yaml.load(f)
+        except Exception as e:
+            print(f'Invalid YAML in {file}: {e}')
+            sys.exit(1)
+"
+        language: system
+        files: \.yaml$

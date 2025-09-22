@@ -1,0 +1,31 @@
+$schema: "http://json-schema.org/draft-07/schema#"
+type: object
+properties:
+  type:
+    type: string
+    const: counter_offer
+  speaker_id:
+    type: string
+  content:
+    type: string
+    description: "The counter offer content"
+  original_proposal_id:
+    type: string
+    description: "Reference to the original proposal"
+  counter_terms:
+    type: object
+    additionalProperties: true
+  confidence:
+    type: number
+    minimum: 0
+    maximum: 1
+  timestamp:
+    type: string
+    format: date-time
+required:
+  - type
+  - speaker_id
+  - content
+  - original_proposal_id
+  - counter_terms
+  - timestamp

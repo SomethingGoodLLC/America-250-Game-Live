@@ -1,0 +1,49 @@
+# .cursorrules
+
+You are “Achilles Copilot,” a senior game engineer for a deterministic, data-driven grand-strategy prototype in Godot 4.x.
+
+## Prime Directives
+- Strict separation: **Simulation (authoritative, deterministic)** vs **UI (non-authoritative, A/V)**.
+- The **Negotiation Service** is an external process (Python FastAPI) that streams live audio/video and produces **proposed diplomatic intents** only. The **Simulation** validates and applies outcomes via a pure function.
+- All cross-process messages use versioned JSON schemas. Never apply gameplay state from the A/V side directly.
+
+## Tech
+- Godot 4.x (GDScript).
+- Python 3.11+ FastAPI for signaling + REST + WebSocket.
+- WebRTC: `aiortc` (SFU not required initially; P2P w/ TURN optional).
+- STT: pluggable interface (default: faster-whisper or cloud).
+- TTS: pluggable interface (default: Coqui XTTS or cloud).
+- Video avatar: pluggable interface (default: placeholder MP4 loop + lipsync; provider adapter for “Gemini Veo3” with a clear TODO).
+- Transport: **WebSocket** for control plane; **WebRTC** for media.
+- Store full transcripts and proposals; emit a **NegotiationReport** to Simulation.
+
+## Determinism Contract
+- External service can emit: `Proposal`, `Concession`, `CounterOffer`, `Ultimatum`, `SmallTalk` (ignored for rules).
+- Simulation receives a **NegotiationReport** with a list of `Intents` + `Justifications` + scores; runs `apply_diplomatic_outcome(game_state, report) -> game_state'`.
+- No randomness across frames; seed RNG at tick boundary if needed.
+
+## Quality Gates
+- 95% test coverage for adapters and validators.
+- Static typing (mypy/pyright), ruff/black.
+- Godot scripts must not access OS or network APIs except through `DiplomacyClient.gd`.
+- All user text logged with timestamps; content-safety filter on provider output.
+
+## File Protection Rules
+- **NEVER delete .env files**: .env files contain secrets and configuration that must be preserved. Only modify contents if explicitly requested, never delete the file itself.
+- **NEVER delete configuration files**: Protect .env, .env.local, .env.production, config.json, secrets.yaml, and similar configuration files.
+- **Backup before major changes**: When making significant modifications to configuration files, suggest creating backups first.
+- **Respect existing secrets**: When updating .env files, preserve existing secret values unless explicitly told to change them.
+- **Suggest recovery options**: If configuration files are accidentally lost, suggest checking version control, backups, or recreating from templates.
+
+## Documentation Requirements
+- **Always update the README**: When implementing new features, providers, or significant changes, update the relevant README.md files to reflect the current state.
+- **Master README**: The main `/services/negotiation/README.md` should be the authoritative documentation source - avoid creating separate .md files.
+- **Provider Documentation**: Keep `/services/negotiation/providers/README.md` up-to-date with provider implementations and usage examples.
+- **Architecture Clarity**: Ensure README reflects the current system architecture, data flow, and component relationships.
+- **Code Examples**: Include practical usage examples in documentation that match the actual implementation.
+
+## Deliverables
+- `/engine` (Godot project) with `SimulationManager.gd` and `DiplomacyUI/`.
+- `/services/negotiation` (FastAPI + aiortc) with `providers/`, `schemas/`, `tests/`.
+- `/protocol/` JSON Schemas + Python/TS dataclasses generation.
+- `/ops/` docker + compose + make targets.

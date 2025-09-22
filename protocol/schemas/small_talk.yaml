@@ -1,0 +1,26 @@
+$schema: "http://json-schema.org/draft-07/schema#"
+type: object
+properties:
+  type:
+    type: string
+    const: small_talk
+  speaker_id:
+    type: string
+  content:
+    type: string
+    description: "The small talk content"
+  topic:
+    type: string
+    enum:
+      - weather
+      - culture
+      - personal
+      - general
+  timestamp:
+    type: string
+    format: date-time
+required:
+  - type
+  - speaker_id
+  - content
+  - timestamp

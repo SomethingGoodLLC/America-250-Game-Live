@@ -1,0 +1,24 @@
+$schema: "http://json-schema.org/draft-07/schema#"
+type: object
+properties:
+  error:
+    type: object
+    properties:
+      code:
+        type: string
+        enum:
+          - VALIDATION_ERROR
+          - NOT_FOUND
+          - INTERNAL_ERROR
+          - BAD_REQUEST
+          - UNAUTHORIZED
+      message:
+        type: string
+      details:
+        type: object
+        additionalProperties: true
+    required:
+      - code
+      - message
+required:
+  - error
