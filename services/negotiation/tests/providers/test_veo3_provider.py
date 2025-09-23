@@ -5,8 +5,8 @@ import asyncio
 from datetime import datetime
 from unittest.mock import Mock, AsyncMock
 
-from ...schemas.models import SpeakerTurnModel, WorldContextModel
-from ...providers.gemini_veo3 import Veo3Provider
+from schemas.models import SpeakerTurnModel, WorldContextModel
+from providers.gemini_veo3 import Veo3Provider
 
 
 class TestVeo3Provider:

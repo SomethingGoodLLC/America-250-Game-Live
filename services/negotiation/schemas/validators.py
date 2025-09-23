@@ -28,7 +28,19 @@ class SchemaValidator:
 
         # Default schema directory
         if schema_dir is None:
-            schema_dir = Path(__file__).parent.parent.parent / "protocol" / "schemas"
+            # Try multiple paths for schema directory
+            possible_paths = [
+                Path(__file__).parent.parent.parent / "protocol" / "schemas",
+                Path(__file__).parent.parent / "protocol" / "schemas",
+                Path(__file__).parent / "protocol" / "schemas"
+            ]
+            for path in possible_paths:
+                if path.exists():
+                    schema_dir = path
+                    break
+            else:
+                # Last resort - try from current working directory
+                schema_dir = Path.cwd() / "protocol" / "schemas"
 
         self.schema_dir = Path(schema_dir)
         self._schemas = {}

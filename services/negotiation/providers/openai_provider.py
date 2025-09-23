@@ -4,7 +4,7 @@ import asyncio
 from typing import AsyncGenerator, Dict, Any, List, Optional
 from datetime import datetime
 
-from ..schemas.models import SpeakerTurnModel, IntentModel, WorldContextModel, SmallTalkModel
+from schemas.models import SpeakerTurnModel, IntentModel, WorldContextModel, SmallTalkModel
 from .base import Provider, ProviderEvent, NewIntent, LiveSubtitle, Analysis, Safety
 from core.settings import settings
 

@@ -7,19 +7,19 @@ from datetime import datetime
 import structlog
 from ruamel.yaml import YAML
 
-from ..schemas.models import (
+from schemas.models import (
     SpeakerTurnModel, IntentModel, WorldContextModel,
     ProposalModel, ConcessionModel, CounterOfferModel,
     UltimatumModel, SmallTalkModel
 )
-from ..schemas.validators import validator
+from schemas.validators import validator
 from .base import Provider, ProviderEvent, NewIntent, LiveSubtitle, Analysis, Safety
 from .types import VideoSourceConfig
 from ._safety import screen_intent
 from ._scoring import score_intent
 from ._backpressure import BoundedAIO
-from ..stt.base import STTProvider
-from ..tts.base import TTSProvider
+from stt.base import STTProvider
+from tts.base import TTSProvider
 from .video_sources import create_video_source
 
 
@@ -144,8 +144,13 @@ class Veo3Provider(Provider):
             system_prompt = self._build_system_prompt(world_model, system_guidelines)
 
             # Start video source
-            await self.video_source.start()
-
+            try:
+                await self.video_source.start()
+                self.logger.info("Video source started successfully")
+            except Exception as e:
+                self.logger.error("Failed to start video source", error=str(e))
+                # Continue without video - audio/text processing can still work
+                
             # Create backpressured queues
             subs_q = BoundedAIO(maxsize=50)
             intent_q = BoundedAIO(maxsize=20)
@@ -184,18 +189,23 @@ class Veo3Provider(Provider):
             cleanup_tasks = []
             
             if subs_q:
-                cleanup_tasks.append(subs_q.close())
-            if intent_q:
-                cleanup_tasks.append(intent_q.close())
-            if self.video_source:
-                cleanup_tasks.append(self.video_source.stop())
-            
-            # Execute cleanup tasks concurrently but handle errors gracefully
-            if cleanup_tasks:
                 try:
-                    await asyncio.gather(*cleanup_tasks, return_exceptions=True)
+                    await subs_q.close()
                 except Exception as e:
-                    self.logger.error("Error during cleanup", error=str(e))
+                    self.logger.warning("Error closing subtitle queue", error=str(e))
+                    
+            if intent_q:
+                try:
+                    await intent_q.close()
+                except Exception as e:
+                    self.logger.warning("Error closing intent queue", error=str(e))
+                    
+            if self.video_source:
+                try:
+                    await self.video_source.stop()
+                    self.logger.info("Video source stopped successfully")
+                except Exception as e:
+                    self.logger.warning("Error stopping video source", error=str(e))
 
     def _build_system_prompt(self, world_context: WorldContextModel, system_guidelines: Optional[str] = None) -> str:
         """Build YAML system prompt from world context and guidelines.
@@ -231,7 +241,10 @@ class Veo3Provider(Provider):
         if system_guidelines:
             prompt_data["system"]["guidelines"] = system_guidelines
 
-        return self.yaml.dump(prompt_data)
+        from io import StringIO
+        stream = StringIO()
+        self.yaml.dump(prompt_data, stream)
+        return stream.getvalue()
 
     async def _stream_subtitles(
         self,
@@ -240,6 +253,9 @@ class Veo3Provider(Provider):
         system_prompt: str
     ) -> None:
         """Stream subtitle events from player turns.
+
+        # TODO: Wire Gemini Veo3 SDK streaming here for real-time subtitle generation
+        # This mock implementation simulates progressive subtitle delivery
 
         Args:
             queue: Backpressured queue for subtitles
@@ -324,6 +340,10 @@ class Veo3Provider(Provider):
         system_prompt: str
     ) -> None:
         """Detect intents from conversation turns.
+
+        # TODO: Wire Gemini Veo3 SDK streaming here
+        # This is currently a mock implementation for testing and development.
+        # Replace with actual Gemini API calls when Veo3 SDK is available.
 
         Args:
             queue: Backpressured queue for intents
@@ -507,3 +527,105 @@ timestamp: "{datetime.now().isoformat()}"
                 }
             }
         )
+
+    async def validate_and_score_intent(
+        self,
+        intent: Any,
+        world_context: Dict[str, Any]
+    ) -> tuple[Any, float, str]:
+        """Validate and score intent using schema validation and context-aware scoring.
+
+        Args:
+            intent: Intent to validate and score
+            world_context: World context for scoring
+
+        Returns:
+            Tuple of (validated_intent, confidence_score, justification)
+        """
+        # First validate using schema validator
+        from schemas.validators import validator
+
+        try:
+            # Convert datetime to ISO string for schema validation if needed
+            if hasattr(intent, 'timestamp') and hasattr(intent.timestamp, 'isoformat'):
+                intent_dict = intent.model_dump()
+                intent_dict['timestamp'] = intent.timestamp.isoformat()
+                
+                # Validate against schema using the dict with string timestamp
+                validated_dict = validator.validate_intent(intent_dict)
+            else:
+                # Validate against schema
+                validated_dict = validator.validate_intent(intent)
+
+            # Calculate context-aware confidence score
+            confidence = self._calculate_confidence_score(intent, world_context)
+
+            # Generate justification based on validation and context
+            justification = self._generate_validation_justification(intent, world_context, confidence)
+
+            return intent, confidence, justification
+
+        except Exception as e:
+            self.logger.warning(
+                "Intent validation failed",
+                intent_type=intent.type if hasattr(intent, 'type') else 'unknown',
+                error=str(e)
+            )
+            # Return original intent with low confidence
+            return intent, 0.1, f"Validation failed: {str(e)}"
+
+    def _calculate_confidence_score(
+        self,
+        intent: Any,
+        world_context: Dict[str, Any]
+    ) -> float:
+        """Calculate context-aware confidence score for intent."""
+        base_score = 0.9  # Start with high confidence for Veo3 provider
+
+        # Reduce confidence based on context mismatch
+        if isinstance(world_context, dict) and 'scenario_tags' in world_context:
+            scenario_tags = world_context.get('scenario_tags', [])
+            if scenario_tags:
+                intent_content = intent.content.lower() if hasattr(intent, 'content') else ''
+                intent_keywords = set(intent_content.split())
+
+                context_keywords = set()
+                for tag in scenario_tags:
+                    context_keywords.update(tag.lower().split())
+
+                # Calculate keyword overlap
+                if intent_keywords and context_keywords:
+                    overlap = len(intent_keywords.intersection(context_keywords))
+                    overlap_ratio = overlap / len(intent_keywords)
+                    base_score *= (0.7 + 0.3 * overlap_ratio)  # 0.7 to 1.0 multiplier
+
+        # Reduce confidence for very short content
+        if hasattr(intent, 'content') and len(intent.content) < 10:
+            base_score *= 0.8
+
+        return min(1.0, max(0.1, base_score))
+
+    def _generate_validation_justification(
+        self,
+        intent: Any,
+        world_context: Dict[str, Any],
+        confidence: float
+    ) -> str:
+        """Generate justification for validation and scoring decision."""
+        justifications = []
+
+        # Schema validation
+        justifications.append("Schema validation passed")
+
+        # Context awareness
+        if confidence > 0.8:
+            justifications.append("High context relevance")
+        elif confidence > 0.6:
+            justifications.append("Moderate context relevance")
+        else:
+            justifications.append("Low context relevance")
+
+        # Provider type
+        justifications.append("Validated by Veo3 provider")
+
+        return ". ".join(justifications)

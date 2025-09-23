@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock
 
 from schemas.models import SpeakerTurnModel, WorldContextModel, ProposalModel, ConcessionModel, CounterOfferModel, UltimatumModel, SmallTalkModel
 from providers.mock_local import MockLocalProvider
-from providers.base import NewIntent, Analysis, Safety
+from providers.base import NewIntent, LiveSubtitle, Analysis, Safety
 
 
 class TestMockLocalProvider:
@@ -297,3 +297,66 @@ class TestMockLocalProvider:
 
         for text in safe_texts:
             assert not provider._contains_unsafe_content(text)
+
+    @pytest.mark.asyncio
+    async def test_counter_offer_intent_detection(self, provider, mock_world_context):
+        """Test specific counter-offer phrase detection and validation."""
+        # Test the specific phrase mentioned in requirements
+        counter_offer_turn = SpeakerTurnModel(
+            speaker_id="player",
+            text="We'll grant trade access if you withdraw troops",
+            timestamp=datetime.now(),
+            confidence=0.9
+        )
+
+        events = []
+        async for event in provider.stream_dialogue([counter_offer_turn], mock_world_context):
+            events.append(event)
+
+        # Should emit safety check, analysis, and intent events
+        assert len(events) > 0
+
+        # Check for safety event
+        safety_events = [e for e in events if isinstance(e, Safety)]
+        assert len(safety_events) >= 1
+
+        # Check for intent detection
+        intent_events = [e for e in events if isinstance(e, NewIntent)]
+        assert len(intent_events) >= 1
+
+        # Should detect COUNTER_OFFER intent
+        detected_intent = intent_events[0].intent
+        assert isinstance(detected_intent, CounterOfferModel)
+        assert "trade access" in detected_intent.content.lower()
+        # Accept both "troops" and "military forces" as valid variations
+        assert ("withdraw troops" in detected_intent.content.lower() or 
+                "military forces" in detected_intent.content.lower())
+
+        # Validate intent using validators
+        from schemas.validators import validator
+        # Convert datetime to string for validation
+        intent_dict = detected_intent.model_dump()
+        intent_dict['timestamp'] = detected_intent.timestamp.isoformat()
+        validated_intent = validator.validate_intent(intent_dict)
+        assert validated_intent is not None
+        assert validated_intent["type"] == "counter_offer"
+
+        # Should include scoring fields
+        assert intent_events[0].confidence is not None
+        assert 0.0 <= intent_events[0].confidence <= 1.0
+        assert intent_events[0].justification is not None
+        assert len(intent_events[0].justification) > 0
+
+        # Should have interim and final subtitles
+        subtitle_events = [e for e in events if isinstance(e, LiveSubtitle)]
+        assert len(subtitle_events) >= 2
+
+        # Check subtitle progression
+        interim_subtitle = next((e for e in subtitle_events if not e.is_final), None)
+        final_subtitle = next((e for e in subtitle_events if e.is_final), None)
+
+        assert interim_subtitle is not None
+        assert final_subtitle is not None
+        assert interim_subtitle.speaker_id == final_subtitle.speaker_id
+        assert interim_subtitle.text.endswith("...")
+        assert final_subtitle.text == counter_offer_turn.text

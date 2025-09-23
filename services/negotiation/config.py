@@ -59,6 +59,13 @@ class ProviderConfig:
     enable_realtime_subtitles: bool = True
     enable_intent_detection: bool = True
 
+    # Video+dialogue provider settings
+    use_veo3: int = 0
+    veo3_api_key: Optional[str] = None
+    avatar_style: str = "colonial_diplomat"
+    voice_id: str = "en_male_01"
+    latency_target_ms: int = 800
+
 
 @dataclass
 class WebRTCConfig:
@@ -157,6 +164,13 @@ class ConfigManager:
         self.enable_realtime_subtitles = os.getenv("ENABLE_REALTIME_SUBTITLES", "true").lower() == "true"
         self.enable_intent_detection = os.getenv("ENABLE_INTENT_DETECTION", "true").lower() == "true"
 
+        # Video+dialogue provider settings
+        self.use_veo3 = int(os.getenv("USE_VEO3", "0"))
+        self.veo3_api_key = os.getenv("VEO3_API_KEY")
+        self.avatar_style = os.getenv("AVATAR_STYLE", "colonial_diplomat")
+        self.voice_id = os.getenv("VOICE_ID", "en_male_01")
+        self.latency_target_ms = int(os.getenv("LATENCY_TARGET_MS", "800"))
+
         # WebRTC settings
         self.stun_servers = os.getenv("STUN_SERVERS", "stun:stun.l.google.com:19302").split(",")
         self.turn_servers = os.getenv("TURN_SERVERS", "").split(",") if os.getenv("TURN_SERVERS") else []
@@ -217,7 +231,12 @@ class ConfigManager:
             enable_video=self.enable_video,
             enable_audio=self.enable_audio,
             enable_realtime_subtitles=self.enable_realtime_subtitles,
-            enable_intent_detection=self.enable_intent_detection
+            enable_intent_detection=self.enable_intent_detection,
+            use_veo3=self.use_veo3,
+            veo3_api_key=self.veo3_api_key,
+            avatar_style=self.avatar_style,
+            voice_id=self.voice_id,
+            latency_target_ms=self.latency_target_ms
         )
 
     def _create_webrtc_config(self) -> WebRTCConfig:
@@ -307,6 +326,13 @@ class ConfigManager:
 
         if not self.grok_api_key and self.grok_model:
             issues.append("GROK_API_KEY required for Grok provider")
+
+        # Validate video+dialogue settings
+        if self.use_veo3 == 1 and not self.veo3_api_key:
+            issues.append("VEO3_API_KEY required when USE_VEO3=1")
+
+        if self.latency_target_ms < 100:
+            issues.append("LATENCY_TARGET_MS should be at least 100ms")
 
         # Validate resource limits
         if self.memory_limit_mb < 100:

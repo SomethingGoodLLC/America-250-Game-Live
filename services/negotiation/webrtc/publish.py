@@ -413,3 +413,169 @@ class TrackPublisher:
                 return audio_frame
 
         return DataAudioTrack(audio_data, sample_rate)
+
+
+class FrameTrack(VideoStreamTrack):
+    """WebRTC video track that pulls frames from a VideoSource.
+
+    This class implements the WebRTC VideoStreamTrack interface by
+    pulling frames from a VideoSource.frames() async generator and
+    converting them to av.VideoFrame objects.
+    """
+
+    def __init__(self, video_source):
+        """Initialize FrameTrack with a video source.
+
+        Args:
+            video_source: Video source that provides frames() async generator
+        """
+        super().__init__()
+        self.video_source = video_source
+        self.logger = structlog.get_logger(__name__)
+        self._frame_generator = None
+        self._is_stopped = False
+
+    async def recv(self):
+        """Receive the next video frame.
+
+        Returns:
+            av.VideoFrame: Next video frame for WebRTC streaming
+
+        Raises:
+            Exception: If frame generation fails or track is stopped
+        """
+        if self._is_stopped:
+            raise Exception("FrameTrack has been stopped")
+            
+        try:
+            # Initialize frame generator if needed
+            if self._frame_generator is None:
+                self._frame_generator = self.video_source.frames()
+
+            # Get next frame from video source
+            try:
+                frame_array = await self._frame_generator.__anext__()
+            except StopAsyncIteration:
+                # Restart generator if exhausted
+                self.logger.debug("Video frame generator exhausted, restarting")
+                self._frame_generator = self.video_source.frames()
+                frame_array = await self._frame_generator.__anext__()
+
+            # Convert numpy array to av.VideoFrame
+            import av
+            import numpy as np
+
+            # Validate frame array
+            if frame_array is None:
+                raise ValueError("Received None frame from video source")
+                
+            if not isinstance(frame_array, np.ndarray):
+                raise ValueError(f"Expected numpy array, got {type(frame_array)}")
+
+            # Ensure frame_array is in correct format (HxWxC)
+            if len(frame_array.shape) == 3 and frame_array.shape[2] == 3:
+                # RGB format
+                av_frame = av.VideoFrame.from_ndarray(frame_array, format="rgb24")
+            elif len(frame_array.shape) == 3 and frame_array.shape[2] == 1:
+                # Grayscale - convert to RGB
+                rgb_frame = np.repeat(frame_array, 3, axis=2)
+                av_frame = av.VideoFrame.from_ndarray(rgb_frame, format="rgb24")
+            elif len(frame_array.shape) == 3 and frame_array.shape[2] == 4:
+                # RGBA - drop alpha channel
+                rgb_frame = frame_array[:, :, :3]
+                av_frame = av.VideoFrame.from_ndarray(rgb_frame, format="rgb24")
+            else:
+                # Unsupported format - create blank frame
+                self.logger.warning(
+                    "Unsupported frame format", 
+                    shape=frame_array.shape,
+                    dtype=str(frame_array.dtype)
+                )
+                raise ValueError(f"Unsupported frame format: {frame_array.shape}")
+
+            # Set timing information
+            av_frame.pts = self.video_source.get_frame_count()
+            av_frame.time_base = av.Fraction(1, self.video_source.config.framerate)
+
+            return av_frame
+
+        except Exception as e:
+            self.logger.error("Error in FrameTrack.recv", error=str(e))
+
+            # Return a blank frame on error to prevent stream interruption
+            import av
+            import numpy as np
+            
+            try:
+                # Create a simple colored frame to indicate error
+                width, height = self.video_source.config.resolution
+                error_array = np.full((height, width, 3), [128, 0, 0], dtype=np.uint8)  # Dark red
+                error_frame = av.VideoFrame.from_ndarray(error_array, format="rgb24")
+                error_frame.pts = self.video_source.get_frame_count()
+                error_frame.time_base = av.Fraction(1, self.video_source.config.framerate)
+                return error_frame
+            except Exception as fallback_error:
+                self.logger.error("Failed to create error frame", error=str(fallback_error))
+                # Last resort - create minimal frame
+                error_frame = av.VideoFrame(width=320, height=240, format="rgb24")
+                error_frame.pts = 0
+                error_frame.time_base = av.Fraction(1, 30)
+                return error_frame
+
+    async def stop(self):
+        """Stop the track gracefully."""
+        self._is_stopped = True
+        self.logger.info("FrameTrack stopped")
+
+
+async def attach_avatar_track(
+    peer: RTCPeerConnection,
+    source: 'VideoSource',
+    session_id: str = None
+) -> FrameTrack:
+    """Attach an avatar video track to a WebRTC peer connection.
+
+    Args:
+        peer: WebRTC peer connection to attach track to
+        source: Video source providing frames
+        session_id: Optional session identifier for logging
+
+    Returns:
+        FrameTrack: The attached video track
+
+    Raises:
+        Exception: If track attachment fails
+    """
+    logger = structlog.get_logger(__name__)
+
+    try:
+        # Create FrameTrack from video source
+        frame_track = FrameTrack(source)
+
+        # Add track to peer connection
+        sender = peer.addTrack(frame_track)
+
+        # Configure sender (optional)
+        if hasattr(sender, 'setParameters'):
+            # Set encoding parameters for optimal quality
+            from aiortc import RTCRtpSender
+            if isinstance(sender, RTCRtpSender):
+                # This is where we could configure bitrate, resolution, etc.
+                pass
+
+        logger.info(
+            "Attached avatar track to peer connection",
+            session_id=session_id,
+            track_id=id(frame_track),
+            source_type=source.__class__.__name__
+        )
+
+        return frame_track
+
+    except Exception as e:
+        logger.error(
+            "Failed to attach avatar track",
+            session_id=session_id,
+            error=str(e)
+        )
+        raise

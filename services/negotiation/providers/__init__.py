@@ -1,6 +1,6 @@
 """Negotiation providers."""
 
-from .base import Provider, ProviderEvent
+from .base import Provider, ProviderEvent, NewIntent, LiveSubtitle, Analysis, Safety
 from .types import ProviderConfig, VideoSourceConfig, ProcessingContext, IntentEvent, SubtitleEvent, AnalysisEvent, SafetyEvent
 from .mock_local import MockLocalProvider
 from .gemini_provider import GeminiProvider
@@ -24,6 +24,10 @@ __all__ = [
     # Core provider classes
     "Provider",
     "ProviderEvent",
+    "NewIntent",
+    "LiveSubtitle",
+    "Analysis",
+    "Safety",
 
     # Type definitions
     "ProviderConfig",

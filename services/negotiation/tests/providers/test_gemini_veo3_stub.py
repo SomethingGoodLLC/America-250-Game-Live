@@ -47,7 +47,12 @@ class TestVeo3Provider:
 
     @pytest.fixture
     def provider(self, mock_config):
-        return Veo3Provider(mock_config)
+        return Veo3Provider(
+            avatar_style=mock_config.get("avatar_style", "diplomatic"),
+            voice_id=mock_config.get("voice_id", "diplomat_en_us"),
+            latency_target_ms=mock_config.get("latency_target_ms", 150),
+            use_veo3=False  # Use placeholder mode for testing
+        )
 
     def test_provider_initialization(self, provider, mock_config):
         """Test provider initialization."""
@@ -324,3 +329,64 @@ class TestVeo3Provider:
 
         # Provider confidence should also be reasonable
         assert 0.0 <= intent_events[0].confidence <= 1.0
+
+    @pytest.mark.asyncio
+    async def test_ultimatum_intent_detection(self, provider, mock_world_context):
+        """Test ultimatum intent detection and validation."""
+        # Test the specific phrase mentioned in requirements
+        ultimatum_turn = SpeakerTurnModel(
+            speaker_id="player",
+            text="Ceasefire now or else",
+            timestamp=datetime.now(),
+            confidence=0.9
+        )
+
+        events = []
+        async for event in provider.stream_dialogue([ultimatum_turn], mock_world_context, "Test guidelines"):
+            events.append(event)
+
+        # Should emit safety check, analysis, and intent events
+        assert len(events) > 0
+
+        # Check for safety event
+        safety_events = [e for e in events if isinstance(e, Safety)]
+        assert len(safety_events) >= 1
+
+        # Should detect ULTIMATUM intent
+        intent_events = [e for e in events if isinstance(e, NewIntent)]
+        assert len(intent_events) >= 1
+
+        detected_intent = intent_events[0].intent
+        assert isinstance(detected_intent, UltimatumModel)
+        assert "ceasefire" in detected_intent.content.lower()
+        assert "or else" in detected_intent.content.lower()
+
+        # Validate intent using validators
+        from schemas.validators import validator
+        # Convert datetime to string for validation
+        intent_dict = detected_intent.model_dump()
+        intent_dict['timestamp'] = detected_intent.timestamp.isoformat()
+        validated_intent = validator.validate_intent(intent_dict)
+        assert validated_intent is not None
+        assert validated_intent["type"] == "ultimatum"
+
+        # Should include scoring fields
+        assert intent_events[0].confidence is not None
+        assert 0.0 <= intent_events[0].confidence <= 1.0
+        assert intent_events[0].justification is not None
+        assert len(intent_events[0].justification) > 0
+        assert "pattern" in intent_events[0].justification.lower()
+
+        # Should have interim and final subtitles
+        subtitle_events = [e for e in events if isinstance(e, LiveSubtitle)]
+        assert len(subtitle_events) >= 2
+
+        # Check subtitle progression
+        interim_subtitle = next((e for e in subtitle_events if not e.is_final), None)
+        final_subtitle = next((e for e in subtitle_events if e.is_final), None)
+
+        assert interim_subtitle is not None
+        assert final_subtitle is not None
+        assert interim_subtitle.speaker_id == final_subtitle.speaker_id
+        assert interim_subtitle.text.endswith("...")
+        assert final_subtitle.text == ultimatum_turn.text

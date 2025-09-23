@@ -34,6 +34,7 @@ class LiveSubtitle:
     start_time: float
     end_time: float
     speaker_id: str
+    is_final: bool = False
 
 
 @dataclass
@@ -63,4 +64,20 @@ class Provider(Protocol):
         system_guidelines: str,                 # safety/tone/system text
     ) -> AsyncIterator[ProviderEvent]:
         """Stream dialogue processing and emit events."""
+        ...
+
+    async def validate_and_score_intent(
+        self,
+        intent: Any,
+        world_context: Dict[str, Any]
+    ) -> tuple[Any, float, str]:
+        """Validate and score an intent against schemas and context.
+
+        Args:
+            intent: Intent object to validate and score
+            world_context: World context for scoring
+
+        Returns:
+            Tuple of (validated_intent, confidence_score, justification)
+        """
         ...

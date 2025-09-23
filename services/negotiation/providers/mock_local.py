@@ -4,8 +4,9 @@ import asyncio
 import re
 from typing import AsyncGenerator, Dict, Any, List, Optional
 from datetime import datetime
+import structlog
 
-from ..schemas.models import SpeakerTurnModel, IntentModel, WorldContextModel, ProposalModel, ConcessionModel, CounterOfferModel, UltimatumModel, SmallTalkModel
+from schemas.models import SpeakerTurnModel, IntentModel, WorldContextModel, ProposalModel, ConcessionModel, CounterOfferModel, UltimatumModel, SmallTalkModel
 from .base import Provider, ProviderEvent, NewIntent, LiveSubtitle, Analysis, Safety
 
 
@@ -23,6 +24,7 @@ class MockLocalProvider(Provider):
     def __init__(self, config: Dict[str, Any]):
         super().__init__(config)
         self.strict = config.get("strict", False)
+        self.logger = structlog.get_logger(__name__)
 
         # Pre-compiled regex patterns for efficient matching
         self._patterns = {
@@ -43,9 +45,10 @@ class MockLocalProvider(Provider):
 
         # Always emit safety check first
         yield Safety(
-            flag="deterministic_mode",
-            detail="Operating in deterministic mock mode",
-            severity="info"
+            is_safe=True,
+            flags=["deterministic_mode"],
+            severity="info",
+            reason="Operating in deterministic mock mode"
         )
 
         if not turns:
@@ -68,12 +71,13 @@ class MockLocalProvider(Provider):
         if last_turn.speaker_id != world_context.initiator_faction.get("id"):
             # This is an AI turn, just acknowledge and continue
             yield Analysis(
-                tag="turn_analysis",
-                payload={
+                analysis_type="turn_analysis",
+                result={
                     "turn_type": "ai_response",
                     "content_length": len(last_turn.text),
                     "sentiment": "neutral"
-                }
+                },
+                confidence=0.8
             )
             return
 
@@ -83,23 +87,45 @@ class MockLocalProvider(Provider):
         # Check for strict mode violations
         if self.strict and self._contains_unsafe_content(text):
             yield Safety(
-                flag="unsafe_content",
-                detail="Strict mode detected potentially unsafe content",
-                severity="high"
+                is_safe=False,
+                flags=["unsafe_content"],
+                severity="high",
+                reason="Strict mode detected potentially unsafe content"
             )
             # Still yield analysis even in strict mode
             yield Analysis(
-                tag="strict_mode_violation",
-                payload={
+                analysis_type="strict_mode_violation",
+                result={
                     "blocked_content": text[:50] + "..." if len(text) > 50 else text,
                     "violation_type": "unsafe_content",
                     "processing_mode": "strict"
-                }
+                },
+                confidence=0.9
             )
             return
 
         # Deterministic intent detection based on key phrases
         intent = await self._detect_intent_from_text(text, last_turn, world_context)
+
+        # Generate live subtitles for the player turn
+        yield LiveSubtitle(
+            text=text[:len(text)//2] + "...",
+            start_time=0.0,
+            end_time=0.5,
+            speaker_id=last_turn.speaker_id,
+            is_final=False
+        )
+        
+        # Simulate processing delay
+        await asyncio.sleep(0.1)
+        
+        yield LiveSubtitle(
+            text=text,
+            start_time=0.0,
+            end_time=1.0,
+            speaker_id=last_turn.speaker_id,
+            is_final=True
+        )
 
         if intent:
             # Validate and score the intent
@@ -112,12 +138,13 @@ class MockLocalProvider(Provider):
 
         # Always yield analysis
         yield Analysis(
-            tag="deterministic_analysis",
-            payload={
+            analysis_type="deterministic_analysis",
+            result={
                 "matched_patterns": self._get_matched_patterns(text),
                 "intent_detected": intent.type if intent else "none",
                 "processing_mode": "strict" if self.strict else "permissive"
-            }
+            },
+            confidence=0.85
         )
 
     async def _detect_intent_from_text(
@@ -228,13 +255,112 @@ class MockLocalProvider(Provider):
         try:
             # Basic schema validation
             intent.model_validate(intent.model_dump())
-            
+
             if self.strict:
                 # In strict mode, only allow safe, schema-compliant intents
                 return self._is_intent_safe(intent)
             return True
         except Exception:
             return False
+
+    async def validate_and_score_intent(
+        self,
+        intent: IntentModel,
+        world_context: WorldContextModel
+    ) -> tuple[IntentModel, float, str]:
+        """Validate and score intent using schema validation and context-aware scoring.
+
+        Args:
+            intent: Intent to validate and score
+            world_context: World context for scoring
+
+        Returns:
+            Tuple of (validated_intent, confidence_score, justification)
+        """
+        # First validate using schema validator
+        from schemas.validators import validator
+
+        try:
+            # Convert datetime to ISO string for schema validation
+            if hasattr(intent, 'timestamp') and hasattr(intent.timestamp, 'isoformat'):
+                intent_dict = intent.model_dump()
+                intent_dict['timestamp'] = intent.timestamp.isoformat()
+                
+                # Validate against schema using the dict with string timestamp
+                validated_dict = validator.validate_intent(intent_dict)
+            else:
+                # Validate against schema
+                validated_dict = validator.validate_intent(intent)
+
+            # Calculate context-aware confidence score
+            confidence = self._calculate_confidence_score(intent, world_context)
+
+            # Generate justification based on validation and context
+            justification = self._generate_validation_justification(intent, world_context, confidence)
+
+            return intent, confidence, justification
+
+        except Exception as e:
+            self.logger.warning(
+                "Intent validation failed",
+                intent_type=intent.type,
+                error=str(e)
+            )
+            # Return original intent with low confidence
+            return intent, 0.1, f"Validation failed: {str(e)}"
+
+    def _calculate_confidence_score(
+        self,
+        intent: IntentModel,
+        world_context: WorldContextModel
+    ) -> float:
+        """Calculate context-aware confidence score for intent."""
+        base_score = 0.8  # Start with high confidence for mock provider
+
+        # Reduce confidence based on context mismatch
+        if world_context.scenario_tags:
+            intent_keywords = set(intent.content.lower().split())
+            context_keywords = set(" ".join(world_context.scenario_tags).lower().split())
+
+            # Calculate keyword overlap
+            if intent_keywords and context_keywords:
+                overlap = len(intent_keywords.intersection(context_keywords))
+                overlap_ratio = overlap / len(intent_keywords)
+                base_score *= (0.5 + 0.5 * overlap_ratio)  # 0.5 to 1.0 multiplier
+
+        # Reduce confidence for very short content
+        if len(intent.content) < 10:
+            base_score *= 0.7
+
+        return min(1.0, max(0.1, base_score))
+
+    def _generate_validation_justification(
+        self,
+        intent: IntentModel,
+        world_context: WorldContextModel,
+        confidence: float
+    ) -> str:
+        """Generate justification for validation and scoring decision."""
+        justifications = []
+
+        # Schema validation
+        justifications.append("Schema validation passed")
+
+        # Context awareness
+        if confidence > 0.8:
+            justifications.append("High context relevance")
+        elif confidence > 0.5:
+            justifications.append("Moderate context relevance")
+        else:
+            justifications.append("Low context relevance")
+
+        # Pattern matching
+        if hasattr(intent, 'content'):
+            matched_patterns = self._get_matched_patterns(intent.content)
+            if matched_patterns:
+                justifications.append(f"Pattern matches: {', '.join(matched_patterns)}")
+
+        return ". ".join(justifications)
 
     def _is_intent_safe(self, intent: IntentModel) -> bool:
         """Check if intent is safe for strict mode."""
