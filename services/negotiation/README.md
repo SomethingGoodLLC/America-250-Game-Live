@@ -52,6 +52,57 @@ make test
 make run
 ```
 
+### Enhanced Browser Test Harness
+
+**🚀 Quickest way to test your AI avatar!**
+
+```bash
+# Start the enhanced test harness server
+make run
+
+# Or use the simple version
+make run-simple
+```
+
+Open http://localhost:8000 in your browser for a complete test environment featuring:
+
+#### **🎭 Enhanced Avatar System**
+- **Realistic avatar animations** with facial expressions and speaking states
+- **Live WebRTC video streaming** at 30 FPS with 640x480 resolution
+- **Dynamic expressions** that respond to conversation context
+- **Smooth animation transitions** between speaking and listening states
+
+#### **💬 Advanced Diplomatic Testing**
+- **Pre-built test utterances** with expected outcomes:
+  - "We'll grant trade access if you withdraw troops" → Counter-offer with confidence scoring
+  - "Ceasefire now or else we'll declare war!" → Ultimatum with clear consequences
+  - "I propose we establish a fair trade agreement" → Diplomatic proposal
+  - **Custom message input** for testing your own scenarios
+- **Real-time intent detection** with confidence scores and detailed rationale
+- **Keyword extraction** and sentiment analysis
+- **Streaming subtitle generation** showing partial and final transcriptions
+
+#### **🔧 Professional Development Tools**
+- **Live event logs** with color-coded event types (intents, safety, analysis, subtitles)
+- **Real-time statistics** tracking sessions, messages, intents, and connection time
+- **Model switching** between Enhanced Mock (deterministic) and Veo3 (advanced)
+- **Comprehensive diagnostics** for microphone and WebRTC testing
+- **Log export functionality** for debugging and analysis
+- **Structured JSON logging** with timestamps and correlation IDs
+
+#### **🛡️ Safety & Validation**
+- **Content safety screening** with configurable severity levels
+- **Schema validation** against YAML diplomatic protocols
+- **Error handling** with graceful degradation
+- **Session management** with automatic cleanup
+
+Perfect for:
+- **Demonstrating** the complete negotiation pipeline to stakeholders
+- **Testing** avatar video generation and diplomatic intent detection
+- **Debugging** negotiation flow and provider integration in real-time
+- **Validating** safety filters and content screening
+- **Developing** new diplomatic scenarios and testing edge cases
+
 ### Using Docker
 
 ```bash

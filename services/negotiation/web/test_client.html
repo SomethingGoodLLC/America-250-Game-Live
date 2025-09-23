@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Avatar Negotiation Test Harness</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 { color: #333; }
+        h2 { color: #666; }
+        .controls {
+            margin: 20px 0;
+            padding: 15px;
+            background: #f9f9f9;
+            border-radius: 6px;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover { background: #0056b3; }
+        button:disabled { background: #ccc; cursor: not-allowed; }
+        #video {
+            width: 100%;
+            max-width: 640px;
+            border-radius: 6px;
+            background: #000;
+        }
+        .logs {
+            height: 200px;
+            overflow-y: auto;
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            padding: 10px;
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            font-size: 12px;
+        }
+        .log-entry {
+            margin: 2px 0;
+            padding: 2px 5px;
+        }
+        .log-intent { background: #e3f2fd; }
+        .log-subtitle { background: #fff3e0; }
+        .log-safety { background: #ffebee; }
+        .log-analysis { background: #e8f5e8; }
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+        }
+        .status.connected { background: #d4edda; color: #155724; }
+        .status.disconnected { background: #f8d7da; color: #721c24; }
+        .status.error { background: #fff3cd; color: #856404; }
+        .model-selector {
+            margin: 10px 0;
+        }
+        label { margin-right: 10px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎭 AI Avatar Negotiation Test Harness</h1>
+        <p>Test your AI negotiation avatar with live WebRTC video and WebSocket control.</p>
+
+        <div class="controls">
+            <h2>Setup</h2>
+            <div class="model-selector">
+                <label><input type="radio" name="model" value="mock_local" checked> Mock Local (deterministic)</label>
+                <label><input type="radio" name="model" value="veo3"> Gemini Veo3 (with USE_VEO3=1)</label>
+            </div>
+
+            <button id="startSession">🚀 Start Session</button>
+            <button id="endSession" disabled>🛑 End Session</button>
+            <button id="testMic">🎤 Test Microphone</button>
+        </div>
+
+        <div class="controls">
+            <h2>WebRTC Connection</h2>
+            <div id="status" class="status disconnected">Not connected</div>
+            <video id="video" autoplay playsinline muted></video>
+        </div>
+
+        <div class="controls">
+            <h2>Test Utterances</h2>
+            <p>Say these phrases to trigger specific negotiation intents:</p>
+            <ul>
+                <li><strong>"We'll grant trade access if you withdraw troops"</strong> → Counter-offer</li>
+                <li><strong>"Ceasefire now or else"</strong> → Ultimatum</li>
+                <li><strong>Any other text</strong> → Small talk + proposal</li>
+            </ul>
+            <button id="sendTestUtterance">📝 Send Test Utterance</button>
+        </div>
+
+        <div class="controls">
+            <h2>Live Logs</h2>
+            <div id="logs" class="logs"></div>
+            <button id="clearLogs">🗑️ Clear Logs</button>
+        </div>
+    </div>
+
+    <script>
+        class NegotiationTestClient {
+            constructor() {
+                this.sessionId = null;
+                this.ws = null;
+                this.pc = null;
+                this.logs = [];
+                this.model = 'mock_local';
+
+                this.setupEventListeners();
+            }
+
+            setupEventListeners() {
+                document.getElementById('startSession').onclick = () => this.startSession();
+                document.getElementById('endSession').onclick = () => this.endSession();
+                document.getElementById('testMic').onclick = () => this.testMic();
+                document.getElementById('sendTestUtterance').onclick = () => this.sendTestUtterance();
+                document.getElementById('clearLogs').onclick = () => this.clearLogs();
+
+                // Model selection
+                document.querySelectorAll('input[name="model"]').forEach(radio => {
+                    radio.onchange = (e) => {
+                        this.model = e.target.value;
+                    };
+                });
+            }
+
+            async startSession() {
+                try {
+                    this.log('Starting session...', 'info');
+
+                    // Create session
+                    const response = await fetch('/v1/session', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/yaml' },
+                        body: `model: ${this.model}\nworld_context:\n  scenario: colonial_america\n  year: 1755`
+                    });
+
+                    const yamlText = await response.text();
+                    const sessionData = this.parseYaml(yamlText);
+                    this.sessionId = sessionData.session_id;
+
+                    this.log(`Session created: ${this.sessionId}`, 'info');
+
+                    // Setup WebSocket
+                    await this.setupWebSocket();
+
+                    // Setup WebRTC
+                    await this.setupWebRTC();
+
+                    document.getElementById('startSession').disabled = true;
+                    document.getElementById('endSession').disabled = false;
+
+                } catch (error) {
+                    this.log(`Error starting session: ${error.message}`, 'error');
+                }
+            }
+
+            async endSession() {
+                if (this.ws) {
+                    this.ws.close();
+                }
+                if (this.pc) {
+                    this.pc.close();
+                }
+
+                document.getElementById('startSession').disabled = false;
+                document.getElementById('endSession').disabled = true;
+                document.getElementById('status').className = 'status disconnected';
+                document.getElementById('status').textContent = 'Not connected';
+            }
+
+            async setupWebSocket() {
+                return new Promise((resolve, reject) => {
+                    this.ws = new WebSocket(`ws://localhost:8000/v1/session/${this.sessionId}/control`);
+
+                    this.ws.onopen = () => {
+                        this.log('WebSocket connected', 'info');
+                        resolve();
+                    };
+
+                    this.ws.onmessage = (event) => {
+                        const data = this.parseYaml(event.data);
+                        this.handleWebSocketMessage(data);
+                    };
+
+                    this.ws.onerror = (error) => {
+                        this.log(`WebSocket error: ${error}`, 'error');
+                        reject(error);
+                    };
+
+                    this.ws.onclose = () => {
+                        this.log('WebSocket disconnected', 'info');
+                    };
+                });
+            }
+
+            async setupWebRTC() {
+                this.pc = new RTCPeerConnection({
+                    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+                });
+
+                // Handle incoming video
+                this.pc.ontrack = (event) => {
+                    this.log('Received video track', 'info');
+                    document.getElementById('video').srcObject = event.streams[0];
+                };
+
+                // Handle connection state
+                this.pc.onconnectionstatechange = () => {
+                    const state = this.pc.connectionState;
+                    this.log(`WebRTC state: ${state}`, 'info');
+
+                    if (state === 'connected') {
+                        document.getElementById('status').className = 'status connected';
+                        document.getElementById('status').textContent = 'Connected - Ready for negotiation!';
+                    } else if (state === 'failed' || state === 'disconnected') {
+                        document.getElementById('status').className = 'status disconnected';
+                        document.getElementById('status').textContent = 'Disconnected';
+                    }
+                };
+
+                // Get user media (microphone only for this demo)
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    audio: true,
+                    video: false
+                });
+
+                // Add audio track
+                stream.getTracks().forEach(track => {
+                    this.pc.addTrack(track, stream);
+                });
+
+                // Create offer
+                const offer = await this.pc.createOffer();
+                await this.pc.setLocalDescription(offer);
+
+                // Send offer to server
+                const response = await fetch(`/v1/session/${this.sessionId}/webrtc/offer`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        sdp: offer.sdp,
+                        type: offer.type
+                    })
+                });
+
+                const yamlText = await response.text();
+                const answerData = this.parseYaml(yamlText);
+
+                await this.pc.setRemoteDescription({
+                    type: answerData.type,
+                    sdp: answerData.sdp
+                });
+            }
+
+            async testMic() {
+                this.log('Testing microphone access...', 'info');
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    this.log('✅ Microphone access granted', 'info');
+                    stream.getTracks().forEach(track => track.stop());
+                } catch (error) {
+                    this.log(`❌ Microphone error: ${error.message}`, 'error');
+                }
+            }
+
+            async sendTestUtterance() {
+                const utterances = [
+                    "We'll grant trade access if you withdraw troops from Ohio Country.",
+                    "Ceasefire now or else we'll declare war!",
+                    "I propose we establish a fair trade agreement between our nations."
+                ];
+
+                const utterance = utterances[Math.floor(Math.random() * utterances.length)];
+                this.log(`Sending test utterance: "${utterance}"`, 'info');
+
+                if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+                    this.ws.send(`type: player_utterance\ntext: "${utterance}"`);
+                }
+            }
+
+            handleWebSocketMessage(data) {
+                switch (data.type) {
+                    case 'subtitle':
+                        this.log(`🎬 Subtitle: ${data.text} ${data.final ? '(final)' : ''}`, 'subtitle');
+                        break;
+                    case 'intent':
+                        this.log(`💭 Intent: ${JSON.stringify(data.payload, null, 2)}`, 'intent');
+                        break;
+                    case 'safety':
+                        this.log(`🛡️ Safety: ${JSON.stringify(data.payload, null, 2)}`, 'safety');
+                        break;
+                    case 'analysis':
+                        this.log(`📊 Analysis: ${data.tag} - ${JSON.stringify(data.payload, null, 2)}`, 'analysis');
+                        break;
+                    case 'ack':
+                        this.log('✅ Server acknowledged', 'info');
+                        break;
+                    default:
+                        this.log(`Unknown message type: ${data.type}`, 'info');
+                }
+            }
+
+            log(message, type = 'info') {
+                const timestamp = new Date().toLocaleTimeString();
+                const entry = {
+                    timestamp,
+                    message,
+                    type
+                };
+
+                this.logs.push(entry);
+
+                const logsElement = document.getElementById('logs');
+                const logEntry = document.createElement('div');
+                logEntry.className = `log-entry log-${type}`;
+                logEntry.textContent = `[${timestamp}] ${message}`;
+                logsElement.appendChild(logEntry);
+                logsElement.scrollTop = logsElement.scrollHeight;
+            }
+
+            clearLogs() {
+                this.logs = [];
+                document.getElementById('logs').innerHTML = '';
+            }
+
+            parseYaml(yamlText) {
+                // Simple YAML parser for demo - in production use a proper library
+                try {
+                    const lines = yamlText.trim().split('\n');
+                    const result = {};
+
+                    for (const line of lines) {
+                        const [key, ...valueParts] = line.split(':');
+                        if (key && valueParts.length > 0) {
+                            const value = valueParts.join(':').trim();
+                            // Remove quotes if present
+                            const cleanValue = value.replace(/^["']|["']$/g, '');
+                            result[key.trim()] = cleanValue;
+                        }
+                    }
+
+                    return result;
+                } catch (error) {
+                    this.log(`YAML parse error: ${error.message}`, 'error');
+                    return {};
+                }
+            }
+        }
+
+        // Initialize client when page loads
+        document.addEventListener('DOMContentLoaded', () => {
+            window.client = new NegotiationTestClient();
+        });
+    </script>
+</body>
+</html>

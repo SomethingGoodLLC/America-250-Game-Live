@@ -579,3 +579,48 @@ async def attach_avatar_track(
             error=str(e)
         )
         raise
+
+
+# Simplified FrameTrack for test harness
+class FrameTrack(MediaStreamTrack):
+    kind = "video"
+    def __init__(self, source):
+        super().__init__()
+        self.source = source
+        self._ait = None
+
+    async def recv(self) -> VideoFrame:
+        if self._ait is None:
+            self._ait = self.source.frames().__aiter__()
+        frame_np = await self._ait.__anext__()  # HxWxC uint8
+        h, w, _ = frame_np.shape
+        vf = VideoFrame.from_ndarray(frame_np, format="rgb24")
+        vf.pts, vf.time_base = None, None
+        return vf
+
+
+async def attach_avatar_track_simple(pc: RTCPeerConnection, use_veo3: bool = False):
+    """Simplified avatar track attachment for test harness."""
+    # Import video sources
+    from ..providers.video_sources.placeholder_loop import PlaceholderLoopVideoSource
+    from ..providers.video_sources.veo3_stream import Veo3StreamVideoSource
+    from ..providers.types import VideoSourceConfig
+
+    # Create video source config
+    config = VideoSourceConfig(
+        source_type="veo3" if use_veo3 else "placeholder",
+        resolution=(320, 240),
+        framerate=30,
+        avatar_style="diplomatic"
+    )
+
+    # Create and start video source
+    if use_veo3:
+        source = Veo3StreamVideoSource(config)
+    else:
+        source = PlaceholderLoopVideoSource(config)
+
+    await source.start()
+    track = FrameTrack(source)
+    pc.addTrack(track)
+    # NOTE: stopping handled by session teardown (omitted here for brevity)
