@@ -1,20 +1,26 @@
 # Makefile for Negotiation Service Test Harness
 
-.PHONY: help install run clean test
+.PHONY: help install dev run clean test launch
 
 PYTHON := python3
-PIP := pip3
+UV := uv
 
 help:
 	@echo "Available commands:"
-	@echo "  install    - Install dependencies"
+	@echo "  install    - Install dependencies using uv"
+	@echo "  dev        - Install dependencies in development mode using uv"
 	@echo "  run        - Run the test harness server"
+	@echo "  launch     - Interactive launch script with port management"
 	@echo "  clean      - Clean up Python cache files"
-	@echo "  test       - Run tests"
+	@echo "  test       - Run tests using pytest"
 
 install:
-	$(PIP) install -r requirements-providers.txt
-	@echo "Dependencies installed successfully"
+	$(UV) sync
+	@echo "Dependencies installed successfully using uv"
+
+dev:
+	$(UV) sync --dev
+	@echo "Development dependencies installed successfully using uv"
 
 run:
 	@echo "Starting Enhanced AI Avatar test harness server..."
@@ -33,4 +39,8 @@ clean:
 	@echo "Cache files cleaned"
 
 test:
-	pytest tests/ -v
+	$(UV) run pytest tests/ -v
+
+launch:
+	@echo "Starting interactive launch script..."
+	./launch.sh

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import structlog
 
 from aiortc import RTCPeerConnection, MediaStreamTrack, RTCDataChannel
+from av import VideoFrame
 from aiortc.mediastreams import VideoStreamTrack, AudioStreamTrack
 
 from core.webrtc_manager import WebRTCManager

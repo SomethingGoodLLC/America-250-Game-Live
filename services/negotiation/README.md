@@ -39,44 +39,73 @@ A production-ready FastAPI service for diplomatic negotiations with WebRTC A/V s
 ### Using UV (Recommended)
 
 ```bash
-# Install dependencies
+# Install dependencies (production)
 make install
 
-# Run development server
+# Install development dependencies
 make dev
 
 # Run tests
 make test
 
-# Run production server
+# Run the test harness server
 make run
 ```
 
-### Enhanced Browser Test Harness
+**Note**: This project now uses **uv** exclusively for package management. All dependencies are defined in `pyproject.toml` with automatic virtual environment management.
 
-**🚀 Quickest way to test your AI avatar!**
+### Turn-Key Browser Test Harness
+
+**🚀 Quickest way to test your AI avatar today!**
 
 ```bash
-# Start the enhanced test harness server
-make run
+# Start the test harness server
+cd services/negotiation
+uv run uvicorn simple_test_harness:app --host 127.0.0.1 --port 8000 --reload
 
-# Or use the simple version
-make run-simple
+# Alternative: Use the Makefile
+make run
 ```
 
-Open http://localhost:8000 in your browser for a complete test environment featuring:
+Open http://localhost:8000 in your browser for an instant test environment featuring:
 
-#### **🎭 Enhanced Avatar System**
-- **Realistic avatar animations** with facial expressions and speaking states
-- **Live WebRTC video streaming** at 30 FPS with 640x480 resolution
-- **Dynamic expressions** that respond to conversation context
-- **Smooth animation transitions** between speaking and listening states
+#### **🎭 Live Negotiation System**
+- **Real-time WebSocket** communication for instant feedback
+- **YAML-first protocol** with `js-yaml` integration for proper data handling
+- **Live subtitles** with final/partial indicators
+- **Intent detection** with structured diplomatic analysis
+- **Content safety** filtering and validation
 
-#### **💬 Advanced Diplomatic Testing**
-- **Pre-built test utterances** with expected outcomes:
-  - "We'll grant trade access if you withdraw troops" → Counter-offer with confidence scoring
-  - "Ceasefire now or else we'll declare war!" → Ultimatum with clear consequences
-  - "I propose we establish a fair trade agreement" → Diplomatic proposal
+#### **🎮 Interactive Testing**
+- **Model Selection**: Switch between `mock_local` (deterministic) and `veo3` (advanced)
+- **Custom Utterances**: Type or paste diplomatic messages to test AI responses
+- **Session Management**: Create, monitor, and end negotiation sessions
+- **Real-time Status**: Connection state, WebRTC ICE state, and message flow
+
+#### **💻 Technical Features**
+- **WebSocket Control**: Real-time bidirectional communication
+- **Proper YAML Parsing**: Uses `js-yaml` library for robust data handling
+- **Cross-browser Support**: Works in modern browsers with WebRTC support
+- **Mobile Friendly**: Responsive design with touch controls
+
+#### **🔧 Usage**
+1. **Create Session**: Select model and click "Create Session"
+2. **Grant Microphone**: Allow browser microphone access for audio input
+3. **Send Utterance**: Type diplomatic messages or use test phrases
+4. **Watch Results**: See avatar video, live subtitles, and detected intents
+5. **Monitor Status**: Real-time connection and processing status
+
+#### **📋 Test Scenarios**
+- **Counter-Offers**: "We'll grant trade access if you withdraw troops"
+- **Ultimatums**: "Ceasefire now or else we'll declare war!"
+- **Proposals**: "I propose we establish a fair trade agreement"
+- **Custom Messages**: Type any diplomatic text for testing
+
+#### **🔍 Expected Outputs**
+- **🟢 Subtitles**: Live speech-to-text with confidence indicators
+- **📜 Intents**: Structured diplomatic intents (Proposal, CounterOffer, Ultimatum)
+- **⚠️ Safety**: Content safety validation results
+- **📊 Analysis**: Detailed diplomatic analysis with scoring
   - **Custom message input** for testing your own scenarios
 - **Real-time intent detection** with confidence scores and detailed rationale
 - **Keyword extraction** and sentiment analysis
@@ -107,8 +136,14 @@ Perfect for:
 
 ```bash
 # Build and run with Docker Compose
-make docker-run
+docker-compose up -d
+
+# Or build manually
+docker build -t samson-negotiation-service .
+docker run -p 8000:8000 samson-negotiation-service
 ```
+
+**Note**: The Docker setup uses uv for dependency management as defined in the Dockerfile. The `pyproject.toml` file is used for all dependency resolution.
 
 ## API Endpoints
 
@@ -133,6 +168,34 @@ Copy `.env.example` to `.env` and configure:
 
 ```bash
 cp .env.example .env
+```
+
+### Package Management with UV
+
+This project uses **uv** for fast, reliable Python package management:
+
+- **Dependencies**: All defined in `pyproject.toml`
+- **Virtual Environment**: Automatically managed by uv (`.venv/`)
+- **Lock File**: `uv.lock` ensures reproducible builds
+- **Development Tools**: Integrated linting, formatting, and type checking
+
+#### Key UV Commands
+
+```bash
+# Install all dependencies
+uv sync
+
+# Install with development dependencies
+uv sync --dev
+
+# Run commands in the uv environment
+uv run python script.py
+uv run pytest
+uv run uvicorn app:main
+
+# Add new dependencies
+uv add package-name
+uv add --dev dev-package-name
 ```
 
 ## Project Structure
@@ -173,8 +236,10 @@ services/negotiation/
 │   └── test_session_manager.py # Session management tests
 ├── Dockerfile            # Docker configuration
 ├── docker-compose.yml    # Docker Compose setup
-├── Makefile             # Development commands
-└── env.example          # Environment configuration template
+├── Makefile             # Development commands (uv-based)
+├── pyproject.toml       # Python project configuration and dependencies
+├── uv.lock             # Dependency lock file for reproducible builds
+└── .env.example        # Environment configuration template
 ```
 
 ## Development
@@ -297,12 +362,13 @@ uv run pytest -k "performance" -v
 
 ### Quality Gates
 
-✅ **95%+ Test Coverage**  
-✅ **Type Safety** (mypy/pyright)  
-✅ **Code Quality** (ruff/black)  
+✅ **95%+ Test Coverage** (pytest with coverage reporting)  
+✅ **Type Safety** (mypy with strict configuration)  
+✅ **Code Quality** (ruff linting + black formatting)  
 ✅ **Performance** (sub-second response times)  
 ✅ **Error Handling** (graceful degradation)  
-✅ **Schema Compliance** (Pydantic validation)
+✅ **Schema Compliance** (Pydantic validation)  
+✅ **Dependency Management** (uv with lock file for reproducibility)
 
 ## Deployment
 
@@ -316,12 +382,18 @@ docker build -t samson-negotiation-service .
 docker-compose up -d
 ```
 
+The Dockerfile uses uv for fast, reproducible builds:
+- Dependencies installed from `pyproject.toml`
+- Multi-stage build for optimized image size
+- Automatic virtual environment management
+
 ### Production
 
 - Set `DEBUG=false` in environment
 - Use proper STUN/TURN servers
 - Configure logging appropriately
 - Set up monitoring and health checks
+- Ensure `uv.lock` is committed for reproducible deployments
 
 ## Architecture
 

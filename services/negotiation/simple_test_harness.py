@@ -1,22 +1,16 @@
-# Minimal test harness for negotiation service
+# Ultra-simple test harness for negotiation service
 from __future__ import annotations
 import asyncio, os, uuid
 from typing import Dict, Any
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 from fastapi.responses import HTMLResponse, PlainTextResponse
-from fastapi.staticfiles import StaticFiles
 from starlette.websockets import WebSocketState
 from ruamel.yaml import YAML
 from pydantic import BaseModel
-from aiortc import RTCPeerConnection, MediaStreamTrack, RTCSessionDescription
-from aiortc.contrib.media import MediaBlackhole
-from av import VideoFrame
-import numpy as np
-import fractions
 
 yaml = YAML()
 
-app = FastAPI(title="Negotiation Test Harness")
+app = FastAPI(title="Simple Negotiation Test Harness")
 
 SESSIONS: Dict[str, Dict[str, Any]] = {}
 
@@ -29,47 +23,6 @@ def _dump_yaml(obj: Any) -> str:
     buf = StringIO()
     yaml.dump(obj, buf)
     return buf.getvalue()
-
-# Simple video track for testing
-class TestVideoTrack(MediaStreamTrack):
-    kind = "video"
-    
-    def __init__(self):
-        super().__init__()
-        self.counter = 0
-        self._start_time = None
-    
-    async def recv(self) -> VideoFrame:
-        import time
-        
-        # Generate a simple test pattern
-        self.counter += 1
-        
-        if self._start_time is None:
-            self._start_time = time.time()
-        
-        # Create a 320x240 RGB frame with a simple pattern
-        width, height = 320, 240
-        frame_data = np.zeros((height, width, 3), dtype=np.uint8)
-        
-        # Create a simple animated pattern
-        offset = (self.counter // 10) % 255
-        frame_data[:, :, 0] = offset  # Red channel
-        frame_data[:, :, 1] = (offset + 85) % 255  # Green channel  
-        frame_data[:, :, 2] = (offset + 170) % 255  # Blue channel
-        
-        # Add some text-like pattern
-        for i in range(0, height, 20):
-            frame_data[i:i+5, :, :] = 255
-        
-        vf = VideoFrame.from_ndarray(frame_data, format="rgb24")
-        vf.pts = self.counter * 1000  # Use milliseconds
-        vf.time_base = fractions.Fraction(1, 30000)  # 30 FPS in proper time base
-        
-        # Add a small delay to simulate real video timing
-        await asyncio.sleep(1/30)
-        
-        return vf
 
 # Simple mock provider for testing
 class SimpleMockProvider:
@@ -153,51 +106,119 @@ class SimpleMockProvider:
 
 @app.get("/", response_class=HTMLResponse)
 async def root():
-    # Serve the test page
-    with open("web/test_client.html", "r", encoding="utf-8") as f:
-        return HTMLResponse(f.read())
+    # Serve a simplified test page without WebRTC video
+    html_content = """
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Simple Negotiation Test Client</title>
+  <style>
+    body { font-family: system-ui, Arial; margin: 20px; }
+    #subs { border: 1px solid #ccc; padding: 8px; width: 480px; height: 120px; overflow: auto; white-space: pre-wrap; }
+    .row { display:flex; gap:20px; margin-top:10px;}
+    button { padding: 8px 16px; margin: 5px; }
+    textarea { width: 400px; height: 100px; }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist/js-yaml.min.js"></script>
+</head>
+<body>
+  <h1>Simple Negotiation Test (WebSocket + YAML)</h1>
+
+  <div class="row">
+    <div>
+      <label>Model:
+        <select id="model">
+          <option value="mock_local">Mock Local</option>
+          <option value="veo3">Veo3 (stub/fallback)</option>
+        </select>
+      </label>
+      <button id="create">Create Session</button>
+      <p>Session: <code id="sid">—</code></p>
+      <div id="subs"></div>
+    </div>
+    <div>
+      <textarea id="utter" rows="6" cols="40" placeholder="Say something to your envoy…"></textarea><br/>
+      <button id="send">Send Utterance</button>
+      <p>Status: <span id="status">idle</span></p>
+    </div>
+  </div>
+
+<script>
+(async function() {
+  const ydump = obj => jsyaml.dump(obj);
+  const yload = str => jsyaml.load(str);
+  const $ = id => document.getElementById(id);
+
+  let sid = null;
+  let ws = null;
+
+  async function createSession() {
+    const model = $("model").value;
+    const res = await fetch("/v1/session", {
+      method: "POST",
+      headers: {"Content-Type":"application/x-yaml"},
+      body: ydump({ model })
+    });
+    const text = await res.text();
+    const data = yload(text);
+    sid = data.session_id;
+    $("sid").textContent = sid;
+    $("status").textContent = "session created";
+    await openWS();
+  }
+
+  async function openWS() {
+    ws = new WebSocket(`ws://${location.host}/v1/session/${sid}/control`);
+    ws.onopen = () => $("status").textContent = "ws open";
+    ws.onmessage = (ev) => {
+      const obj = yload(ev.data);
+      if (obj.type === "subtitle") {
+        $("subs").textContent += (obj.final ? "🟢 " : "… ") + obj.text + "\\n";
+        $("subs").scrollTop = $("subs").scrollHeight;
+      } else if (obj.type === "intent") {
+        $("subs").textContent += "📜 INTENT:\\n" + ydump(obj.payload) + "\\n";
+        $("subs").scrollTop = $("subs").scrollHeight;
+      } else if (obj.type === "safety") {
+        $("subs").textContent += "⚠️ SAFETY: " + JSON.stringify(obj.payload) + "\\n";
+      }
+    };
+    ws.onclose = () => $("status").textContent = "ws closed";
+  }
+
+  $("create").onclick = createSession;
+  $("send").onclick = () => {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      const text = $("utter").value.trim();
+      if (text) ws.send(ydump({ type: "player_utterance", text }));
+    }
+  };
+})();
+</script>
+</body>
+</html>
+    """
+    return HTMLResponse(html_content)
 
 @app.post("/v1/session", response_class=PlainTextResponse)
 async def create_session(request: Request):
     body = yaml.load(await request.body() or b"") or {}
     session_id = str(uuid.uuid4())[:8]
     model = body.get("model", "mock_local")
-    pc = RTCPeerConnection()
     
     SESSIONS[session_id] = {
-        "pc": pc,
         "model": model,
         "ws_clients": set(),
         "turns": [],
         "world_context": body.get("world_context", {}),
         "provider_task": None,
-        "blackhole": MediaBlackhole(),
     }
     return _dump_yaml({"session_id": session_id})
 
 @app.post("/v1/session/{sid}/webrtc/offer", response_class=PlainTextResponse)
 async def sdp_offer(sid: str, sdp_in: SDPIn):
-    sess = SESSIONS[sid]
-    pc: RTCPeerConnection = sess["pc"]
-
-    # Handle incoming audio
-    @pc.on("track")
-    async def on_track(track):
-        if track.kind == "audio":
-            sess["blackhole"].addTrack(track)
-
-    # Add test video track before setting remote description
-    video_track = TestVideoTrack()
-    pc.addTrack(video_track)
-
-    try:
-        await pc.setRemoteDescription(RTCSessionDescription(sdp=sdp_in.sdp, type=sdp_in.type))
-        answer = await pc.createAnswer()
-        await pc.setLocalDescription(answer)
-        return _dump_yaml({"type": pc.localDescription.type, "sdp": pc.localDescription.sdp})
-    except Exception as e:
-        # If WebRTC fails, return a simple error response
-        return _dump_yaml({"error": f"WebRTC setup failed: {str(e)}", "type": "error"})
+    # For this simple version, just return a dummy response
+    return _dump_yaml({"type": "answer", "sdp": "v=0\\r\\no=- 0 0 IN IP4 127.0.0.1\\r\\ns=-\\r\\nt=0 0\\r\\n"})
 
 @app.websocket("/v1/session/{sid}/control")
 async def ws_control(ws: WebSocket, sid: str):

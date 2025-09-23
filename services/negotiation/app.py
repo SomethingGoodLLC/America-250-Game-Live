@@ -10,10 +10,10 @@ from ruamel.yaml import YAML
 from pydantic import BaseModel
 from aiortc import RTCPeerConnection
 from aiortc.contrib.media import MediaBlackhole
-from .webrtc.publish import attach_avatar_track_simple as attach_avatar_track
-from .providers.mock_local import MockLocalProvider
-from .providers.gemini_veo3 import GeminiVeo3Provider  # stub uses placeholder video unless USE_VEO3=1
-from .schemas.validators import validate_or_raise
+from webrtc.publish import attach_avatar_track_simple as attach_avatar_track
+from providers.mock_local import MockLocalProvider
+from providers.gemini_veo3 import GeminiVeo3Provider  # stub uses placeholder video unless USE_VEO3=1
+from schemas.validators import validate_or_raise
 
 yaml = YAML()
 
@@ -90,8 +90,8 @@ async def ws_control(ws: WebSocket, sid: str):
     # Kick off a demo provider loop (subtitles + one intent)
     async def provider_loop():
         provider = (
-            GeminiVeo3Provider(use_veo3=True) if sess["model"] == "veo3"
-            else MockLocalProvider(strict=True)
+            GeminiVeo3Provider({"use_veo3": True}) if sess["model"] == "veo3"
+            else MockLocalProvider({"strict": True})
         )
         # For demo, turns include a single PLAYER utterance if we got one from client
         turns = sess["turns"] or [{"speaker":"PLAYER","text":"We'll grant trade access if you withdraw troops from Ohio Country."}]
