@@ -1,5 +1,8 @@
 """Base video source interface for avatar generation."""
 
+from __future__ import annotations
+from typing import AsyncIterator, Protocol
+import numpy as np  # frames as HxWxC uint8
 import asyncio
 from abc import ABC, abstractmethod
 from typing import AsyncGenerator, Optional, Dict, Any
@@ -10,6 +13,13 @@ from aiortc.mediastreams import VideoStreamTrack
 import structlog
 
 from ..types import VideoSourceConfig
+
+
+class VideoSource(Protocol):
+    """Protocol for video source implementations."""
+    async def start(self) -> None: ...
+    async def stop(self) -> None: ...
+    async def frames(self) -> AsyncIterator[np.ndarray]: ...
 
 
 @dataclass
@@ -51,6 +61,15 @@ class BaseVideoSource(ABC):
 
         Returns:
             VideoFrame or None if no frame is available
+        """
+        pass
+
+    @abstractmethod
+    async def frames(self) -> AsyncIterator[np.ndarray]:
+        """Stream video frames as numpy arrays.
+
+        Yields:
+            np.ndarray: Next frame as HxWxC uint8 array
         """
         pass
 
@@ -99,54 +118,67 @@ class AvatarVideoTrack(VideoStreamTrack):
     async def recv(self):
         """Receive the next video frame for WebRTC streaming."""
         try:
-            frame = await self.video_source.get_frame()
-            if frame is None:
-                # Return a blank frame if no data is available
+            # Try to get frame using the new frames() method first
+            try:
+                async for frame_array in self.video_source.frames():
+                    # Convert numpy array to av.VideoFrame
+                    import av
+                    import numpy as np
+
+                    av_frame = av.VideoFrame.from_ndarray(frame_array, format="rgb24")
+                    av_frame.pts = self.video_source.get_frame_count()
+                    av_frame.time_base = av.Fraction(1, self.video_source.config.framerate)
+                    return av_frame
+            except (AttributeError, NotImplementedError):
+                # Fallback to legacy get_frame() method
+                frame = await self.video_source.get_frame()
+                if frame is None:
+                    # Return a blank frame if no data is available
+                    try:
+                        import av
+                        import numpy as np
+
+                        blank_frame = av.VideoFrame.from_ndarray(
+                            np.zeros((self.video_source.config.resolution[1],
+                                     self.video_source.config.resolution[0], 3),
+                                    dtype=np.uint8),
+                            format="rgb24"
+                        )
+                    except ImportError:
+                        import av
+                        blank_frame = av.VideoFrame(
+                            width=self.video_source.config.resolution[0],
+                            height=self.video_source.config.resolution[1],
+                            format="rgb24"
+                        )
+                    blank_frame.pts = self.video_source.get_frame_count()
+                    blank_frame.time_base = av.Fraction(1, self.video_source.config.framerate)
+                    return blank_frame
+
+                # Convert VideoFrame to av.VideoFrame
                 try:
                     import av
                     import numpy as np
 
-                    blank_frame = av.VideoFrame.from_ndarray(
-                        np.zeros((self.video_source.config.resolution[1],
-                                 self.video_source.config.resolution[0], 3),
-                                dtype=np.uint8),
-                        format="rgb24"
+                    # Assuming frame.data is in the right format
+                    # This is a simplified conversion - real implementation would handle format conversion
+                    av_frame = av.VideoFrame.from_ndarray(
+                        np.frombuffer(frame.data, dtype=np.uint8).reshape(
+                            (frame.height, frame.width, 3)
+                        ),
+                        format=frame.format
                     )
                 except ImportError:
+                    # Fallback if av or numpy not available
                     import av
-                    blank_frame = av.VideoFrame(
-                        width=self.video_source.config.resolution[0],
-                        height=self.video_source.config.resolution[1],
-                        format="rgb24"
-                    )
-                blank_frame.pts = self.video_source.get_frame_count()
-                blank_frame.time_base = av.Fraction(1, self.video_source.config.framerate)
-                return blank_frame
-
-            # Convert VideoFrame to av.VideoFrame
-            try:
-                import av
-                import numpy as np
-
-                # Assuming frame.data is in the right format
-                # This is a simplified conversion - real implementation would handle format conversion
-                av_frame = av.VideoFrame.from_ndarray(
-                    np.frombuffer(frame.data, dtype=np.uint8).reshape(
-                        (frame.height, frame.width, 3)
-                    ),
-                    format=frame.format
-                )
-            except ImportError:
-                # Fallback if av or numpy not available
-                import av
-                av_frame = av.VideoFrame(width=frame.width, height=frame.height, format="rgb24")
+                    av_frame = av.VideoFrame(width=frame.width, height=frame.height, format="rgb24")
+                    av_frame.pts = self.video_source.get_frame_count()
+                    av_frame.time_base = av.Fraction(1, self.video_source.config.framerate)
+                    return av_frame
                 av_frame.pts = self.video_source.get_frame_count()
                 av_frame.time_base = av.Fraction(1, self.video_source.config.framerate)
-                return av_frame
-            av_frame.pts = self.video_source.get_frame_count()
-            av_frame.time_base = av.Fraction(1, self.video_source.config.framerate)
 
-            return av_frame
+                return av_frame
 
         except Exception as e:
             self.logger.error("Error receiving video frame", error=str(e))

@@ -5,7 +5,7 @@ import re
 from typing import AsyncGenerator, Dict, Any, List, Optional
 from datetime import datetime
 
-from schemas.models import SpeakerTurnModel, IntentModel, WorldContextModel, ProposalModel, ConcessionModel, CounterOfferModel, UltimatumModel, SmallTalkModel
+from ..schemas.models import SpeakerTurnModel, IntentModel, WorldContextModel, ProposalModel, ConcessionModel, CounterOfferModel, UltimatumModel, SmallTalkModel
 from .base import Provider, ProviderEvent, NewIntent, LiveSubtitle, Analysis, Safety
 
 

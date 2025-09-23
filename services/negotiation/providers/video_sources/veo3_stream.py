@@ -1,7 +1,8 @@
 """Gemini Veo3 video streaming source for avatar generation."""
 
 import asyncio
-from typing import AsyncGenerator, Optional, Dict, Any
+import os
+from typing import AsyncGenerator, Optional, Dict, Any, AsyncIterator
 try:
     import numpy as np
 except ImportError:
@@ -18,40 +19,58 @@ class Veo3StreamVideoSource(BaseVideoSource):
     This integrates with Google's Gemini Veo3 model to generate
     real-time avatar video based on negotiation context and dialogue.
 
-    TODO: Implement actual Gemini Veo3 API integration
-    TODO: Add authentication and API key management
-    TODO: Implement real-time video generation based on dialogue content
+    Environment Variables:
+        USE_VEO3: Set to "1" to use actual Veo3 API, "0" for mock mode
+        GEMINI_API_KEY: API key for Gemini services
+        VEO3_PROMPT_STYLE: Style for avatar prompts
+        VEO3_AVATAR_STYLE: Style for avatar appearance
+        VEO3_LATENCY_TARGET_MS: Target latency in milliseconds
     """
 
     def __init__(self, config: VideoSourceConfig):
         super().__init__(config)
-        self.api_key = None  # TODO: Load from secure config
-        self.project_id = None  # TODO: Load from config
-        self.model_name = "gemini-veo3"  # TODO: Make configurable
+
+        # Load configuration from environment variables
+        self.use_veo3 = os.getenv("USE_VEO3", "0") == "1"
+        self.api_key = os.getenv("GEMINI_API_KEY")
+        self.project_id = os.getenv("GOOGLE_CLOUD_PROJECT")
+        self.model_name = "gemini-veo3"
+        self.prompt_style = os.getenv("VEO3_PROMPT_STYLE", "diplomatic")
+        self.avatar_style = os.getenv("VEO3_AVATAR_STYLE", config.avatar_style)
+        self.latency_target_ms = int(os.getenv("VEO3_LATENCY_TARGET_MS", "100"))
+
         self._session_active = False
         self._last_dialogue_context = ""
 
-        # Mock video generation parameters
+        # Mock video generation parameters (used when USE_VEO3=0)
         self._mock_frame_buffer = []
         self._mock_frame_index = 0
 
+        if self.use_veo3 and not self.api_key:
+            self.logger.warning("USE_VEO3=1 but GEMINI_API_KEY not set, falling back to mock mode")
+
     async def start(self) -> None:
         """Start the Veo3 video streaming session."""
+        mode = "Veo3 API" if self.use_veo3 else "Mock mode"
         self.logger.info(
             "Starting Veo3 video source",
             model=self.model_name,
-            style=self.config.avatar_style
+            style=self.avatar_style,
+            mode=mode,
+            use_veo3=self.use_veo3
         )
 
         self._is_running = True
         self._session_active = True
 
-        # Initialize mock video buffer for demonstration
-        await self._initialize_mock_video_buffer()
-
-        # TODO: Initialize actual Veo3 API session
-        # TODO: Set up WebSocket connection for real-time streaming
-        # TODO: Authenticate with Google Cloud credentials
+        if self.use_veo3:
+            # TODO: Initialize actual Veo3 API session
+            # TODO: Set up WebSocket connection for real-time streaming
+            # TODO: Authenticate with Google Cloud credentials
+            raise NotImplementedError("Wire Veo3 SDK here - see TODO in code")
+        else:
+            # Initialize mock video buffer for demonstration
+            await self._initialize_mock_video_buffer()
 
     async def stop(self) -> None:
         """Stop the Veo3 video streaming session."""
@@ -69,11 +88,37 @@ class Veo3StreamVideoSource(BaseVideoSource):
             return None
 
         try:
-            # TODO: Replace with actual Veo3 API call
-            return await self._get_mock_frame()
+            if self.use_veo3:
+                # TODO: Replace with actual Veo3 API call
+                raise NotImplementedError("Wire Veo3 SDK here")
+            else:
+                return await self._get_mock_frame()
         except Exception as e:
             self.logger.error("Error getting Veo3 frame", error=str(e))
             return None
+
+    async def frames(self) -> AsyncIterator[np.ndarray]:
+        """Stream video frames as numpy arrays."""
+        if self.use_veo3:
+            # TODO: Implement actual Veo3 frame streaming
+            raise NotImplementedError("Wire Veo3 SDK here")
+
+        # For mock mode, convert VideoFrame to numpy array
+        while self._is_running and self._session_active:
+            frame = await self._get_mock_frame()
+            if frame:
+                # Convert bytes to numpy array
+                if np is not None:
+                    frame_array = np.frombuffer(frame.data, dtype=np.uint8).reshape(
+                        (frame.height, frame.width, 3)
+                    )
+                    yield frame_array
+                else:
+                    # Fallback if numpy not available
+                    yield None
+
+            # Control frame rate
+            await asyncio.sleep(1.0 / self.config.framerate)
 
     async def stream_frames(self) -> AsyncGenerator[VideoFrame, None]:
         """Stream frames continuously from Veo3."""

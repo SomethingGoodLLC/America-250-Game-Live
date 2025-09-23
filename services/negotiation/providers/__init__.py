@@ -13,6 +13,7 @@ from .grok_provider import GrokProvider
 from .video_sources.base import BaseVideoSource, AvatarVideoTrack, VideoFrame
 from .video_sources.placeholder_loop import PlaceholderLoopVideoSource
 from .video_sources.veo3_stream import Veo3StreamVideoSource
+from .video_sources import create_video_source
 
 # Utility modules
 from ._scoring import score_intent, calculate_overall_score
@@ -47,6 +48,7 @@ __all__ = [
     "VideoFrame",
     "PlaceholderLoopVideoSource",
     "Veo3StreamVideoSource",
+    "create_video_source",
 
     # Utility functions
     "score_intent",

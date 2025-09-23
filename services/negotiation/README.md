@@ -17,7 +17,8 @@ A production-ready FastAPI service for diplomatic negotiations with WebRTC A/V s
 ### Provider System
 - **Pluggable Architecture** for negotiation analysis providers
 - **MockLocalProvider** - Deterministic state machine for testing and development
-- **Veo3Provider** - Stub for Google Gemini Veo3 integration (with TODOs)
+- **Veo3Provider** - Complete video+dialogue pipeline with Gemini Veo3 integration
+- **Video Avatar Support** - Real-time avatar generation with placeholder and Veo3 modes
 - **Structured Events** - Type-safe event system (`NewIntent`, `LiveSubtitle`, `Analysis`, `Safety`)
 - **Schema Validation** - Automatic Pydantic model validation with confidence scoring
 - **Backpressured Streaming** - Real-time subtitle generation with partial/final events
@@ -98,7 +99,11 @@ services/negotiation/
 ├── providers/             # Negotiation analysis providers
 │   ├── base.py           # Abstract provider interface
 │   ├── mock_local.py     # Deterministic local provider
-│   ├── gemini_veo3.py    # Gemini Veo3 stub (TODO)
+│   ├── gemini_veo3.py    # Complete Veo3 video+dialogue pipeline
+│   ├── video_sources/    # Video avatar generation
+│   │   ├── base.py       # Video source interface
+│   │   ├── placeholder_loop.py # Placeholder video source
+│   │   └── veo3_stream.py      # Veo3 API video source
 │   └── README.md         # Provider documentation
 ├── stt/                   # Speech-to-Text interfaces
 │   ├── base.py           # STT provider interface
@@ -131,27 +136,60 @@ The negotiation service uses a pluggable provider architecture for diplomatic in
 
 1. **Implement the Provider Interface**:
    ```python
-   from providers.base import Provider, ProviderEvent, NewIntent
+   from providers.base import Provider, ProviderEvent
    
    class MyProvider(Provider):
-       async def stream_dialogue(self, turns, world_context, system_guidelines=None):
+       async def stream_dialogue(self, turns, world_context, system_guidelines):
            # Implement your logic here
-           yield NewIntent(intent=my_intent, confidence=0.9, justification="...")
-       
-       async def validate_intent(self, intent):
-           return True  # Implement validation logic
+           yield ProviderEvent(
+               type="intent",
+               payload={
+                   "intent": my_intent,
+                   "confidence": 0.9,
+                   "justification": "Analysis reasoning..."
+               }
+           )
    ```
 
 2. **Add to Module**: Update `providers/__init__.py` to export your provider
 3. **Add Tests**: Create comprehensive tests following the existing pattern
 4. **Update Configuration**: Add any required configuration parameters
 
+#### Veo3Provider Features
+
+The **Veo3Provider** offers a complete video+dialogue pipeline:
+
+- **🎬 Video Avatar Generation**: Supports both Veo3 API and placeholder modes
+- **📺 Live Subtitle Streaming**: Progressive clause-by-clause subtitle delivery
+- **🎯 Intent Detection**: YAML-based function calling with schema validation
+- **🛡️ Content Safety**: Integrated safety screening and filtering
+- **📊 Scoring & Analytics**: Context-aware confidence scoring
+- **⚡ Backpressure Control**: Real-time performance with bounded queues
+- **🔄 Dependency Injection**: Pluggable STT/TTS provider support
+
+```python
+# Example usage
+provider = Veo3Provider(
+    avatar_style="colonial_diplomat",
+    voice_id="en_male_01",
+    latency_target_ms=800,
+    use_veo3=False  # True for Veo3 API, False for placeholder
+)
+
+async for event in provider.stream_dialogue(turns, world_context, guidelines):
+    if event.type == "subtitle":
+        print(f"Subtitle: {event.payload['text']}")
+    elif event.type == "intent":
+        print(f"Intent: {event.payload['intent']['type']}")
+```
+
 #### Provider Event Types
 
-- **`NewIntent`**: Diplomatic intent with confidence and justification
-- **`LiveSubtitle`**: Real-time subtitle text with finality flag  
-- **`Analysis`**: Structured analysis data with tag and payload
-- **`Safety`**: Safety validation with flag, detail, and severity
+- **`ProviderEvent`**: Base event with type, payload, and timestamp
+  - **`"intent"`**: Diplomatic intent with confidence and justification
+  - **`"subtitle"`**: Real-time subtitle text with finality flag  
+  - **`"analysis"`**: Structured analysis data with tag and payload
+  - **`"safety"`**: Safety validation with flag, detail, and severity
 
 #### Key Phrase Detection (MockLocalProvider)
 
@@ -198,10 +236,11 @@ uv run pytest -k "performance" -v
 
 ### Test Coverage
 
-- **Provider System**: 26 core functionality tests + 12 edge case tests
+- **Provider System**: 26 core functionality tests + 12 edge case tests + Veo3Provider tests
 - **Integration**: End-to-end API and WebSocket testing
 - **Content Safety**: Comprehensive safety filtering validation
 - **Session Management**: Session lifecycle and cleanup testing
+- **Video Sources**: Avatar generation and streaming tests
 - **Edge Cases**: Empty inputs, malformed data, concurrent usage, memory efficiency
 - **Performance**: Response time consistency and pattern matching efficiency
 
@@ -274,14 +313,16 @@ Negotiation Report → Simulation Validation → Game State Update
 
 ```python
 # Structured event system
-NewIntent(intent, confidence, justification)
-LiveSubtitle(text, is_final, speaker_id) 
-Analysis(tag, payload)
-Safety(flag, detail, severity)
+ProviderEvent(type="intent", payload={"intent": {...}, "confidence": 0.9})
+ProviderEvent(type="subtitle", payload={"text": "...", "is_final": True})
+ProviderEvent(type="analysis", payload={"tag": "summary", "result": {...}})
+ProviderEvent(type="safety", payload={"flag": "content_check", "is_safe": True})
 ```
 
 The provider system enables:
 - **Real-time Processing**: Streaming analysis with backpressure support
+- **Video Avatar Integration**: Seamless avatar generation and streaming
 - **Confidence Scoring**: Context-aware scoring based on relevance and quality  
 - **Safety Validation**: Multi-layer content filtering and validation
 - **Extensibility**: Easy addition of new analysis providers
+- **YAML Protocol**: Schema-compliant diplomatic intent generation

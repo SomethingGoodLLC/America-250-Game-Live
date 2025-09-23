@@ -1,11 +1,15 @@
-"""Placeholder video source that generates a simple looping animation."""
+"""Placeholder video source that loops MP4 video files."""
 
 import asyncio
+import os
 import math
-from typing import AsyncGenerator, Optional
+from pathlib import Path
+from typing import AsyncGenerator, Optional, AsyncIterator
 try:
+    import av
     import numpy as np
 except ImportError:
+    av = None
     np = None
 import structlog
 
@@ -14,64 +18,154 @@ from ..types import VideoSourceConfig
 
 
 class PlaceholderLoopVideoSource(BaseVideoSource):
-    """Video source that generates a simple animated placeholder avatar.
+    """Video source that loops MP4 video files for avatar display.
 
-    This creates a diplomatic-style avatar with subtle animations:
-    - Gentle pulsing background
-    - Smooth color transitions
-    - Subtle geometric patterns
+    Reads a short looping MP4 from /assets/avatars/loop.mp4 and decodes
+    frames using av/PyAV, yielding frames at the configured framerate.
+
+    Environment Variables:
+        AVATAR_VIDEO_PATH: Custom path to avatar video file
+        ASSETS_DIR: Directory containing avatar assets (default: /assets/avatars/)
     """
 
     def __init__(self, config: VideoSourceConfig):
         super().__init__(config)
-        self.phase = 0.0  # Animation phase
-        self.animation_speed = 0.02  # Animation speed multiplier
 
-        # Avatar styling parameters
-        self.background_colors = [
-            (50, 100, 150),    # Deep blue
-            (60, 120, 170),    # Medium blue
-            (70, 140, 190),    # Light blue
-        ]
+        # Video file configuration
+        self.assets_dir = Path(os.getenv("ASSETS_DIR", "/tmp/avatars/"))
+        self.video_path = os.getenv("AVATAR_VIDEO_PATH") or str(self.assets_dir / "loop.mp4")
 
-        self.accent_colors = [
-            (200, 200, 220),   # Light gray
-            (180, 180, 200),   # Slightly warmer gray
-        ]
+        # Video decoding state
+        self._container = None
+        self._video_stream = None
+        self._frame_iter = None
+        self._current_frame_index = 0
+        self._total_frames = 0
+
+        # Ensure assets directory exists
+        try:
+            self.assets_dir.mkdir(parents=True, exist_ok=True)
+        except (OSError, PermissionError):
+            # Fallback to current directory if we can't create the assets dir
+            self.assets_dir = Path.cwd() / "assets" / "avatars"
+            self.assets_dir.mkdir(parents=True, exist_ok=True)
+            self.video_path = str(self.assets_dir / "loop.mp4")
 
     async def start(self) -> None:
         """Start the placeholder video source."""
-        self.logger.info("Starting placeholder video source", style=self.config.avatar_style)
+        self.logger.info(
+            "Starting placeholder video source",
+            video_path=self.video_path,
+            style=self.config.avatar_style
+        )
         self._is_running = True
-        self.phase = 0.0
+
+        if av is None:
+            self.logger.error("PyAV not available, cannot decode video file")
+            return
+
+        try:
+            # Open video container
+            self._container = av.open(self.video_path)
+            self._video_stream = self._container.streams.video[0]
+
+            # Get total frame count
+            self._total_frames = self._video_stream.frames if self._video_stream.frames > 0 else 0
+
+            if self._total_frames == 0:
+                self.logger.warning("Video file has no frames or frame count unknown")
+
+            self.logger.info(
+                "Opened video file",
+                duration=self._container.duration / av.time_base if self._container.duration else 0,
+                frames=self._total_frames,
+                framerate=self._video_stream.average_rate
+            )
+
+        except Exception as e:
+            self.logger.error("Failed to open video file", error=str(e), path=self.video_path)
+            # Fall back to synthetic frame generation
+            self.logger.info("Falling back to synthetic frame generation")
+            await self._initialize_synthetic_frames()
 
     async def stop(self) -> None:
         """Stop the placeholder video source."""
         self.logger.info("Stopping placeholder video source")
         self._is_running = False
 
+        # Clean up video resources
+        if self._container:
+            self._container.close()
+            self._container = None
+            self._video_stream = None
+            self._frame_iter = None
+
     async def get_frame(self) -> Optional[VideoFrame]:
-        """Get the next frame in the animation sequence."""
+        """Get the next frame from video file or synthetic generation."""
         if not self._is_running:
             return None
 
-        # Generate frame data
-        width, height = self.config.resolution
-        frame_data = await self._generate_frame_data(width, height)
+        try:
+            if self._container and self._video_stream:
+                # Read from video file
+                return await self._get_video_frame()
+            else:
+                # Fall back to synthetic generation
+                return await self._get_synthetic_frame()
+        except Exception as e:
+            self.logger.error("Error getting frame", error=str(e))
+            return None
 
-        # Create frame object
-        frame = VideoFrame(
-            data=frame_data.tobytes(),
-            timestamp=asyncio.get_event_loop().time(),
-            width=width,
-            height=height,
-            format="rgb24"
-        )
+    async def _get_video_frame(self) -> Optional[VideoFrame]:
+        """Get next frame from video file."""
+        if not self._container or not self._video_stream:
+            return None
 
-        self._frame_count += 1
-        self.phase += self.animation_speed
+        try:
+            # Decode next frame
+            frame = next(self._container.decode(video=0))
 
-        return frame
+            # Convert to RGB format if needed
+            if frame.format.name != 'rgb24':
+                frame = frame.reformat(format='rgb24')
+
+            # Create VideoFrame object
+            video_frame = VideoFrame(
+                data=frame.to_ndarray(format='rgb24').tobytes(),
+                timestamp=frame.time,
+                width=frame.width,
+                height=frame.height,
+                format="rgb24"
+            )
+
+            self._frame_count += 1
+            return video_frame
+
+        except (StopIteration, av.error.EOFError):
+            # End of file reached, restart from beginning
+            self._container.seek(0)
+            return await self._get_video_frame()
+        except Exception as e:
+            self.logger.error("Error decoding video frame", error=str(e))
+            return None
+
+    async def frames(self) -> AsyncIterator[np.ndarray]:
+        """Stream video frames as numpy arrays."""
+        while self._is_running:
+            frame = await self.get_frame()
+            if frame:
+                # Convert bytes to numpy array
+                if np is not None:
+                    frame_array = np.frombuffer(frame.data, dtype=np.uint8).reshape(
+                        (frame.height, frame.width, 3)
+                    )
+                    yield frame_array
+                else:
+                    # Fallback if numpy not available
+                    yield None
+
+            # Control frame rate
+            await asyncio.sleep(1.0 / self.config.framerate)
 
     async def stream_frames(self) -> AsyncGenerator[VideoFrame, None]:
         """Stream frames continuously."""
@@ -83,141 +177,62 @@ class PlaceholderLoopVideoSource(BaseVideoSource):
             # Control frame rate
             await asyncio.sleep(1.0 / self.config.framerate)
 
-    async def _generate_frame_data(self, width: int, height: int):
-        """Generate the actual frame pixel data."""
+    async def _get_synthetic_frame(self) -> Optional[VideoFrame]:
+        """Get synthetic frame when video file is not available."""
+        width, height = self.config.resolution
+
         if np is None:
             # Fallback to basic array if numpy not available
-            return [[[(50, 100, 150) for _ in range(width)] for _ in range(height)]]
-        
-        # Create base frame
+            frame_data = bytes([(50, 100, 150) for _ in range(width * height * 3)])
+        else:
+            # Create simple animated frame
+            frame_array = await self._generate_synthetic_frame_data(width, height)
+            frame_data = frame_array.tobytes()
+
+        # Create frame object
+        frame = VideoFrame(
+            data=frame_data,
+            timestamp=asyncio.get_event_loop().time(),
+            width=width,
+            height=height,
+            format="rgb24"
+        )
+
+        self._frame_count += 1
+        return frame
+
+    async def _generate_synthetic_frame_data(self, width: int, height: int):
+        """Generate synthetic frame pixel data."""
+        if np is None:
+            # Fallback to basic array if numpy not available
+            return np.array([[(50, 100, 150) for _ in range(width)] for _ in range(height)])
+
+        # Create base frame with simple animation
         frame = np.zeros((height, width, 3), dtype=np.uint8)
 
-        # Add background gradient
-        await self._draw_background_gradient(frame)
+        # Add simple pulsing background
+        phase = self._frame_count * 0.1
+        pulse = (math.sin(phase) + 1) / 2  # 0 to 1
+        base_color = (
+            int(50 + 50 * pulse),
+            int(100 + 50 * pulse),
+            int(150 + 50 * pulse)
+        )
+        frame[:, :] = base_color
 
-        # Add animated elements based on avatar style
-        if self.config.avatar_style == "diplomatic":
-            await self._draw_diplomatic_elements(frame)
-        elif self.config.avatar_style == "formal":
-            await self._draw_formal_elements(frame)
-        else:
-            await self._draw_simple_elements(frame)
+        # Add simple avatar representation
+        center_x, center_y = width // 2, height // 2
+        radius = min(width, height) // 4
+
+        # Simple face circle
+        for y in range(max(0, center_y - radius), min(height, center_y + radius + 1)):
+            for x in range(max(0, center_x - radius), min(width, center_x + radius + 1)):
+                dx, dy = x - center_x, y - center_y
+                if dx*dx + dy*dy <= radius*radius:
+                    frame[y, x] = (200, 180, 160)  # Skin tone
 
         return frame
 
-    async def _draw_background_gradient(self, frame: np.ndarray) -> None:
-        """Draw animated background gradient."""
-        height, width, _ = frame.shape
-
-        # Create pulsing background based on animation phase
-        pulse = (math.sin(self.phase * 2) + 1) / 2  # 0 to 1
-        color_index = int(pulse * (len(self.background_colors) - 1))
-        base_color = self.background_colors[color_index]
-
-        # Create vertical gradient
-        for y in range(height):
-            # Gradient from dark to light
-            gradient_factor = y / height
-            color = (
-                int(base_color[0] * (0.7 + 0.3 * gradient_factor)),
-                int(base_color[1] * (0.7 + 0.3 * gradient_factor)),
-                int(base_color[2] * (0.7 + 0.3 * gradient_factor))
-            )
-            frame[y, :] = color
-
-    async def _draw_diplomatic_elements(self, frame: np.ndarray) -> None:
-        """Draw diplomatic-style avatar elements."""
-        height, width, _ = frame.shape
-        center_x, center_y = width // 2, height // 2
-
-        # Draw pulsing circle (representing diplomatic presence)
-        radius = min(width, height) // 6
-        animated_radius = int(radius * (0.8 + 0.2 * math.sin(self.phase * 3)))
-
-        # Draw outer circle
-        for y in range(max(0, center_y - animated_radius),
-                      min(height, center_y + animated_radius + 1)):
-            for x in range(max(0, center_x - animated_radius),
-                          min(width, center_x + animated_radius + 1)):
-                dx, dy = x - center_x, y - center_y
-                distance = math.sqrt(dx*dx + dy*dy)
-
-                if distance <= animated_radius:
-                    # Fade out towards edge
-                    alpha = 1.0 - (distance / animated_radius)
-                    color = self.accent_colors[0] if distance <= animated_radius * 0.7 else (100, 100, 120)
-                    frame[y, x] = (
-                        int(frame[y, x][0] * (1 - alpha) + color[0] * alpha),
-                        int(frame[y, x][1] * (1 - alpha) + color[1] * alpha),
-                        int(frame[y, x][2] * (1 - alpha) + color[2] * alpha)
-                    )
-
-    async def _draw_formal_elements(self, frame: np.ndarray) -> None:
-        """Draw formal business-style avatar elements."""
-        height, width, _ = frame.shape
-
-        # Draw horizontal lines (representing formal structure)
-        line_spacing = height // 8
-        for i in range(1, 7):
-            y = i * line_spacing
-            # Animated line opacity
-            opacity = 0.3 + 0.2 * math.sin(self.phase + i * 0.5)
-
-            if 0 <= y < height:
-                for x in range(width):
-                    if 0 <= x < width:
-                        frame[y, x] = (
-                            int(frame[y, x][0] * (1 - opacity) + 200 * opacity),
-                            int(frame[y, x][1] * (1 - opacity) + 200 * opacity),
-                            int(frame[y, x][2] * (1 - opacity) + 220 * opacity)
-                        )
-
-    async def _draw_simple_elements(self, frame: np.ndarray) -> None:
-        """Draw simple geometric elements."""
-        height, width, _ = frame.shape
-        center_x, center_y = width // 2, height // 2
-
-        # Draw simple rotating square
-        size = min(width, height) // 8
-        angle = self.phase * 2
-
-        # Calculate square corners
-        corners = []
-        for i in range(4):
-            corner_angle = angle + i * math.pi / 2
-            x = center_x + int(size * math.cos(corner_angle))
-            y = center_y + int(size * math.sin(corner_angle))
-            corners.append((x, y))
-
-        # Draw square outline
-        for i in range(4):
-            x1, y1 = corners[i]
-            x2, y2 = corners[(i + 1) % 4]
-
-            # Simple line drawing
-            await self._draw_line(frame, x1, y1, x2, y2, (220, 220, 220))
-
-    async def _draw_line(self, frame: np.ndarray, x1: int, y1: int, x2: int, y2: int, color: tuple) -> None:
-        """Draw a simple line on the frame."""
-        # Bresenham's line algorithm (simplified)
-        dx = abs(x2 - x1)
-        dy = abs(y2 - y1)
-        sx = 1 if x1 < x2 else -1
-        sy = 1 if y1 < y2 else -1
-        err = dx - dy
-
-        x, y = x1, y1
-        while True:
-            if 0 <= x < frame.shape[1] and 0 <= y < frame.shape[0]:
-                frame[y, x] = color
-
-            if x == x2 and y == y2:
-                break
-
-            e2 = 2 * err
-            if e2 > -dy:
-                err -= dy
-                x += sx
-            if e2 < dx:
-                err += dx
-                y += sy
+    async def _initialize_synthetic_frames(self) -> None:
+        """Initialize synthetic frame generation fallback."""
+        self.logger.info("Initialized synthetic frame generation fallback")

@@ -1,7 +1,7 @@
 """Base provider interface for negotiation providers."""
 
 from __future__ import annotations
-from typing import AsyncIterator, Protocol, Any, Dict, Iterable
+from typing import AsyncIterator, Protocol, Any, Dict, Iterable, Union, List
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -16,6 +16,41 @@ class ProviderEvent:
     def __post_init__(self):
         if self.timestamp is None:
             self.timestamp = datetime.now()
+
+
+# Event type classes
+@dataclass
+class NewIntent:
+    """New diplomatic intent detected."""
+    intent: Dict[str, Any]
+    confidence: float
+    justification: str
+
+
+@dataclass
+class LiveSubtitle:
+    """Live subtitle with timing information."""
+    text: str
+    start_time: float
+    end_time: float
+    speaker_id: str
+
+
+@dataclass
+class Analysis:
+    """Analysis result with metadata."""
+    analysis_type: str
+    result: Dict[str, Any]
+    confidence: float
+
+
+@dataclass
+class Safety:
+    """Safety check result."""
+    is_safe: bool
+    flags: List[str]
+    severity: str
+    reason: str
 
 
 class Provider(Protocol):
