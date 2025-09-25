@@ -603,9 +603,9 @@ class FrameTrack(MediaStreamTrack):
 async def attach_avatar_track_simple(pc: RTCPeerConnection, use_veo3: bool = False):
     """Simplified avatar track attachment for test harness."""
     # Import video sources
-    from ..providers.video_sources.placeholder_loop import PlaceholderLoopVideoSource
-    from ..providers.video_sources.veo3_stream import Veo3StreamVideoSource
-    from ..providers.types import VideoSourceConfig
+    from providers.video_sources.placeholder_loop import PlaceholderLoopVideoSource
+    from providers.video_sources.veo3_stream import Veo3StreamVideoSource
+    from providers.types import VideoSourceConfig
 
     # Create video source config
     config = VideoSourceConfig(

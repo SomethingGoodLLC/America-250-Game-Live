@@ -2,6 +2,26 @@
 
 A production-ready FastAPI service for diplomatic negotiations with WebRTC A/V streaming and real-time intent detection.
 
+## Table of Contents
+
+- [Features](#features)
+- [Quick Start](#quick-start)
+  - [🚀 Instant Setup (30 seconds)](#-instant-setup-30-seconds)
+  - [First Test (2 minutes)](#first-test-2-minutes)
+  - [Turn-Key Browser Test Harness](#turn-key-browser-test-harness)
+- [Configuration](#configuration)
+  - [Environment Setup](#environment-setup)
+  - [Advanced Configuration](#advanced-configuration)
+- [API Endpoints](#api-endpoints)
+- [Project Structure](#project-structure)
+- [Development](#development)
+  - [Provider System](#provider-system)
+  - [Listener Adapters](#listener-adapters)
+- [Testing](#testing)
+- [Deployment](#deployment)
+- [Architecture](#architecture)
+- [Troubleshooting](#troubleshooting)
+
 ## Features
 
 ### Core Capabilities
@@ -27,6 +47,7 @@ A production-ready FastAPI service for diplomatic negotiations with WebRTC A/V s
 - **STT Interfaces** - Pluggable Speech-to-Text (faster-whisper, cloud providers)
 - **TTS Interfaces** - Pluggable Text-to-Speech (Coqui XTTS, cloud providers)
 - **Avatar Support** - Video avatar generation with lipsync capabilities
+- **Listener Adapters** - Real-time audio processing with local STT and cloud realtime APIs
 
 ### Development & Deployment
 - **Comprehensive Testing** - 38+ tests with 95%+ coverage including edge cases
@@ -35,6 +56,46 @@ A production-ready FastAPI service for diplomatic negotiations with WebRTC A/V s
 - **Performance Optimized** - Sub-second response times with efficient pattern matching
 
 ## Quick Start
+
+### 🚀 Instant Setup (30 seconds)
+
+```bash
+cd services/negotiation
+./scripts/start.sh
+# Opens http://127.0.0.1:8000 automatically
+```
+
+**Even easier: Use the automated startup script that handles everything!**
+
+### First Test (2 minutes)
+
+1. **Create Session**
+   - Select "Mock Local" model
+   - Select "Local STT" listener
+   - Click "🚀 Create Session"
+
+2. **Grant Permissions**
+   - Allow microphone access when prompted
+   - You should see "🎤 Microphone connected and ready"
+
+3. **Test Text Input**
+   - Select test phrase: "We'll grant trade access if you withdraw troops"
+   - Click "📤 Send Text"
+   - Watch for structured YAML intent in transcript
+
+4. **Test Audio Input** (optional)
+   - Click "🎤 Send Audio" 
+   - Speak: "I propose we establish a fair trade agreement"
+   - Click "⏹️ Stop Audio"
+   - Watch for live subtitles and intent detection
+
+### Expected Results
+
+✅ **Video Stream**: Black video element (placeholder mode)  
+✅ **Live Subtitles**: Real-time transcription in transcript panel  
+✅ **Intent Detection**: Structured YAML diplomatic intents  
+✅ **Session Stats**: Live counters for messages, intents, connection time  
+✅ **Audio Feedback**: Visual audio level monitoring  
 
 ### Using UV (Recommended)
 
@@ -59,9 +120,12 @@ make run
 **🚀 Quickest way to test your AI avatar today!**
 
 ```bash
-# Start the test harness server
+# Start the test harness server (automated)
 cd services/negotiation
-uv run uvicorn simple_test_harness:app --host 127.0.0.1 --port 8000 --reload
+./scripts/start.sh
+
+# Alternative: Manual startup
+uv run uvicorn main:app --host 127.0.0.1 --port 8000 --reload
 
 # Alternative: Use the Makefile
 make run
@@ -78,7 +142,9 @@ Open http://localhost:8000 in your browser for an instant test environment featu
 
 #### **🎮 Interactive Testing**
 - **Model Selection**: Switch between `mock_local` (deterministic) and `veo3` (advanced)
+- **Listener Selection**: Choose from `local_stt`, `gemini_realtime`, `openai_realtime`, `grok_realtime`
 - **Custom Utterances**: Type or paste diplomatic messages to test AI responses
+- **Audio Input**: Real-time microphone input with visual feedback
 - **Session Management**: Create, monitor, and end negotiation sessions
 - **Real-time Status**: Connection state, WebRTC ICE state, and message flow
 
@@ -87,13 +153,22 @@ Open http://localhost:8000 in your browser for an instant test environment featu
 - **Proper YAML Parsing**: Uses `js-yaml` library for robust data handling
 - **Cross-browser Support**: Works in modern browsers with WebRTC support
 - **Mobile Friendly**: Responsive design with touch controls
+- **Audio Visualization**: Real-time audio level monitoring
 
 #### **🔧 Usage**
-1. **Create Session**: Select model and click "Create Session"
+1. **Create Session**: Select model and listener type, click "Create Session"
 2. **Grant Microphone**: Allow browser microphone access for audio input
 3. **Send Utterance**: Type diplomatic messages or use test phrases
 4. **Watch Results**: See avatar video, live subtitles, and detected intents
 5. **Monitor Status**: Real-time connection and processing status
+
+#### **🎤 Listener Adapters**
+Choose your audio processing backend:
+
+- **Local STT (Whisper)**: Fast, local speech-to-text using faster-whisper
+- **Gemini Realtime**: Direct streaming to Gemini Live API (requires API key)
+- **OpenAI Realtime**: Direct streaming to OpenAI Realtime API (requires API key)
+- **Grok Realtime**: Direct streaming to xAI Grok API (requires API key)
 
 #### **📋 Test Scenarios**
 - **Counter-Offers**: "We'll grant trade access if you withdraw troops"
@@ -106,18 +181,18 @@ Open http://localhost:8000 in your browser for an instant test environment featu
 - **📜 Intents**: Structured diplomatic intents (Proposal, CounterOffer, Ultimatum)
 - **⚠️ Safety**: Content safety validation results
 - **📊 Analysis**: Detailed diplomatic analysis with scoring
-  - **Custom message input** for testing your own scenarios
-- **Real-time intent detection** with confidence scores and detailed rationale
-- **Keyword extraction** and sentiment analysis
-- **Streaming subtitle generation** showing partial and final transcriptions
+- **🎤 Audio Levels**: Real-time microphone input visualization
+- **📊 Session Stats**: Live statistics for messages, intents, and connection time
 
 #### **🔧 Professional Development Tools**
 - **Live event logs** with color-coded event types (intents, safety, analysis, subtitles)
 - **Real-time statistics** tracking sessions, messages, intents, and connection time
 - **Model switching** between Enhanced Mock (deterministic) and Veo3 (advanced)
+- **Listener switching** between local STT and cloud realtime APIs
 - **Comprehensive diagnostics** for microphone and WebRTC testing
 - **Log export functionality** for debugging and analysis
 - **Structured JSON logging** with timestamps and correlation IDs
+- **Audio level monitoring** with visual feedback
 
 #### **🛡️ Safety & Validation**
 - **Content safety screening** with configurable severity levels
@@ -131,6 +206,7 @@ Perfect for:
 - **Debugging** negotiation flow and provider integration in real-time
 - **Validating** safety filters and content screening
 - **Developing** new diplomatic scenarios and testing edge cases
+- **Comparing** different STT/TTS providers in real-time
 
 ### Using Docker
 
@@ -164,11 +240,65 @@ docker run -p 8000:8000 samson-negotiation-service
 
 ## Configuration
 
+### Environment Setup
+
+**Easy Setup:**
+```bash
+./scripts/setup_env.sh  # Interactive configuration wizard
+# Or use the Makefile shortcut:
+make setup
+```
+
+**Manual Setup:**
 Copy `.env.example` to `.env` and configure:
 
 ```bash
 cp .env.example .env
 ```
+
+### Advanced Configuration
+
+#### API Keys for Cloud Listeners
+
+Set these environment variables to enable cloud listeners:
+
+```bash
+# For Gemini Realtime
+export GEMINI_API_KEY="your_gemini_api_key"
+
+# For OpenAI Realtime  
+export OPENAI_API_KEY="your_openai_api_key"
+
+# For Grok Realtime
+export GROK_API_KEY="your_grok_api_key"
+
+# Choose listener type (default: local_stt)
+export LISTENER_TYPE="local_stt"  # or gemini_realtime, openai_realtime, grok_realtime
+```
+
+#### Enable Veo3 Video
+```bash
+export USE_VEO3=1
+export GEMINI_API_KEY="your_api_key_here"
+```
+
+#### Real AI Video Generation
+The service includes `real_video_generator.py` for generating ultra-realistic videos using AI models:
+
+- **Gemini Veo3**: Primary provider with automatic RAI filter handling
+- **RunwayML Gen-3**: Alternative provider for video generation  
+- **Stability AI**: Additional fallback provider
+
+```bash
+# Generate video with your API key
+export GEMINI_API_KEY="your_key"
+cd services/negotiation
+uv run python tools/real_video_generator.py
+# Or use the Makefile shortcut:
+make video-gen
+```
+
+The generator automatically handles content safety filters and retries with modified prompts when needed.
 
 ### Package Management with UV
 
@@ -191,7 +321,7 @@ uv sync --dev
 # Run commands in the uv environment
 uv run python script.py
 uv run pytest
-uv run uvicorn app:main
+uv run uvicorn main:app
 
 # Add new dependencies
 uv add package-name
@@ -219,6 +349,12 @@ services/negotiation/
 │   │   ├── placeholder_loop.py # Placeholder video source
 │   │   └── veo3_stream.py      # Veo3 API video source
 │   └── README.md         # Provider documentation
+├── listeners/             # Real-time audio listener adapters
+│   ├── base.py           # Listener interface and factory
+│   ├── local_stt.py      # Local STT using faster-whisper
+│   ├── gemini_realtime.py # Gemini Live API adapter
+│   ├── openai_realtime.py # OpenAI Realtime API adapter
+│   └── grok_realtime.py   # Grok Realtime API adapter
 ├── stt/                   # Speech-to-Text interfaces
 │   ├── base.py           # STT provider interface
 │   └── faster_whisper.py # faster-whisper implementation
@@ -233,7 +369,25 @@ services/negotiation/
 │   ├── test_provider_edge_cases.py # Edge case and performance tests
 │   ├── test_integration.py    # End-to-end integration tests
 │   ├── test_content_safety.py # Content filtering tests
-│   └── test_session_manager.py # Session management tests
+│   ├── test_session_manager.py # Session management tests
+│   ├── test_end_to_end.py     # End-to-end system tests
+│   ├── test_harness.py        # Test harness functionality
+│   ├── test_llm_integration.py # LLM integration tests
+│   ├── test_runner.py         # Test runner utilities
+│   └── test_webrtc_browser.py # WebRTC browser tests
+├── tools/                 # Utilities and generators
+│   └── real_video_generator.py # AI video generation tool
+├── scripts/               # Shell scripts and utilities
+│   ├── setup_env.sh      # Environment setup wizard
+│   ├── start.sh          # Main startup script
+│   ├── start_clean.sh    # Clean startup script
+│   ├── start.bat         # Windows startup script
+│   └── launch.sh         # Interactive launch script
+├── web/                   # Web client files
+│   ├── enhanced_test_client.html # Enhanced test interface
+│   └── test_client.html  # Basic test interface
+├── webrtc/                # WebRTC utilities
+│   └── publish.py        # WebRTC publishing utilities
 ├── Dockerfile            # Docker configuration
 ├── docker-compose.yml    # Docker Compose setup
 ├── Makefile             # Development commands (uv-based)
@@ -317,6 +471,36 @@ The mock provider uses deterministic pattern matching:
 - Cooperative language → `Concession`
 - Default → `SmallTalk`
 
+### Listener Adapters
+
+The negotiation service uses pluggable listener adapters for real-time audio processing:
+
+#### Available Listeners
+
+- **LocalSTTListener** - Uses faster-whisper for local speech-to-text
+- **RealLLMListener** - Real LLM processing with transcription and intent analysis
+- **GeminiRealtimeListener** - Direct streaming to Gemini Live API
+- **OpenAIRealtimeListener** - Direct streaming to OpenAI Realtime API
+- **GrokRealtimeListener** - Direct streaming to xAI Grok API
+
+#### Adding New Listeners
+
+1. **Implement the Listener Interface**:
+   ```python
+   from listeners.base import Listener
+   
+   class MyListener(Listener):
+       async def start(self): ...
+       async def stop(self): ...
+       async def feed_pcm(self, pcm_bytes: bytes, ts_ms: int): ...
+       async def final_text(self) -> str: ...
+       async def stream_events(self): ...
+   ```
+
+2. **Add to Factory**: Update `listeners/base.py` factory function
+3. **Add Tests**: Create comprehensive tests following the existing pattern
+4. **Update Configuration**: Add any required configuration parameters
+
 ### Adding STT/TTS Providers
 
 1. **Implement Interface**: 
@@ -328,7 +512,77 @@ The mock provider uses deterministic pattern matching:
 
 ## Testing
 
-The service includes a comprehensive test suite with 38+ tests covering functionality, edge cases, and performance:
+The service includes comprehensive testing for all components including end-to-end integration tests:
+
+### 🚀 Run All Tests
+
+```bash
+# Run comprehensive test suite
+./test_runner.py
+
+# Run individual test files
+uv run pytest test_end_to_end.py -v
+uv run pytest test_llm_integration.py -v
+uv run pytest test_webrtc_browser.py -v
+```
+
+### 📋 Test Categories
+
+#### End-to-End Tests (`test_end_to_end.py`)
+- **Server Health**: Basic FastAPI functionality
+- **Session Management**: Creation, WebSocket, WebRTC
+- **Audio Processing**: Listener adapters and audio pipeline
+- **Provider Integration**: Intent detection and analysis
+- **Full Negotiation Flow**: Complete system test
+
+#### LLM Integration Tests (`test_llm_integration.py`)
+- **Mock LLM Listener**: Simulated real-time transcription
+- **Mock Veo3 Provider**: Simulated video generation
+- **API Key Validation**: Environment configuration checks
+- **Video Source Integration**: Placeholder and real video sources
+
+#### WebRTC Browser Tests (`test_webrtc_browser.py`)
+- **Browser-like WebRTC Flow**: Complete SDP offer/answer
+- **Audio Track Handling**: Microphone input simulation
+- **Error Handling**: Connection failures and edge cases
+- **Multiple Sessions**: Concurrent session management
+
+### 🎯 Test Results
+
+The test suite validates:
+
+✅ **WebRTC Connection**: Proper SDP exchange with RTCSessionDescription objects
+✅ **Audio Processing**: Real-time audio through listener adapters
+✅ **LLM Integration**: Transcription and intent analysis simulation
+✅ **Video Generation**: Avatar video streaming (placeholder mode)
+✅ **Session Management**: Multiple concurrent sessions
+✅ **Error Handling**: Graceful failure recovery
+✅ **Real-time Communication**: WebSocket control messages
+
+### 🔧 Testing Individual Components
+
+```bash
+# Test just the listeners
+uv run python -c "
+from listeners.base import make_listener_from_env
+listener = make_listener_from_env()
+print('✅ Listener created successfully')
+"
+
+# Test just the providers
+uv run python -c "
+from providers.mock_local import MockLocalProvider
+provider = MockLocalProvider({'strict': True})
+print('✅ Provider created successfully')
+"
+
+# Test WebRTC components
+uv run python -c "
+from aiortc import RTCPeerConnection, RTCSessionDescription
+pc = RTCPeerConnection()
+print('✅ WebRTC components working')
+"
+```
 
 ```bash
 # Run all tests
@@ -449,3 +703,78 @@ The provider system enables:
 - **Safety Validation**: Multi-layer content filtering and validation
 - **Extensibility**: Easy addition of new analysis providers
 - **YAML Protocol**: Schema-compliant diplomatic intent generation
+
+## Troubleshooting
+
+### Common Issues
+
+#### No Microphone Access
+- Check browser permissions (click lock icon in address bar)
+- Try "Test Microphone" button for diagnostics
+- Ensure you're using HTTPS or localhost
+
+#### No Subtitles
+- Local STT falls back to mock mode if faster-whisper not installed
+- Should still show "Mock local STT processing audio..." messages
+- Install dependencies: `uv add faster-whisper numpy torch`
+
+#### Connection Issues
+- Check console for WebSocket/WebRTC errors
+- Ensure port 8000 is available: `lsof -i :8000`
+- Try refreshing the page
+- Kill existing processes: `pkill -f uvicorn`
+
+#### Server Won't Start
+- **Port in use**: `./scripts/start.sh` handles this automatically
+- **Import errors**: Check that you're in `/services/negotiation` directory
+- **Missing dependencies**: Run `uv sync` to install packages
+- **Python version**: Requires Python 3.11+
+
+#### WebRTC Connection Fails
+- **"Failed to create session"**: Check server logs for import errors
+- **500 Internal Server Error**: Usually import path issues - restart server
+- **No video stream**: Normal in placeholder mode (shows black video)
+- **Audio not detected**: Check microphone permissions and browser console
+
+#### Environment Configuration
+- **API keys not working**: Check `.env` file exists and has correct keys
+- **Wrong listener**: Use `./scripts/setup_env.sh` to reconfigure
+- **Missing .env**: Copy from `.env.example` or run setup script
+
+### Performance Issues
+
+#### Veo3 RAI Filters (Audio/Speech)
+- **Symptom**: Logs show `rai_media_filtered_count > 0` and reasons like: "We encountered an issue with the audio for your prompt..." and no `generated_videos` are returned.
+- **What we do now**: The real video generator detects this condition and automatically retries with a silent prompt (no explicit speech) to avoid audio-related filtering while keeping visual fidelity.
+- **If still filtered**:
+  - Remove literal quotes and verbs like "says", "speaks"; describe silent gestures (e.g., "nods solemnly").
+  - Avoid sensitive phrasing that could trigger safety (harassment/violence) even in historical contexts.
+  - Keep `resolution=1080p` with `duration_seconds=8` (required pairing), or try `720p` if rate limits are suspected.
+  - Do not include unsupported parameters like `generate_audio` or `enhance_prompt`.
+  - Verify your API key has Veo3 generation access.
+- **Logs**: We print `rai_media_filtered_reasons` for transparency. Use these to refine prompts.
+
+#### Slow Audio Processing
+- Local STT: Try smaller Whisper model (`tiny` vs `small`)
+- Cloud APIs: Check network latency and API quotas
+- Browser: Close other tabs using microphone
+
+#### High Memory Usage
+- Whisper models are memory-intensive
+- Use `tiny` model for development: `WHISPER_MODEL_SIZE=tiny`
+- Monitor with: `uv run python -c "import psutil; print(f'Memory: {psutil.virtual_memory().percent}%')"`
+
+### Getting Help
+
+1. **Check Logs**: Server logs show detailed error messages
+2. **Browser Console**: F12 → Console for client-side errors  
+3. **Test Scripts**: Use `./scripts/start.sh` for automated diagnostics
+4. **Minimal Setup**: Try with `local_stt` and `mock_local` first
+
+### Next Steps for Production
+
+- **Add Real Dependencies**: `uv add faster-whisper numpy torch silero-vad`
+- **Configure API Keys**: Set up cloud listener credentials
+- **Wire Real APIs**: Replace stub implementations with actual API calls
+- **Deploy with Docker**: Use provided docker-compose for production
+- **Monitor Performance**: Set up logging and metrics collection

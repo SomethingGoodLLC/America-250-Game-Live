@@ -1,739 +1,559 @@
-<!DOCTYPE html>
-<html lang="en">
+<!doctype html>
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Enhanced AI Avatar Negotiation Test Harness</title>
-    <style>
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 20px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: #333;
-        }
-        .container {
-            background: white;
-            padding: 25px;
-            border-radius: 12px;
-            box-shadow: 0 8px 32px rgba(0,0,0,0.1);
-            margin-bottom: 20px;
-        }
-        h1 { 
-            color: #2c3e50; 
-            text-align: center;
-            margin-bottom: 10px;
-        }
-        .subtitle {
-            text-align: center;
-            color: #7f8c8d;
-            margin-bottom: 30px;
-            font-style: italic;
-        }
-        h2 { 
-            color: #34495e;
-            border-bottom: 2px solid #ecf0f1;
-            padding-bottom: 8px;
-        }
-        .controls {
-            margin: 20px 0;
-            padding: 20px;
-            background: #f8f9fa;
-            border-radius: 8px;
-            border-left: 4px solid #3498db;
-        }
-        button {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            border: none;
-            padding: 12px 24px;
-            border-radius: 6px;
-            cursor: pointer;
-            margin: 5px;
-            font-weight: 500;
-            transition: all 0.3s ease;
-        }
-        button:hover { 
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
-        }
-        button:disabled { 
-            background: #bdc3c7;
-            cursor: not-allowed;
-            transform: none;
-            box-shadow: none;
-        }
-        #video {
-            width: 100%;
-            max-width: 640px;
-            border-radius: 8px;
-            background: #000;
-            box-shadow: 0 4px 16px rgba(0,0,0,0.3);
-        }
-        .video-container {
-            text-align: center;
-            margin: 20px 0;
-        }
-        .logs {
-            height: 300px;
-            overflow-y: auto;
-            background: #2c3e50;
-            color: #ecf0f1;
-            border: 1px solid #34495e;
-            padding: 15px;
-            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
-            font-size: 13px;
-            border-radius: 6px;
-        }
-        .log-entry {
-            margin: 4px 0;
-            padding: 4px 8px;
-            border-radius: 4px;
-            border-left: 3px solid transparent;
-        }
-        .log-intent { 
-            background: rgba(52, 152, 219, 0.2); 
-            border-left-color: #3498db;
-        }
-        .log-subtitle { 
-            background: rgba(230, 126, 34, 0.2); 
-            border-left-color: #e67e22;
-        }
-        .log-safety { 
-            background: rgba(231, 76, 60, 0.2); 
-            border-left-color: #e74c3c;
-        }
-        .log-analysis { 
-            background: rgba(46, 204, 113, 0.2); 
-            border-left-color: #2ecc71;
-        }
-        .log-error {
-            background: rgba(231, 76, 60, 0.3);
-            border-left-color: #c0392b;
-        }
-        .status {
-            padding: 15px;
-            margin: 15px 0;
-            border-radius: 6px;
-            font-weight: 500;
-            text-align: center;
-        }
-        .status.connected { 
-            background: #d5f4e6; 
-            color: #27ae60; 
-            border: 1px solid #2ecc71;
-        }
-        .status.disconnected { 
-            background: #fadbd8; 
-            color: #e74c3c; 
-            border: 1px solid #e74c3c;
-        }
-        .status.connecting { 
-            background: #fef9e7; 
-            color: #f39c12; 
-            border: 1px solid #f1c40f;
-        }
-        .model-selector {
-            margin: 15px 0;
-            display: flex;
-            gap: 20px;
-            align-items: center;
-        }
-        .model-selector label { 
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            cursor: pointer;
-            padding: 8px 12px;
-            border-radius: 6px;
-            transition: background 0.3s ease;
-        }
-        .model-selector label:hover {
-            background: rgba(102, 126, 234, 0.1);
-        }
-        .test-utterances {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 15px;
-            margin: 20px 0;
-        }
-        .utterance-card {
-            background: #ecf0f1;
-            padding: 15px;
-            border-radius: 8px;
-            border-left: 4px solid #9b59b6;
-            cursor: pointer;
-            transition: all 0.3s ease;
-        }
-        .utterance-card:hover {
-            background: #d5dbdb;
-            transform: translateY(-2px);
-        }
-        .utterance-text {
-            font-weight: 500;
-            margin-bottom: 8px;
-            color: #2c3e50;
-        }
-        .utterance-result {
-            font-size: 12px;
-            color: #7f8c8d;
-            font-style: italic;
-        }
-        .stats {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-            gap: 15px;
-            margin: 20px 0;
-        }
-        .stat-card {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 15px;
-            border-radius: 8px;
-            text-align: center;
-        }
-        .stat-number {
-            font-size: 24px;
-            font-weight: bold;
-            margin-bottom: 5px;
-        }
-        .stat-label {
-            font-size: 12px;
-            opacity: 0.9;
-        }
-        .custom-input {
-            width: 100%;
-            padding: 12px;
-            border: 2px solid #ecf0f1;
-            border-radius: 6px;
-            font-size: 14px;
-            margin: 10px 0;
-            transition: border-color 0.3s ease;
-        }
-        .custom-input:focus {
-            outline: none;
-            border-color: #667eea;
-        }
-    </style>
+  <meta charset="utf-8" />
+  <title>AI Avatar Negotiation - Turn-Key Test Harness</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: system-ui, -apple-system, Arial, sans-serif;
+      margin: 0; padding: 20px;
+      background: #f5f5f5;
+      color: #333;
+    }
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+      align-items: start;
+    }
+    .panel {
+      background: white;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+      padding: 20px;
+    }
+    h1 {
+      margin-top: 0;
+      color: #2c3e50;
+      text-align: center;
+      grid-column: span 2;
+    }
+    h2 {
+      color: #34495e;
+      border-bottom: 2px solid #3498db;
+      padding-bottom: 8px;
+      margin-top: 0;
+    }
+
+    /* Video Panel */
+    .video-panel {
+      position: relative;
+    }
+    video {
+      width: 100%;
+      height: 320px;
+      background: #000;
+      border-radius: 4px;
+      object-fit: cover;
+    }
+    .controls {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+    }
+    select, button {
+      padding: 8px 16px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      background: white;
+      font-size: 14px;
+    }
+    button {
+      background: #3498db;
+      color: white;
+      border: none;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    button:hover { background: #2980b9; }
+    button:disabled {
+      background: #bdc3c7;
+      cursor: not-allowed;
+    }
+    .status {
+      padding: 8px;
+      border-radius: 4px;
+      font-weight: 500;
+      text-align: center;
+      margin-bottom: 16px;
+    }
+    .status.connected { background: #2ecc71; color: white; }
+    .status.connecting { background: #f39c12; color: white; }
+    .status.disconnected { background: #e74c3c; color: white; }
+
+    /* Transcript Panel */
+    .transcript {
+      height: 200px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      padding: 12px;
+      overflow-y: auto;
+      background: #fafafa;
+      font-family: 'Courier New', monospace;
+      font-size: 13px;
+      line-height: 1.4;
+    }
+    .subtitle { color: #27ae60; }
+    .final { color: #2c3e50; font-weight: bold; }
+    .intent { color: #8e44ad; }
+    .safety { color: #e67e22; }
+
+    /* Input Panel */
+    textarea {
+      width: 100%;
+      height: 120px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      padding: 12px;
+      font-size: 14px;
+      resize: vertical;
+    }
+    .test-phrases {
+      margin-top: 12px;
+    }
+    .test-phrases select {
+      width: 100%;
+      padding: 8px;
+      margin-bottom: 8px;
+    }
+
+    /* Stats */
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+      gap: 12px;
+      margin-top: 16px;
+      padding: 16px;
+      background: #ecf0f1;
+      border-radius: 4px;
+    }
+    .stat {
+      text-align: center;
+    }
+    .stat-label { font-size: 12px; color: #7f8c8d; }
+    .stat-value { font-size: 18px; font-weight: bold; color: #2c3e50; }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+      .container {
+        grid-template-columns: 1fr;
+        gap: 16px;
+      }
+      h1 { grid-column: span 1; }
+    }
+
+    /* Animation */
+    @keyframes pulse {
+      0% { opacity: 1; }
+      50% { opacity: 0.6; }
+      100% { opacity: 1; }
+    }
+    .listening {
+      animation: pulse 2s infinite;
+    }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist/js-yaml.min.js"></script>
 </head>
 <body>
-    <div class="container">
-        <h1>🎭 Enhanced AI Avatar Negotiation Test Harness</h1>
-        <p class="subtitle">Advanced testing environment for diplomatic AI with real-time avatar streaming</p>
+  <h1>🤖 AI Avatar Negotiation - Turn-Key Test Harness</h1>
 
-        <div class="stats" id="stats">
-            <div class="stat-card">
-                <div class="stat-number" id="sessionCount">0</div>
-                <div class="stat-label">Sessions</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-number" id="messageCount">0</div>
-                <div class="stat-label">Messages</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-number" id="intentCount">0</div>
-                <div class="stat-label">Intents</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-number" id="connectionTime">0s</div>
-                <div class="stat-label">Connected</div>
-            </div>
-        </div>
+  <div class="container">
+    <!-- Left Panel: Video & Controls -->
+    <div class="panel video-panel">
+      <h2>🎥 Avatar Video</h2>
+
+      <div class="controls">
+        <select id="model">
+          <option value="mock_local">Mock Local (Deterministic)</option>
+          <option value="veo3">Veo3 (Advanced AI)</option>
+        </select>
+        <select id="listener">
+          <option value="local_stt">Local STT (Whisper)</option>
+          <option value="gemini_realtime">Gemini Realtime</option>
+          <option value="openai_realtime">OpenAI Realtime</option>
+          <option value="grok_realtime">Grok Realtime</option>
+        </select>
+        <button id="create">🚀 Create Session</button>
+        <button id="testMic" disabled>Test Microphone</button>
+      </div>
+
+      <div id="status" class="status disconnected">Disconnected</div>
+
+      <video id="remoteVideo" autoplay playsinline muted></video>
+
+      <div id="audioIndicator" style="display: none; margin-top: 12px; padding: 8px; background: #2ecc71; color: white; border-radius: 4px; text-align: center;">
+        🎤 Listening... <span id="audioLevel">0%</span>
+      </div>
     </div>
 
-    <div class="container">
-        <h2>🚀 Session Setup</h2>
-        <div class="controls">
-            <div class="model-selector">
-                <strong>AI Model:</strong>
-                <label><input type="radio" name="model" value="mock_local" checked> 🤖 Enhanced Mock (Deterministic)</label>
-                <label><input type="radio" name="model" value="veo3"> 🎬 Gemini Veo3 (Advanced)</label>
-            </div>
+    <!-- Right Panel: Input & Results -->
+    <div class="panel">
+      <h2>💬 Negotiation Interface</h2>
 
-            <button id="startSession">🚀 Start Session</button>
-            <button id="endSession" disabled>🛑 End Session</button>
-            <button id="testMic">🎤 Test Microphone</button>
-            <button id="testWebRTC">📡 Test WebRTC</button>
+      <div class="test-phrases">
+        <label>Quick Test Phrases:</label>
+        <select id="testPhrase">
+          <option value="">Select a test phrase...</option>
+          <option value="We'll grant trade access if you withdraw troops from Ohio Country">Counter-Offer</option>
+          <option value="Ceasefire now or else we'll declare war">Ultimatum</option>
+          <option value="I propose we establish a fair trade agreement">Proposal</option>
+          <option value="We would be willing to make some concessions">Concession</option>
+          <option value="What is the current state of our borders">Small Talk</option>
+          <option value="The weather has been quite pleasant lately">Small Talk</option>
+        </select>
+      </div>
+
+      <textarea id="utter" rows="4" placeholder="Type your diplomatic message here, or use a test phrase above..."></textarea>
+
+      <div style="margin: 12px 0;">
+        <button id="sendText">📤 Send Text</button>
+        <button id="sendAudio" disabled>🎤 Send Audio</button>
+      </div>
+
+      <h2>📜 Live Transcript</h2>
+      <div id="transcript" class="transcript"></div>
+
+      <h2>📊 Session Stats</h2>
+      <div class="stats">
+        <div class="stat">
+          <div class="stat-label">Session Time</div>
+          <div class="stat-value" id="sessionTime">0:00</div>
         </div>
-
-        <div id="status" class="status disconnected">Not connected - Click "Start Session" to begin</div>
-    </div>
-
-    <div class="container">
-        <h2>📹 Avatar Video Stream</h2>
-        <div class="video-container">
-            <video id="video" autoplay playsinline muted></video>
+        <div class="stat">
+          <div class="stat-label">Messages</div>
+          <div class="stat-value" id="messageCount">0</div>
         </div>
-    </div>
-
-    <div class="container">
-        <h2>💬 Test Diplomatic Utterances</h2>
-        <p>Click any card below to send a test utterance and see the AI's diplomatic response:</p>
-        
-        <div class="test-utterances">
-            <div class="utterance-card" data-text="We'll grant trade access if you withdraw troops from Ohio Country.">
-                <div class="utterance-text">"We'll grant trade access if you withdraw troops from Ohio Country."</div>
-                <div class="utterance-result">→ Expected: Counter-offer with military/economic exchange</div>
-            </div>
-            
-            <div class="utterance-card" data-text="Ceasefire now or else we'll declare war!">
-                <div class="utterance-text">"Ceasefire now or else we'll declare war!"</div>
-                <div class="utterance-result">→ Expected: Ultimatum with clear consequences</div>
-            </div>
-            
-            <div class="utterance-card" data-text="I propose we establish a fair trade agreement between our nations.">
-                <div class="utterance-text">"I propose we establish a fair trade agreement between our nations."</div>
-                <div class="utterance-result">→ Expected: Diplomatic proposal for mutual benefit</div>
-            </div>
-            
-            <div class="utterance-card" data-text="Your recent actions have been most concerning to our alliance.">
-                <div class="utterance-text">"Your recent actions have been most concerning to our alliance."</div>
-                <div class="utterance-result">→ Expected: Diplomatic concern with relationship implications</div>
-            </div>
-            
-            <div class="utterance-card" data-text="We demand immediate reparations for the damages caused.">
-                <div class="utterance-text">"We demand immediate reparations for the damages caused."</div>
-                <div class="utterance-result">→ Expected: Strong demand with compensation requirements</div>
-            </div>
-            
-            <div class="utterance-card" data-text="Perhaps we could find a mutually beneficial solution to this dispute.">
-                <div class="utterance-text">"Perhaps we could find a mutually beneficial solution to this dispute."</div>
-                <div class="utterance-result">→ Expected: Cooperative proposal seeking compromise</div>
-            </div>
+        <div class="stat">
+          <div class="stat-label">Intents</div>
+          <div class="stat-value" id="intentCount">0</div>
         </div>
-
-        <div style="margin-top: 20px;">
-            <strong>Custom Message:</strong>
-            <input type="text" id="customMessage" class="custom-input" placeholder="Enter your own diplomatic message...">
-            <button id="sendCustom">📤 Send Custom Message</button>
+        <div class="stat">
+          <div class="stat-label">Connection</div>
+          <div class="stat-value" id="connectionState">Disconnected</div>
         </div>
+      </div>
     </div>
+  </div>
 
-    <div class="container">
-        <h2>📊 Live Event Logs</h2>
-        <div id="logs" class="logs"></div>
-        <button id="clearLogs">🗑️ Clear Logs</button>
-        <button id="exportLogs">💾 Export Logs</button>
-    </div>
+<script>
+class NegotiationClient {
+  constructor() {
+    this.sid = null;
+    this.ws = null;
+    this.pc = null;
+    this.audioContext = null;
+    this.analyser = null;
+    this.microphone = null;
+    this.isListening = false;
+    this.sessionStart = null;
+    this.messageCount = 0;
+    this.intentCount = 0;
 
-    <script>
-        class EnhancedNegotiationClient {
-            constructor() {
-                this.sessionId = null;
-                this.ws = null;
-                this.pc = null;
-                this.logs = [];
-                this.model = 'mock_local';
-                this.stats = {
-                    sessions: 0,
-                    messages: 0,
-                    intents: 0,
-                    connectionStartTime: null
-                };
+    this.ydump = obj => jsyaml.dump(obj);
+    this.yload = str => jsyaml.load(str);
+    this.$ = id => document.getElementById(id);
 
-                this.setupEventListeners();
-                this.updateStats();
-                this.startConnectionTimer();
-            }
+    this.setupEventListeners();
+    this.updateStats();
+  }
 
-            setupEventListeners() {
-                document.getElementById('startSession').onclick = () => this.startSession();
-                document.getElementById('endSession').onclick = () => this.endSession();
-                document.getElementById('testMic').onclick = () => this.testMic();
-                document.getElementById('testWebRTC').onclick = () => this.testWebRTC();
-                document.getElementById('sendCustom').onclick = () => this.sendCustomMessage();
-                document.getElementById('clearLogs').onclick = () => this.clearLogs();
-                document.getElementById('exportLogs').onclick = () => this.exportLogs();
+  setupEventListeners() {
+    this.$('create').onclick = () => this.createSession();
+    this.$('sendText').onclick = () => this.sendText();
+    this.$('testMic').onclick = () => this.testMicrophone();
+    this.$('testPhrase').onchange = (e) => {
+      if (e.target.value) {
+        this.$('utter').value = e.target.value;
+        this.$('testPhrase').value = ''; // Reset
+      }
+    };
+  }
 
-                // Model selection
-                document.querySelectorAll('input[name="model"]').forEach(radio => {
-                    radio.onchange = (e) => {
-                        this.model = e.target.value;
-                        this.log(`Model changed to: ${this.model}`, 'info');
-                    };
-                });
+  async createSession() {
+    try {
+      this.setStatus('connecting', 'Creating session...');
 
-                // Test utterance cards
-                document.querySelectorAll('.utterance-card').forEach(card => {
-                    card.onclick = () => {
-                        const text = card.dataset.text;
-                        this.sendTestUtterance(text);
-                    };
-                });
+      const model = this.$('model').value;
+      const listener = this.$('listener').value;
 
-                // Custom message on Enter
-                document.getElementById('customMessage').onkeypress = (e) => {
-                    if (e.key === 'Enter') {
-                        this.sendCustomMessage();
-                    }
-                };
-            }
+      const res = await fetch('/v1/session', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/x-yaml'},
+        body: this.ydump({ model, listener })
+      });
 
-            async startSession() {
-                try {
-                    this.updateStatus('connecting', 'Connecting to server...');
-                    this.log('🚀 Starting enhanced session...', 'info');
+      const data = this.yload(await res.text());
+      this.sid = data.session_id;
 
-                    // Create session with enhanced context
-                    const response = await fetch('/v1/session', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/yaml' },
-                        body: `model: ${this.model}
-world_context:
-  scenario: colonial_america
-  year: 1755
-  avatar_style: diplomatic
-  initiator_faction:
-    id: player
-    name: "Colonial Delegation"
-  counterpart_faction:
-    id: ai_diplomat
-    name: "British Crown Representative"`
-                    });
+      this.addTranscript(`🆔 Session created: ${this.sid}`, 'info');
+      this.setStatus('connected', 'Session active');
 
-                    const yamlText = await response.text();
-                    const sessionData = this.parseYaml(yamlText);
-                    this.sessionId = sessionData.session_id;
+      await this.startWebRTC();
+      await this.openWebSocket();
 
-                    this.log(`✅ Session created: ${this.sessionId}`, 'info');
-                    this.stats.sessions++;
+      this.sessionStart = Date.now();
+      this.updateStats();
 
-                    // Setup WebSocket
-                    await this.setupWebSocket();
+    } catch (error) {
+      console.error('Session creation failed:', error);
+      this.setStatus('disconnected', 'Failed to create session');
+      this.addTranscript(`❌ Error: ${error.message}`, 'error');
+    }
+  }
 
-                    // Setup WebRTC
-                    await this.setupWebRTC();
+  async startWebRTC() {
+    this.pc = new RTCPeerConnection({
+      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+    });
 
-                    document.getElementById('startSession').disabled = true;
-                    document.getElementById('endSession').disabled = false;
-                    
-                    this.stats.connectionStartTime = Date.now();
-                    this.updateStats();
+    this.pc.oniceconnectionstatechange = () => {
+      this.$('connectionState').textContent = this.pc.iceConnectionState;
+      this.updateStats();
+    };
 
-                } catch (error) {
-                    this.log(`❌ Error starting session: ${error.message}`, 'error');
-                    this.updateStatus('disconnected', 'Connection failed');
-                }
-            }
+    this.pc.ontrack = (e) => {
+      if (e.track.kind === 'video') {
+        this.$('remoteVideo').srcObject = e.streams[0];
+        this.addTranscript('📺 Avatar video connected', 'info');
+      } else if (e.track.kind === 'audio') {
+        this.addTranscript('🔊 Avatar audio connected', 'info');
+      }
+    };
 
-            async endSession() {
-                this.log('🛑 Ending session...', 'info');
-                
-                if (this.ws) {
-                    this.ws.close();
-                }
-                if (this.pc) {
-                    this.pc.close();
-                }
+    // Microphone setup
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true },
+        video: false
+      });
 
-                document.getElementById('startSession').disabled = false;
-                document.getElementById('endSession').disabled = true;
-                this.updateStatus('disconnected', 'Session ended');
-                this.stats.connectionStartTime = null;
-                this.updateStats();
-            }
+      this.setupAudioAnalysis(stream);
+      stream.getTracks().forEach(track => this.pc.addTrack(track, stream));
 
-            async setupWebSocket() {
-                return new Promise((resolve, reject) => {
-                    const wsUrl = `ws://localhost:8000/v1/session/${this.sessionId}/control`;
-                    this.ws = new WebSocket(wsUrl);
+      this.$('sendAudio').disabled = false;
+      this.$('testMic').disabled = false;
+      this.addTranscript('🎤 Microphone connected and ready', 'info');
 
-                    this.ws.onopen = () => {
-                        this.log('🔌 WebSocket connected', 'info');
-                        resolve();
-                    };
+    } catch (error) {
+      console.error('Microphone access failed:', error);
+      this.addTranscript('⚠️ Microphone access denied', 'warning');
+    }
 
-                    this.ws.onmessage = (event) => {
-                        try {
-                            const data = this.parseYaml(event.data);
-                            this.handleWebSocketMessage(data);
-                        } catch (error) {
-                            this.log(`⚠️ Failed to parse message: ${error.message}`, 'error');
-                        }
-                    };
+    // Create and send offer
+    const offer = await this.pc.createOffer();
+    await this.pc.setLocalDescription(offer);
 
-                    this.ws.onerror = (error) => {
-                        this.log(`❌ WebSocket error: ${error}`, 'error');
-                        reject(error);
-                    };
+    const res = await fetch(`/v1/session/${this.sid}/webrtc/offer`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ type: 'offer', sdp: offer.sdp })
+    });
 
-                    this.ws.onclose = () => {
-                        this.log('🔌 WebSocket disconnected', 'info');
-                    };
-                });
-            }
+    const answer = this.yload(await res.text());
+    await this.pc.setRemoteDescription({ type: answer.type, sdp: answer.sdp });
+  }
 
-            async setupWebRTC() {
-                this.pc = new RTCPeerConnection({
-                    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
-                });
+  setupAudioAnalysis(stream) {
+    this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    const source = this.audioContext.createMediaStreamSource(stream);
+    this.analyser = this.audioContext.createAnalyser();
+    this.analyser.fftSize = 256;
+    source.connect(this.analyser);
 
-                // Handle incoming video
-                this.pc.ontrack = (event) => {
-                    this.log('📹 Received video track', 'info');
-                    document.getElementById('video').srcObject = event.streams[0];
-                };
+    // Audio level monitoring
+    const dataArray = new Uint8Array(this.analyser.frequencyBinCount);
+    const monitor = () => {
+      if (!this.isListening) return;
 
-                // Handle connection state
-                this.pc.onconnectionstatechange = () => {
-                    const state = this.pc.connectionState;
-                    this.log(`📡 WebRTC state: ${state}`, 'info');
+      this.analyser.getByteFrequencyData(dataArray);
+      const average = dataArray.reduce((a, b) => a + b) / dataArray.length;
+      const level = Math.min(100, Math.round(average / 2.55));
 
-                    if (state === 'connected') {
-                        this.updateStatus('connected', '✅ Connected - AI Avatar Ready!');
-                    } else if (state === 'failed' || state === 'disconnected') {
-                        this.updateStatus('disconnected', '❌ WebRTC connection failed');
-                    }
-                };
+      this.$('audioLevel').textContent = `${level}%`;
 
-                // Get user media (microphone)
-                try {
-                    const stream = await navigator.mediaDevices.getUserMedia({
-                        audio: true,
-                        video: false
-                    });
+      requestAnimationFrame(monitor);
+    };
 
-                    stream.getTracks().forEach(track => {
-                        this.pc.addTrack(track, stream);
-                    });
+    this.$('sendAudio').onclick = () => {
+      this.isListening = !this.isListening;
+      this.$('audioIndicator').style.display = this.isListening ? 'block' : 'none';
+      this.$('sendAudio').textContent = this.isListening ? '⏹️ Stop Audio' : '🎤 Send Audio';
 
-                    this.log('🎤 Microphone access granted', 'info');
-                } catch (error) {
-                    this.log(`⚠️ Microphone access denied: ${error.message}`, 'error');
-                }
+      if (this.isListening) {
+        monitor();
+        this.addTranscript('🎤 Started audio input - speak now!', 'info');
+      } else {
+        this.addTranscript('⏹️ Stopped audio input', 'info');
+      }
+    };
+  }
 
-                // Create and send offer
-                const offer = await this.pc.createOffer();
-                await this.pc.setLocalDescription(offer);
+  async openWebSocket() {
+    this.ws = new WebSocket(`ws://${location.host}/v1/session/${this.sid}/control`);
 
-                const response = await fetch(`/v1/session/${this.sessionId}/webrtc/offer`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        sdp: offer.sdp,
-                        type: offer.type
-                    })
-                });
+    this.ws.onopen = () => {
+      this.addTranscript('🔌 WebSocket connected', 'info');
+    };
 
-                const yamlText = await response.text();
-                const answerData = this.parseYaml(yamlText);
+    this.ws.onmessage = (event) => {
+      try {
+        const data = this.yload(event.data);
 
-                await this.pc.setRemoteDescription({
-                    type: answerData.type,
-                    sdp: answerData.sdp
-                });
-            }
-
-            async testMic() {
-                this.log('🎤 Testing microphone access...', 'info');
-                try {
-                    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                    this.log('✅ Microphone test successful', 'info');
-                    
-                    // Show audio levels for 3 seconds
-                    const audioContext = new AudioContext();
-                    const analyser = audioContext.createAnalyser();
-                    const microphone = audioContext.createMediaStreamSource(stream);
-                    microphone.connect(analyser);
-                    
-                    const dataArray = new Uint8Array(analyser.frequencyBinCount);
-                    let testCount = 0;
-                    
-                    const checkLevel = () => {
-                        analyser.getByteFrequencyData(dataArray);
-                        const average = dataArray.reduce((a, b) => a + b) / dataArray.length;
-                        this.log(`🔊 Audio level: ${Math.round(average)}`, 'info');
-                        
-                        if (testCount++ < 10) {
-                            setTimeout(checkLevel, 300);
-                        } else {
-                            stream.getTracks().forEach(track => track.stop());
-                            audioContext.close();
-                        }
-                    };
-                    
-                    checkLevel();
-                } catch (error) {
-                    this.log(`❌ Microphone test failed: ${error.message}`, 'error');
-                }
-            }
-
-            async testWebRTC() {
-                this.log('📡 Testing WebRTC capabilities...', 'info');
-                
-                try {
-                    const pc = new RTCPeerConnection();
-                    const offer = await pc.createOffer();
-                    this.log('✅ WebRTC offer creation successful', 'info');
-                    
-                    pc.close();
-                } catch (error) {
-                    this.log(`❌ WebRTC test failed: ${error.message}`, 'error');
-                }
-            }
-
-            sendTestUtterance(text) {
-                this.log(`📝 Sending test utterance: "${text}"`, 'info');
-                this.sendMessage('player_utterance', { text });
-            }
-
-            sendCustomMessage() {
-                const input = document.getElementById('customMessage');
-                const text = input.value.trim();
-                
-                if (!text) {
-                    this.log('⚠️ Please enter a message', 'error');
-                    return;
-                }
-                
-                this.log(`📤 Sending custom message: "${text}"`, 'info');
-                this.sendMessage('player_utterance', { text });
-                input.value = '';
-            }
-
-            sendMessage(type, data) {
-                if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-                    const message = `type: ${type}\n${Object.entries(data).map(([k, v]) => `${k}: "${v}"`).join('\n')}`;
-                    this.ws.send(message);
-                    this.stats.messages++;
-                    this.updateStats();
-                } else {
-                    this.log('❌ WebSocket not connected', 'error');
-                }
-            }
-
-            handleWebSocketMessage(data) {
-                switch (data.type) {
-                    case 'subtitle':
-                        const finalText = data.final ? ' (final)' : ' (partial)';
-                        this.log(`🎬 Subtitle: "${data.text}"${finalText}`, 'subtitle');
-                        break;
-                        
-                    case 'intent':
-                        this.stats.intents++;
-                        this.updateStats();
-                        const intent = data.payload;
-                        this.log(`💭 Intent Detected: ${intent.kind} (confidence: ${intent.confidence})`, 'intent');
-                        this.log(`📋 Details: ${JSON.stringify(intent, null, 2)}`, 'intent');
-                        break;
-                        
-                    case 'safety':
-                        const safety = data.payload;
-                        const safetyStatus = safety.is_safe ? '✅ Safe' : '⚠️ Unsafe';
-                        this.log(`🛡️ Safety Check: ${safetyStatus} - ${safety.reason}`, 'safety');
-                        break;
-                        
-                    case 'analysis':
-                        const analysis = data.payload;
-                        this.log(`📊 Analysis (${data.tag}): ${JSON.stringify(analysis, null, 2)}`, 'analysis');
-                        break;
-                        
-                    case 'error':
-                        this.log(`❌ Server Error: ${data.payload.message}`, 'error');
-                        break;
-                        
-                    case 'ack':
-                        this.log('✅ Server acknowledged', 'info');
-                        break;
-                        
-                    default:
-                        this.log(`📨 Unknown message: ${data.type}`, 'info');
-                }
-            }
-
-            updateStatus(type, message) {
-                const statusEl = document.getElementById('status');
-                statusEl.className = `status ${type}`;
-                statusEl.textContent = message;
-            }
-
-            log(message, type = 'info') {
-                const timestamp = new Date().toLocaleTimeString();
-                const entry = { timestamp, message, type };
-                this.logs.push(entry);
-
-                const logsElement = document.getElementById('logs');
-                const logEntry = document.createElement('div');
-                logEntry.className = `log-entry log-${type}`;
-                logEntry.textContent = `[${timestamp}] ${message}`;
-                logsElement.appendChild(logEntry);
-                logsElement.scrollTop = logsElement.scrollHeight;
-
-                // Keep only last 100 log entries
-                if (this.logs.length > 100) {
-                    this.logs = this.logs.slice(-100);
-                    const entries = logsElement.querySelectorAll('.log-entry');
-                    if (entries.length > 100) {
-                        entries[0].remove();
-                    }
-                }
-            }
-
-            clearLogs() {
-                this.logs = [];
-                document.getElementById('logs').innerHTML = '';
-                this.log('🗑️ Logs cleared', 'info');
-            }
-
-            exportLogs() {
-                const logData = JSON.stringify(this.logs, null, 2);
-                const blob = new Blob([logData], { type: 'application/json' });
-                const url = URL.createObjectURL(blob);
-                
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = `negotiation-logs-${new Date().toISOString().slice(0, 19)}.json`;
-                a.click();
-                
-                URL.revokeObjectURL(url);
-                this.log('💾 Logs exported', 'info');
-            }
-
-            updateStats() {
-                document.getElementById('sessionCount').textContent = this.stats.sessions;
-                document.getElementById('messageCount').textContent = this.stats.messages;
-                document.getElementById('intentCount').textContent = this.stats.intents;
-            }
-
-            startConnectionTimer() {
-                setInterval(() => {
-                    if (this.stats.connectionStartTime) {
-                        const elapsed = Math.floor((Date.now() - this.stats.connectionStartTime) / 1000);
-                        document.getElementById('connectionTime').textContent = `${elapsed}s`;
-                    } else {
-                        document.getElementById('connectionTime').textContent = '0s';
-                    }
-                }, 1000);
-            }
-
-            parseYaml(yamlText) {
-                try {
-                    const lines = yamlText.trim().split('\n');
-                    const result = {};
-
-                    for (const line of lines) {
-                        const colonIndex = line.indexOf(':');
-                        if (colonIndex > 0) {
-                            const key = line.substring(0, colonIndex).trim();
-                            const value = line.substring(colonIndex + 1).trim();
-                            const cleanValue = value.replace(/^["']|["']$/g, '');
-                            result[key] = cleanValue;
-                        }
-                    }
-
-                    return result;
-                } catch (error) {
-                    this.log(`YAML parse error: ${error.message}`, 'error');
-                    return {};
-                }
-            }
+        switch (data.type) {
+          case 'subtitle':
+            this.addTranscript(data.text, data.final ? 'final' : 'subtitle');
+            break;
+          case 'intent':
+            this.intentCount++;
+            this.addTranscript(`📜 INTENT: ${JSON.stringify(data.payload, null, 2)}`, 'intent');
+            break;
+          case 'safety':
+            this.addTranscript(`⚠️ SAFETY: ${JSON.stringify(data.payload, null, 2)}`, 'safety');
+            break;
+          case 'analysis':
+            this.addTranscript(`📊 ANALYSIS: ${data.tag} - ${JSON.stringify(data.payload, null, 2)}`, 'analysis');
+            break;
+          case 'ack':
+            // Acknowledgment received
+            break;
         }
 
-        // Initialize client when page loads
-        document.addEventListener('DOMContentLoaded', () => {
-            window.client = new EnhancedNegotiationClient();
-        });
-    </script>
+        this.messageCount++;
+        this.updateStats();
+      } catch (error) {
+        console.error('Error parsing WebSocket message:', error);
+      }
+    };
+
+    this.ws.onclose = () => {
+      this.addTranscript('🔌 WebSocket disconnected', 'info');
+    };
+  }
+
+  async sendText() {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      this.addTranscript('❌ Not connected', 'error');
+      return;
+    }
+
+    const text = this.$('utter').value.trim();
+    if (!text) {
+      this.addTranscript('❌ No text to send', 'error');
+      return;
+    }
+
+    this.ws.send(this.ydump({ type: 'player_utterance', text }));
+    this.addTranscript(`📤 Sent: "${text}"`, 'sent');
+    this.$('utter').value = '';
+  }
+
+  async testMicrophone() {
+    if (!this.analyser) {
+      this.addTranscript('❌ No microphone available', 'error');
+      return;
+    }
+
+    this.addTranscript('🎤 Testing microphone... speak now!', 'info');
+    
+    // Test for 3 seconds
+    const testDuration = 3000;
+    const startTime = Date.now();
+    const dataArray = new Uint8Array(this.analyser.frequencyBinCount);
+    
+    const testLoop = () => {
+      if (Date.now() - startTime > testDuration) {
+        this.addTranscript('✅ Microphone test complete', 'info');
+        return;
+      }
+      
+      this.analyser.getByteFrequencyData(dataArray);
+      const average = dataArray.reduce((a, b) => a + b) / dataArray.length;
+      const level = Math.min(100, Math.round(average / 2.55));
+      
+      if (level > 10) {
+        this.addTranscript(`🔊 Audio detected: ${level}%`, 'info');
+      }
+      
+      setTimeout(testLoop, 100);
+    };
+    
+    testLoop();
+  }
+
+  addTranscript(text, type = 'info') {
+    const transcript = this.$('transcript');
+    const div = document.createElement('div');
+
+    const timestamp = new Date().toLocaleTimeString();
+    div.innerHTML = `<span style="color: #7f8c8d;">[${timestamp}]</span> ${text}`;
+
+    switch (type) {
+      case 'subtitle':
+        div.className = 'subtitle';
+        break;
+      case 'final':
+        div.className = 'final';
+        break;
+      case 'intent':
+        div.className = 'intent';
+        break;
+      case 'safety':
+        div.className = 'safety';
+        break;
+      case 'sent':
+        div.style.color = '#3498db';
+        break;
+      case 'error':
+        div.style.color = '#e74c3c';
+        break;
+      case 'warning':
+        div.style.color = '#f39c12';
+        break;
+      default:
+        div.style.color = '#2c3e50';
+    }
+
+    transcript.appendChild(div);
+    transcript.scrollTop = transcript.scrollHeight;
+  }
+
+  setStatus(state, message) {
+    const status = this.$('status');
+    status.className = `status ${state}`;
+    status.textContent = message;
+  }
+
+  updateStats() {
+    if (this.sessionStart) {
+      const elapsed = Math.floor((Date.now() - this.sessionStart) / 1000);
+      const minutes = Math.floor(elapsed / 60);
+      const seconds = elapsed % 60;
+      this.$('sessionTime').textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+    }
+
+    this.$('messageCount').textContent = this.messageCount;
+    this.$('intentCount').textContent = this.intentCount;
+  }
+}
+
+// Initialize the client
+const client = new NegotiationClient();
+
+// Update stats every second
+setInterval(() => client.updateStats(), 1000);
+
+// Add some helpful information
+window.onload = () => {
+  client.addTranscript('🚀 Turn-key test harness ready!', 'info');
+  client.addTranscript('💡 Select a model and listener type, then click "Create Session"', 'info');
+  client.addTranscript('🎤 Grant microphone permissions when prompted', 'info');
+  client.addTranscript('📝 Use test phrases or type your own diplomatic messages', 'info');
+};
+</script>
 </body>
 </html>
