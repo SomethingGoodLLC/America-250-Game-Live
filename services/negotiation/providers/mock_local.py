@@ -44,25 +44,32 @@ class MockLocalProvider(Provider):
         """Stream deterministic dialogue processing based on key phrases."""
 
         # Always emit safety check first
-        yield Safety(
-            is_safe=True,
-            flags=["deterministic_mode"],
-            severity="info",
-            reason="Operating in deterministic mock mode"
+        yield ProviderEvent(
+            type="safety",
+            payload={
+                "is_safe": True,
+                "flags": ["deterministic_mode"],
+                "severity": "info",
+                "reason": "Operating in deterministic mock mode"
+            }
         )
 
         if not turns:
             # Initial greeting - no player turns yet
-            yield NewIntent(
-                intent=SmallTalkModel(
-                    type="small_talk",
-                    speaker_id=world_context.counterpart_faction.get("id", "ai_diplomat"),
-                    content="Greetings. I understand we have matters to discuss regarding our diplomatic relations.",
-                    topic="diplomatic_relations",
-                    timestamp=datetime.now()
-                ),
-                confidence=1.0,
-                justification="Initial greeting in diplomatic negotiations"
+            greeting_intent = SmallTalkModel(
+                type="small_talk",
+                speaker_id=world_context.counterpart_faction.get("id", "ai_diplomat"),
+                content="Greetings. I understand we have matters to discuss regarding our diplomatic relations.",
+                topic="diplomatic_relations",
+                timestamp=datetime.now()
+            )
+            yield ProviderEvent(
+                type="intent",
+                payload={
+                    "intent": greeting_intent.model_dump(),
+                    "confidence": 1.0,
+                    "justification": "Initial greeting in diplomatic negotiations"
+                }
             )
             return
 
@@ -70,14 +77,17 @@ class MockLocalProvider(Provider):
         last_turn = turns[-1]
         if last_turn.speaker_id != world_context.initiator_faction.get("id"):
             # This is an AI turn, just acknowledge and continue
-            yield Analysis(
-                analysis_type="turn_analysis",
-                result={
-                    "turn_type": "ai_response",
-                    "content_length": len(last_turn.text),
-                    "sentiment": "neutral"
-                },
-                confidence=0.8
+            yield ProviderEvent(
+                type="analysis",
+                payload={
+                    "analysis_type": "turn_analysis",
+                    "result": {
+                        "turn_type": "ai_response",
+                        "content_length": len(last_turn.text),
+                        "sentiment": "neutral"
+                    },
+                    "confidence": 0.8
+                }
             )
             return
 
@@ -86,66 +96,129 @@ class MockLocalProvider(Provider):
 
         # Check for strict mode violations
         if self.strict and self._contains_unsafe_content(text):
-            yield Safety(
-                is_safe=False,
-                flags=["unsafe_content"],
-                severity="high",
-                reason="Strict mode detected potentially unsafe content"
+            yield ProviderEvent(
+                type="safety",
+                payload={
+                    "is_safe": False,
+                    "flags": ["unsafe_content"],
+                    "severity": "high",
+                    "reason": "Strict mode detected potentially unsafe content"
+                }
             )
             # Still yield analysis even in strict mode
-            yield Analysis(
-                analysis_type="strict_mode_violation",
-                result={
-                    "blocked_content": text[:50] + "..." if len(text) > 50 else text,
-                    "violation_type": "unsafe_content",
-                    "processing_mode": "strict"
-                },
-                confidence=0.9
+            yield ProviderEvent(
+                type="analysis",
+                payload={
+                    "analysis_type": "strict_mode_violation",
+                    "result": {
+                        "blocked_content": text[:50] + "..." if len(text) > 50 else text,
+                        "violation_type": "unsafe_content",
+                        "processing_mode": "strict"
+                    },
+                    "confidence": 0.9
+                }
             )
             return
 
-        # Deterministic intent detection based on key phrases
-        intent = await self._detect_intent_from_text(text, last_turn, world_context)
-
-        # Generate live subtitles for the player turn
-        yield LiveSubtitle(
-            text=text[:len(text)//2] + "...",
-            start_time=0.0,
-            end_time=0.5,
-            speaker_id=last_turn.speaker_id,
-            is_final=False
+        # Generate AI conversational response first
+        ai_response = await self._generate_ai_response(text, last_turn, world_context)
+        
+        # Generate live subtitles for the AI response (not player turn)
+        yield ProviderEvent(
+            type="subtitle",
+            payload={"text": ai_response[:len(ai_response)//2] + "...", "speaker": "AI"},
+            final=False
         )
         
         # Simulate processing delay
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(0.2)
         
-        yield LiveSubtitle(
-            text=text,
-            start_time=0.0,
-            end_time=1.0,
-            speaker_id=last_turn.speaker_id,
-            is_final=True
+        # Final AI response
+        yield ProviderEvent(
+            type="subtitle",
+            payload={"text": ai_response, "speaker": "AI"},
+            final=True
         )
 
+        # Then detect and emit intent
+        intent = await self._detect_intent_from_text(text, last_turn, world_context)
         if intent:
             # Validate and score the intent
             validated_intent, confidence, justification = await self.validate_and_score_intent(intent, world_context)
-            yield NewIntent(
-                intent=validated_intent,
-                confidence=confidence,
-                justification=justification
+            yield ProviderEvent(
+                type="intent",
+                payload={
+                    "intent": validated_intent.model_dump() if hasattr(validated_intent, 'model_dump') else validated_intent,
+                    "confidence": confidence,
+                    "justification": justification
+                }
             )
 
         # Always yield analysis
-        yield Analysis(
-            analysis_type="deterministic_analysis",
-            result={
-                "matched_patterns": self._get_matched_patterns(text),
-                "intent_detected": intent.type if intent else "none",
-                "processing_mode": "strict" if self.strict else "permissive"
-            },
-            confidence=0.85
+        yield ProviderEvent(
+            type="analysis",
+            payload={
+                "analysis_type": "deterministic_analysis",
+                "result": {
+                    "matched_patterns": self._get_matched_patterns(text),
+                    "intent_detected": intent.type if intent else "none",
+                    "processing_mode": "strict" if self.strict else "permissive"
+                },
+                "confidence": 0.85
+            }
         )
+
+    async def _generate_ai_response(
+        self,
+        user_text: str,
+        turn: SpeakerTurnModel,
+        world_context: WorldContextModel
+    ) -> str:
+        """Generate a conversational AI response based on user input."""
+        
+        # Analyze user input for appropriate response
+        text_lower = user_text.lower()
+        
+        # Diplomatic responses based on content
+        if self._patterns["counter_offer"].search(user_text):
+            return "That's an interesting proposal. We'll need to consider the implications of troop withdrawal, but trade access could indeed benefit both our peoples."
+            
+        elif self._patterns["ultimatum"].search(user_text):
+            return "I understand the urgency of your position. However, ultimatums rarely lead to lasting peace. Perhaps we can find a more diplomatic solution?"
+            
+        elif self._patterns["trade"].search(user_text):
+            return "Trade relations are indeed vital for our mutual prosperity. I'm open to discussing the terms of such an agreement."
+            
+        elif self._patterns["aggressive"].search(user_text):
+            return "I hear your concerns, but aggressive rhetoric will not serve our diplomatic goals. Let us focus on constructive dialogue."
+            
+        elif self._patterns["cooperative"].search(user_text):
+            return "I appreciate your cooperative spirit. Such an approach will surely lead to mutually beneficial outcomes."
+            
+        elif "establish" in text_lower and "agreement" in text_lower:
+            return "Establishing formal agreements requires careful consideration of all parties' interests. What specific terms did you have in mind?"
+            
+        elif "propose" in text_lower:
+            return "Your proposal has merit. Let me consider how we might structure this to benefit both our nations."
+            
+        elif "withdraw" in text_lower and "troops" in text_lower:
+            return "Military positioning is always a sensitive matter. We'd need substantial guarantees before considering any troop movements."
+            
+        elif "access" in text_lower and ("trade" in text_lower or "grant" in text_lower):
+            return "Trade access is something we can certainly discuss. What assurances can you provide regarding fair treatment of our merchants?"
+            
+        else:
+            # Default diplomatic responses
+            responses = [
+                "I see your point. Let us explore this matter further in our negotiations.",
+                "That's a reasonable position. How do you envision implementing such measures?",
+                "Your perspective is noted. We should consider all implications before proceeding.",
+                "An interesting approach. What would you consider fair terms for both parties?",
+                "I understand your concerns. Perhaps we can find common ground on this issue."
+            ]
+            # Use hash of text for deterministic selection
+            response_index = hash(user_text) % len(responses)
+            return responses[response_index]
 
     async def _detect_intent_from_text(
         self,

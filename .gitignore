@@ -392,3 +392,4 @@ metrics/
 monitoring/
 grafana/
 prometheus/
+services/negotiation/teller-avatar/

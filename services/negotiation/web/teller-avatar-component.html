@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Teller Avatar Component</title>
+    <style>
+        .teller-avatar-container {
+            width: 100%;
+            height: 100%;
+            position: relative;
+            background: #000;
+            border-radius: 8px;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .avatar-video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        
+        .avatar-placeholder {
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(45deg, #1a1a1a, #2a2a2a);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: #fff;
+            font-family: Arial, sans-serif;
+        }
+        
+        .avatar-status {
+            margin-top: 10px;
+            font-size: 14px;
+            opacity: 0.8;
+        }
+        
+        .speaking-indicator {
+            width: 60px;
+            height: 60px;
+            border: 3px solid #4CAF50;
+            border-radius: 50%;
+            margin-bottom: 20px;
+            position: relative;
+            animation: pulse 1.5s ease-in-out infinite;
+        }
+        
+        .speaking-indicator::before {
+            content: '🎤';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 24px;
+        }
+        
+        @keyframes pulse {
+            0% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.1); opacity: 0.7; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+        
+        .avatar-controls {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            right: 10px;
+            display: flex;
+            gap: 10px;
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+        
+        .teller-avatar-container:hover .avatar-controls {
+            opacity: 1;
+        }
+        
+        .control-btn {
+            padding: 5px 10px;
+            background: rgba(0,0,0,0.7);
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+        
+        .control-btn:hover {
+            background: rgba(0,0,0,0.9);
+        }
+    </style>
+</head>
+<body>
+    <div class="teller-avatar-container" id="tellerAvatarContainer">
+        <div class="avatar-placeholder" id="avatarPlaceholder">
+            <div class="speaking-indicator" id="speakingIndicator" style="display: none;"></div>
+            <div>🤖 AI Diplomat</div>
+            <div class="avatar-status" id="avatarStatus">Ready to negotiate</div>
+        </div>
+        
+        <video class="avatar-video" id="avatarVideo" style="display: none;" autoplay muted loop>
+            <source src="" type="video/mp4">
+        </video>
+        
+        <div class="avatar-controls">
+            <button class="control-btn" onclick="tellerAvatar.toggleMute()">🔊</button>
+            <button class="control-btn" onclick="tellerAvatar.changeAvatar()">👤</button>
+            <button class="control-btn" onclick="tellerAvatar.resetAvatar()">🔄</button>
+        </div>
+    </div>
+
+    <script>
+        class TellerAvatar {
+            constructor() {
+                this.container = document.getElementById('tellerAvatarContainer');
+                this.placeholder = document.getElementById('avatarPlaceholder');
+                this.video = document.getElementById('avatarVideo');
+                this.status = document.getElementById('avatarStatus');
+                this.speakingIndicator = document.getElementById('speakingIndicator');
+                this.isSpeaking = false;
+                this.currentAvatarIndex = 0;
+                
+                // Available Teller Avatar videos (from the cloned repo)
+                this.avatarVideos = [
+                    '../teller-avatar/video/taylor_NYU_speech2_rec_stage2_final2.mp4',
+                    '../teller-avatar/video/molly_demo.mp4',
+                    '../teller-avatar/video/sd154_talkshow_rec_stage2_final2.mp4',
+                    '../teller-avatar/video/cropped_video.mp4'
+                ];
+                
+                this.setupEventListeners();
+            }
+            
+            setupEventListeners() {
+                // Listen for AI response events
+                window.addEventListener('aiResponse', (event) => {
+                    this.handleAIResponse(event.detail);
+                });
+                
+                // Listen for avatar generation events
+                window.addEventListener('avatarGenerating', (event) => {
+                    this.showGenerating();
+                });
+                
+                // Listen for avatar ready events
+                window.addEventListener('avatarReady', (event) => {
+                    this.showAvatar(event.detail);
+                });
+            }
+            
+            handleAIResponse(data) {
+                if (data.final) {
+                    this.startSpeaking(data.text);
+                } else {
+                    this.updateStatus(`AI: ${data.text}...`);
+                }
+            }
+            
+            startSpeaking(text) {
+                this.isSpeaking = true;
+                this.speakingIndicator.style.display = 'block';
+                this.updateStatus(`Speaking: "${text}"`);
+                
+                // Show a Teller Avatar video
+                this.showCurrentAvatar();
+                
+                // Simulate speaking duration based on text length
+                const speakingDuration = Math.max(2000, text.length * 100);
+                
+                setTimeout(() => {
+                    this.stopSpeaking();
+                }, speakingDuration);
+            }
+            
+            stopSpeaking() {
+                this.isSpeaking = false;
+                this.speakingIndicator.style.display = 'none';
+                this.updateStatus('Ready to negotiate');
+                
+                // Hide video after speaking
+                setTimeout(() => {
+                    this.hideAvatar();
+                }, 1000);
+            }
+            
+            showGenerating() {
+                this.updateStatus('🎬 Generating avatar response...');
+            }
+            
+            showAvatar(data) {
+                if (data.video_url && data.video_url !== '/api/avatar/latest.mp4') {
+                    // Use provided video URL
+                    this.video.src = data.video_url;
+                } else {
+                    // Use current Teller Avatar video
+                    this.showCurrentAvatar();
+                }
+                this.updateStatus('🎭 Avatar ready');
+            }
+            
+            showCurrentAvatar() {
+                const videoSrc = this.avatarVideos[this.currentAvatarIndex];
+                this.video.src = videoSrc;
+                this.video.style.display = 'block';
+                this.placeholder.style.display = 'none';
+                this.video.play();
+            }
+            
+            hideAvatar() {
+                this.video.style.display = 'none';
+                this.placeholder.style.display = 'flex';
+                this.video.pause();
+            }
+            
+            changeAvatar() {
+                this.currentAvatarIndex = (this.currentAvatarIndex + 1) % this.avatarVideos.length;
+                if (this.isSpeaking) {
+                    this.showCurrentAvatar();
+                }
+                this.updateStatus(`Switched to avatar ${this.currentAvatarIndex + 1}`);
+            }
+            
+            toggleMute() {
+                this.video.muted = !this.video.muted;
+                this.updateStatus(this.video.muted ? 'Audio muted' : 'Audio enabled');
+            }
+            
+            resetAvatar() {
+                this.hideAvatar();
+                this.stopSpeaking();
+                this.updateStatus('Avatar reset');
+            }
+            
+            updateStatus(message) {
+                this.status.textContent = message;
+            }
+            
+            // Public API for integration
+            triggerSpeaking(text) {
+                this.startSpeaking(text);
+            }
+            
+            triggerAvatarGeneration() {
+                this.showGenerating();
+            }
+            
+            setAvatarReady(videoUrl = null) {
+                this.showAvatar({ video_url: videoUrl });
+            }
+        }
+        
+        // Initialize Teller Avatar
+        const tellerAvatar = new TellerAvatar();
+        
+        // Make it globally accessible
+        window.tellerAvatar = tellerAvatar;
+    </script>
+</body>
+</html>

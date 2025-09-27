@@ -30,7 +30,9 @@ class SchemaValidator:
         if schema_dir is None:
             # Try multiple paths for schema directory
             possible_paths = [
-                Path(__file__).parent.parent.parent / "protocol" / "schemas",
+                # From services/negotiation/schemas/validators.py, go up to project root
+                Path(__file__).parent.parent.parent.parent / "protocol" / "schemas",
+                Path(__file__).parent.parent.parent / "protocol" / "schemas", 
                 Path(__file__).parent.parent / "protocol" / "schemas",
                 Path(__file__).parent / "protocol" / "schemas"
             ]

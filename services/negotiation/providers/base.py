@@ -11,11 +11,16 @@ class ProviderEvent:
     """Event emitted by negotiation providers."""
     type: str
     payload: Dict[str, Any]
+    final: bool = False
     timestamp: datetime = None
 
     def __post_init__(self):
         if self.timestamp is None:
             self.timestamp = datetime.now()
+
+    @property
+    def is_final(self) -> bool:
+        return self.final
 
 
 # Event type classes

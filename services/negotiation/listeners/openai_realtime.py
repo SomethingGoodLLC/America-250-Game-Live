@@ -1,46 +1,72 @@
-"""OpenAI realtime listener adapter for bidirectional audio streaming."""
+"""OpenAI realtime listener adapter for bidirectional audio streaming (production)."""
 
 import asyncio
+import base64
 import json
+import os
+from typing import AsyncIterator, Dict, Any, Optional
+
+import numpy as np
+from scipy.signal import resample_poly
 import websockets
-from typing import AsyncIterator, Dict, Any
+import structlog
 from .base import Listener
 
 
 class OpenAIRealtimeListener(Listener):
-    """OpenAI realtime listener using WebSocket API.
+    """OpenAI Realtime WebSocket integration.
 
-    Note: This is a stub implementation. OpenAI Realtime API is in beta.
-    For a full implementation, you'd need:
-    1. OpenAI API key with realtime access
-    2. WebSocket client setup
-    3. Proper audio encoding
+    - Resamples incoming PCM to 24kHz 16-bit mono
+    - Streams audio via input_audio_buffer.{append,commit}
+    - Periodically sends response.create to elicit transcripts
+    - Emits partial/final subtitle events
     """
 
     def __init__(self, config: Dict[str, Any]):
         super().__init__(config)
-        self.api_key = config.get("api_key")
-        self.model = config.get("model", "gpt-4o-realtime-preview-2024-10-01")
-        self.websocket = None
-        self.event_queue = asyncio.Queue()
-        self.running = False
+        self.logger = structlog.get_logger(__name__)
+        self.api_key: Optional[str] = config.get("api_key") or os.getenv("OPENAI_API_KEY")
+        self.model: str = config.get("model", "gpt-4o-realtime-preview-2024-10-01")
+        self.websocket: Optional[websockets.WebSocketClientProtocol] = None
+        self.event_queue: asyncio.Queue = asyncio.Queue()
+        self.running: bool = False
+        self._send_lock = asyncio.Lock()
+        self._buffer = bytearray()
+        self._last_commit = 0.0
+        self._last_requested = 0.0
+        self._commit_interval = 1.0
+        self._request_interval = 2.0
+        self._last_final_text = ""
 
     async def start(self) -> None:
-        """Start the OpenAI realtime connection."""
         if not self.api_key:
-            print("OPENAI_API_KEY not set. Using mock mode.")
+            self.logger.warning("OPENAI_API_KEY not set. Using mock mode.")
             self.running = True
             asyncio.create_task(self._mock_stream())
             return
 
         try:
-            # Note: OpenAI Realtime API is still in beta and requires special access
-            # This is a placeholder for the actual implementation
+            uri = f"wss://api.openai.com/v1/realtime?model={self.model}"
+            headers = {
+                "Authorization": f"Bearer {self.api_key}",
+                "OpenAI-Beta": "realtime=v1",
+            }
+            self.websocket = await websockets.connect(uri, extra_headers=headers, max_size=None)
+            await self._send_json({
+                "type": "session.update",
+                "session": {
+                    "modalities": ["text", "audio"],
+                    "instructions": "You are a diplomatic negotiation assistant.",
+                    "voice": "alloy",
+                },
+            })
+            self.running = True
+            asyncio.create_task(self._recv_loop())
+            self.logger.info("OpenAI Realtime connected", model=self.model)
+        except Exception as e:
+            self.logger.error("Failed to connect to OpenAI Realtime", error=str(e))
             self.running = True
             asyncio.create_task(self._mock_stream())
-            print("OpenAI realtime listener started (stub mode)")
-        except Exception as e:
-            print(f"Error starting OpenAI realtime: {e}")
 
     async def stop(self) -> None:
         """Stop the connection."""
@@ -51,17 +77,44 @@ class OpenAIRealtimeListener(Listener):
             await self.event_queue.put({"type": "stop"})
 
     async def feed_pcm(self, pcm_bytes: bytes, ts_ms: int) -> None:
-        """Feed PCM audio to OpenAI."""
-        if not self.running:
+        if not self.running or not self.websocket:
             return
+        try:
+            # Interpret incoming as 16-bit mono int16 @ 48kHz (adjust if needed)
+            src = np.frombuffer(pcm_bytes, dtype=np.int16)
+            if src.size == 0:
+                return
+            # Resample 48kHz -> 24kHz
+            res = resample_poly(src, up=1, down=2).astype(np.int16)
+            self._buffer.extend(res.tobytes())
 
-        # Note: In real implementation, convert PCM to proper format and send via WebSocket
-        # For now, we simulate processing
-        pass
+            loop_time = asyncio.get_event_loop().time()
+            # Send ~100ms chunks
+            chunk_bytes = int(0.1 * 24000) * 2
+            while len(self._buffer) >= chunk_bytes:
+                chunk = bytes(self._buffer[:chunk_bytes])
+                del self._buffer[:chunk_bytes]
+                await self._send_json({
+                    "type": "input_audio_buffer.append",
+                    "audio": base64.b64encode(chunk).decode("utf-8"),
+                })
+
+            if loop_time - self._last_commit >= self._commit_interval:
+                await self._send_json({"type": "input_audio_buffer.commit"})
+                self._last_commit = loop_time
+
+            if loop_time - self._last_requested >= self._request_interval:
+                await self._send_json({
+                    "type": "response.create",
+                    "response": {"instructions": "Transcribe and summarize intents succinctly."},
+                })
+                self._last_requested = loop_time
+        except Exception as e:
+            self.logger.error("Error feeding PCM to OpenAI Realtime", error=str(e))
 
     async def final_text(self) -> str:
         """Get final recognized text."""
-        return "Final transcript from OpenAI realtime"  # Placeholder
+        return self._last_final_text
 
     async def stream_events(self) -> AsyncIterator[Dict[str, Any]]:
         """Stream events from OpenAI."""
@@ -74,80 +127,68 @@ class OpenAIRealtimeListener(Listener):
             except asyncio.TimeoutError:
                 continue
             except Exception as e:
-                print(f"Error in stream_events: {e}")
+                self.logger.error("Error in stream_events", error=str(e))
                 break
 
     async def _mock_stream(self) -> None:
         """Mock streaming for testing."""
         while self.running:
             try:
+                await asyncio.sleep(2.0)
+                await self.event_queue.put({"type": "subtitle", "text": "Analyzing audio...", "final": False, "confidence": 0.9})
                 await asyncio.sleep(1.0)
-                # Simulate subtitle events
-                await self.event_queue.put({
-                    "type": "subtitle",
-                    "text": "Processing audio with OpenAI realtime...",
-                    "final": False,
-                    "confidence": 0.9
-                })
+                await self.event_queue.put({"type": "subtitle", "text": "Proposal detected: trade agreement.", "final": True, "confidence": 0.95})
+                self._last_final_text = "Proposal detected: trade agreement."
             except Exception as e:
-                print(f"Error in mock stream: {e}")
+                self.logger.error("Error in mock stream", error=str(e))
+
+    async def _recv_loop(self) -> None:
+        if not self.websocket:
+            return
+        try:
+            async for message in self.websocket:
+                try:
+                    data = json.loads(message)
+                except Exception:
+                    continue
+                typ = data.get("type", "")
+                # Handle text deltas (streaming text from model)
+                if typ in ("response.audio_transcript.delta", "conversation.item.output_audio_transcript.delta"):
+                    delta = data.get("delta") or data.get("transcript", "")
+                    if isinstance(delta, str) and delta:
+                        await self.event_queue.put({"type": "subtitle", "text": delta, "final": False, "confidence": 0.9})
+                # Handle completed responses  
+                elif typ in ("response.audio_transcript.done", "conversation.item.output_audio_transcript.done"):
+                    text = data.get("transcript", "")
+                    if isinstance(text, str) and text:
+                        self._last_final_text = text
+                        await self.event_queue.put({"type": "subtitle", "text": text, "final": True, "confidence": 1.0})
+                # Handle text-only responses (fallback)
+                elif typ in ("response.text.delta", "response.output_text.delta"):
+                    delta = data.get("delta") or data.get("text", "")
+                    if isinstance(delta, str) and delta:
+                        await self.event_queue.put({"type": "subtitle", "text": delta, "final": False, "confidence": 0.9})
+                elif typ in ("response.text.done", "response.done"):
+                    text = data.get("text") or data.get("output", "")
+                    if isinstance(text, str) and text:
+                        self._last_final_text = text
+                        await self.event_queue.put({"type": "subtitle", "text": text, "final": True, "confidence": 1.0})
+                elif typ == "error":
+                    self.logger.error("OpenAI Realtime error", details=data)
+                elif typ in ("session.created", "session.updated"):
+                    self.logger.info("OpenAI session event", event_type=typ)
+                else:
+                    self.logger.debug("Unhandled OpenAI event", event_type=typ, data=data)
+        except Exception as e:
+            self.logger.error("OpenAI Realtime receive loop failed", error=str(e))
+
+    async def _send_json(self, payload: Dict[str, Any]) -> None:
+        if not self.websocket:
+            return
+        async with self._send_lock:
+            await self.websocket.send(json.dumps(payload))
 
 
-# TODO: Real OpenAI Realtime implementation
-# The actual OpenAI Realtime API requires:
-# 1. WebSocket connection to wss://api.openai.com/v1/realtime
-# 2. Proper authentication with API key
-# 3. Session management with create, update, delete operations
-# 4. Audio format conversion to 24kHz, 16-bit PCM
-# 5. Event handling for transcripts, tool calls, etc.
-
-# Example of what the real implementation would look like:
-"""
-class RealOpenAIRealtimeListener(Listener):
-    async def start(self):
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "OpenAI-Beta": "realtime=v1"
-        }
-
-        uri = f"wss://api.openai.com/v1/realtime?model={self.model}"
-        self.websocket = await websockets.connect(uri, extra_headers=headers)
-
-        # Set up session
-        await self.websocket.send(json.dumps({
-            "type": "session.update",
-            "session": {
-                "modalities": ["text", "audio"],
-                "instructions": "You are a diplomatic negotiation assistant.",
-                "voice": "alloy"
-            }
-        }))
-
-    async def feed_pcm(self, pcm_bytes: bytes, ts_ms: int):
-        # Convert to 24kHz PCM and send as audio chunk
-        audio_data = self._convert_to_24khz(pcm_bytes)
-        await self.websocket.send(json.dumps({
-            "type": "input_audio_buffer.append",
-            "audio": audio_data
-        }))
-
-        # Commit the audio
-        await self.websocket.send(json.dumps({
-            "type": "input_audio_buffer.commit"
-        }))
-
-    async def stream_events(self):
-        async for message in self.websocket:
-            data = json.loads(message)
-            if data["type"] == "output_audio_transcript":
-                yield {
-                    "type": "subtitle",
-                    "text": data["transcript"],
-                    "final": True
-                }
-            elif data["type"] == "error":
-                print(f"OpenAI error: {data}")
-"""
 
 
 # Re-export for convenience

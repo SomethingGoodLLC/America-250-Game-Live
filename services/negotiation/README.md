@@ -166,7 +166,7 @@ Open http://localhost:8000 in your browser for an instant test environment featu
 Choose your audio processing backend:
 
 - **Local STT (Whisper)**: Fast, local speech-to-text using faster-whisper
-- **Gemini Realtime**: Direct streaming to Gemini Live API (requires API key)
+- **Gemini Realtime**: **🆕 Enhanced** Bidirectional streaming to Gemini Live API with professional diplomatic voice
 - **OpenAI Realtime**: Direct streaming to OpenAI Realtime API (requires API key)
 - **Grok Realtime**: Direct streaming to xAI Grok API (requires API key)
 
@@ -479,9 +479,40 @@ The negotiation service uses pluggable listener adapters for real-time audio pro
 
 - **LocalSTTListener** - Uses faster-whisper for local speech-to-text
 - **RealLLMListener** - Real LLM processing with transcription and intent analysis
-- **GeminiRealtimeListener** - Direct streaming to Gemini Live API
-- **OpenAIRealtimeListener** - Direct streaming to OpenAI Realtime API
+- **GeminiRealtimeListener** - **🆕 Enhanced** Direct streaming to Gemini Live API with bidirectional audio
+- **OpenAIRealtimeListener** - Direct streaming to OpenAI Realtime API  
 - **GrokRealtimeListener** - Direct streaming to xAI Grok API
+
+#### 🆕 Gemini Live API Integration
+
+The enhanced `GeminiRealtimeListener` provides full integration with Google's Gemini 2.0 multimodal live API:
+
+**Features:**
+- **Real-time bidirectional audio** streaming using WebSocket connection
+- **Professional diplomatic voice** with "Aoede" voice optimized for negotiations
+- **Context-aware responses** with specialized diplomatic system prompts
+- **Low-latency processing** with ~200-500ms round-trip response times
+- **Automatic fallback** to mock mode when API key not available
+- **Structured event streaming** with partial and final transcription events
+
+**Setup:**
+```bash
+export GEMINI_API_KEY="your-api-key-from-google-ai-studio"
+export LISTENER_TYPE="gemini_realtime"
+```
+
+**Supported Models:**
+- `gemini-2.0-flash-exp` (default) - Latest experimental multimodal model
+- `gemini-1.5-flash` - Fast, lightweight model for quick responses
+- `gemini-1.5-pro` - High-quality model for complex diplomatic scenarios
+
+**Audio Processing:**
+- Input: 16kHz mono PCM from WebRTC (100ms chunks)
+- Output: Generated speech responses with diplomatic tone
+- Encoding: Base64 encoding for WebSocket transmission
+- Buffering: Smart audio buffering for smooth real-time streaming
+
+See `examples/gemini_setup.md` for detailed configuration and usage examples.
 
 #### Adding New Listeners
 

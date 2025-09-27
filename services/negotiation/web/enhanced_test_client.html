@@ -100,7 +100,13 @@
     }
     .subtitle { color: #27ae60; }
     .final { color: #2c3e50; font-weight: bold; }
+    .ai-response { color: #3498db; font-style: italic; }
+    .ai-final { color: #2980b9; font-weight: bold; }
+    .avatar-status { color: #9b59b6; }
+    .avatar-ready { color: #8e44ad; font-weight: bold; }
+    .avatar-link { color: #e74c3c; }
     .intent { color: #8e44ad; }
+    .ai-intent { color: #3498db; background: #ecf0f1; padding: 2px 4px; border-radius: 2px; }
     .safety { color: #e67e22; }
 
     /* Input Panel */
@@ -171,6 +177,7 @@
         <select id="model">
           <option value="mock_local">Mock Local (Deterministic)</option>
           <option value="veo3">Veo3 (Advanced AI)</option>
+          <option value="teller">Teller Avatar (Real-time)</option>
         </select>
         <select id="listener">
           <option value="local_stt">Local STT (Whisper)</option>
@@ -184,7 +191,22 @@
 
       <div id="status" class="status disconnected">Disconnected</div>
 
-      <video id="remoteVideo" autoplay playsinline muted></video>
+      <!-- Avatar Display Area -->
+      <div id="avatarDisplayArea">
+        <!-- Traditional WebRTC Video (Veo3) -->
+        <video id="remoteVideo" autoplay playsinline muted style="display: none;"></video>
+        
+        <!-- Teller Avatar Component -->
+        <iframe id="tellerAvatarFrame" src="teller-avatar-component.html" 
+                style="width: 100%; height: 400px; border: none; display: none;"></iframe>
+        
+        <!-- Default Placeholder -->
+        <div id="defaultPlaceholder" style="width: 100%; height: 400px; background: #000; 
+             border-radius: 8px; display: flex; align-items: center; justify-content: center; 
+             color: #fff; font-size: 18px;">
+          🤖 Select a model and create session
+        </div>
+      </div>
 
       <div id="audioIndicator" style="display: none; margin-top: 12px; padding: 8px; background: #2ecc71; color: white; border-radius: 4px; text-align: center;">
         🎤 Listening... <span id="audioLevel">0%</span>
@@ -253,6 +275,7 @@ class NegotiationClient {
     this.sessionStart = null;
     this.messageCount = 0;
     this.intentCount = 0;
+    this.currentModel = 'mock_local';
 
     this.ydump = obj => jsyaml.dump(obj);
     this.yload = str => jsyaml.load(str);
@@ -260,6 +283,7 @@ class NegotiationClient {
 
     this.setupEventListeners();
     this.updateStats();
+    this.setupAvatarDisplay();
   }
 
   setupEventListeners() {
@@ -272,6 +296,62 @@ class NegotiationClient {
         this.$('testPhrase').value = ''; // Reset
       }
     };
+    
+    // Model selection change handler
+    this.$('model').onchange = (e) => {
+      this.currentModel = e.target.value;
+      this.updateAvatarDisplay();
+    };
+  }
+
+  setupAvatarDisplay() {
+    // Initialize avatar display based on current model
+    this.updateAvatarDisplay();
+  }
+
+  updateAvatarDisplay() {
+    const remoteVideo = this.$('remoteVideo');
+    const tellerFrame = this.$('tellerAvatarFrame');
+    const placeholder = this.$('defaultPlaceholder');
+
+    // Hide all displays first
+    remoteVideo.style.display = 'none';
+    tellerFrame.style.display = 'none';
+    placeholder.style.display = 'none';
+
+    switch (this.currentModel) {
+      case 'teller':
+        tellerFrame.style.display = 'block';
+        break;
+      case 'veo3':
+        remoteVideo.style.display = 'block';
+        break;
+      default:
+        placeholder.style.display = 'flex';
+        break;
+    }
+  }
+
+  getTellerAvatar() {
+    // Get reference to Teller Avatar instance in iframe
+    try {
+      const iframe = this.$('tellerAvatarFrame');
+      return iframe.contentWindow.tellerAvatar;
+    } catch (e) {
+      console.warn('Teller Avatar not accessible:', e);
+      return null;
+    }
+  }
+
+  handleTellerAvatarResponse(data) {
+    // Handle AI response for Teller Avatar
+    const teller = this.getTellerAvatar();
+    if (!teller) return;
+
+    if (data.final && data.text) {
+      // Trigger speaking animation with the AI's text
+      teller.triggerSpeaking(data.text);
+    }
   }
 
   async createSession() {
@@ -286,6 +366,10 @@ class NegotiationClient {
         headers: {'Content-Type': 'application/x-yaml'},
         body: this.ydump({ model, listener })
       });
+
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+      }
 
       const data = this.yload(await res.text());
       this.sid = data.session_id;
@@ -307,55 +391,84 @@ class NegotiationClient {
   }
 
   async startWebRTC() {
-    this.pc = new RTCPeerConnection({
-      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
-    });
-
-    this.pc.oniceconnectionstatechange = () => {
-      this.$('connectionState').textContent = this.pc.iceConnectionState;
-      this.updateStats();
-    };
-
-    this.pc.ontrack = (e) => {
-      if (e.track.kind === 'video') {
-        this.$('remoteVideo').srcObject = e.streams[0];
-        this.addTranscript('📺 Avatar video connected', 'info');
-      } else if (e.track.kind === 'audio') {
-        this.addTranscript('🔊 Avatar audio connected', 'info');
-      }
-    };
-
-    // Microphone setup
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true },
-        video: false
+      this.addTranscript('🔧 Starting WebRTC setup...', 'info');
+      
+      this.pc = new RTCPeerConnection({
+        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
       });
 
-      this.setupAudioAnalysis(stream);
-      stream.getTracks().forEach(track => this.pc.addTrack(track, stream));
+      this.pc.oniceconnectionstatechange = () => {
+        this.$('connectionState').textContent = this.pc.iceConnectionState;
+        this.updateStats();
+        this.addTranscript(`🔗 ICE connection state: ${this.pc.iceConnectionState}`, 'info');
+      };
 
-      this.$('sendAudio').disabled = false;
-      this.$('testMic').disabled = false;
-      this.addTranscript('🎤 Microphone connected and ready', 'info');
+      this.pc.ontrack = (e) => {
+        if (e.track.kind === 'video') {
+          this.$('remoteVideo').srcObject = e.streams[0];
+          this.addTranscript('📺 Avatar video connected', 'info');
+        } else if (e.track.kind === 'audio') {
+          this.addTranscript('🔊 Avatar audio connected', 'info');
+        }
+      };
 
+      // Microphone setup
+      try {
+        this.addTranscript('🎤 Requesting microphone access...', 'info');
+        
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: { echoCancellation: true, noiseSuppression: true },
+          video: false
+        });
+
+        this.setupAudioAnalysis(stream);
+        stream.getTracks().forEach(track => this.pc.addTrack(track, stream));
+
+        this.$('sendAudio').disabled = false;
+        this.$('testMic').disabled = false;
+        this.addTranscript('🎤 Microphone connected and ready', 'info');
+
+      } catch (error) {
+        console.error('Microphone access failed:', error);
+        this.addTranscript(`⚠️ Microphone access denied: ${error.message}`, 'warning');
+      }
+
+      // Create and send offer
+      this.addTranscript('📤 Creating WebRTC offer...', 'info');
+      const offer = await this.pc.createOffer();
+      await this.pc.setLocalDescription(offer);
+      this.addTranscript('✅ Local description set', 'info');
+
+      this.addTranscript('📡 Sending offer to server...', 'info');
+      const res = await fetch(`/v1/session/${this.sid}/webrtc/offer`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ type: 'offer', sdp: offer.sdp })
+      });
+
+      if (!res.ok) {
+        const errorText = await res.text();
+        throw new Error(`WebRTC setup failed: HTTP ${res.status} - ${errorText}`);
+      }
+
+      this.addTranscript('📥 Received server answer', 'info');
+      const answer = await res.json();
+      
+      // Validate answer before setting
+      if (!answer.type || !answer.sdp) {
+        throw new Error(`Invalid answer format: ${JSON.stringify(answer)}`);
+      }
+      
+      this.addTranscript('🔧 Setting remote description...', 'info');
+      await this.pc.setRemoteDescription({ type: answer.type, sdp: answer.sdp });
+      this.addTranscript('✅ WebRTC setup completed', 'info');
+      
     } catch (error) {
-      console.error('Microphone access failed:', error);
-      this.addTranscript('⚠️ Microphone access denied', 'warning');
+      console.error('WebRTC setup error:', error);
+      this.addTranscript(`❌ WebRTC Error: ${error.message}`, 'error');
+      throw error; // Re-throw to trigger session creation failure
     }
-
-    // Create and send offer
-    const offer = await this.pc.createOffer();
-    await this.pc.setLocalDescription(offer);
-
-    const res = await fetch(`/v1/session/${this.sid}/webrtc/offer`, {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ type: 'offer', sdp: offer.sdp })
-    });
-
-    const answer = this.yload(await res.text());
-    await this.pc.setRemoteDescription({ type: answer.type, sdp: answer.sdp });
   }
 
   setupAudioAnalysis(stream) {
@@ -394,45 +507,90 @@ class NegotiationClient {
   }
 
   async openWebSocket() {
-    this.ws = new WebSocket(`ws://${location.host}/v1/session/${this.sid}/control`);
+    try {
+      this.addTranscript('🔌 Connecting WebSocket...', 'info');
+      
+      this.ws = new WebSocket(`ws://${location.host}/v1/session/${this.sid}/control`);
 
-    this.ws.onopen = () => {
-      this.addTranscript('🔌 WebSocket connected', 'info');
-    };
+      this.ws.onopen = () => {
+        this.addTranscript('✅ WebSocket connected', 'info');
+        this.setStatus('connected', 'Connected');
+      };
 
-    this.ws.onmessage = (event) => {
-      try {
-        const data = this.yload(event.data);
+      this.ws.onmessage = (event) => {
+        try {
+          const data = this.yload(event.data);
 
-        switch (data.type) {
-          case 'subtitle':
-            this.addTranscript(data.text, data.final ? 'final' : 'subtitle');
-            break;
-          case 'intent':
-            this.intentCount++;
-            this.addTranscript(`📜 INTENT: ${JSON.stringify(data.payload, null, 2)}`, 'intent');
-            break;
-          case 'safety':
-            this.addTranscript(`⚠️ SAFETY: ${JSON.stringify(data.payload, null, 2)}`, 'safety');
-            break;
-          case 'analysis':
-            this.addTranscript(`📊 ANALYSIS: ${data.tag} - ${JSON.stringify(data.payload, null, 2)}`, 'analysis');
-            break;
-          case 'ack':
-            // Acknowledgment received
-            break;
+          switch (data.type) {
+            case 'subtitle':
+              this.addTranscript(`👤 You: ${data.text}`, data.final ? 'final' : 'subtitle');
+              break;
+            case 'ai_response':
+              this.addTranscript(`🤖 AI: ${data.text}`, data.final ? 'ai-final' : 'ai-response');
+              // Trigger Teller Avatar if using teller model
+              if (this.currentModel === 'teller') {
+                this.handleTellerAvatarResponse(data);
+              }
+              break;
+            case 'avatar_generating':
+              this.addTranscript(data.text, 'avatar-status');
+              if (this.currentModel === 'teller') {
+                const teller = this.getTellerAvatar();
+                if (teller) teller.triggerAvatarGeneration();
+              }
+              break;
+            case 'avatar_ready':
+              this.addTranscript(data.text, 'avatar-ready');
+              if (data.video_url) {
+                this.addTranscript(`🎥 <a href="${data.video_url}" target="_blank">View Avatar Video</a>`, 'avatar-link');
+              }
+              if (this.currentModel === 'teller') {
+                const teller = this.getTellerAvatar();
+                if (teller) teller.setAvatarReady(data.video_url);
+              }
+              break;
+            case 'intent':
+              this.intentCount++;
+              this.addTranscript(`📜 INTENT: ${JSON.stringify(data.payload, null, 2)}`, 'intent');
+              break;
+            case 'ai_intent':
+              this.addTranscript(`🧠 AI STRATEGY: ${JSON.stringify(data.payload, null, 2)}`, 'ai-intent');
+              break;
+            case 'safety':
+              this.addTranscript(`⚠️ SAFETY: ${JSON.stringify(data.payload, null, 2)}`, 'safety');
+              break;
+            case 'analysis':
+              this.addTranscript(`📊 ANALYSIS: ${data.tag} - ${JSON.stringify(data.payload, null, 2)}`, 'analysis');
+              break;
+            case 'ack':
+              // Acknowledgment received
+              break;
+          }
+
+          this.messageCount++;
+          this.updateStats();
+        } catch (error) {
+          console.error('Error parsing WebSocket message:', error);
+          this.addTranscript(`❌ WebSocket parse error: ${error.message}`, 'error');
         }
-
-        this.messageCount++;
-        this.updateStats();
-      } catch (error) {
-        console.error('Error parsing WebSocket message:', error);
-      }
     };
 
-    this.ws.onclose = () => {
-      this.addTranscript('🔌 WebSocket disconnected', 'info');
+    this.ws.onclose = (event) => {
+      this.addTranscript(`🔌 WebSocket disconnected (code: ${event.code})`, 'info');
+      this.setStatus('disconnected', 'Disconnected');
     };
+
+    this.ws.onerror = (error) => {
+      console.error('WebSocket error:', error);
+      this.addTranscript('❌ WebSocket connection error', 'error');
+      this.setStatus('disconnected', 'Connection error');
+    };
+
+    } catch (error) {
+      console.error('WebSocket setup error:', error);
+      this.addTranscript(`❌ WebSocket setup failed: ${error.message}`, 'error');
+      throw error;
+    }
   }
 
   async sendText() {
