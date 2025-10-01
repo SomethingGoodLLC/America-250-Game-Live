@@ -5,7 +5,8 @@ import os
 import uuid
 import time
 from datetime import datetime
-from typing import Dict, Any
+from typing import Dict, Any, Optional
+from pathlib import Path
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 from fastapi.responses import HTMLResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
@@ -88,7 +89,7 @@ async def generate_ai_response(sess: dict, user_text: str, send_yaml_func):
         if sess["model"] == "veo3":
             provider = Veo3Provider(use_veo3=True)
         else:
-            # Use MockLocalProvider for both "mock_local" and "teller" models
+            # Use MockLocalProvider for both "mock_local" and "sadtalker" models
             # The difference is in avatar generation, not AI logic
             provider = MockLocalProvider({"strict": True})
         turns = [turn if isinstance(turn, SpeakerTurnModel) else SpeakerTurnModel(**turn) for turn in sess["turns"][-5:]]
@@ -120,9 +121,19 @@ async def generate_ai_response(sess: dict, user_text: str, send_yaml_func):
                     logger.info("Generating avatar for model type", model_type=sess["model"])
                     if sess["model"] == "veo3":
                         await generate_veo3_avatar(ai_text, send_yaml_func)
-                    elif sess["model"] == "teller":
-                        logger.info("Calling generate_teller_avatar for TTS audio")
-                        await generate_teller_avatar(ai_text, send_yaml_func, sess.get("session_id"))
+                    elif sess["model"] == "sadtalker":
+                        logger.info("Calling generate_sadtalker_avatar for TTS audio")
+                        await generate_sadtalker_avatar(ai_text, send_yaml_func, sess.get("session_id"))
+                    elif sess["model"] == "gemini_realtime":
+                        logger.info("Calling generate_wav2lip_avatar for Gemini Realtime (fast lip-sync)")
+                        # Use Wav2Lip for fast lip-sync (~5-10 seconds)
+                        await generate_wav2lip_avatar(ai_text, send_yaml_func, sess.get("session_id"))
+                    elif sess["model"] == "wav2lip":
+                        logger.info("Calling generate_wav2lip_avatar for fast lip-sync")
+                        await generate_wav2lip_avatar(ai_text, send_yaml_func, sess.get("session_id"))
+                    elif sess["model"] == "did":
+                        logger.info("Calling generate_wav2lip_avatar for D-ID cloud lip-sync")
+                        await generate_wav2lip_avatar(ai_text, send_yaml_func, sess.get("session_id"))
                         
             elif ev.type == "intent":
                 logger.info("Sending AI intent", intent_type=ev.payload.get("intent", {}).get("type", "unknown"))
@@ -197,6 +208,113 @@ async def generate_and_save_tts_audio(tts_provider, text: str, job_id: str, send
         return None
 
 
+async def generate_sadtalker_video_from_audio(
+    audio_file_path: str,
+    text: str,
+    job_id: str,
+    send_yaml_func
+) -> Optional[str]:
+    """Generate SadTalker video from audio file.
+    
+    Args:
+        audio_file_path: Path to the TTS audio file
+        text: The text being spoken
+        job_id: Unique job identifier
+        send_yaml_func: Function to send status updates
+        
+    Returns:
+        Path to generated video file, or None if generation failed
+    """
+    try:
+        logger.info("Starting SadTalker video generation", audio_file=audio_file_path)
+        
+        # Send generation status
+        await send_yaml_func({
+            "type": "sadtalker_generating",
+            "text": "🎨 Generating animated portrait..."
+        })
+        
+        # Get configuration from environment
+        sadtalker_dir = Path(os.getenv("SADTALKER_DIR", "~/Projects/SadTalker")).expanduser()
+        portrait_path = Path(os.getenv("PORTRAIT_PATH", "assets/avatars/british_general_frame.jpg"))
+        device = os.getenv("SADTALKER_DEVICE", "mps")
+        enhance = os.getenv("SADTALKER_ENHANCE", "true").lower() == "true"
+        still_mode = os.getenv("SADTALKER_STILL_MODE", "false").lower() == "true"
+        
+        # Verify SadTalker is installed
+        inference_script = sadtalker_dir / "inference.py"
+        if not inference_script.exists():
+            logger.error("SadTalker not found", path=str(inference_script))
+            return None
+        
+        # Create output directory
+        video_dir = Path("diplomatic_videos")
+        video_dir.mkdir(exist_ok=True)
+        result_dir = video_dir / f"result_{job_id}"
+        result_dir.mkdir(exist_ok=True)
+        
+        # Build SadTalker command
+        venv_python = sadtalker_dir / ".venv" / "bin" / "python"
+        python_exe = str(venv_python) if venv_python.exists() else sys.executable
+        
+        cmd = [
+            python_exe,
+            str(inference_script),
+            "--driven_audio", str(Path(audio_file_path).absolute()),
+            "--source_image", str(portrait_path.absolute()),
+            "--result_dir", str(result_dir.absolute()),
+            "--batch_size", "1",
+        ]
+        
+        # SadTalker uses --cpu flag for CPU, or no flag for GPU/MPS
+        if device == "cpu":
+            cmd.append("--cpu")
+        # For MPS or GPU, don't add device flag - it auto-detects
+        
+        if still_mode:
+            cmd.append("--still")
+        
+        if enhance:
+            cmd.extend(["--enhancer", "gfpgan"])
+        
+        logger.info("Running SadTalker", command=" ".join(cmd))
+        
+        # Run SadTalker
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            cwd=str(sadtalker_dir),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env={**os.environ, "PYTORCH_ENABLE_MPS_FALLBACK": "1"}
+        )
+        
+        stdout, stderr = await process.communicate()
+        
+        if process.returncode != 0:
+            logger.error("SadTalker failed", 
+                        returncode=process.returncode,
+                        stderr=stderr.decode()[:500])
+            return None
+        
+        logger.info("SadTalker completed", stdout=stdout.decode()[:200])
+        
+        # Find the generated video
+        generated_videos = list(result_dir.glob("*.mp4"))
+        if not generated_videos:
+            logger.error("No video generated by SadTalker", result_dir=str(result_dir))
+            return None
+        
+        video_file = generated_videos[0]
+        logger.info("SadTalker video generated successfully", video_path=str(video_file))
+        
+        # Return relative path for web serving
+        return str(video_file.relative_to(Path.cwd()))
+        
+    except Exception as e:
+        logger.error("Error generating SadTalker video", error=str(e), exc_info=True)
+        return None
+
+
 async def create_audio_track_from_file(file_path: str, tts_provider):
     """Create an audio track from a saved audio file."""
     try:
@@ -238,19 +356,158 @@ async def create_audio_track_from_file(file_path: str, tts_provider):
         return await tts_provider.get_audio_track("Error loading audio file", "default")
 
 
-async def generate_teller_avatar(ai_text: str, send_yaml_func, session_id: str = None):
-    """Generate Teller Avatar animation for AI speech with audio."""
+async def generate_wav2lip_avatar(ai_text: str, send_yaml_func, session_id: str = None):
+    """Generate Wav2Lip avatar with fast lip-sync (~5-10 seconds)."""
     try:
-        logger.info("Generating Teller avatar", text=ai_text)
+        logger.info("Generating Wav2Lip avatar", text=ai_text)
+        
+        # Send avatar generation status
+        await send_yaml_func({
+            "type": "avatar_generating",
+            "text": "🎬 Wav2Lip generating lip-sync video...",
+            "final": False
+        })
+        
+        # Generate TTS audio and create video
+        if session_id and session_id in SESSIONS:
+            sess = SESSIONS[session_id]
+            tts_provider = sess.get("tts_provider")
+            pc = sess.get("pc")
+            
+            logger.info("TTS setup check", has_tts_provider=tts_provider is not None, has_peer_connection=pc is not None)
+            
+            if tts_provider and pc:
+                try:
+                    logger.info("Generating TTS audio for AI response", text=ai_text[:50])
+                    
+                    # Update the audio track with new TTS data using job system
+                    if "audio_track" in sess and "tts_provider" in sess:
+                        logger.info("Starting TTS job for audio generation")
+                        audio_track = sess["audio_track"]
+                        tts_provider = sess["tts_provider"]
+                        
+                        # Create a job ID for this TTS request
+                        job_id = f"tts_{session_id}_{int(time.time())}"
+                        sess["current_tts_job"] = job_id
+                        
+                        # Generate audio asynchronously and save to file
+                        audio_file_path = await generate_and_save_tts_audio(
+                            tts_provider, ai_text, job_id, send_yaml_func
+                        )
+                        
+                        if audio_file_path:
+                            # Load the saved audio file and create audio track
+                            new_audio_track = await create_audio_track_from_file(
+                                audio_file_path, tts_provider
+                            )
+                            logger.info("Created audio track from saved file")
+                            
+                            # Replace the track in the sender
+                            audio_sender = sess["audio_sender"]
+                            logger.info("Replacing track in sender", old_track_id=id(audio_sender.track), new_track_id=id(new_audio_track))
+                            audio_sender.replaceTrack(new_audio_track)
+                            sess["audio_track"] = new_audio_track
+                            logger.info("Successfully updated audio track with AI response from file")
+                            
+                            # Send job completion status
+                            await send_yaml_func({
+                                "type": "tts_job_completed",
+                                "job_id": job_id,
+                                "audio_file": audio_file_path,
+                                "text": ai_text
+                            })
+                            
+                            # Generate talking avatar video with D-ID
+                            did_enabled = os.getenv("DID_ENABLED", "true").lower() == "true"
+                            video_path = None
+                            
+                            if did_enabled and os.getenv("DID_API_KEY"):
+                                try:
+                                    from video_providers.did_video import DIDVideoProvider
+                                    from pathlib import Path
+                                    
+                                    # Use local portrait path - D-ID will upload it
+                                    portrait_path = os.getenv("PORTRAIT_PATH", "assets/avatars/british_general_frame.jpg")
+                                    
+                                    logger.info("Generating D-ID video with text", text=ai_text[:50], portrait=portrait_path)
+                                    
+                                    # Send progress update to client
+                                    await send_yaml_func({
+                                        "type": "avatar_status",
+                                        "status": "generating",
+                                        "message": "⏳ Generating photorealistic lip-sync video (20-40s)...",
+                                        "generator": "did"
+                                    })
+                                    
+                                    # Generate video with D-ID's built-in TTS
+                                    provider = DIDVideoProvider()
+                                    output_path = Path(f"diplomatic_videos/did/did_{job_id}.mp4")
+                                    
+                                    # Use text directly - D-ID handles TTS internally
+                                    video_path = await provider.generate_video(
+                                        text=ai_text,
+                                        image_url=portrait_path,
+                                        output_path=output_path,
+                                        voice_id="en-US-GuyNeural"  # Male voice for British general
+                                    )
+                                    
+                                    logger.info("✅ D-ID video generated successfully!", path=video_path)
+                                    
+                                except Exception as did_error:
+                                    logger.error("D-ID generation failed, using audio only", error=str(did_error))
+                                    import traceback
+                                    logger.error("D-ID error details", traceback=traceback.format_exc())
+                                    video_path = None
+                            else:
+                                if not os.getenv("DID_API_KEY"):
+                                    logger.info("D-ID disabled: No API key set. Get one at https://studio.d-id.com/account-settings")
+                            
+                            # Send ready event
+                            await send_yaml_func({
+                                "type": "sadtalker_video_ready",  # Reuse same event type
+                                "audio_file": audio_file_path,
+                                "video_file": video_path,
+                                "text": ai_text,
+                                "job_id": job_id,
+                                "generator": "did" if video_path else "audio_only"
+                            })
+                            
+                            if video_path:
+                                logger.info("D-ID avatar ready for playback", video_file=video_path)
+                            else:
+                                logger.info("Audio-only avatar ready (D-ID disabled or failed)")
+                        else:
+                            logger.error("Failed to generate and save TTS audio")
+                            await send_yaml_func({
+                                "type": "tts_job_failed",
+                                "job_id": job_id,
+                                "error": "Audio generation failed"
+                            })
+                    else:
+                        logger.error("No stored audio track or TTS provider found for update")
+                        
+                except Exception as tts_error:
+                    logger.error("Failed to generate TTS audio", error=str(tts_error), error_type=type(tts_error))
+                    import traceback
+                    logger.error("TTS error traceback", traceback=traceback.format_exc())
+                    
+    except Exception as e:
+        logger.error("Error generating Wav2Lip avatar", error=str(e))
+
+
+async def generate_sadtalker_avatar(ai_text: str, send_yaml_func, session_id: str = None):
+    """Generate SadTalker Avatar animation for AI speech with audio."""
+    try:
+        logger.info("Generating SadTalker avatar", text=ai_text)
 
         # Send avatar generation status
         await send_yaml_func({
             "type": "avatar_generating",
-            "text": "🎭 Teller Avatar animating...",
+            "text": "🎭 SadTalker Avatar generating portrait...",
             "final": False
         })
 
-        # Replace placeholder audio track with actual TTS audio
+        # Generate TTS audio and create video
         if session_id and session_id in SESSIONS:
             sess = SESSIONS[session_id]
             tts_provider = sess.get("tts_provider")
@@ -301,6 +558,36 @@ async def generate_teller_avatar(ai_text: str, send_yaml_func, session_id: str =
                                 "audio_file": audio_file_path,
                                 "text": ai_text
                             })
+                            
+                            # Check if SadTalker is enabled (disabled by default for speed)
+                            sadtalker_enabled = os.getenv("SADTALKER_ENABLED", "false").lower() == "true"
+                            video_path = None
+                            
+                            if sadtalker_enabled:
+                                # Generate SadTalker video from the audio (SLOW: ~20min for 10sec speech)
+                                video_path = await generate_sadtalker_video_from_audio(
+                                    audio_file_path, ai_text, job_id, send_yaml_func
+                                )
+                            
+                            if video_path and sadtalker_enabled:
+                                # Trigger SadTalker video playback
+                                await send_yaml_func({
+                                    "type": "sadtalker_video_ready",
+                                    "audio_file": audio_file_path,
+                                    "video_file": video_path,
+                                    "text": ai_text,
+                                    "job_id": job_id
+                                })
+                                logger.info("SadTalker video ready for playback", video_file=video_path)
+                            else:
+                                # Fallback to audio-only if video generation fails
+                                await send_yaml_func({
+                                    "type": "sadtalker_video_ready",
+                                    "audio_file": audio_file_path,
+                                    "text": ai_text,
+                                    "job_id": job_id
+                                })
+                                logger.warning("SadTalker video generation failed, using audio only")
                         else:
                             logger.error("Failed to generate and save TTS audio")
                             await send_yaml_func({
@@ -316,23 +603,8 @@ async def generate_teller_avatar(ai_text: str, send_yaml_func, session_id: str =
                     import traceback
                     logger.error("TTS error traceback", traceback=traceback.format_exc())
 
-        # Simulate processing time (in real implementation, this would trigger TTS + animation)
-        await asyncio.sleep(0.5)
-
-        # Send avatar ready status
-        await send_yaml_func({
-            "type": "avatar_ready",
-            "text": f"🎬 Teller Avatar speaking: {ai_text}",
-            "animation_data": {
-                "text": ai_text,
-                "duration": len(ai_text) * 100,  # Estimate speaking duration
-                "emotion": "diplomatic"
-            },
-            "final": True
-        })
-
     except Exception as e:
-        logger.error("Error generating Teller avatar", error=str(e))
+        logger.error("Error generating SadTalker avatar", error=str(e))
 
 @app.get("/", response_class=HTMLResponse)
 async def root():
@@ -340,10 +612,16 @@ async def root():
     with open("web/enhanced_test_client.html", "r", encoding="utf-8") as f:
         return HTMLResponse(f.read())
 
-@app.get("/teller-avatar-component.html", response_class=HTMLResponse)
-async def teller_avatar_component():
-    # Serve the Teller Avatar component
-    with open("web/teller-avatar-component.html", "r", encoding="utf-8") as f:
+@app.get("/sadtalker-avatar-component.html", response_class=HTMLResponse)
+async def sadtalker_avatar_component():
+    # Serve the SadTalker Avatar component
+    with open("web/sadtalker-avatar-component.html", "r", encoding="utf-8") as f:
+        return HTMLResponse(f.read())
+
+@app.get("/gemini-realtime-component.html", response_class=HTMLResponse)
+async def gemini_avatar_component():
+    # Serve the Gemini Realtime Avatar component
+    with open("web/gemini-realtime-component.html", "r", encoding="utf-8") as f:
         return HTMLResponse(f.read())
 
 from fastapi.staticfiles import StaticFiles
@@ -351,8 +629,9 @@ from fastapi.staticfiles import StaticFiles
 # Create generated audio directory if it doesn't exist
 os.makedirs("generated_audio", exist_ok=True)
 
-# Mount the teller-avatar directory to serve videos
-app.mount("/teller-avatar", StaticFiles(directory="teller-avatar"), name="teller-avatar")
+# Mount the diplomatic videos directory to serve generated videos
+if os.path.exists("diplomatic_videos"):
+    app.mount("/diplomatic_videos", StaticFiles(directory="diplomatic_videos"), name="diplomatic-videos")
 # Mount the generated audio directory
 app.mount("/generated_audio", StaticFiles(directory="generated_audio"), name="generated-audio")
 
@@ -363,7 +642,7 @@ async def create_session(request: Request):
     except:
         body = {}
     session_id = str(uuid.uuid4())[:8]
-    model = body.get("model", "teller")  # Default to teller for TTS functionality
+    model = body.get("model", "gemini_realtime")  # Default to Gemini Realtime for real-time performance
     logger.info("Session creation request", session_id=session_id, requested_model=model, body_keys=list(body.keys()) if body else [])
     pc = RTCPeerConnection()
     world_context = sanitize_world_context(body.get("world_context"), session_id)
@@ -579,11 +858,11 @@ async def health_check():
     """Health check endpoint."""
     return {"status": "ok", "service": "negotiation", "version": "1.0.0"}
 
-@app.post("/test-session-teller")
-async def test_session_teller():
-    """Test endpoint to create a session with teller model directly."""
+@app.post("/test-session-sadtalker")
+async def test_session_sadtalker():
+    """Test endpoint to create a session with sadtalker model directly."""
     session_id = str(uuid.uuid4())[:8]
-    model = "teller"
+    model = "sadtalker"
     pc = RTCPeerConnection()
 
     # Create TTS provider
@@ -614,7 +893,7 @@ async def test_session_teller():
         "tts_provider": tts_provider,
     }
 
-    return {"session_id": session_id, "model": model, "message": "Teller session created for testing"}
+    return {"session_id": session_id, "model": model, "message": "SadTalker session created for testing"}
 
 @app.post("/test-tts")
 async def test_tts():

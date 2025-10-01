@@ -9,7 +9,7 @@
   <script>
     // Force cache busting by adding timestamp to console
     console.log('Page loaded at:', new Date().toISOString());
-    console.log('Current model should be: teller');
+    console.log('Current model should be: sadtalker');
   </script>
   <style>
     * { box-sizing: border-box; }
@@ -189,14 +189,16 @@
 
       <div class="controls">
         <select id="model">
-          <option value="mock_local">Mock Local (Deterministic)</option>
+          <option value="did" selected>D-ID (Photorealistic Lip-Sync)</option>
+          <option value="wav2lip">Wav2Lip (Fast Lip-Sync - Disabled)</option>
+          <option value="gemini_realtime">Gemini Realtime (Live Avatar)</option>
+          <option value="sadtalker">SadTalker (Slow - 20min per video)</option>
           <option value="veo3">Veo3 (Advanced AI)</option>
-          <option value="teller" selected>Teller Avatar (Real-time)</option>
+          <option value="mock_local">Mock Local (Deterministic)</option>
         </select>
         <select id="listener">
-          <option value="local_stt">Local STT (Whisper)</option>
+          <option value="openai_realtime" selected>OpenAI Realtime</option>
           <option value="gemini_realtime">Gemini Realtime</option>
-          <option value="openai_realtime">OpenAI Realtime</option>
           <option value="grok_realtime">Grok Realtime</option>
         </select>
         <button id="create">🚀 Create Session</button>
@@ -210,8 +212,13 @@
         <!-- Traditional WebRTC Video (Veo3) -->
         <video id="remoteVideo" autoplay playsinline muted style="display: none;"></video>
         
-        <!-- Teller Avatar Component -->
-        <iframe id="tellerAvatarFrame" src="teller-avatar-component.html" 
+        <!-- Gemini Realtime Avatar Component -->
+        <iframe id="geminiAvatarFrame" src="gemini-realtime-component.html" 
+                style="width: 100%; height: 100%; border: none; border-radius: 8px; background: #000;">
+        </iframe>
+        
+        <!-- SadTalker Avatar Component -->
+        <iframe id="sadtalkerAvatarFrame" src="sadtalker-avatar-component.html" 
                 style="width: 100%; height: 400px; border: none; display: none;"></iframe>
         
         <!-- Default Placeholder -->
@@ -289,7 +296,7 @@ class NegotiationClient {
     this.sessionStart = null;
     this.messageCount = 0;
     this.intentCount = 0;
-    this.currentModel = 'teller';
+    this.currentModel = 'gemini_realtime';
     console.log('Initializing with currentModel:', this.currentModel);
 
     this.ydump = obj => jsyaml.dump(obj);
@@ -326,57 +333,116 @@ class NegotiationClient {
     // Model selection change handler
     this.$('model').onchange = (e) => {
       this.currentModel = e.target.value;
+      this.showAvatar(this.currentModel);
       this.updateAvatarDisplay();
     };
   }
 
   setupAvatarDisplay() {
     // Initialize avatar display based on current model
+    console.log('setupAvatarDisplay called, currentModel:', this.currentModel);
+    this.showAvatar(this.currentModel);  // Explicitly show the correct avatar
     this.updateAvatarDisplay();
   }
 
   updateAvatarDisplay() {
     const remoteVideo = this.$('remoteVideo');
-    const tellerFrame = this.$('tellerAvatarFrame');
+    const geminiFrame = this.$('geminiAvatarFrame');
+    const sadtalkerFrame = this.$('sadtalkerAvatarFrame');
     const placeholder = this.$('defaultPlaceholder');
 
+    console.log('updateAvatarDisplay - currentModel:', this.currentModel);
+
     // Hide all displays first
-    remoteVideo.style.display = 'none';
-    tellerFrame.style.display = 'none';
-    placeholder.style.display = 'none';
+    if (remoteVideo) remoteVideo.style.display = 'none';
+    if (geminiFrame) geminiFrame.style.display = 'none';
+    if (sadtalkerFrame) sadtalkerFrame.style.display = 'none';
+    if (placeholder) placeholder.style.display = 'none';
 
     switch (this.currentModel) {
-      case 'teller':
-        tellerFrame.style.display = 'block';
+      case 'did':
+        console.log('Showing D-ID avatar');
+        if (sadtalkerFrame) sadtalkerFrame.style.display = 'block';
+        break;
+      case 'wav2lip':
+        console.log('Showing Wav2Lip avatar');
+        if (sadtalkerFrame) sadtalkerFrame.style.display = 'block';
+        break;
+      case 'gemini_realtime':
+        console.log('Showing Gemini Realtime avatar');
+        if (geminiFrame) geminiFrame.style.display = 'block';
+        break;
+      case 'sadtalker':
+        console.log('Showing SadTalker avatar (will be slow)');
+        if (sadtalkerFrame) sadtalkerFrame.style.display = 'block';
         break;
       case 'veo3':
-        remoteVideo.style.display = 'block';
+        console.log('Showing Veo3 video');
+        if (remoteVideo) remoteVideo.style.display = 'block';
         break;
       default:
-        placeholder.style.display = 'flex';
+        console.log('Showing placeholder');
+        if (placeholder) placeholder.style.display = 'flex';
         break;
     }
   }
 
-  getTellerAvatar() {
-    // Get reference to Teller Avatar instance in iframe
+  getSadTalkerAvatar() {
+    // Get reference to SadTalker Avatar instance in iframe
     try {
-      const iframe = this.$('tellerAvatarFrame');
-      return iframe.contentWindow.tellerAvatar;
+      const iframe = this.$('sadtalkerAvatarFrame');
+      return iframe.contentWindow.sadtalkerAvatar;
     } catch (e) {
-      console.warn('Teller Avatar not accessible:', e);
+      console.warn('SadTalker Avatar not accessible:', e);
       return null;
     }
   }
 
-  handleTellerAvatarResponse(data) {
-    // Handle AI response for Teller Avatar
-    const teller = this.getTellerAvatar();
-    if (!teller) return;
+  getGeminiAvatar() {
+    // Get reference to Gemini Avatar instance in iframe
+    try {
+      const iframe = this.$('geminiAvatarFrame');
+      return iframe.contentWindow.geminiAvatar;
+    } catch (e) {
+      console.warn('Gemini Avatar not accessible:', e);
+      return null;
+    }
+  }
 
-    if (data.final && data.text) {
-      // Trigger speaking animation with the AI's text
-      teller.triggerSpeaking(data.text);
+  showAvatar(modelType) {
+    // Show/hide iframes based on model type
+    const geminiFrame = this.$('geminiAvatarFrame');
+    const sadtalkerFrame = this.$('sadtalkerAvatarFrame');
+    const remoteVideo = this.$('remoteVideo');
+
+    if (modelType === 'gemini_realtime') {
+      geminiFrame.style.display = 'block';
+      sadtalkerFrame.style.display = 'none';
+      remoteVideo.style.display = 'none';
+    } else if (modelType === 'sadtalker') {
+      geminiFrame.style.display = 'none';
+      sadtalkerFrame.style.display = 'block';
+      remoteVideo.style.display = 'none';
+    } else {
+      geminiFrame.style.display = 'none';
+      sadtalkerFrame.style.display = 'none';
+      remoteVideo.style.display = 'block';
+    }
+  }
+
+  handleSadTalkerAvatarResponse(data) {
+    // Handle AI response for SadTalker Avatar
+    // Handle both SadTalker and Gemini avatars
+    if (this.currentModel === 'gemini_realtime') {
+      const gemini = this.getGeminiAvatar();
+      if (gemini && data.final && data.text) {
+        gemini.triggerSpeaking(data.text);
+      }
+    } else if (this.currentModel === 'sadtalker') {
+      const sadtalker = this.getSadTalkerAvatar();
+      if (sadtalker && data.final && data.text) {
+        sadtalker.triggerSpeaking(data.text);
+      }
     }
   }
 
@@ -558,16 +624,16 @@ class NegotiationClient {
               break;
             case 'ai_response':
               this.addTranscript(`🤖 AI: ${data.text}`, data.final ? 'ai-final' : 'ai-response');
-              // Trigger Teller Avatar if using teller model
-              if (this.currentModel === 'teller') {
-                this.handleTellerAvatarResponse(data);
+              // Trigger SadTalker Avatar if using sadtalker model
+              if (this.currentModel === 'sadtalker') {
+                this.handleSadTalkerAvatarResponse(data);
               }
               break;
             case 'avatar_generating':
               this.addTranscript(data.text, 'avatar-status');
-              if (this.currentModel === 'teller') {
-                const teller = this.getTellerAvatar();
-                if (teller) teller.triggerAvatarGeneration();
+              if (this.currentModel === 'sadtalker') {
+                const sadtalker = this.getSadTalkerAvatar();
+                if (sadtalker) sadtalker.triggerAvatarGeneration();
               }
               break;
             case 'tts_job_started':
@@ -579,6 +645,139 @@ class NegotiationClient {
               this.addTranscript(`🎵 <a href="/${data.audio_file}" target="_blank" download>▶️ PLAY AUDIO FILE</a>`, 'audio-play');
               this.addTranscript(`💾 <a href="/${data.audio_file}" download>⬇️ DOWNLOAD AUDIO</a>`, 'audio-download');
               break;
+                case 'avatar_status':
+                    console.log('📊 Avatar status update:', data);
+                    if (data.message) {
+                        this.addTranscript(data.message, 'info');
+                    }
+                    break;
+                
+                case 'sadtalker_video_ready':
+                case 'gemini_video_ready':
+            this.addTranscript(`🎬 Avatar Speaking!`, 'avatar-ready');
+            console.log('Received avatar ready event:', {
+              model: this.currentModel,
+              hasAudioFile: !!data.audio_file,
+              hasVideoFile: !!data.video_file,
+              audioFile: data.audio_file,
+              text: data.text,
+              generator: data.generator
+            });
+            
+            if (this.currentModel === 'did' || this.currentModel === 'wav2lip') {
+                const sadtalker = this.getSadTalkerAvatar();
+                console.log('D-ID/Wav2Lip avatar instance:', sadtalker);
+                
+                if (sadtalker) {
+                    sadtalker.triggerSpeaking(data.text || 'Speaking...');
+                    
+                    if (data.audio_file) {
+                        const audioUrl = `/${data.audio_file}`;
+                        this.addTranscript(`🔊 Playing audio: ${audioUrl}`, 'audio-playing');
+                        console.log('Creating audio element for:', audioUrl);
+                        
+                        const audio = new Audio(audioUrl);
+                        audio.play()
+                          .then(() => {
+                            console.log('Audio playing successfully');
+                            this.addTranscript(`✅ Audio playing`, 'success');
+                          })
+                          .catch(e => {
+                            console.error('Audio autoplay blocked:', e);
+                            this.addTranscript(`⚠️ Click to play audio: <a href="${audioUrl}" target="_blank">PLAY</a>`, 'warning');
+                          });
+                        
+                        audio.onended = () => {
+                          console.log('Audio ended, stopping animation');
+                          sadtalker.stopSpeaking();
+                        };
+                    }
+                    
+                    if (data.video_file) {
+                        const videoUrl = `/${data.video_file}`;
+                        this.addTranscript(`🎥 Wav2Lip video: ${videoUrl}`, 'video-ready');
+                        console.log('Wav2Lip video available:', videoUrl);
+                        sadtalker.setAvatarReady(videoUrl);
+                    }
+                }
+            } else if (this.currentModel === 'gemini_realtime') {
+                        const gemini = this.getGeminiAvatar();
+                        console.log('Gemini avatar instance:', gemini);
+                        
+                        if (gemini) {
+                            // Trigger speaking animation
+                            gemini.triggerSpeaking(data.text || 'Speaking...');
+                            
+                            // Play audio if available
+                            if (data.audio_file) {
+                                const audioUrl = `/${data.audio_file}`;
+                                this.addTranscript(`🔊 Playing audio: ${audioUrl}`, 'audio-playing');
+                                console.log('Creating audio element for:', audioUrl);
+                                
+                                const audio = new Audio(audioUrl);
+                                audio.play()
+                                  .then(() => {
+                                    console.log('Audio playing successfully');
+                                    this.addTranscript(`✅ Audio playing`, 'success');
+                                  })
+                                  .catch(e => {
+                                    console.error('Audio autoplay blocked:', e);
+                                    this.addTranscript(`⚠️ Click to play audio: <a href="${audioUrl}" target="_blank">PLAY</a>`, 'warning');
+                                  });
+                                
+                                // Stop animation when audio ends
+                                audio.onended = () => {
+                                  console.log('Audio ended, stopping animation');
+                                  gemini.stopSpeaking();
+                                };
+                            }
+                            
+                            // Handle video if available
+                            if (data.video_file) {
+                                const videoUrl = `/${data.video_file}`;
+                                this.addTranscript(`🎥 Video: ${videoUrl}`, 'video-ready');
+                                gemini.setAvatarReady(videoUrl);
+                            }
+                        }
+                    } else if (this.currentModel === 'sadtalker') {
+                        const sadtalker = this.getSadTalkerAvatar();
+                        if (sadtalker) {
+                            // Trigger speaking animation
+                            sadtalker.triggerSpeaking(data.text || 'Speaking...');
+                            
+                            // Play audio if available
+                            if (data.audio_file) {
+                                const audioUrl = `/${data.audio_file}`;
+                                this.addTranscript(`🔊 Playing audio: ${audioUrl}`, 'audio-playing');
+                                
+                                const audio = new Audio(audioUrl);
+                                audio.play()
+                                  .then(() => {
+                                    this.addTranscript(`✅ Audio playing`, 'success');
+                                  })
+                                  .catch(e => {
+                                    console.error('Audio autoplay blocked:', e);
+                                    this.addTranscript(`⚠️ Click to play: <a href="${audioUrl}" target="_blank">PLAY</a>`, 'warning');
+                                  });
+                            }
+                            
+                            // Handle video if available
+                            if (data.video_file) {
+                                const videoUrl = `/${data.video_file}`;
+                                this.addTranscript(`🎥 Video: ${videoUrl}`, 'video-ready');
+                                sadtalker.setAvatarReady(videoUrl);
+                            }
+                        }
+                    }
+                    break;
+                
+                case 'sadtalker_generating':
+                    this.addTranscript(`🎨 ${data.text}`, 'status-update');
+                    const sadtalkerGen = this.getSadTalkerAvatar();
+                    if (sadtalkerGen) {
+                        sadtalkerGen.triggerAvatarGeneration();
+                    }
+                    break;
             case 'tts_job_failed':
               this.addTranscript(`❌ TTS Job Failed: ${data.error}`, 'tts-error');
               break;
@@ -587,9 +786,9 @@ class NegotiationClient {
               if (data.video_url) {
                 this.addTranscript(`🎥 <a href="${data.video_url}" target="_blank">View Avatar Video</a>`, 'avatar-link');
               }
-              if (this.currentModel === 'teller') {
-                const teller = this.getTellerAvatar();
-                if (teller) teller.setAvatarReady(data.video_url);
+              if (this.currentModel === 'sadtalker') {
+                const sadtalker = this.getSadTalkerAvatar();
+                if (sadtalker) sadtalker.setAvatarReady(data.video_url);
               }
               break;
             case 'intent':

@@ -1,0 +1,160 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Gemini Realtime Avatar</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: system-ui, -apple-system, Arial, sans-serif;
+      background: #000;
+      overflow: hidden;
+    }
+    #container {
+      width: 100%;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%);
+    }
+    #portrait-image {
+      max-width: 640px;
+      width: 100%;
+      border-radius: 8px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+      transition: filter 0.3s ease;
+    }
+    #portrait-image.speaking {
+      filter: brightness(1.2) drop-shadow(0 0 20px rgba(66, 133, 244, 0.6));
+      animation: pulse-glow 1s ease-in-out infinite;
+    }
+    #avatar-video {
+      width: 100%;
+      max-width: 640px;
+      height: auto;
+      border-radius: 8px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+      display: none;
+    }
+    #status {
+      color: #fff;
+      font-size: 18px;
+      margin-top: 20px;
+      text-align: center;
+      padding: 10px 20px;
+      background: rgba(66, 133, 244, 0.2);
+      border-radius: 4px;
+    }
+    @keyframes pulse-glow {
+      0%, 100% { filter: brightness(1.1) drop-shadow(0 0 15px rgba(66, 133, 244, 0.5)); }
+      50% { filter: brightness(1.3) drop-shadow(0 0 30px rgba(66, 133, 244, 0.8)); }
+    }
+  </style>
+</head>
+<body>
+  <div id="container">
+    <img id="portrait-image" src="/assets/avatars/british_general_frame.jpg" alt="Diplomatic Portrait" />
+    <video id="avatar-video" autoplay playsinline></video>
+    <div id="status">Gemini Realtime Ready</div>
+  </div>
+
+  <script>
+    class GeminiRealtimeAvatar {
+      constructor() {
+        this.video = document.getElementById('avatar-video');
+        this.portrait = document.getElementById('portrait-image');
+        this.status = document.getElementById('status');
+        this.isSpeaking = false;
+        this.currentVideoUrl = null;
+        this.audioContext = null;
+        
+        console.log('Gemini Realtime Avatar initialized');
+        
+        // Expose this instance globally for parent window access
+        window.geminiAvatar = this;
+      }
+
+      async triggerSpeaking(text) {
+        console.log('Gemini avatar speaking:', text);
+        this.isSpeaking = true;
+        this.portrait.classList.add('speaking');
+        this.status.textContent = `🎙️ ${text.substring(0, 50)}...`;
+      }
+
+      stopSpeaking() {
+        this.isSpeaking = false;
+        this.portrait.classList.remove('speaking');
+        this.status.textContent = 'Gemini Realtime Ready';
+      }
+
+      async setAvatarReady(videoUrl) {
+        console.log('Gemini avatar video ready:', videoUrl);
+        this.currentVideoUrl = videoUrl;
+        
+        if (videoUrl) {
+          // Load and display the generated video
+          this.video.src = videoUrl;
+          this.video.style.display = 'block';
+          this.portrait.style.display = 'none';
+          this.video.loop = false;
+          this.video.muted = false;
+          this.status.textContent = '✅ Gemini Video Ready';
+          
+          // Play the video
+          try {
+            await this.video.play();
+          } catch (e) {
+            console.error('Video autoplay failed:', e);
+          }
+          
+          // Return to static portrait when video ends
+          this.video.onended = () => {
+            console.log('Video ended, showing static portrait');
+            this.video.style.display = 'none';
+            this.portrait.style.display = 'block';
+            this.stopSpeaking();
+          };
+        }
+      }
+
+      reset() {
+        this.video.style.display = 'none';
+        this.video.src = '';
+        this.portrait.style.display = 'block';
+        this.stopSpeaking();
+        this.currentVideoUrl = null;
+      }
+    }
+
+    // Initialize on load
+    const geminiAvatar = new GeminiRealtimeAvatar();
+    
+    // Listen for messages from parent window
+    window.addEventListener('message', (event) => {
+      const { type, data } = event.data;
+      
+      switch (type) {
+        case 'speak':
+          geminiAvatar.triggerSpeaking(data.text);
+          break;
+        case 'stop':
+          geminiAvatar.stopSpeaking();
+          break;
+        case 'ready':
+          geminiAvatar.setAvatarReady(data.videoUrl);
+          break;
+        case 'reset':
+          geminiAvatar.reset();
+          break;
+      }
+    });
+  </script>
+</body>
+</html>
+
+
+

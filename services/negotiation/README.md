@@ -70,7 +70,7 @@ cd services/negotiation
 ### First Test (2 minutes)
 
 1. **Create Session**
-   - "Teller Avatar (Real-time)" is selected by default for voice synthesis
+   - "SadTalker Avatar (Portrait Animation)" is selected by default for voice synthesis
    - Select "Local STT" listener
    - Click "🚀 Create Session"
 
@@ -129,6 +129,97 @@ cd services/negotiation
 - `AZnzlk1XvdvUeBnXmlld` - Drew (male)
 - `EXAVITQu4vr4xnSDxMaL` - Clyde (male)
 - `ErXwobaYiN019PkySvjV` - Bella (female)
+
+### 🎭 SadTalker Portrait Animation (Apple Silicon Optimized)
+
+**Revolutionary War Diplomatic Avatars with Lip-Sync**
+
+SadTalker generates realistic talking portraits from static images, perfect for creating animated 18th-century diplomatic characters. Optimized for Apple Silicon Macs using MPS (Metal Performance Shaders).
+
+#### Installation (Mac only)
+
+1. **Install PyTorch with MPS Support**:
+   ```bash
+   pip3 install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cpu
+   ```
+
+2. **Clone and Setup SadTalker**:
+   ```bash
+   cd ~/Projects  # or your preferred location
+   git clone https://github.com/OpenTalker/SadTalker.git
+   cd SadTalker
+   ```
+
+3. **Install Dependencies**:
+   ```bash
+   # Install ffmpeg via Homebrew
+   brew install ffmpeg
+   
+   # Install Python requirements
+   pip install -r requirements.txt
+   pip install dlib face-alignment
+   ```
+
+4. **Download Pre-trained Models** (~2GB):
+   ```bash
+   bash scripts/download_models.sh
+   ```
+
+5. **Verify Installation**:
+   ```bash
+   python inference.py \
+     --driven_audio examples/driven_audio/bus_chinese.wav \
+     --source_image examples/source_image/full_body_1.png \
+     --result_dir ./test_output
+   ```
+
+#### Configure Environment
+
+Add to your `.env` file:
+```bash
+SADTALKER_DIR=~/Projects/SadTalker
+PORTRAIT_PATH=assets/avatars/portrait.jpg
+SADTALKER_DEVICE=mps  # Apple Silicon optimization
+SADTALKER_ENHANCE=true  # Use GFPGAN enhancement
+```
+
+#### Quick Test
+
+```bash
+# Test with a single portrait
+python test_diplomatic_avatar.py quick
+
+# Test Revolutionary War character
+python test_diplomatic_avatar.py washington
+```
+
+#### Character Presets
+
+Pre-configured Revolutionary War characters:
+- **George Washington** - Commander-in-Chief, Continental Army
+- **Benjamin Franklin** - American Diplomat to France
+- **Lord Cornwallis** - British General
+- **Joseph Brant** - Mohawk Chief, British Ally
+
+#### Usage Example
+
+```python
+from diplomatic_avatar import DiplomaticAvatar
+
+avatar = DiplomaticAvatar(
+    portrait_path="portraits/washington.jpg",
+    voice_id="YOUR_ELEVENLABS_VOICE_ID"
+)
+
+video = avatar.speak(
+    text="We shall secure liberty for these colonies.",
+    output_name="washington_speech",
+    still_mode=True,  # Formal speech posture
+    enhance_video=True  # GFPGAN quality enhancement
+)
+```
+
+**Note**: SadTalker requires significant processing time (30-60 seconds per video on M1 Macs). For real-time applications, pre-generate videos or use the placeholder mode.
 
 ### 🔄 Alternative: If ElevenLabs Doesn't Work
 

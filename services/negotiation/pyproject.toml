@@ -45,6 +45,16 @@ dependencies = [
     "aiohttp>=3.12.15",
     "google-genai>=1.38.0",
     "elevenlabs>=2.16.0",
+    "torchvision>=0.23.0",
+    "dlib>=20.0.0",
+    "face-alignment>=1.4.1",
+    "opencv-python>=4.11.0.86",
+    "scikit-image>=0.25.2",
+    "librosa>=0.11.0",
+    "pydub>=0.25.1",
+    "imageio>=2.37.0",
+    "imageio-ffmpeg>=0.6.0",
+    "yacs>=0.1.8",
 ]
 
 [project.optional-dependencies]
