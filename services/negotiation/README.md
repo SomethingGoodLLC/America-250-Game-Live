@@ -70,7 +70,7 @@ cd services/negotiation
 ### First Test (2 minutes)
 
 1. **Create Session**
-   - Select "Mock Local" model
+   - "Teller Avatar (Real-time)" is selected by default for voice synthesis
    - Select "Local STT" listener
    - Click "🚀 Create Session"
 
@@ -95,7 +95,54 @@ cd services/negotiation
 ✅ **Live Subtitles**: Real-time transcription in transcript panel  
 ✅ **Intent Detection**: Structured YAML diplomatic intents  
 ✅ **Session Stats**: Live counters for messages, intents, connection time  
-✅ **Audio Feedback**: Visual audio level monitoring  
+✅ **Audio Feedback**: Visual audio level monitoring
+
+### 🎵 High-Quality Voice Synthesis (ElevenLabs)
+
+**IMPORTANT**: The current fallback TTS produces alien-like sounds. For proper human speech, use ElevenLabs:
+
+1. **Get ElevenLabs API Key**:
+   - Sign up at [ElevenLabs](https://elevenlabs.io)
+   - Go to your profile → **API Keys** tab
+   - Click **"Create API Key"**
+   - **IMPORTANT**: Make sure to select "Text-to-Speech" permission when creating the key
+   - Copy the generated API key
+
+2. **Configure Environment**:
+   ```bash
+   cd services/negotiation
+   cp env.example .env
+   # Edit .env and add your actual API key:
+   echo "ELEVENLABS_API_KEY=sk_your_actual_api_key_here" >> .env
+   ```
+
+3. **Restart Service**:
+   ```bash
+   # Stop current service (Ctrl+C)
+   python main.py  # Will now use ElevenLabs for natural speech
+   ```
+
+**Voice Quality**: ElevenLabs provides natural, expressive speech with customizable voices and emotions.
+
+**Available Voices**:
+- `21m00Tcm4TlvDq8ikWAM` - Rachel (default, professional female)
+- `AZnzlk1XvdvUeBnXmlld` - Drew (male)
+- `EXAVITQu4vr4xnSDxMaL` - Clyde (male)
+- `ErXwobaYiN019PkySvjV` - Bella (female)
+
+### 🔄 Alternative: If ElevenLabs Doesn't Work
+
+If you can't get ElevenLabs working, the system will automatically fall back to the basic waveform synthesis. While not as natural-sounding as ElevenLabs, it will still provide audio feedback.
+
+**To improve the fallback audio quality**, you can:
+1. **Use a different voice ID** in your `.env` file:
+   ```bash
+   ELEVENLABS_VOICE_ID=AZnzlk1XvdvUeBnXmlld  # Try Drew (male voice)
+   ```
+
+2. **Adjust audio parameters** in the code (requires code changes)
+
+3. **Use a different TTS service** by modifying the provider selection logic
 
 ### Using UV (Recommended)
 

@@ -3,6 +3,14 @@
 <head>
   <meta charset="utf-8" />
   <title>AI Avatar Negotiation - Turn-Key Test Harness</title>
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="0" />
+  <script>
+    // Force cache busting by adding timestamp to console
+    console.log('Page loaded at:', new Date().toISOString());
+    console.log('Current model should be: teller');
+  </script>
   <style>
     * { box-sizing: border-box; }
     body {
@@ -107,6 +115,12 @@
     .avatar-link { color: #e74c3c; }
     .intent { color: #8e44ad; }
     .ai-intent { color: #3498db; background: #ecf0f1; padding: 2px 4px; border-radius: 2px; }
+    .tts-job { color: #f39c12; font-style: italic; }
+    .tts-success { color: #27ae60; font-weight: bold; background: #d5f4e6; padding: 2px 4px; border-radius: 2px; }
+    .tts-error { color: #e74c3c; font-weight: bold; }
+    .audio-info { color: #3498db; font-family: monospace; }
+    .audio-play { color: #27ae60; font-weight: bold; background: #d5f4e6; padding: 4px 8px; border-radius: 4px; display: inline-block; margin: 2px; }
+    .audio-download { color: #9b59b6; font-weight: bold; background: #f8e6ff; padding: 4px 8px; border-radius: 4px; display: inline-block; margin: 2px; }
     .safety { color: #e67e22; }
 
     /* Input Panel */
@@ -177,7 +191,7 @@
         <select id="model">
           <option value="mock_local">Mock Local (Deterministic)</option>
           <option value="veo3">Veo3 (Advanced AI)</option>
-          <option value="teller">Teller Avatar (Real-time)</option>
+          <option value="teller" selected>Teller Avatar (Real-time)</option>
         </select>
         <select id="listener">
           <option value="local_stt">Local STT (Whisper)</option>
@@ -275,7 +289,8 @@ class NegotiationClient {
     this.sessionStart = null;
     this.messageCount = 0;
     this.intentCount = 0;
-    this.currentModel = 'mock_local';
+    this.currentModel = 'teller';
+    console.log('Initializing with currentModel:', this.currentModel);
 
     this.ydump = obj => jsyaml.dump(obj);
     this.yload = str => jsyaml.load(str);
@@ -284,6 +299,17 @@ class NegotiationClient {
     this.setupEventListeners();
     this.updateStats();
     this.setupAvatarDisplay();
+
+    // Sync dropdown with currentModel
+    console.log('Setting dropdown value to:', this.currentModel);
+    this.$('model').value = this.currentModel;
+    console.log('Dropdown value after setting:', this.$('model').value);
+
+    // Add immediate check
+    setTimeout(() => {
+      console.log('After 100ms - currentModel:', this.currentModel);
+      console.log('After 100ms - dropdown value:', this.$('model').value);
+    }, 100);
   }
 
   setupEventListeners() {
@@ -358,8 +384,13 @@ class NegotiationClient {
     try {
       this.setStatus('connecting', 'Creating session...');
 
-      const model = this.$('model').value;
+      const model = this.currentModel;
       const listener = this.$('listener').value;
+
+      console.log('Creating session with model:', model);
+      console.log('currentModel:', this.currentModel);
+      console.log('dropdown value:', this.$('model').value);
+      console.log('Request body:', { model, listener });
 
       const res = await fetch('/v1/session', {
         method: 'POST',
@@ -538,6 +569,18 @@ class NegotiationClient {
                 const teller = this.getTellerAvatar();
                 if (teller) teller.triggerAvatarGeneration();
               }
+              break;
+            case 'tts_job_started':
+              this.addTranscript(`🎵 TTS Job Started: ${data.job_id}`, 'tts-job');
+              break;
+            case 'tts_job_completed':
+              this.addTranscript(`✅ TTS AUDIO FILE GENERATED!`, 'tts-success');
+              this.addTranscript(`📁 File: ${data.audio_file}`, 'audio-info');
+              this.addTranscript(`🎵 <a href="/${data.audio_file}" target="_blank" download>▶️ PLAY AUDIO FILE</a>`, 'audio-play');
+              this.addTranscript(`💾 <a href="/${data.audio_file}" download>⬇️ DOWNLOAD AUDIO</a>`, 'audio-download');
+              break;
+            case 'tts_job_failed':
+              this.addTranscript(`❌ TTS Job Failed: ${data.error}`, 'tts-error');
               break;
             case 'avatar_ready':
               this.addTranscript(data.text, 'avatar-ready');
