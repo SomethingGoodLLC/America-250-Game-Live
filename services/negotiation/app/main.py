@@ -35,6 +35,7 @@ from core.yaml_middleware import YAMLMiddleware, YAMLResponse
 from tts.streaming import CartesiaTTSStreamer, AzureTTSStreamer, ElevenLabsTTSStreamer
 from tts.streaming.base import TTSStreamer
 from app.routers import stream_router
+from app.providers import cartesia_router, elevenlabs_router, azure_router
 
 
 # Configure logging
@@ -64,6 +65,9 @@ app.add_middleware(YAMLMiddleware)
 
 # Include routers
 app.include_router(stream_router, tags=["streaming"])
+app.include_router(cartesia_router, tags=["providers", "cartesia"])
+app.include_router(elevenlabs_router, tags=["providers", "elevenlabs"])
+app.include_router(azure_router, tags=["providers", "azure"])
 
 
 class CreateSessionRequest(BaseModel):

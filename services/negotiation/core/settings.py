@@ -74,6 +74,14 @@ class Settings(BaseSettings):
     voice_id: str = "default"
     latency_target_ms: int = 500
     
+    # Rate Limiting (for WebSocket proxies and token endpoints)
+    rate_limit_ws_per_ip: int = 3  # Max concurrent WebSocket connections per IP
+    rate_limit_token_per_minute: int = 10  # Max token requests per minute per IP
+    rate_limit_token_per_hour: int = 100  # Max token requests per hour per IP
+    
+    # CORS/Origin checking for WebSocket proxies
+    allowed_ws_origins: str = "http://localhost:*,http://127.0.0.1:*,https://*.your-domain.com"
+    
     # Pydantic v2 settings
     model_config = SettingsConfigDict(
         env_file=".env",

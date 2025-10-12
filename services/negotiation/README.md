@@ -908,6 +908,173 @@ docker run -p 8000:8000 samson-negotiation-service
 - `POST /v1/session/{id}/proposed-intents` - Inject intents (dev only)
 - `GET /health` - Health check
 
+---
+
+## Browser-Side TTS Integration (WebSocket Proxies)
+
+The service provides **WebSocket proxies** that allow browser clients to connect directly to TTS provider APIs while keeping API keys secure server-side. This enables lower latency and direct browser-to-provider communication.
+
+### Architecture
+
+```
+Browser ←→ WebSocket Proxy (Server) ←→ TTS Provider API
+         ↑                           ↑
+    No API key                 API key secure
+```
+
+### Available Endpoints
+
+#### 1. Cartesia WebSocket Proxy (`/ws/cartesia`)
+
+Connect browser directly to Cartesia's streaming TTS API with server-side API key protection.
+
+**Query Parameters**:
+- `voice_id` (optional): Voice ID for synthesis
+- `model` (default: `sonic-english`): Model ID
+- `sample_rate` (default: `24000`): Audio sample rate Hz
+- `output_format` (default: `pcm_s16le`): Audio format
+
+**Browser Example**:
+```javascript
+const ws = new WebSocket('ws://localhost:8000/ws/cartesia?voice_id=abc123');
+
+ws.onopen = () => {
+    ws.send(JSON.stringify({
+        type: 'text',
+        text: 'Welcome to the diplomatic summit.'
+    }));
+};
+
+ws.onmessage = (event) => {
+    const data = JSON.parse(event.data);
+    if (data.type === 'chunk' && data.data) {
+        const audioData = atob(data.data);
+        playAudio(audioData);
+        if (data.timestamps) {
+            updateLipSync(data.timestamps);
+        }
+    }
+};
+```
+
+**Helper Endpoints**:
+- `GET /cartesia/voices` - List available voices
+- `GET /cartesia/models` - List available models
+
+#### 2. ElevenLabs WebSocket Proxy (`/ws/elevenlabs`)
+
+Connect browser to ElevenLabs realtime API with alignment data for lip-sync.
+
+**Query Parameters**:
+- `voice_id` (**required**): ElevenLabs voice ID
+- `model` (default: `eleven_turbo_v2`): Model ID
+- `output_format` (default: `pcm_24000`): Audio format
+- `latency` (default: `normal`): `normal` or `optimized`
+
+**Browser Example**:
+```javascript
+const ws = new WebSocket('ws://localhost:8000/ws/elevenlabs?voice_id=abc123');
+
+ws.onopen = () => {
+    ws.send(JSON.stringify({
+        text: 'Greetings from His Majesty.',
+        flush: true
+    }));
+};
+
+ws.onmessage = (event) => {
+    const data = JSON.parse(event.data);
+    if (data.audio) {
+        playAudio(atob(data.audio));
+    }
+    if (data.alignment) {
+        updateLipSync(data.alignment);
+    }
+};
+```
+
+**Helper Endpoints**:
+- `GET /elevenlabs/voices` - List available voices
+- `GET /elevenlabs/models` - List available models
+- `GET /elevenlabs/user` - Get subscription info
+
+#### 3. Azure Speech Token Endpoint (`POST /azure/token`)
+
+Issue short-lived tokens for browser-side Azure Speech SDK usage (visemes, ARKit blendshapes).
+
+**Browser Example**:
+```javascript
+// 1. Get token
+const { token, region } = await fetch('/azure/token', { method: 'POST' }).then(r => r.json());
+
+// 2. Initialize Azure SDK
+const speechConfig = SpeechSDK.SpeechConfig.fromAuthorizationToken(token, region);
+const synthesizer = new SpeechSDK.SpeechSynthesizer(speechConfig);
+
+// 3. Subscribe to viseme events
+synthesizer.visemeReceived = (s, e) => {
+    applyViseme(e.visemeId, e.audioOffset / 10000);
+};
+
+// 4. Synthesize
+synthesizer.speakTextAsync('We propose a treaty of mutual benefit.');
+```
+
+**Helper Endpoints**:
+- `GET /azure/regions` - List available Azure regions
+- `GET /azure/voices` - List available neural voices
+
+### Security
+
+- **Rate Limiting**: Max 3 concurrent WS connections per IP, 10/min token requests
+- **Origin Checking**: Configurable allowed origins (default: localhost)
+- **API Key Protection**: Keys never exposed to browser
+- **Token Expiry**: Azure tokens expire after 10 minutes
+
+### Configuration
+
+Add to `.env`:
+```bash
+# Rate limiting
+RATE_LIMIT_WS_PER_IP=3
+RATE_LIMIT_TOKEN_PER_MINUTE=10
+RATE_LIMIT_TOKEN_PER_HOUR=100
+
+# Origin checking (comma-separated, supports wildcards)
+ALLOWED_WS_ORIGINS=http://localhost:*,https://*.yourdomain.com
+```
+
+### Phoneme-to-Viseme Utilities
+
+The service includes utilities in `app/utils/` for lip-sync:
+
+**Mapping** (`app/utils/mapping.py`):
+```python
+from app.utils import phonemes_to_visemes, arpabet_to_ovr_viseme
+
+# Convert phoneme timestamps to viseme events
+phonemes = [
+    {"phoneme": "HH", "start_ms": 0, "end_ms": 50},
+    {"phoneme": "AH0", "start_ms": 50, "end_ms": 150},
+]
+visemes = phonemes_to_visemes(phonemes, collapse_similar=True)
+# [{"viseme": "SIL", "start_ms": 0, "end_ms": 50}, ...]
+```
+
+**G2P** (`app/utils/g2p.py`):
+```python
+from app.utils import text_to_phonemes_with_timing
+
+# Convert text to phonemes with estimated timing
+result = text_to_phonemes_with_timing(
+    "hello world",
+    total_duration_ms=1000
+)
+# [{"phoneme": "HH", "start_ms": 0, "end_ms": 125}, ...]
+```
+
+---
+
 ## Configuration
 
 ### Environment Setup
