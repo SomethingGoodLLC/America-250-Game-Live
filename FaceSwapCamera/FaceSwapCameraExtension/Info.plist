@@ -20,8 +20,11 @@
 	<string>1.0</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
-	<key>CMIOExtensionMachServiceName</key>
-	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CMIOExtension</key>
+	<dict>
+		<key>CMIOExtensionMachServiceName</key>
+		<string>6DR6N9843T.$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	</dict>
 	<key>NSCameraUsageDescription</key>
 	<string>This extension provides a virtual camera for face swapping functionality.</string>
 	<key>NSSystemExtensionUsageDescription</key>

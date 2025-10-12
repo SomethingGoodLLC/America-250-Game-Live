@@ -6,6 +6,7 @@ import os.log
 let kWhiteStripeHeight: Int = 10
 let kFrameRate: Int = 60
 
+@objc(ExtensionProvider)
 class ExtensionProvider: NSObject, CMIOExtensionProviderSource {
     
     private(set) var provider: CMIOExtensionProvider!
