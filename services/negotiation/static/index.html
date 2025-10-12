@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Diplomatic Avatar - Samson Negotiation Service</title>
+    
+    <!-- Three.js and loaders from CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/examples/js/loaders/GLTFLoader.js"></script>
+    
+    <!-- Ready Player Me SDK (optional) -->
+    <script src="https://cdn.jsdelivr.net/npm/@readyplayerme/webgl-sdk@1.1.0/dist/index.js"></script>
+    
+    <!-- Styles -->
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <!-- Main Container -->
+    <div id="app">
+        <!-- Header -->
+        <header class="app-header">
+            <h1>🎭 Diplomatic Avatar</h1>
+            <div class="header-status">
+                <span id="connection-status" class="status-badge disconnected">Disconnected</span>
+            </div>
+        </header>
+
+        <!-- Main Content Area -->
+        <div class="main-content">
+            <!-- Left Panel: 3D Avatar Stage -->
+            <div class="stage-panel">
+                <canvas id="stage"></canvas>
+                
+                <!-- Latency HUD Overlay -->
+                <div class="latency-hud" id="latency-hud">
+                    <div class="hud-item">
+                        <span class="hud-label">Audio Latency:</span>
+                        <span id="audio-latency" class="hud-value">-- ms</span>
+                    </div>
+                    <div class="hud-item">
+                        <span class="hud-label">Buffer Depth:</span>
+                        <span id="buffer-depth" class="hud-value">-- ms</span>
+                    </div>
+                    <div class="hud-item">
+                        <span class="hud-label">Viseme Events:</span>
+                        <span id="viseme-count" class="hud-value">0</span>
+                    </div>
+                    <div class="hud-item">
+                        <span class="hud-label">Dropped Events:</span>
+                        <span id="dropped-events" class="hud-value">0</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Panel: Controls -->
+            <div class="control-panel">
+                <!-- Provider Configuration -->
+                <section class="control-section">
+                    <h2>Provider Configuration</h2>
+                    
+                    <div class="form-group">
+                        <label for="provider-select">TTS Provider:</label>
+                        <select id="provider-select" class="form-control">
+                            <option value="cartesia">Cartesia (Low Latency)</option>
+                            <option value="azure">Azure Cognitive Speech</option>
+                            <option value="elevenlabs">ElevenLabs</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="voice-select">Voice:</label>
+                        <select id="voice-select" class="form-control">
+                            <option value="">Loading voices...</option>
+                        </select>
+                        <button id="refresh-voices-btn" class="btn btn-secondary btn-small">↻ Refresh</button>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="mode-select">Animation Mode:</label>
+                        <select id="mode-select" class="form-control">
+                            <option value="phonemes">Phonemes</option>
+                            <option value="viseme">Visemes (Azure/Cartesia)</option>
+                            <option value="blendshapes">Blendshapes (ARKit)</option>
+                        </select>
+                    </div>
+                </section>
+
+                <!-- Connection Control -->
+                <section class="control-section">
+                    <h2>Connection</h2>
+                    <button id="connect-btn" class="btn btn-primary btn-large">Connect WebSocket</button>
+                    <button id="disconnect-btn" class="btn btn-danger btn-large" disabled>Disconnect</button>
+                </section>
+
+                <!-- Text Input -->
+                <section class="control-section">
+                    <h2>Speech Input</h2>
+                    
+                    <div class="form-group">
+                        <label for="text-input">Text to Speak:</label>
+                        <textarea 
+                            id="text-input" 
+                            class="form-control text-area" 
+                            rows="4" 
+                            placeholder="Enter diplomatic text to synthesize..."
+                        >Greetings. I represent His Majesty's government in these negotiations. We seek a resolution that benefits all parties involved.</textarea>
+                    </div>
+
+                    <div class="button-group">
+                        <button id="speak-btn" class="btn btn-success" disabled>🎤 Speak</button>
+                        <button id="stop-btn" class="btn btn-warning" disabled>⏹ Stop</button>
+                        <button id="clear-btn" class="btn btn-secondary">Clear</button>
+                    </div>
+                </section>
+
+                <!-- Quick Phrases -->
+                <section class="control-section">
+                    <h2>Quick Phrases</h2>
+                    <div class="button-group">
+                        <button class="btn btn-outline quick-phrase" data-text="Welcome to the negotiation table.">Welcome</button>
+                        <button class="btn btn-outline quick-phrase" data-text="I propose a trade agreement between our nations.">Proposal</button>
+                        <button class="btn btn-outline quick-phrase" data-text="That is unacceptable. We demand better terms.">Rejection</button>
+                        <button class="btn btn-outline quick-phrase" data-text="We accept your terms. Let us seal this agreement.">Acceptance</button>
+                    </div>
+                </section>
+
+                <!-- Advanced Settings -->
+                <section class="control-section">
+                    <h2>Advanced Settings</h2>
+                    
+                    <div class="form-group">
+                        <label for="sample-rate-select">Sample Rate:</label>
+                        <select id="sample-rate-select" class="form-control">
+                            <option value="16000">16 kHz</option>
+                            <option value="24000" selected>24 kHz (Default)</option>
+                            <option value="48000">48 kHz</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group checkbox-group">
+                        <label>
+                            <input type="checkbox" id="enable-lipsync" checked>
+                            Enable Lip Sync Animation
+                        </label>
+                    </div>
+
+                    <div class="form-group checkbox-group">
+                        <label>
+                            <input type="checkbox" id="show-debug" checked>
+                            Show Debug HUD
+                        </label>
+                    </div>
+                </section>
+
+                <!-- Event Log -->
+                <section class="control-section">
+                    <h2>Event Log</h2>
+                    <div id="event-log" class="event-log"></div>
+                    <button id="clear-log-btn" class="btn btn-secondary btn-small">Clear Log</button>
+                </section>
+            </div>
+        </div>
+    </div>
+
+    <!-- Audio element for monitoring (muted by default) -->
+    <audio id="monitor" muted></audio>
+
+    <!-- JavaScript modules -->
+    <script src="/static/pcm-worklet.js"></script>
+    <script src="/static/lipsync.js"></script>
+    <script src="/static/avatar.js"></script>
+    <script src="/static/app.js"></script>
+</body>
+</html>
+

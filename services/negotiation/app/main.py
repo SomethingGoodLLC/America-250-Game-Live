@@ -5,10 +5,12 @@ import uuid
 import base64
 from contextlib import asynccontextmanager
 from typing import Dict, Any, Optional
+from pathlib import Path
 
 import structlog
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Request, Response
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ValidationError
 
 from schemas.models import (
@@ -69,6 +71,14 @@ app.include_router(cartesia_router, tags=["providers", "cartesia"])
 app.include_router(elevenlabs_router, tags=["providers", "elevenlabs"])
 app.include_router(azure_router, tags=["providers", "azure"])
 
+# Mount static files
+STATIC_DIR = Path(__file__).parent.parent / "static"
+if STATIC_DIR.exists():
+    app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+    logger.info(f"Static files mounted from {STATIC_DIR}")
+else:
+    logger.warning(f"Static directory not found: {STATIC_DIR}")
+
 
 class CreateSessionRequest(BaseModel):
     """Request model for creating a negotiation session."""
@@ -104,6 +114,15 @@ class ControlMessage(BaseModel):
 # Global managers
 session_manager = SessionManager()
 webrtc_manager = WebRTCManager()
+
+
+@app.get("/")
+async def root():
+    """Serve the main UI."""
+    index_path = STATIC_DIR / "index.html"
+    if index_path.exists():
+        return FileResponse(str(index_path))
+    return {"message": "Samson Negotiation Service", "docs": "/docs"}
 
 
 @app.get("/health")

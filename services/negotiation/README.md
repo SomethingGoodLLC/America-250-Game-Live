@@ -789,19 +789,55 @@ make run
 
 **🚀 Quickest way to test your AI avatar today!**
 
-```bash
-# Start the test harness server (automated)
-cd services/negotiation
-./scripts/start.sh
+#### 🎭 **3D Avatar UI with Real-Time Lip Sync** (New!)
 
-# Alternative: Manual startup
-uv run uvicorn main:app --host 127.0.0.1 --port 8000 --reload
+Access the modern 3D avatar interface at `http://localhost:8000/` (root path) featuring:
 
-# Alternative: Use the Makefile
-make run
-```
+**Core Features:**
+- **Three.js 3D Avatar** - Real-time animated 3D head with lip-sync
+- **AudioWorklet Playback** - Ultra-low latency PCM audio (40-60ms target buffer)
+- **Multiple TTS Providers** - Cartesia (low-latency), Azure (enterprise), ElevenLabs (high-quality)
+- **Dynamic Voice Loading** - Automatically fetches available voices for each provider
+- **Animation Modes** - Phonemes, Visemes (SAPI 0-21), or ARKit Blendshapes (55 weights)
+- **Ready Player Me Compatible** - Load custom avatars (`.glb` format)
 
-Open http://localhost:8000 in your browser for an instant test environment featuring:
+**Real-Time Monitoring:**
+- **Latency HUD** - Live display of audio latency, buffer depth, viseme count
+- **Event Log** - Timestamped connection events and synthesis progress
+- **Backpressure Management** - Automatically drops old viseme events if buffer >120ms
+- **Connection Status** - Visual indicators for WebSocket connection state
+
+**How to Use:**
+1. Start the service: `./scripts/start.sh` or `make run`
+2. Open `http://localhost:8000/` in your browser
+3. Select TTS provider (Cartesia recommended for low latency)
+4. Click "Refresh" to load available voices
+5. Click "Connect WebSocket" to establish connection
+6. Enter text or use quick phrases
+7. Click "Speak" to generate speech with lip-sync animation
+
+**Technical Details:**
+- PCM16LE audio at 24kHz via AudioWorklet (no Web Audio API latency)
+- Phoneme-to-viseme mapping with smooth interpolation
+- Ring buffer with backpressure (drops timing events, never audio)
+- Three.js-based 3D rendering with morph target support
+- Compatible with Ready Player Me avatars (morph target blendshapes)
+
+**Files:**
+- `/static/index.html` - Main UI layout
+- `/static/app.js` - WebSocket communication and state management
+- `/static/pcm-worklet.js` - AudioWorklet processor for low-latency playback
+- `/static/avatar.js` - Three.js 3D avatar rendering
+- `/static/lipsync.js` - Phoneme/viseme-based lip sync engine
+- `/static/styles.css` - Modern UI styling
+
+---
+
+#### 🎥 **Full Negotiation System** (Complete Demo)
+
+For the full diplomatic negotiation demo with video avatars, session management, and intent detection, access the legacy test harness at `http://localhost:8000/web/test_client.html`:
+
+**Features:**
 
 #### **🎭 Live Negotiation System**
 - **Real-time WebSocket** communication for instant feedback
