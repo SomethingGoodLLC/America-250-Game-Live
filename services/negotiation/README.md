@@ -9,6 +9,11 @@ A production-ready FastAPI service for diplomatic negotiations with WebRTC A/V s
   - [🚀 Instant Setup (30 seconds)](#-instant-setup-30-seconds)
   - [First Test (2 minutes)](#first-test-2-minutes)
   - [Turn-Key Browser Test Harness](#turn-key-browser-test-harness)
+- [TTS Streaming](#tts-streaming)
+  - [Overview](#tts-overview)
+  - [Supported Providers](#tts-providers)
+  - [Usage Examples](#tts-usage-examples)
+  - [Phoneme & Lip-Sync](#phoneme-lipsync)
 - [Configuration](#configuration)
   - [Environment Setup](#environment-setup)
   - [Advanced Configuration](#advanced-configuration)
@@ -46,6 +51,8 @@ A production-ready FastAPI service for diplomatic negotiations with WebRTC A/V s
 ### Audio/Video Processing
 - **STT Interfaces** - Pluggable Speech-to-Text (faster-whisper, cloud providers)
 - **TTS Interfaces** - Pluggable Text-to-Speech (Coqui XTTS, cloud providers)
+- **TTS Streaming** - Real-time TTS with phoneme/viseme/blendshape support (Cartesia, Azure, ElevenLabs)
+- **Lip-Sync Support** - ARPAbet/OVR phoneme mapping for accurate facial animation
 - **Avatar Support** - Video avatar generation with lipsync capabilities
 - **Listener Adapters** - Real-time audio processing with local STT and cloud realtime APIs
 
@@ -220,6 +227,449 @@ video = avatar.speak(
 ```
 
 **Note**: SadTalker requires significant processing time (30-60 seconds per video on M1 Macs). For real-time applications, pre-generate videos or use the placeholder mode.
+
+---
+
+## TTS Streaming
+
+### Overview {#tts-overview}
+
+The negotiation service includes a **unified TTS streaming API** that supports real-time text-to-speech with **phoneme timestamps**, **viseme events**, and **ARKit blendshapes** for accurate lip-sync and facial animation.
+
+**Key Features:**
+- 🎤 **Real-time streaming** - Low-latency audio generation (200-800ms)
+- 📊 **Normalized events** - Unified format across all providers
+- 👄 **Lip-sync metadata** - Phonemes, visemes, and blendshapes
+- 🔌 **Pluggable providers** - Easy to add new TTS services
+- 🎭 **Avatar integration** - Direct support for facial animation systems
+
+**Architecture:**
+```
+Client → WebSocket/REST → TTSStreamer (Cartesia/Azure/ElevenLabs)
+                            ↓
+                    StreamEvent (normalized)
+                      ↓     ↓      ↓
+                   Audio  Phonemes  Visemes/Blendshapes
+```
+
+### Supported Providers {#tts-providers}
+
+#### 1. **Cartesia TTS** (Recommended for Low-Latency)
+
+**Best for:** Real-time applications, gaming, interactive avatars
+
+**Features:**
+- ⚡ Ultra-low latency (~200ms first-byte)
+- 📞 Native WebSocket streaming
+- 🎵 High-quality 24kHz audio
+- 📝 Built-in phoneme timestamps
+
+**Setup:**
+```bash
+# Get API key from https://cartesia.ai
+export CARTESIA_API_KEY="cart_..."
+```
+
+**Voice IDs:** Available from Cartesia dashboard
+
+**Configuration:**
+```bash
+# .env
+CARTESIA_API_KEY=cart_your_key_here
+CARTESIA_MODEL=sonic-english
+```
+
+#### 2. **Azure Cognitive Services Speech**
+
+**Best for:** Enterprise applications, multilingual support, ARKit blendshapes
+
+**Features:**
+- 🌍 75+ languages, 400+ voices
+- 🎭 Native viseme events (0-21 SAPI IDs)
+- 💼 Enterprise-grade reliability
+- 📐 ARKit blendshape support (preview)
+- 🎚️ SSML control (pitch, rate, emphasis)
+
+**Setup:**
+```bash
+# Get credentials from Azure Portal
+export AZURE_SPEECH_KEY="your_key"
+export AZURE_SPEECH_REGION="eastus"
+```
+
+**Voice IDs:** Format: `{locale}-{name}Neural`
+- `en-US-JennyNeural` - Female, conversational
+- `en-US-GuyNeural` - Male, professional
+- `en-GB-SoniaNeural` - British female
+- Full list: https://learn.microsoft.com/en-us/azure/cognitive-services/speech-service/language-support
+
+**Configuration:**
+```bash
+# .env
+AZURE_SPEECH_KEY=your_azure_key
+AZURE_SPEECH_REGION=eastus
+# AZURE_SPEECH_ENDPOINT=  # Optional custom endpoint
+```
+
+**Python SDK Required:**
+```bash
+pip install azure-cognitiveservices-speech
+```
+
+#### 3. **ElevenLabs**
+
+**Best for:** Voice cloning, emotional expression, character voices
+
+**Features:**
+- 🎭 Voice cloning from audio samples
+- 🎨 Emotional range and expression control
+- 🔊 Ultra-realistic voice quality
+- 🌐 Multiple languages
+- 📊 Word-level alignment (converted to phonemes)
+
+**Setup:**
+```bash
+# Get API key from https://elevenlabs.io
+export ELEVENLABS_API_KEY="el_..."
+```
+
+**Voice IDs:** From ElevenLabs Voice Library or custom clones
+- Pre-made voices available at https://elevenlabs.io/voice-library
+- Custom voice cloning with Pro plan
+
+**Configuration:**
+```bash
+# .env
+ELEVENLABS_API_KEY=el_your_key_here
+ELEVENLABS_MODEL=eleven_turbo_v2
+```
+
+### Usage Examples {#tts-usage-examples}
+
+#### REST API: Full Synthesis (`POST /speak`)
+
+Diagnostic endpoint that synthesizes complete audio and returns a WAV file.
+
+```bash
+# Test with Cartesia
+curl -X POST http://localhost:8000/speak \
+  -H "Content-Type: application/json" \
+  -d '{
+    "provider": "cartesia",
+    "voice_id": "a0e99841-...",
+    "text": "Welcome to the diplomatic summit.",
+    "sample_rate": 24000
+  }' \
+  --output speech.wav
+
+# Test with Azure
+curl -X POST http://localhost:8000/speak \
+  -H "Content-Type: application/json" \
+  -d '{
+    "provider": "azure",
+    "voice_id": "en-US-JennyNeural",
+    "text": "We propose a trade agreement.",
+    "sample_rate": 24000
+  }' \
+  --output speech.wav
+
+# Test with ElevenLabs
+curl -X POST http://localhost:8000/speak \
+  -H "Content-Type: application/json" \
+  -d '{
+    "provider": "elevenlabs",
+    "voice_id": "21m00Tcm4TlvDq8ikWAM",
+    "text": "Let us begin negotiations.",
+    "sample_rate": 24000
+  }' \
+  --output speech.wav
+```
+
+#### WebSocket API: Real-Time Streaming (`WS /ws/stream`)
+
+For real-time applications with live audio and timing metadata.
+
+**Protocol:**
+1. Client connects to `ws://localhost:8000/ws/stream`
+2. Client sends `StreamRequest` with provider and voice config
+3. Server sends `config_ack` acknowledgment
+4. Client sends `TextChunk` messages (can be incremental)
+5. Server streams `StreamEvent` messages (audio, phonemes, visemes)
+6. Client sends final `TextChunk` with `is_final=true`
+7. Server sends `done` event and closes
+
+**JavaScript Example:**
+
+```javascript
+const ws = new WebSocket('ws://localhost:8000/ws/stream');
+
+// 1. Configure streaming
+ws.onopen = () => {
+  ws.send(JSON.stringify({
+    provider: 'cartesia',
+    voice_id: 'a0e99841-...',
+    mode: 'full',
+    sample_rate: 24000
+  }));
+};
+
+// 2. Handle incoming events
+ws.onmessage = (event) => {
+  const data = JSON.parse(event.data);
+  
+  if (data.type === 'config_ack') {
+    console.log('Streaming configured:', data.message);
+    
+    // Send text to synthesize
+    ws.send(JSON.stringify({
+      text: 'Welcome to the negotiation.',
+      is_final: false
+    }));
+    
+    ws.send(JSON.stringify({
+      text: 'Let us discuss terms.',
+      is_final: true
+    }));
+  }
+  
+  else if (data.kind === 'audio') {
+    // Decode base64 PCM audio
+    const audioData = atob(data.pcm16_b64);
+    playAudio(audioData, data.sample_rate);
+  }
+  
+  else if (data.kind === 'phonemes') {
+    // Update lip-sync animation
+    data.phonemes.forEach(p => {
+      scheduleLipSync(p.phoneme, p.start_ms, p.end_ms);
+    });
+  }
+  
+  else if (data.kind === 'viseme') {
+    // Azure viseme event
+    const visemeId = data.viseme.viseme_id;
+    const offsetMs = data.viseme.audio_offset_ms;
+    scheduleViseme(visemeId, offsetMs);
+  }
+  
+  else if (data.kind === 'blendshapes') {
+    // ARKit blendshapes (Azure preview)
+    data.blendshapes.forEach(frame => {
+      applyBlendshapes(frame.weights, frame.t_ms);
+    });
+  }
+  
+  else if (data.kind === 'done') {
+    console.log('Synthesis complete');
+    ws.close();
+  }
+  
+  else if (data.kind === 'error') {
+    console.error('TTS error:', data.error);
+  }
+};
+```
+
+**Python Example:**
+
+```python
+import asyncio
+import websockets
+import json
+import base64
+
+async def stream_tts():
+    uri = "ws://localhost:8000/ws/stream"
+    
+    async with websockets.connect(uri) as ws:
+        # Configure
+        await ws.send(json.dumps({
+            "provider": "azure",
+            "voice_id": "en-US-JennyNeural",
+            "mode": "full",
+            "sample_rate": 24000
+        }))
+        
+        # Wait for acknowledgment
+        ack = await ws.recv()
+        print(f"Config ack: {json.loads(ack)}")
+        
+        # Send text
+        await ws.send(json.dumps({
+            "text": "Hello, welcome to the summit.",
+            "is_final": True
+        }))
+        
+        # Receive events
+        while True:
+            msg = await ws.recv()
+            event = json.loads(msg)
+            
+            if event["kind"] == "audio":
+                audio_bytes = base64.b64decode(event["pcm16_b64"])
+                print(f"Received {len(audio_bytes)} bytes of audio")
+                # Play or save audio
+            
+            elif event["kind"] == "viseme":
+                print(f"Viseme {event['viseme']['viseme_id']} at {event['viseme']['audio_offset_ms']}ms")
+            
+            elif event["kind"] == "phonemes":
+                print(f"Received {len(event['phonemes'])} phonemes")
+                for p in event["phonemes"]:
+                    print(f"  {p['phoneme']}: {p['start_ms']}-{p['end_ms']}ms")
+            
+            elif event["kind"] == "done":
+                print("Synthesis complete")
+                break
+            
+            elif event["kind"] == "error":
+                print(f"Error: {event['error']}")
+                break
+
+asyncio.run(stream_tts())
+```
+
+### Phoneme & Lip-Sync {#phoneme-lipsync}
+
+#### ARPAbet Phonemes
+
+All providers output phonemes in **ARPAbet** format, the standard phonetic alphabet used by most TTS systems.
+
+**Examples:**
+- `HH EH1 L OW0` = "hello"
+- `W ER1 L D` = "world"
+- `AA1 F ER0` = "offer"
+
+**Stress markers:**
+- `0` = No stress
+- `1` = Primary stress
+- `2` = Secondary stress
+
+#### OVR Lip-Sync Visemes
+
+The service includes mapping from ARPAbet to **Oculus OVR Lip Sync** viseme IDs (0-14):
+
+| Viseme | ID | Example Phonemes | Mouth Shape |
+|--------|-----|------------------|-------------|
+| `SIL` | 0 | Silence | Closed |
+| `PP` | 1 | P, B, M | Lips together |
+| `FF` | 2 | F, V | Upper teeth on lower lip |
+| `TH` | 3 | TH, DH | Tongue between teeth |
+| `DD` | 4 | T, D | Tongue at roof |
+| `KK` | 5 | K, G | Back of tongue up |
+| `CH` | 6 | CH, J, SH, ZH | Lips forward |
+| `SS` | 7 | S, Z | Teeth together |
+| `NN` | 8 | N, L | Tongue at roof, relaxed |
+| `RR` | 9 | R | Lips slightly rounded |
+| `AA` | 10 | AA, AE, AH | Open mouth (ah) |
+| `E` | 11 | EH, EY | Slight smile (eh) |
+| `I` | 12 | IH, IY | Wide smile (ee) |
+| `O` | 13 | OW, AO | Rounded lips (oh) |
+| `U` | 14 | UW, UH | Tight rounded (oo) |
+
+**Usage:**
+
+```python
+from app.mapping import arpabet_to_ovr, azure_to_ovr
+
+# Convert ARPAbet to OVR
+ovr_id = arpabet_to_ovr("AA1")  # → 10 (open mouth)
+ovr_id = arpabet_to_ovr("P")     # → 1 (lips together)
+
+# Convert Azure viseme to OVR
+ovr_id = azure_to_ovr(21)  # Azure P_B_M → OVR PP (1)
+```
+
+#### Azure Visemes
+
+Azure provides 22 viseme IDs (0-21) following SAPI conventions. These can be converted to OVR:
+
+```python
+from app.mapping import azure_to_ovr
+
+# Azure → OVR conversion
+ovr_id = azure_to_ovr(21)  # P_B_M → PP
+ovr_id = azure_to_ovr(18)  # F_V → FF
+ovr_id = azure_to_ovr(15)  # S_Z → SS
+```
+
+#### Phoneme-to-Viseme Pipeline
+
+```python
+# Example: Cartesia → OVR pipeline
+from tts.streaming import CartesiaTTSStreamer
+from app.mapping import arpabet_to_ovr
+
+streamer = CartesiaTTSStreamer(api_key="...")
+await streamer.start(voice_id="...")
+
+async for event in streamer.aiter_events():
+    if event.kind == "phonemes":
+        for p in event.phonemes:
+            # Convert to OVR viseme
+            ovr_viseme = arpabet_to_ovr(p.phoneme)
+            
+            # Apply to avatar at specified time
+            schedule_viseme(ovr_viseme, p.start_ms, p.end_ms)
+```
+
+#### Custom Phoneme Dictionary
+
+For improved accuracy, load the CMU Pronouncing Dictionary:
+
+```python
+from app.phonemizer import load_cmu_dict, text_to_phonemes
+
+# Load full dictionary (optional)
+load_cmu_dict()
+
+# Convert text to phonemes
+phonemes = text_to_phonemes("diplomatic negotiations")
+print(phonemes)
+# ['D', 'IH0', 'P', 'L', 'OW0', 'M', 'AE1', 'T', 'IH0', 'K', 'SP', ...]
+```
+
+#### Unity/Unreal Integration
+
+**Unity (with OVR Lip Sync):**
+```csharp
+using Oculus.Voice.LipSync;
+
+public class TTSLipSync : MonoBehaviour
+{
+    private OVRLipSync lipSync;
+    
+    void ApplyViseme(int visemeId, float timeMs)
+    {
+        // Map to OVR viseme
+        var viseme = (Viseme)visemeId;
+        lipSync.SetVisemeBlend(viseme, 1.0f);
+        
+        // Schedule blend-out
+        Invoke(() => lipSync.SetVisemeBlend(viseme, 0.0f), 
+               timeMs / 1000f);
+    }
+}
+```
+
+**Unreal (ARKit Live Link):**
+```cpp
+// Apply blendshapes from Azure
+void ApplyBlendshapes(const TArray<float>& Weights, float TimeMs)
+{
+    check(Weights.Num() == 55); // ARKit blendshape count
+    
+    FLiveLinkSubjectFrame Frame;
+    Frame.BlendShapeWeights = Weights;
+    
+    LiveLinkClient->PushSubjectFrame(
+        FName("TTS_Face"),
+        Frame
+    );
+}
+```
+
+---
 
 ### 🔄 Alternative: If ElevenLabs Doesn't Work
 

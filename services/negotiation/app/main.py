@@ -32,6 +32,8 @@ from core.logging_config import setup_logging
 from core.yaml_utils import yaml_helper
 from core.settings import settings
 from core.yaml_middleware import YAMLMiddleware, YAMLResponse
+from tts.streaming import CartesiaTTSStreamer, AzureTTSStreamer, ElevenLabsTTSStreamer
+from tts.streaming.base import TTSStreamer
 
 
 # Configure logging
@@ -108,6 +110,47 @@ async def healthz():
     return {"status": "ok", "service": "negotiation"}
 
 
+def _create_tts_streamer(provider: str) -> TTSStreamer:
+    """Factory function to create TTS streamer based on provider.
+    
+    Args:
+        provider: Provider name ("cartesia", "azure", "elevenlabs")
+    
+    Returns:
+        Configured TTSStreamer instance
+    
+    Raises:
+        ValueError: If provider is invalid or not configured
+    """
+    if provider == "cartesia":
+        if not settings.cartesia_api_key:
+            raise ValueError("CARTESIA_API_KEY not configured")
+        return CartesiaTTSStreamer(
+            api_key=settings.cartesia_api_key,
+            model_id=settings.cartesia_model
+        )
+    
+    elif provider == "azure":
+        if not settings.azure_speech_key or not settings.azure_speech_region:
+            raise ValueError("AZURE_SPEECH_KEY and AZURE_SPEECH_REGION required")
+        return AzureTTSStreamer(
+            subscription_key=settings.azure_speech_key,
+            region=settings.azure_speech_region,
+            endpoint=settings.azure_speech_endpoint
+        )
+    
+    elif provider == "elevenlabs":
+        if not settings.elevenlabs_api_key:
+            raise ValueError("ELEVENLABS_API_KEY not configured")
+        return ElevenLabsTTSStreamer(
+            api_key=settings.elevenlabs_api_key,
+            model_id=settings.elevenlabs_model
+        )
+    
+    else:
+        raise ValueError(f"Unknown TTS provider: {provider}")
+
+
 @app.post("/speak")
 async def speak(request: SpeakRequest):
     """Diagnostic endpoint: synthesize full utterance via selected provider.
@@ -117,6 +160,8 @@ async def speak(request: SpeakRequest):
     
     For production streaming, use the /ws/stream WebSocket endpoint.
     """
+    streamer = None
+    
     try:
         logger.info(
             "Speak request received",
@@ -125,17 +170,43 @@ async def speak(request: SpeakRequest):
             text_length=len(request.text)
         )
         
-        # TODO: Implement actual TTS provider integration
-        # For now, return a mock response
+        # Create TTS streamer
+        streamer = _create_tts_streamer(request.provider)
         
-        # Mock: Generate silent PCM16LE audio (1 second at 24kHz)
-        sample_rate = request.sample_rate
-        duration_sec = 1.0
-        num_samples = int(sample_rate * duration_sec)
+        # Start streaming
+        await streamer.start(
+            voice_id=request.voice_id,
+            sample_rate=request.sample_rate
+        )
         
-        # Silent audio: array of zeros as int16
-        import numpy as np
-        audio_data = np.zeros(num_samples, dtype=np.int16)
+        # Collect all audio chunks
+        audio_chunks = []
+        
+        # Send text and consume events
+        send_task = asyncio.create_task(
+            streamer.send_text(request.text, final=True)
+        )
+        
+        async for event in streamer.aiter_events():
+            if event.kind == "audio" and event.pcm16_b64:
+                # Decode base64 audio
+                audio_bytes = base64.b64decode(event.pcm16_b64)
+                audio_chunks.append(audio_bytes)
+            
+            elif event.kind == "error":
+                raise Exception(event.error)
+            
+            elif event.kind == "done":
+                break
+        
+        # Wait for send to complete
+        await send_task
+        
+        # Combine audio chunks
+        if not audio_chunks:
+            raise Exception("No audio received from provider")
+        
+        combined_audio = b''.join(audio_chunks)
         
         # Convert to WAV format
         import io
@@ -145,12 +216,16 @@ async def speak(request: SpeakRequest):
         with wave.open(wav_buffer, 'wb') as wav_file:
             wav_file.setnchannels(1)  # Mono
             wav_file.setsampwidth(2)  # 16-bit
-            wav_file.setframerate(sample_rate)
-            wav_file.writeframes(audio_data.tobytes())
+            wav_file.setframerate(request.sample_rate)
+            wav_file.writeframes(combined_audio)
         
         wav_buffer.seek(0)
         
-        logger.info("Speak request completed", provider=request.provider)
+        logger.info(
+            "Speak request completed",
+            provider=request.provider,
+            audio_size=len(combined_audio)
+        )
         
         return StreamingResponse(
             wav_buffer,
@@ -160,9 +235,21 @@ async def speak(request: SpeakRequest):
             }
         )
         
+    except ValueError as e:
+        logger.error("Configuration error", error=str(e), provider=request.provider)
+        raise HTTPException(status_code=400, detail=str(e))
+    
     except Exception as e:
         logger.error("Speak request failed", error=str(e), provider=request.provider)
         raise HTTPException(status_code=500, detail=f"TTS synthesis failed: {str(e)}")
+    
+    finally:
+        # Clean up streamer
+        if streamer:
+            try:
+                await streamer.stop()
+            except:
+                pass
 
 
 @app.websocket("/ws/stream")
@@ -181,9 +268,11 @@ async def stream_websocket(websocket: WebSocket):
     """
     await websocket.accept()
     
+    streamer: Optional[TTSStreamer] = None
     provider: Optional[str] = None
     voice_id: Optional[str] = None
     mode: Optional[str] = None
+    event_task: Optional[asyncio.Task] = None
     
     try:
         # Receive initial configuration
@@ -202,6 +291,13 @@ async def stream_websocket(websocket: WebSocket):
                 mode=mode
             )
             
+            # Create and start TTS streamer
+            streamer = _create_tts_streamer(provider)
+            await streamer.start(
+                voice_id=voice_id,
+                sample_rate=config.sample_rate
+            )
+            
             # Send acknowledgment
             await websocket.send_json({
                 "type": "config_ack",
@@ -214,7 +310,27 @@ async def stream_websocket(websocket: WebSocket):
             await websocket.close(code=4000)
             return
         
-        # Main streaming loop
+        except ValueError as e:
+            error_event = StreamEvent(kind="error", error=f"Configuration error: {str(e)}")
+            await websocket.send_json(error_event.model_dump())
+            await websocket.close(code=4000)
+            return
+        
+        # Start event forwarding task
+        async def forward_events():
+            """Forward events from TTS streamer to WebSocket."""
+            try:
+                async for event in streamer.aiter_events():
+                    await websocket.send_json(event.model_dump())
+                    
+                    if event.kind in ("done", "error"):
+                        break
+            except Exception as e:
+                logger.error("Error forwarding events", error=str(e))
+        
+        event_task = asyncio.create_task(forward_events())
+        
+        # Main text receiving loop
         while True:
             # Receive text chunks from client
             chunk_data = await websocket.receive_json()
@@ -229,44 +345,35 @@ async def stream_websocket(websocket: WebSocket):
                     provider=provider
                 )
                 
-                # TODO: Implement actual TTS provider streaming
-                # For now, send mock events
+                # Send text to TTS streamer
+                await streamer.send_text(chunk.text, final=chunk.is_final)
                 
-                # Mock: Send audio event
-                mock_audio = base64.b64encode(b'\x00' * 1000).decode('utf-8')
-                audio_event = StreamEvent(
-                    kind="audio",
-                    pcm16_b64=mock_audio,
-                    sample_rate=24000
-                )
-                await websocket.send_json(audio_event.model_dump())
-                
-                # Mock: Send viseme event
-                viseme_event = StreamEvent(
-                    kind="viseme",
-                    viseme=VisemeEvent(viseme_id=8, audio_offset_ms=125.5)
-                )
-                await websocket.send_json(viseme_event.model_dump())
-                
-                # If this is the final chunk, send done event
+                # If this is the final chunk, wait for events to complete
                 if chunk.is_final:
-                    done_event = StreamEvent(kind="done")
-                    await websocket.send_json(done_event.model_dump())
-                    
                     logger.info(
-                        "Stream completed",
+                        "Final chunk sent, waiting for completion",
                         provider=provider,
                         voice_id=voice_id
                     )
+                    
+                    # Wait for event task to complete (done/error received)
+                    await event_task
                     break
                     
             except ValidationError as e:
                 error_event = StreamEvent(kind="error", error=f"Invalid text chunk: {str(e)}")
                 await websocket.send_json(error_event.model_dump())
                 continue
+            
+            except Exception as e:
+                logger.error("Error processing text chunk", error=str(e))
+                error_event = StreamEvent(kind="error", error=str(e))
+                await websocket.send_json(error_event.model_dump())
+                break
         
     except WebSocketDisconnect:
         logger.info("Stream WebSocket disconnected", provider=provider)
+    
     except Exception as e:
         logger.error("Stream WebSocket error", error=str(e), provider=provider)
         try:
@@ -274,7 +381,26 @@ async def stream_websocket(websocket: WebSocket):
             await websocket.send_json(error_event.model_dump())
         except:
             pass
-        await websocket.close(code=4000)
+    
+    finally:
+        # Clean up
+        if event_task and not event_task.done():
+            event_task.cancel()
+            try:
+                await event_task
+            except asyncio.CancelledError:
+                pass
+        
+        if streamer:
+            try:
+                await streamer.stop()
+            except:
+                pass
+        
+        try:
+            await websocket.close()
+        except:
+            pass
 
 
 @app.post("/v1/session", response_model=SessionResponse)

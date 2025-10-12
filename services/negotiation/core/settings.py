@@ -50,6 +50,17 @@ class Settings(BaseSettings):
     xtts_model_path: str = "models/xtts"
     xtts_device: str = "cpu"
     
+    # TTS Streaming Providers
+    cartesia_api_key: Optional[str] = None
+    cartesia_model: str = "sonic-english"
+    
+    azure_speech_key: Optional[str] = None
+    azure_speech_region: Optional[str] = None
+    azure_speech_endpoint: Optional[str] = None
+    
+    elevenlabs_api_key: Optional[str] = None
+    elevenlabs_model: str = "eleven_turbo_v2"
+    
     # Content Safety
     content_safety_enabled: bool = True
     content_safety_provider: str = "rule_based"
