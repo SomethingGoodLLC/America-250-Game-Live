@@ -415,3 +415,427 @@ class LipSyncManager {
 // Global instance
 window.lipSyncManager = new LipSyncManager();
 
+
+/**
+ * LipSyncEngine
+ * 
+ * Advanced lip-sync scheduler with ADSR envelope and multi-format support.
+ * Handles phonemes, visemes, and blendshape frames with precise timing.
+ */
+class LipSyncEngine {
+    /**
+     * @param {Function} getPlayheadMs - Returns audio playhead in milliseconds
+     * @param {Function} setMorphs - Function to set avatar morph weights (dict with 0..1 values)
+     * @param {string} mode - 'viseme' | 'blendshape' | 'phoneme'
+     */
+    constructor(getPlayheadMs, setMorphs, mode = 'viseme') {
+        this.getPlayheadMs = getPlayheadMs;
+        this.setMorphs = setMorphs;
+        this.mode = mode;
+        
+        // Event queues
+        this.visemeEvents = [];      // [{visemeId, audioOffsetMs, duration}]
+        this.blendshapeFrames = [];  // [{tMs, weights[55]}]
+        
+        // Current state
+        this.currentWeights = {};
+        this.targetWeights = {};
+        this.activeEvents = [];      // Events currently in their envelope
+        
+        // ADSR envelope parameters (ms)
+        this.attackTime = 15;        // 10-20ms attack
+        this.releaseTime = 40;       // 30-50ms release
+        this.lookAheadMs = 30;       // Look ahead window
+        
+        // Silence gate
+        this.silenceThreshold = 0.01;
+        this.silenceTimeMs = 0;
+        this.maxSilenceMs = 100;
+        
+        // Animation frame ID
+        this.tickHandle = null;
+        this.isRunning = false;
+        
+        // Import mapping functions dynamically
+        this.mappingReady = false;
+        this.loadMapping();
+    }
+    
+    /**
+     * Load mapping functions from mapping.js
+     */
+    async loadMapping() {
+        try {
+            const module = await import('./mapping.js');
+            this.arpabetToOVR = module.arpabetToOVR;
+            this.getVisemeBlendshapes = module.getVisemeBlendshapes;
+            this.OVRViseme = module.OVRViseme;
+            this.mappingReady = true;
+        } catch (error) {
+            console.warn('Failed to load mapping.js, using fallback:', error);
+            // Fallback minimal mapping
+            this.arpabetToOVR = (phoneme) => 0;
+            this.getVisemeBlendshapes = (visemeId) => ({ jawOpen: 0 });
+            this.OVRViseme = { SIL: 0 };
+            this.mappingReady = true;
+        }
+    }
+    
+    /**
+     * Ingest phonemes and map to visemes
+     * @param {Array} phonemes - Array of {phoneme, start_ms, end_ms} or {phoneme, audioOffsetMs, duration}
+     */
+    ingestPhonemes(phonemes) {
+        if (!Array.isArray(phonemes) || !this.mappingReady) {
+            return;
+        }
+        
+        phonemes.forEach(p => {
+            // Map phoneme to viseme ID
+            const visemeId = this.arpabetToOVR(p.phoneme || p.phoneme_id || '');
+            
+            // Normalize the event structure
+            const audioOffsetMs = p.audioOffsetMs ?? p.start_ms ?? p.audio_offset_ms ?? 0;
+            const duration = p.duration ?? (p.end_ms ? p.end_ms - p.start_ms : 100);
+            
+            this.visemeEvents.push({
+                visemeId,
+                audioOffsetMs,
+                duration
+            });
+        });
+        
+        // Sort by time
+        this.visemeEvents.sort((a, b) => a.audioOffsetMs - b.audioOffsetMs);
+    }
+    
+    /**
+     * Ingest single viseme event
+     * @param {Object} event - {visemeId, audioOffsetMs, duration}
+     */
+    ingestVisemeEvent(event) {
+        if (!event || event.visemeId === undefined) {
+            return;
+        }
+        
+        const audioOffsetMs = event.audioOffsetMs ?? event.audio_offset_ms ?? 0;
+        const duration = event.duration ?? event.duration_ms ?? 100;
+        
+        this.visemeEvents.push({
+            visemeId: event.visemeId ?? event.viseme_id,
+            audioOffsetMs,
+            duration
+        });
+        
+        // Keep sorted
+        this.visemeEvents.sort((a, b) => a.audioOffsetMs - b.audioOffsetMs);
+    }
+    
+    /**
+     * Ingest blendshape frames
+     * @param {Array} frames - Array of {tMs, weights[55]}
+     */
+    ingestBlendshapeFrames(frames) {
+        if (!Array.isArray(frames)) {
+            return;
+        }
+        
+        frames.forEach(frame => {
+            this.blendshapeFrames.push({
+                tMs: frame.tMs ?? frame.t_ms ?? frame.timestamp_ms ?? 0,
+                weights: frame.weights || []
+            });
+        });
+        
+        // Sort by time
+        this.blendshapeFrames.sort((a, b) => a.tMs - b.tMs);
+    }
+    
+    /**
+     * Main tick function - call this every frame
+     */
+    tick() {
+        if (!this.mappingReady) {
+            return;
+        }
+        
+        const currentMs = this.getPlayheadMs();
+        const lookAheadTarget = currentMs + this.lookAheadMs;
+        
+        // Process events based on mode
+        if (this.mode === 'blendshape') {
+            this.processBlendshapeMode(currentMs);
+        } else {
+            this.processVisemeMode(currentMs, lookAheadTarget);
+        }
+        
+        // Apply silence gate
+        this.applySilenceGate(currentMs);
+        
+        // Apply weights to avatar
+        if (this.setMorphs && Object.keys(this.currentWeights).length > 0) {
+            this.setMorphs(this.currentWeights);
+        }
+    }
+    
+    /**
+     * Process viseme/phoneme mode with ADSR envelope
+     */
+    processVisemeMode(currentMs, lookAheadTarget) {
+        // Activate new events in look-ahead window
+        while (this.visemeEvents.length > 0 && this.visemeEvents[0].audioOffsetMs <= lookAheadTarget) {
+            const event = this.visemeEvents.shift();
+            
+            // Add to active events with envelope state
+            this.activeEvents.push({
+                ...event,
+                startMs: event.audioOffsetMs,
+                endMs: event.audioOffsetMs + event.duration,
+                releaseStartMs: event.audioOffsetMs + event.duration,
+                releaseEndMs: event.audioOffsetMs + event.duration + this.releaseTime,
+                blendshapes: this.getVisemeBlendshapes(event.visemeId)
+            });
+        }
+        
+        // Update weights from active events with ADSR envelope
+        this.targetWeights = {};
+        
+        this.activeEvents = this.activeEvents.filter(event => {
+            if (currentMs > event.releaseEndMs) {
+                // Event finished
+                return false;
+            }
+            
+            // Calculate envelope gain
+            let gain = 0;
+            
+            if (currentMs < event.startMs) {
+                // Pre-attack (shouldn't happen, but handle gracefully)
+                gain = 0;
+            } else if (currentMs < event.startMs + this.attackTime) {
+                // Attack phase
+                const progress = (currentMs - event.startMs) / this.attackTime;
+                gain = this.easeInOut(progress);
+            } else if (currentMs < event.releaseStartMs) {
+                // Sustain phase
+                gain = 1.0;
+            } else {
+                // Release phase
+                const progress = (currentMs - event.releaseStartMs) / this.releaseTime;
+                gain = 1.0 - this.easeInOut(progress);
+            }
+            
+            // Apply gain to blendshape weights
+            for (const [shapeName, weight] of Object.entries(event.blendshapes)) {
+                const scaledWeight = weight * gain;
+                this.targetWeights[shapeName] = Math.max(
+                    this.targetWeights[shapeName] || 0,
+                    scaledWeight
+                );
+            }
+            
+            return true; // Keep event active
+        });
+        
+        // Smooth transition to target weights
+        this.smoothWeights();
+    }
+    
+    /**
+     * Process blendshape mode (direct frame application)
+     */
+    processBlendshapeMode(currentMs) {
+        // Apply all frames up to current time
+        while (this.blendshapeFrames.length > 0 && this.blendshapeFrames[0].tMs <= currentMs) {
+            const frame = this.blendshapeFrames.shift();
+            
+            // Map 55 ARKit blendshapes to named weights
+            const arkitNames = [
+                'browDownLeft', 'browDownRight', 'browInnerUp',
+                'browOuterUpLeft', 'browOuterUpRight',
+                'cheekPuff', 'cheekSquintLeft', 'cheekSquintRight',
+                'eyeBlinkLeft', 'eyeBlinkRight',
+                'eyeLookDownLeft', 'eyeLookDownRight',
+                'eyeLookInLeft', 'eyeLookInRight',
+                'eyeLookOutLeft', 'eyeLookOutRight',
+                'eyeLookUpLeft', 'eyeLookUpRight',
+                'eyeSquintLeft', 'eyeSquintRight',
+                'eyeWideLeft', 'eyeWideRight',
+                'jawForward', 'jawLeft', 'jawOpen', 'jawRight',
+                'mouthClose', 'mouthDimpleLeft', 'mouthDimpleRight',
+                'mouthFrownLeft', 'mouthFrownRight',
+                'mouthFunnel', 'mouthLeft',
+                'mouthLowerDownLeft', 'mouthLowerDownRight',
+                'mouthPressLeft', 'mouthPressRight',
+                'mouthPucker', 'mouthRight',
+                'mouthRollLower', 'mouthRollUpper',
+                'mouthShrugLower', 'mouthShrugUpper',
+                'mouthSmileLeft', 'mouthSmileRight',
+                'mouthStretchLeft', 'mouthStretchRight',
+                'mouthUpperUpLeft', 'mouthUpperUpRight',
+                'noseSneerLeft', 'noseSneerRight',
+                'tongueOut'
+            ];
+            
+            this.currentWeights = {};
+            frame.weights.forEach((weight, index) => {
+                if (index < arkitNames.length) {
+                    this.currentWeights[arkitNames[index]] = weight;
+                }
+            });
+        }
+    }
+    
+    /**
+     * Smooth transition between current and target weights
+     */
+    smoothWeights() {
+        const smoothFactor = 0.4; // Higher = faster response
+        
+        // Interpolate towards target
+        for (const [shapeName, targetWeight] of Object.entries(this.targetWeights)) {
+            const currentWeight = this.currentWeights[shapeName] || 0;
+            this.currentWeights[shapeName] = currentWeight + (targetWeight - currentWeight) * smoothFactor;
+        }
+        
+        // Decay weights not in target
+        for (const shapeName of Object.keys(this.currentWeights)) {
+            if (!(shapeName in this.targetWeights)) {
+                this.currentWeights[shapeName] *= (1 - smoothFactor);
+                
+                // Remove near-zero weights
+                if (this.currentWeights[shapeName] < 0.001) {
+                    delete this.currentWeights[shapeName];
+                }
+            }
+        }
+    }
+    
+    /**
+     * Apply silence gate to gradually reduce weights when no events
+     */
+    applySilenceGate(currentMs) {
+        // Check if we have active events or upcoming events soon
+        const hasActiveEvents = this.activeEvents.length > 0;
+        const hasUpcomingEvents = this.visemeEvents.length > 0 && 
+                                  this.visemeEvents[0].audioOffsetMs < currentMs + 200;
+        
+        if (hasActiveEvents || hasUpcomingEvents) {
+            this.silenceTimeMs = 0;
+            return;
+        }
+        
+        // Accumulate silence time
+        this.silenceTimeMs += 16; // ~60fps frame time
+        
+        if (this.silenceTimeMs > this.maxSilenceMs) {
+            // Fade out weights
+            const fadeFactor = 0.9;
+            for (const shapeName of Object.keys(this.currentWeights)) {
+                this.currentWeights[shapeName] *= fadeFactor;
+                
+                if (this.currentWeights[shapeName] < this.silenceThreshold) {
+                    delete this.currentWeights[shapeName];
+                }
+            }
+        }
+    }
+    
+    /**
+     * Ease-in-out function for smooth envelope transitions
+     * @param {number} t - Progress from 0 to 1
+     * @returns {number} Eased value from 0 to 1
+     */
+    easeInOut(t) {
+        // Cubic ease-in-out
+        return t < 0.5 
+            ? 4 * t * t * t 
+            : 1 - Math.pow(-2 * t + 2, 3) / 2;
+    }
+    
+    /**
+     * Start the tick loop (requestAnimationFrame)
+     */
+    start() {
+        if (this.isRunning) {
+            return;
+        }
+        
+        this.isRunning = true;
+        
+        const loop = () => {
+            if (!this.isRunning) {
+                return;
+            }
+            
+            this.tick();
+            this.tickHandle = requestAnimationFrame(loop);
+        };
+        
+        loop();
+    }
+    
+    /**
+     * Stop the tick loop
+     */
+    stop() {
+        this.isRunning = false;
+        
+        if (this.tickHandle !== null) {
+            cancelAnimationFrame(this.tickHandle);
+            this.tickHandle = null;
+        }
+    }
+    
+    /**
+     * Clear all events and reset state
+     */
+    reset() {
+        this.visemeEvents = [];
+        this.blendshapeFrames = [];
+        this.activeEvents = [];
+        this.currentWeights = {};
+        this.targetWeights = {};
+        this.silenceTimeMs = 0;
+    }
+    
+    /**
+     * Get current queue sizes (for debugging)
+     */
+    getQueueStats() {
+        return {
+            visemeEvents: this.visemeEvents.length,
+            blendshapeFrames: this.blendshapeFrames.length,
+            activeEvents: this.activeEvents.length,
+            currentWeights: Object.keys(this.currentWeights).length
+        };
+    }
+}
+
+
+// Export singleton instance (initialized when needed)
+let lipSyncInstance = null;
+
+/**
+ * Initialize and get the LipSync singleton
+ * @param {Function} getPlayheadMs - Returns audio playhead in milliseconds
+ * @param {Function} setMorphs - Function to set avatar morph weights
+ * @param {string} mode - 'viseme' | 'blendshape' | 'phoneme'
+ * @returns {LipSyncEngine} The singleton instance
+ */
+export function getLipSync(getPlayheadMs, setMorphs, mode = 'viseme') {
+    if (!lipSyncInstance) {
+        lipSyncInstance = new LipSyncEngine(getPlayheadMs, setMorphs, mode);
+    }
+    return lipSyncInstance;
+}
+
+/**
+ * Direct access to LipSyncEngine class for custom instances
+ */
+export { LipSyncEngine };
+
+// Make available globally for non-module scripts
+window.LipSyncEngine = LipSyncEngine;
+window.getLipSync = getLipSync;
+
