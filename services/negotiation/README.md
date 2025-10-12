@@ -387,16 +387,22 @@ curl -X POST http://localhost:8000/speak \
 
 #### WebSocket API: Real-Time Streaming (`WS /ws/stream`)
 
-For real-time applications with live audio and timing metadata.
+For real-time applications with live audio and timing metadata. The router implements **automatic backpressure management** to handle slow clients gracefully.
+
+**Key Features:**
+- 🔄 **Backpressure Management**: Automatically drops old timing events (phonemes, visemes) if client is slow, but NEVER drops audio
+- 🛑 **Stop Commands**: Send `{"command": "stop"}` to gracefully terminate streaming
+- 📊 **Event Queueing**: Intelligent buffering with configurable max queue size
+- 🎯 **Mode Selection**: Choose between `phonemes`, `viseme`, or `blendshapes` output
 
 **Protocol:**
 1. Client connects to `ws://localhost:8000/ws/stream`
-2. Client sends `StreamRequest` with provider and voice config
-3. Server sends `config_ack` acknowledgment
-4. Client sends `TextChunk` messages (can be incremental)
-5. Server streams `StreamEvent` messages (audio, phonemes, visemes)
-6. Client sends final `TextChunk` with `is_final=true`
-7. Server sends `done` event and closes
+2. Client sends initialization config: `{"provider": "cartesia", "voice_id": "...", "mode": "phonemes"}`
+3. Server sends `{"type": "config_ack"}` acknowledgment
+4. Client sends text messages: `{"text": "Your text here"}`
+5. Server streams `StreamEvent` messages (audio, phonemes, visemes, blendshapes)
+6. Client can send `{"command": "stop"}` to terminate early
+7. Server sends `{"kind": "done"}` when complete
 
 **JavaScript Example:**
 
@@ -408,7 +414,7 @@ ws.onopen = () => {
   ws.send(JSON.stringify({
     provider: 'cartesia',
     voice_id: 'a0e99841-...',
-    mode: 'full',
+    mode: 'phonemes',  // 'phonemes' | 'viseme' | 'blendshapes'
     sample_rate: 24000
   }));
 };
@@ -420,40 +426,36 @@ ws.onmessage = (event) => {
   if (data.type === 'config_ack') {
     console.log('Streaming configured:', data.message);
     
-    // Send text to synthesize
-    ws.send(JSON.stringify({
-      text: 'Welcome to the negotiation.',
-      is_final: false
-    }));
+    // Send text to synthesize (can send multiple messages)
+    ws.send(JSON.stringify({ text: 'Welcome to the negotiation.' }));
+    ws.send(JSON.stringify({ text: 'Let us discuss terms.' }));
     
-    ws.send(JSON.stringify({
-      text: 'Let us discuss terms.',
-      is_final: true
-    }));
+    // Optional: Stop early
+    // setTimeout(() => ws.send(JSON.stringify({ command: 'stop' })), 1000);
   }
   
   else if (data.kind === 'audio') {
-    // Decode base64 PCM audio
+    // Decode base64 PCM audio (NEVER dropped by backpressure)
     const audioData = atob(data.pcm16_b64);
     playAudio(audioData, data.sample_rate);
   }
   
   else if (data.kind === 'phonemes') {
-    // Update lip-sync animation
+    // Update lip-sync animation (may be dropped if client is slow)
     data.phonemes.forEach(p => {
       scheduleLipSync(p.phoneme, p.start_ms, p.end_ms);
     });
   }
   
   else if (data.kind === 'viseme') {
-    // Azure viseme event
+    // Azure viseme event (may be dropped if client is slow)
     const visemeId = data.viseme.viseme_id;
     const offsetMs = data.viseme.audio_offset_ms;
     scheduleViseme(visemeId, offsetMs);
   }
   
   else if (data.kind === 'blendshapes') {
-    // ARKit blendshapes (Azure preview)
+    // ARKit blendshapes (may be dropped if client is slow)
     data.blendshapes.forEach(frame => {
       applyBlendshapes(frame.weights, frame.t_ms);
     });
@@ -472,6 +474,8 @@ ws.onmessage = (event) => {
 
 **Python Example:**
 
+See `examples/websocket_stream_client.py` for a complete working example. Basic usage:
+
 ```python
 import asyncio
 import websockets
@@ -482,19 +486,33 @@ async def stream_tts():
     uri = "ws://localhost:8000/ws/stream"
     
     async with websockets.connect(uri) as ws:
-        # Configure
+        # 1. Send initialization config
         await ws.send(json.dumps({
             "provider": "azure",
             "voice_id": "en-US-JennyNeural",
-            "mode": "full",
+            "mode": "phonemes",  # or "viseme" or "blendshapes"
             "sample_rate": 24000
         }))
         
-        # Wait for acknowledgment
+        # 2. Wait for acknowledgment
         ack = await ws.recv()
         print(f"Config ack: {json.loads(ack)}")
         
-        # Send text
+        # 3. Start event receiver task
+        async def receive_events():
+            async for message in ws:
+                event = json.loads(message)
+                if event['kind'] == 'audio':
+                    audio = base64.b64decode(event['pcm16_b64'])
+                    print(f"Received {len(audio)} bytes of audio")
+                elif event['kind'] == 'phonemes':
+                    print(f"Phonemes: {event['phonemes']}")
+                elif event['kind'] == 'done':
+                    break
+        
+        receiver = asyncio.create_task(receive_events())
+        
+        # 4. Send text messages
         await ws.send(json.dumps({
             "text": "Hello, welcome to the summit.",
             "is_final": True
@@ -528,6 +546,70 @@ async def stream_tts():
 
 asyncio.run(stream_tts())
 ```
+
+**Run the Example Client:**
+
+```bash
+cd services/negotiation
+python examples/websocket_stream_client.py --provider cartesia --voice-id "your-voice-id"
+
+# Test backpressure handling
+python examples/websocket_stream_client.py --provider cartesia --voice-id "your-voice-id" --test backpressure
+
+# Test stop command
+python examples/websocket_stream_client.py --provider cartesia --voice-id "your-voice-id" --test stop
+```
+
+### Backpressure Management
+
+The WebSocket router implements **intelligent backpressure** to handle slow clients gracefully without overwhelming the server or client memory.
+
+#### How It Works
+
+1. **Event Queue**: Server maintains a queue of pending events (max 50 by default)
+2. **Selective Dropping**: When queue is full:
+   - ✅ **Audio events**: NEVER dropped (critical for A/V sync)
+   - ✅ **Terminal events** (`done`, `error`): NEVER dropped
+   - ⚠️ **Timing events** (`phonemes`, `viseme`, `blendshapes`): Oldest events dropped first
+3. **Client Transparency**: Backpressure is automatic; client doesn't need special handling
+4. **Logging**: Dropped event count logged for monitoring
+
+#### Why This Matters
+
+**Problem**: Client processes events slowly (e.g., rendering-heavy UI, slow network)
+- Without backpressure: Server queues grow unbounded → memory exhaustion
+- With naive backpressure: Drop all events → audio gaps, broken playback
+
+**Solution**: Selective dropping preserves audio quality while preventing memory issues
+- Audio always delivered in sequence → smooth playback
+- Timing events are "best effort" → lip-sync may be less accurate but never crashes
+- Terminal events ensure proper cleanup
+
+#### Configuration
+
+Adjust backpressure thresholds in `app/routers/stream.py`:
+
+```python
+# Maximum queue size before dropping
+MAX_QUEUE_SIZE = 50  # Default: 50 events
+
+# Event types that can be dropped
+DROP_EVENT_KINDS = {"phonemes", "viseme", "blendshapes"}  # Never: audio, done, error
+```
+
+#### Monitoring
+
+Check server logs for backpressure events:
+
+```
+2025-10-12 17:30:45 [debug] Applied backpressure dropped=15 queue_size=50 total_dropped=15
+2025-10-12 17:31:20 [warning] Session completed with dropped events dropped_count=42 provider=cartesia
+```
+
+**Best Practices:**
+- For critical applications: Reduce `MAX_QUEUE_SIZE` to detect slow clients faster
+- For low-bandwidth clients: Process events as quickly as possible; consider skipping visemes entirely
+- For high-quality lip-sync: Ensure client can keep up with event rate
 
 ### Phoneme & Lip-Sync {#phoneme-lipsync}
 

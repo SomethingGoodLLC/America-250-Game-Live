@@ -34,6 +34,7 @@ from core.settings import settings
 from core.yaml_middleware import YAMLMiddleware, YAMLResponse
 from tts.streaming import CartesiaTTSStreamer, AzureTTSStreamer, ElevenLabsTTSStreamer
 from tts.streaming.base import TTSStreamer
+from app.routers import stream_router
 
 
 # Configure logging
@@ -60,6 +61,9 @@ app = FastAPI(
 
 # Add YAML middleware
 app.add_middleware(YAMLMiddleware)
+
+# Include routers
+app.include_router(stream_router, tags=["streaming"])
 
 
 class CreateSessionRequest(BaseModel):
@@ -250,157 +254,6 @@ async def speak(request: SpeakRequest):
                 await streamer.stop()
             except:
                 pass
-
-
-@app.websocket("/ws/stream")
-async def stream_websocket(websocket: WebSocket):
-    """WebSocket endpoint for real-time TTS streaming.
-    
-    Protocol:
-    1. Client connects and sends StreamRequest with provider, voice_id, mode
-    2. Client sends TextChunk messages with text to synthesize
-    3. Server streams back StreamEvent messages (audio, phonemes, visemes, etc.)
-    4. Client sends TextChunk with is_final=True to signal end
-    5. Server sends StreamEvent with kind="done" and closes
-    
-    The normalized StreamEvent format allows clients to handle any provider
-    (Azure, ElevenLabs, Cartesia) with the same code.
-    """
-    await websocket.accept()
-    
-    streamer: Optional[TTSStreamer] = None
-    provider: Optional[str] = None
-    voice_id: Optional[str] = None
-    mode: Optional[str] = None
-    event_task: Optional[asyncio.Task] = None
-    
-    try:
-        # Receive initial configuration
-        config_data = await websocket.receive_json()
-        
-        try:
-            config = StreamRequest(**config_data)
-            provider = config.provider
-            voice_id = config.voice_id
-            mode = config.mode
-            
-            logger.info(
-                "Stream WebSocket connected",
-                provider=provider,
-                voice_id=voice_id,
-                mode=mode
-            )
-            
-            # Create and start TTS streamer
-            streamer = _create_tts_streamer(provider)
-            await streamer.start(
-                voice_id=voice_id,
-                sample_rate=config.sample_rate
-            )
-            
-            # Send acknowledgment
-            await websocket.send_json({
-                "type": "config_ack",
-                "message": f"Streaming configured with {provider}"
-            })
-            
-        except ValidationError as e:
-            error_event = StreamEvent(kind="error", error=f"Invalid configuration: {str(e)}")
-            await websocket.send_json(error_event.model_dump())
-            await websocket.close(code=4000)
-            return
-        
-        except ValueError as e:
-            error_event = StreamEvent(kind="error", error=f"Configuration error: {str(e)}")
-            await websocket.send_json(error_event.model_dump())
-            await websocket.close(code=4000)
-            return
-        
-        # Start event forwarding task
-        async def forward_events():
-            """Forward events from TTS streamer to WebSocket."""
-            try:
-                async for event in streamer.aiter_events():
-                    await websocket.send_json(event.model_dump())
-                    
-                    if event.kind in ("done", "error"):
-                        break
-            except Exception as e:
-                logger.error("Error forwarding events", error=str(e))
-        
-        event_task = asyncio.create_task(forward_events())
-        
-        # Main text receiving loop
-        while True:
-            # Receive text chunks from client
-            chunk_data = await websocket.receive_json()
-            
-            try:
-                chunk = TextChunk(**chunk_data)
-                
-                logger.debug(
-                    "Received text chunk",
-                    text_length=len(chunk.text),
-                    is_final=chunk.is_final,
-                    provider=provider
-                )
-                
-                # Send text to TTS streamer
-                await streamer.send_text(chunk.text, final=chunk.is_final)
-                
-                # If this is the final chunk, wait for events to complete
-                if chunk.is_final:
-                    logger.info(
-                        "Final chunk sent, waiting for completion",
-                        provider=provider,
-                        voice_id=voice_id
-                    )
-                    
-                    # Wait for event task to complete (done/error received)
-                    await event_task
-                    break
-                    
-            except ValidationError as e:
-                error_event = StreamEvent(kind="error", error=f"Invalid text chunk: {str(e)}")
-                await websocket.send_json(error_event.model_dump())
-                continue
-            
-            except Exception as e:
-                logger.error("Error processing text chunk", error=str(e))
-                error_event = StreamEvent(kind="error", error=str(e))
-                await websocket.send_json(error_event.model_dump())
-                break
-        
-    except WebSocketDisconnect:
-        logger.info("Stream WebSocket disconnected", provider=provider)
-    
-    except Exception as e:
-        logger.error("Stream WebSocket error", error=str(e), provider=provider)
-        try:
-            error_event = StreamEvent(kind="error", error=str(e))
-            await websocket.send_json(error_event.model_dump())
-        except:
-            pass
-    
-    finally:
-        # Clean up
-        if event_task and not event_task.done():
-            event_task.cancel()
-            try:
-                await event_task
-            except asyncio.CancelledError:
-                pass
-        
-        if streamer:
-            try:
-                await streamer.stop()
-            except:
-                pass
-        
-        try:
-            await websocket.close()
-        except:
-            pass
 
 
 @app.post("/v1/session", response_model=SessionResponse)
