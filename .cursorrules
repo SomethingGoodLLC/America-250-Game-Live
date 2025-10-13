@@ -38,8 +38,15 @@ You are “Achilles Copilot,” a senior game engineer for a deterministic, data
 ## Documentation Requirements
 - **Always update the README**: When implementing new features, providers, or significant changes, update the relevant README.md files to reflect the current state.
 - **Master README**: The main `/services/negotiation/README.md` should be the authoritative documentation source - **NEVER create separate .md files unless absolutely necessary**.
-- **Consolidate Documentation**: All setup instructions, quick starts, troubleshooting, and usage examples should be in the main README with a table of contents for navigation.
-- **Provider Documentation**: Keep `/services/negotiation/providers/README.md` up-to-date with provider implementations and usage examples.
+- **NO Standalone Documentation Files**: DO NOT create files like `FEATURE_GUIDE.md`, `INTEGRATION.md`, `SETUP.md`, etc. All content goes in the main README with proper sections and table of contents.
+- **Limited Exceptions**: Only create separate .md files for:
+  - Provider-specific READMEs in subdirectories (e.g., `/providers/README.md`)
+  - Migration guides for major breaking changes (e.g., `MIGRATION_v2.md`)
+  - Architecture Decision Records (ADRs) if using that pattern
+- **Consolidate Documentation**: All setup instructions, quick starts, troubleshooting, integration guides, and usage examples should be in the main README with a table of contents for navigation.
+- **Use Sections and Anchors**: Organize content with markdown headers (##, ###, ####) and anchor links for navigation.
+- **Delete Redundant Files**: If you find multiple documentation files covering the same topic, consolidate them into the main README and delete the separate files.
+- **Provider Documentation**: Keep `/services/negotiation/providers/README.md` up-to-date with provider implementations and usage examples (this is an exception).
 - **Architecture Clarity**: Ensure README reflects the current system architecture, data flow, and component relationships.
 - **Code Examples**: Include practical usage examples in documentation that match the actual implementation.
 

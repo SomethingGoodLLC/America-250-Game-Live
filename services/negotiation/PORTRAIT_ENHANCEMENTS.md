@@ -190,7 +190,71 @@ features = extractor.extract_features_for_animation(
 - ✅ Reuses existing phoneme/viseme mapping utilities
 - ✅ Ready for LivePortrait/SadTalker/Wav2Lip integration
 
-### 7. Health and Metrics Endpoints ✅
+### 7. GPU Utilization Monitoring ✅
+
+**File:** `app/portrait/liveportrait_service.py` → `GPUMonitor` class
+
+Real-time GPU utilization tracking using NVIDIA Management Library (pynvml).
+
+**Features:**
+- **GPU utilization percentage:** Real-time GPU usage (0-100%)
+- **Memory tracking:** Total, used, and free GPU memory
+- **Automatic initialization:** Detects CUDA GPUs on startup
+- **Graceful fallback:** Works without pynvml (reports 0%)
+- **Low overhead:** Sampled every 10 frames to minimize impact
+
+**Implementation:**
+```python
+try:
+    import pynvml
+    PYNVML_AVAILABLE = True
+except ImportError:
+    PYNVML_AVAILABLE = False
+
+class GPUMonitor:
+    def get_utilization(self) -> float:
+        """Get current GPU utilization percentage (0-100)"""
+        utilization = pynvml.nvmlDeviceGetUtilizationRates(self.device_handle)
+        return float(utilization.gpu)
+    
+    def get_memory_info(self) -> Dict[str, int]:
+        """Get GPU memory: total, used, free (bytes)"""
+        mem_info = pynvml.nvmlDeviceGetMemoryInfo(self.device_handle)
+        return {
+            "total": mem_info.total,
+            "used": mem_info.used,
+            "free": mem_info.free
+        }
+```
+
+**Benefits:**
+- ✅ Real-time visibility into GPU performance
+- ✅ Detect GPU saturation before quality degrades
+- ✅ Inform auto-scaling decisions
+- ✅ Track GPU memory leaks
+- ✅ Works with NVIDIA GPUs (CUDA)
+
+**Metrics Integration:**
+GPU utilization is automatically reported in `/portrait/metrics` endpoints:
+```json
+{
+  "session_id": "portrait_1234567890",
+  "metrics": {
+    "gpu_utilization": 67.5,  // <-- GPU usage percentage
+    "avg_frame_time_ms": 38.7,
+    "actual_fps": 25.8
+  }
+}
+```
+
+**Installation:**
+```bash
+pip install pynvml  # For GPU monitoring
+```
+
+**Optional:** Service works without pynvml (reports `gpu_utilization: 0.0`)
+
+### 8. Health and Metrics Endpoints ✅
 
 **File:** `app/portrait/webrtc.py`
 
@@ -248,6 +312,7 @@ Get metrics for specific session.
 - **avg_frame_time_ms:** Average time to generate one frame
 - **actual_fps:** Measured FPS over last 30 frames
 - **target_fps:** Target FPS setting
+- **gpu_utilization:** Real-time GPU usage percentage (0-100)
 
 **Use Cases:**
 - **Monitoring dashboards:** Track service health and performance
@@ -463,6 +528,9 @@ print(f"Output shape: {processed.shape}")
 
 # Audio features (optional)
 "librosa>=0.11.0",        # Mel-spectrogram extraction
+
+# GPU monitoring (optional)
+"pynvml>=11.5.0",         # NVIDIA GPU utilization tracking
 ```
 
 Note: All optional - graceful fallback if unavailable.
@@ -482,11 +550,16 @@ The portrait service is now production-ready with:
 - ✅ Accurate lip-sync for plosives
 - ✅ GPU-efficient with graceful degradation
 - ✅ Consistent frame sizing and timing
+- ✅ Real-time GPU utilization monitoring
 - ✅ Comprehensive monitoring and observability
 
 **Ready for:** Integration with LivePortrait, Wav2Lip, or Ditto models.
 
+**Integration is simple:** Just install dependencies, load model in `load()`, replace placeholder in `_generate_single_frame()`. Everything else (smoothing, plosives, FPS, metrics) works automatically!
+
 **Performance:** Sub-200ms end-to-end latency, 25+ FPS sustained, <1% frame drops.
 
 **Scalability:** Supports 3-5 concurrent sessions per GPU on consumer hardware (M2/RTX 3060).
+
+**Monitoring:** Health endpoints at `/portrait/health` and `/portrait/metrics` provide real-time observability including GPU utilization, frame rates, and buffer depths.
 

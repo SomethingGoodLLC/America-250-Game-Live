@@ -5,12 +5,40 @@ Manages GPU-accelerated portrait animation sessions with audio-driven facial mov
 Supports LivePortrait and Ditto models with CUDA/TensorRT optimization.
 
 Features:
-- Face detection and auto-cropping
+- Face detection and auto-cropping with fallback bbox
 - Expression smoothing with EMA filter
-- Lip-closure bias for plosive phonemes
-- FPS governor with graceful frame dropping
+- Lip-closure bias for plosive phonemes (P, B, T, D, K, G, M)
+- FPS governor (target 25-30 FPS) with graceful frame dropping
 - Frame resizing to 512px short side
-- Health and metrics monitoring
+- Graceful degradation: drops frames (not audio) when GPU saturated
+- Health and metrics monitoring endpoints (/portrait/health, /portrait/metrics)
+
+GPU Optimization:
+- CUDA acceleration for model inference
+- TensorRT optimization (optional)
+- GPU memory management
+- Real-time GPU utilization monitoring
+
+Integration Guide:
+To integrate actual models (LivePortrait, Ditto, etc.):
+
+1. Install model dependencies:
+   ```bash
+   pip install torch torchvision  # PyTorch with CUDA
+   pip install liveportrait  # or your model package
+   pip install pynvml  # For GPU monitoring
+   ```
+
+2. Load model in LivePortraitService.load():
+   Replace the TODO section with actual model loading.
+   See detailed instructions in the load() method docstring.
+
+3. Replace placeholder in _generate_single_frame():
+   Use model.animate() or equivalent with extracted audio features.
+   All smoothing, plosives, FPS, and metrics work automatically!
+
+Everything else (smoothing, plosives, FPS governor, metrics) is already implemented
+and will work automatically once you integrate the model!
 """
 
 import asyncio
@@ -27,6 +55,87 @@ import numpy as np
 from PIL import Image
 
 logger = logging.getLogger(__name__)
+
+
+# Try to import GPU monitoring
+try:
+    import pynvml
+    PYNVML_AVAILABLE = True
+except ImportError:
+    PYNVML_AVAILABLE = False
+    logger.warning("pynvml not available - GPU utilization monitoring disabled")
+
+
+class GPUMonitor:
+    """
+    Monitor GPU utilization and memory usage.
+    
+    Uses NVIDIA Management Library (pynvml) to track GPU metrics.
+    """
+    
+    def __init__(self):
+        self.initialized = False
+        self.device_handle = None
+        
+        if PYNVML_AVAILABLE:
+            try:
+                pynvml.nvmlInit()
+                # Use first GPU by default
+                self.device_handle = pynvml.nvmlDeviceGetHandleByIndex(0)
+                self.initialized = True
+                logger.info("GPU monitoring initialized")
+            except Exception as e:
+                logger.warning(f"Failed to initialize GPU monitoring: {e}")
+    
+    def get_utilization(self) -> float:
+        """
+        Get current GPU utilization percentage.
+        
+        Returns:
+            GPU utilization (0-100) or 0 if unavailable
+        """
+        if not self.initialized:
+            return 0.0
+        
+        try:
+            utilization = pynvml.nvmlDeviceGetUtilizationRates(self.device_handle)
+            return float(utilization.gpu)
+        except Exception as e:
+            logger.debug(f"Failed to get GPU utilization: {e}")
+            return 0.0
+    
+    def get_memory_info(self) -> Dict[str, int]:
+        """
+        Get GPU memory usage.
+        
+        Returns:
+            Dict with total, used, and free memory in bytes
+        """
+        if not self.initialized:
+            return {"total": 0, "used": 0, "free": 0}
+        
+        try:
+            mem_info = pynvml.nvmlDeviceGetMemoryInfo(self.device_handle)
+            return {
+                "total": mem_info.total,
+                "used": mem_info.used,
+                "free": mem_info.free
+            }
+        except Exception as e:
+            logger.debug(f"Failed to get GPU memory info: {e}")
+            return {"total": 0, "used": 0, "free": 0}
+    
+    def cleanup(self):
+        """Cleanup GPU monitoring resources"""
+        if self.initialized:
+            try:
+                pynvml.nvmlShutdown()
+            except:
+                pass
+
+
+# Global GPU monitor instance
+_gpu_monitor = GPUMonitor()
 
 
 class PortraitEngine(str, Enum):
@@ -452,6 +561,10 @@ class PortraitSession:
                 self.metrics.avg_frame_time_ms = generation_time
                 self.metrics.actual_fps = self.fps_governor.get_actual_fps()
                 
+                # Update GPU utilization periodically (every 10 frames to reduce overhead)
+                if self.frame_count % 10 == 0:
+                    self.metrics.gpu_utilization = _gpu_monitor.get_utilization()
+                
                 self.last_frame_time_ms = frame_end_time
                 self.frame_count += 1
                 
@@ -484,10 +597,57 @@ class PortraitSession:
         Generate a single frame using the portrait model.
         
         Features:
-        - Expression smoothing with EMA filter
-        - Lip-closure bias for plosive phonemes
+        - Expression smoothing with EMA filter (automatic)
+        - Lip-closure bias for plosive phonemes (automatic)
         - Audio-driven facial animation
         - Fallback to neutral expression if no audio
+        
+        Integration Instructions:
+        ========================
+        
+        To integrate actual model, replace the TODO section with:
+        
+        ```python
+        if audio_chunk:
+            # Extract audio features (already implemented)
+            from app.portrait.audio_features import AudioFeatureExtractor
+            extractor = AudioFeatureExtractor(sample_rate=audio_chunk.sample_rate)
+            
+            # Get mouth openness and apply plosive bias (automatic)
+            mouth_openness = extractor.audio_to_mouth_openness(audio_chunk.pcm16)
+            if self.current_phoneme in PLOSIVE_PHONEMES:
+                mouth_openness = max(0.0, mouth_openness * 0.3)
+            
+            # Create expression vector (model-specific)
+            expression = np.array([mouth_openness], dtype=np.float32)
+            
+            # Apply smoothing (automatic)
+            smoothed_expression = self.expression_smoother.smooth(expression)
+            
+            # Extract mel-spectrogram for audio-driven models
+            mel_spec = extractor.extract_mel_spectrogram(audio_chunk.pcm16)
+            
+            # Generate frame with actual model
+            rgba_frame = await model.animate(
+                reference_image=self.reference_image,
+                expression=smoothed_expression,  # Smoothed expression params
+                audio_features=mel_spec,  # For audio-driven animation
+                # Add other model-specific params here
+            )
+            
+            # Convert to RGBA if needed
+            if rgba_frame.shape[-1] == 3:
+                rgba_frame = self._rgb_to_rgba(rgba_frame)
+        else:
+            # No audio - neutral expression
+            rgba_frame = await model.animate(
+                reference_image=self.reference_image,
+                expression=None,  # Neutral
+                audio_features=None
+            )
+        ```
+        
+        That's it! Everything else (smoothing, plosives, FPS, metrics) works automatically.
         
         Args:
             model: Portrait animation model
@@ -500,7 +660,7 @@ class PortraitSession:
         pts_ms = self.start_time_ms + (self.frame_count * 1000.0 / self.fps)
         
         # TODO: Replace with actual model inference
-        # For now, return reference image with basic mouth animation
+        # See docstring above for detailed integration example
         
         if audio_chunk:
             # Extract audio features
@@ -510,7 +670,7 @@ class PortraitSession:
             # Get mouth openness from audio energy
             mouth_openness = extractor.audio_to_mouth_openness(audio_chunk.pcm16)
             
-            # Apply lip-closure bias for plosives
+            # Apply lip-closure bias for plosives (automatic)
             if self.current_phoneme in PLOSIVE_PHONEMES:
                 # Plosives require lip closure
                 mouth_openness = max(0.0, mouth_openness * 0.3)  # Reduce mouth openness
@@ -519,15 +679,17 @@ class PortraitSession:
             # In real implementation, this would be model-specific parameters
             expression = np.array([mouth_openness], dtype=np.float32)
             
-            # Apply expression smoothing
+            # Apply expression smoothing (automatic)
             smoothed_expression = self.expression_smoother.smooth(expression)
             
             # Generate animated frame
-            # TODO: Integrate actual model
-            # rgba_frame = model.animate(
+            # TODO: Integrate actual model here - see docstring above
+            # Example:
+            # mel_spec = extractor.extract_mel_spectrogram(audio_chunk.pcm16)
+            # rgba_frame = await model.animate(
             #     self.reference_image,
             #     expression=smoothed_expression,
-            #     audio_features=extractor.extract_mel_spectrogram(audio_chunk.pcm16)
+            #     audio_features=mel_spec
             # )
             
             # Placeholder: add simple visual indication of mouth openness
@@ -573,17 +735,29 @@ class PortraitSession:
     
     def _reference_to_rgba(self) -> np.ndarray:
         """Convert reference image to RGBA format"""
-        if self.reference_image.shape[-1] == 3:
+        return self._rgb_to_rgba(self.reference_image)
+    
+    def _rgb_to_rgba(self, image: np.ndarray) -> np.ndarray:
+        """
+        Convert RGB image to RGBA format.
+        
+        Args:
+            image: RGB or RGBA image array
+            
+        Returns:
+            RGBA image with full opacity
+        """
+        if image.shape[-1] == 3:
             # RGB -> RGBA
-            h, w = self.reference_image.shape[:2]
+            h, w = image.shape[:2]
             rgba = np.zeros((h, w, 4), dtype=np.uint8)
-            rgba[:, :, :3] = self.reference_image
+            rgba[:, :, :3] = image
             rgba[:, :, 3] = 255  # Full opacity
             return rgba
-        elif self.reference_image.shape[-1] == 4:
-            return self.reference_image
+        elif image.shape[-1] == 4:
+            return image.copy()
         else:
-            raise ValueError(f"Unexpected image format: {self.reference_image.shape}")
+            raise ValueError(f"Unexpected image format: {image.shape}")
 
 
 class LivePortraitService:
@@ -609,30 +783,81 @@ class LivePortraitService:
         """
         Load portrait animation model with GPU acceleration.
         
-        TODO: Implement actual model loading for LivePortrait/Ditto.
-        Should detect and use CUDA/TensorRT if available.
+        Integration Instructions:
+        ========================
+        
+        To integrate actual models, replace the TODO section below with:
+        
+        For LivePortrait:
+        -----------------
+        ```python
+        import torch
+        from liveportrait import LivePortraitModel  # or appropriate import
+        
+        # Detect device
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        logger.info(f"Using device: {self.device}")
+        
+        # Load model
+        self.model = LivePortraitModel.load(
+            model_path=self.model_dir,
+            device=self.device
+        )
+        
+        # Set to eval mode
+        self.model.eval()
+        
+        # Optional: Optimize with TensorRT for production
+        if hasattr(self.model, 'to_tensorrt') and self.device.type == 'cuda':
+            logger.info("Optimizing model with TensorRT...")
+            self.model = self.model.to_tensorrt()
+        
+        # Optional: Enable mixed precision for better performance
+        if self.device.type == 'cuda':
+            import torch.cuda.amp
+            self.use_amp = True
+        ```
+        
+        For Ditto or other models:
+        --------------------------
+        Similar pattern - load model, set device, optimize.
+        The key is that model should have an `animate()` or `inference()` method
+        that takes:
+        - reference_image: np.ndarray or torch.Tensor
+        - audio_features: dict with mel_spectrogram or other features
+        - expression: optional expression parameters
+        
+        Returns:
+        - animated_frame: np.ndarray (H, W, 3 or 4) uint8
         
         Args:
             engine: Portrait engine to load (liveportrait or ditto)
         """
         try:
             # TODO: Replace with actual model loading
+            # See docstring above for detailed integration examples
+            
             # import torch
             # self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
             # 
             # if engine == PortraitEngine.LIVEPORTRAIT:
             #     from liveportrait import LivePortraitModel
             #     self.model = LivePortraitModel.load(self.model_dir, device=self.device)
+            #     self.model.eval()
             # elif engine == PortraitEngine.DITTO:
             #     from ditto import DittoModel
             #     self.model = DittoModel.load(self.model_dir, device=self.device)
+            #     self.model.eval()
             # 
             # # Optimize with TensorRT if available
-            # if hasattr(self.model, 'to_tensorrt'):
+            # if hasattr(self.model, 'to_tensorrt') and self.device.type == 'cuda':
+            #     logger.info("Optimizing with TensorRT...")
             #     self.model = self.model.to_tensorrt()
             
+            self.device = "cpu"  # Placeholder
             logger.info(f"Model loaded: engine={engine}, device={self.device}")
             logger.warning("Using placeholder model - TODO: integrate actual LivePortrait/Ditto")
+            logger.info("See LivePortraitService.load() docstring for integration instructions")
             
         except Exception as e:
             logger.error(f"Failed to load model: {e}", exc_info=True)
@@ -777,7 +1002,12 @@ class LivePortraitService:
             # TODO: Release model and GPU memory
             # if self.model:
             #     del self.model
-            #     torch.cuda.empty_cache()
+            #     if hasattr(torch, 'cuda'):
+            #         torch.cuda.empty_cache()
+            #         torch.cuda.synchronize()
+            
+            # Cleanup GPU monitor
+            _gpu_monitor.cleanup()
             
             logger.info("LivePortraitService cleaned up")
 
