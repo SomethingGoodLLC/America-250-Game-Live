@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Audio2Face 3D Head Demo - Samson Negotiation Service</title>
+    <link rel="stylesheet" href="/static/styles.css">
+    <style>
+        .a2f-container {
+            display: grid;
+            grid-template-columns: 1fr 400px;
+            gap: 20px;
+            height: 100vh;
+            padding: 20px;
+            box-sizing: border-box;
+            background: linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%);
+        }
+        
+        .canvas-panel {
+            display: flex;
+            flex-direction: column;
+            background: #222;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+        }
+        
+        #head-canvas {
+            width: 100%;
+            flex: 1;
+            display: block;
+            background: #1a1a1a;
+        }
+        
+        .canvas-controls {
+            padding: 16px;
+            background: rgba(0, 0, 0, 0.3);
+            display: flex;
+            gap: 12px;
+            align-items: center;
+        }
+        
+        .control-panel {
+            background: #2a2a2a;
+            border-radius: 12px;
+            padding: 24px;
+            overflow-y: auto;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+        }
+        
+        .control-section {
+            margin-bottom: 24px;
+            padding-bottom: 24px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .control-section:last-child {
+            border-bottom: none;
+        }
+        
+        .control-section h2 {
+            color: #fff;
+            font-size: 18px;
+            margin: 0 0 16px 0;
+            font-weight: 600;
+        }
+        
+        .form-group {
+            margin-bottom: 16px;
+        }
+        
+        .form-group label {
+            display: block;
+            color: #aaa;
+            font-size: 14px;
+            margin-bottom: 6px;
+        }
+        
+        .form-control {
+            width: 100%;
+            padding: 10px;
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 6px;
+            color: #fff;
+            font-size: 14px;
+            box-sizing: border-box;
+        }
+        
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .btn-primary {
+            background: #3b82f6;
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            background: #2563eb;
+        }
+        
+        .btn-success {
+            background: #10b981;
+            color: white;
+        }
+        
+        .btn-success:hover {
+            background: #059669;
+        }
+        
+        .btn-danger {
+            background: #ef4444;
+            color: white;
+        }
+        
+        .btn-danger:hover {
+            background: #dc2626;
+        }
+        
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .status-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        
+        .status-connected {
+            background: #10b981;
+            color: white;
+        }
+        
+        .status-disconnected {
+            background: #6b7280;
+            color: white;
+        }
+        
+        .status-streaming {
+            background: #f59e0b;
+            color: white;
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 12px;
+        }
+        
+        .stat-item {
+            background: rgba(0, 0, 0, 0.3);
+            padding: 12px;
+            border-radius: 6px;
+        }
+        
+        .stat-label {
+            display: block;
+            color: #888;
+            font-size: 12px;
+            margin-bottom: 4px;
+        }
+        
+        .stat-value {
+            display: block;
+            color: #fff;
+            font-size: 20px;
+            font-weight: 600;
+        }
+        
+        .log-output {
+            background: rgba(0, 0, 0, 0.5);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 6px;
+            padding: 12px;
+            max-height: 200px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            color: #aaa;
+        }
+        
+        .log-entry {
+            margin-bottom: 4px;
+        }
+        
+        .log-entry.info { color: #3b82f6; }
+        .log-entry.success { color: #10b981; }
+        .log-entry.warning { color: #f59e0b; }
+        .log-entry.error { color: #ef4444; }
+        
+        .button-group {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+    </style>
+</head>
+<body>
+    <div class="a2f-container">
+        <!-- Left: 3D Canvas -->
+        <div class="canvas-panel">
+            <canvas id="head-canvas"></canvas>
+            <div class="canvas-controls">
+                <span class="status-badge status-disconnected" id="canvas-status">No Model</span>
+                <button class="btn btn-primary" id="load-model-btn">Load 3D Head</button>
+                <button class="btn" id="reset-view-btn">Reset View</button>
+                <label style="margin-left: auto; display: flex; align-items: center; gap: 8px; color: #aaa; cursor: pointer;">
+                    <input type="checkbox" id="auto-rotate-check" checked>
+                    Auto Rotate
+                </label>
+            </div>
+        </div>
+        
+        <!-- Right: Controls -->
+        <div class="control-panel">
+            <h1 style="color: #fff; margin: 0 0 24px 0; font-size: 24px;">
+                🎭 Audio2Face Demo
+            </h1>
+            
+            <!-- Connection Status -->
+            <div class="control-section">
+                <h2>Connection</h2>
+                <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
+                    <span class="status-badge status-disconnected" id="ws-status">Disconnected</span>
+                    <div style="flex: 1;"></div>
+                    <label style="color: #aaa; display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                        <input type="checkbox" id="stub-mode-check" checked>
+                        Use Stub Mode
+                    </label>
+                </div>
+                <div class="button-group">
+                    <button class="btn btn-success" id="connect-btn">Connect</button>
+                    <button class="btn btn-danger" id="disconnect-btn" disabled>Disconnect</button>
+                </div>
+            </div>
+            
+            <!-- Audio Input -->
+            <div class="control-section">
+                <h2>Audio Input</h2>
+                
+                <div class="form-group">
+                    <label>Upload Audio File:</label>
+                    <input type="file" class="form-control" id="audio-file-input" accept="audio/*">
+                </div>
+                
+                <div class="button-group">
+                    <button class="btn btn-primary" id="upload-audio-btn" disabled>
+                        📁 Stream Audio File
+                    </button>
+                    <button class="btn btn-primary" id="mic-record-btn" disabled>
+                        🎤 Record from Mic (5s)
+                    </button>
+                </div>
+                
+                <div style="margin-top: 12px;">
+                    <button class="btn" id="reset-blendshapes-btn">
+                        Reset Face (Neutral)
+                    </button>
+                </div>
+            </div>
+            
+            <!-- Configuration -->
+            <div class="control-section">
+                <h2>Configuration</h2>
+                
+                <div class="form-group">
+                    <label>A2F Service Host:</label>
+                    <input type="text" class="form-control" id="a2f-host" value="127.0.0.1" placeholder="127.0.0.1">
+                </div>
+                
+                <div class="form-group">
+                    <label>A2F Service Port:</label>
+                    <input type="number" class="form-control" id="a2f-port" value="50051" placeholder="50051">
+                </div>
+                
+                <div class="form-group">
+                    <label>Model Path (GLB with ARKit-52):</label>
+                    <input type="text" class="form-control" id="model-path" value="/static/models/head.glb" placeholder="/static/models/head.glb">
+                </div>
+            </div>
+            
+            <!-- Stats -->
+            <div class="control-section">
+                <h2>Statistics</h2>
+                <div class="stats-grid">
+                    <div class="stat-item">
+                        <span class="stat-label">Frames Received</span>
+                        <span class="stat-value" id="stat-frames">0</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">Current FPS</span>
+                        <span class="stat-value" id="stat-fps">0</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">Blendshapes Active</span>
+                        <span class="stat-value" id="stat-active">0</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">Latency (ms)</span>
+                        <span class="stat-value" id="stat-latency">--</span>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Event Log -->
+            <div class="control-section">
+                <h2>Event Log</h2>
+                <div class="log-output" id="log-output">
+                    <div class="log-entry info">Ready to connect...</div>
+                </div>
+                <button class="btn" id="clear-log-btn" style="margin-top: 8px;">Clear Log</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Scripts -->
+    <script type="module">
+        import { Head3D } from '/static/head3d.js';
+        import { Audio2FaceClient, loadAudioFile } from '/static/a2f.js';
+        
+        // Initialize components
+        const canvas = document.getElementById('head-canvas');
+        const head3d = new Head3D(canvas, {
+            enableControls: true,
+            backgroundColor: 0x1a1a1a
+        });
+        
+        let a2fClient = null;
+        let frameCount = 0;
+        let lastFrameTime = Date.now();
+        let currentFPS = 0;
+        
+        // UI Elements
+        const wsStatus = document.getElementById('ws-status');
+        const canvasStatus = document.getElementById('canvas-status');
+        const connectBtn = document.getElementById('connect-btn');
+        const disconnectBtn = document.getElementById('disconnect-btn');
+        const loadModelBtn = document.getElementById('load-model-btn');
+        const uploadAudioBtn = document.getElementById('upload-audio-btn');
+        const micRecordBtn = document.getElementById('mic-record-btn');
+        const audioFileInput = document.getElementById('audio-file-input');
+        const resetBlendshapesBtn = document.getElementById('reset-blendshapes-btn');
+        const stubModeCheck = document.getElementById('stub-mode-check');
+        const logOutput = document.getElementById('log-output');
+        
+        // Logging
+        function log(message, type = 'info') {
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${type}`;
+            entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            logOutput.appendChild(entry);
+            logOutput.scrollTop = logOutput.scrollHeight;
+            console.log(`[${type.toUpperCase()}] ${message}`);
+        }
+        
+        // Load 3D Model
+        loadModelBtn.addEventListener('click', async () => {
+            try {
+                const modelPath = document.getElementById('model-path').value;
+                log(`Loading model: ${modelPath}`, 'info');
+                canvasStatus.textContent = 'Loading...';
+                
+                await head3d.loadModel(modelPath);
+                
+                canvasStatus.textContent = 'Model Loaded';
+                canvasStatus.className = 'status-badge status-connected';
+                log('Model loaded successfully', 'success');
+            } catch (err) {
+                log(`Failed to load model: ${err.message}`, 'error');
+                canvasStatus.textContent = 'Load Failed';
+                canvasStatus.className = 'status-badge status-disconnected';
+            }
+        });
+        
+        // Connect to A2F WebSocket
+        connectBtn.addEventListener('click', async () => {
+            try {
+                const useStub = stubModeCheck.checked;
+                log(`Connecting to A2F service (stub=${useStub})...`, 'info');
+                
+                a2fClient = new Audio2FaceClient({
+                    useStub: useStub
+                });
+                
+                // Setup event handlers
+                a2fClient.on('frame', (frame) => {
+                    frameCount++;
+                    head3d.applyBlendshapes(frame.weights);
+                    
+                    // Update stats
+                    document.getElementById('stat-frames').textContent = frameCount;
+                    
+                    // Count active blendshapes
+                    const activeCount = frame.weights.filter(w => w > 0.01).length;
+                    document.getElementById('stat-active').textContent = activeCount;
+                    
+                    // Calculate FPS
+                    const now = Date.now();
+                    const delta = now - lastFrameTime;
+                    currentFPS = Math.round(1000 / delta);
+                    document.getElementById('stat-fps').textContent = currentFPS;
+                    lastFrameTime = now;
+                });
+                
+                a2fClient.on('done', () => {
+                    log('Streaming completed', 'success');
+                    wsStatus.textContent = 'Connected (Idle)';
+                    wsStatus.className = 'status-badge status-connected';
+                });
+                
+                a2fClient.on('error', (err) => {
+                    log(`Error: ${err.message}`, 'error');
+                });
+                
+                // Connect
+                await a2fClient.connect();
+                
+                wsStatus.textContent = 'Connected';
+                wsStatus.className = 'status-badge status-connected';
+                connectBtn.disabled = true;
+                disconnectBtn.disabled = false;
+                uploadAudioBtn.disabled = false;
+                micRecordBtn.disabled = false;
+                
+                log('Connected to A2F service', 'success');
+                
+            } catch (err) {
+                log(`Connection failed: ${err.message}`, 'error');
+                wsStatus.textContent = 'Connection Failed';
+                wsStatus.className = 'status-badge status-disconnected';
+            }
+        });
+        
+        // Disconnect
+        disconnectBtn.addEventListener('click', () => {
+            if (a2fClient) {
+                a2fClient.disconnect();
+                a2fClient = null;
+            }
+            
+            wsStatus.textContent = 'Disconnected';
+            wsStatus.className = 'status-badge status-disconnected';
+            connectBtn.disabled = false;
+            disconnectBtn.disabled = true;
+            uploadAudioBtn.disabled = true;
+            micRecordBtn.disabled = true;
+            
+            log('Disconnected from A2F service', 'info');
+        });
+        
+        // Stream audio file
+        uploadAudioBtn.addEventListener('click', async () => {
+            const file = audioFileInput.files[0];
+            if (!file) {
+                log('Please select an audio file first', 'warning');
+                return;
+            }
+            
+            try {
+                log(`Streaming audio file: ${file.name}`, 'info');
+                wsStatus.textContent = 'Streaming';
+                wsStatus.className = 'status-badge status-streaming';
+                
+                const audioData = await loadAudioFile(file);
+                await a2fClient.streamAudio(audioData);
+                
+                log('Audio streaming complete', 'success');
+                
+            } catch (err) {
+                log(`Audio streaming failed: ${err.message}`, 'error');
+                wsStatus.textContent = 'Connected';
+                wsStatus.className = 'status-badge status-connected';
+            }
+        });
+        
+        // Record from microphone
+        micRecordBtn.addEventListener('click', async () => {
+            try {
+                log('Recording from microphone (5 seconds)...', 'info');
+                wsStatus.textContent = 'Recording';
+                wsStatus.className = 'status-badge status-streaming';
+                
+                await a2fClient.streamFromMicrophone(5000);
+                
+                log('Microphone recording complete', 'success');
+                
+            } catch (err) {
+                log(`Microphone recording failed: ${err.message}`, 'error');
+                wsStatus.textContent = 'Connected';
+                wsStatus.className = 'status-badge status-connected';
+            }
+        });
+        
+        // Reset blendshapes
+        resetBlendshapesBtn.addEventListener('click', () => {
+            head3d.resetBlendshapes();
+            log('Reset to neutral face', 'info');
+            document.getElementById('stat-active').textContent = '0';
+        });
+        
+        // Clear log
+        document.getElementById('clear-log-btn').addEventListener('click', () => {
+            logOutput.innerHTML = '<div class="log-entry info">Log cleared.</div>';
+        });
+        
+        // Reset view
+        document.getElementById('reset-view-btn').addEventListener('click', () => {
+            if (head3d.controls) {
+                head3d.controls.reset();
+            }
+        });
+        
+        log('Application initialized', 'success');
+        log('Load a 3D head model to begin', 'info');
+    </script>
+</body>
+</html>
+

@@ -18,6 +18,11 @@ A production-ready FastAPI service for diplomatic negotiations with WebRTC A/V s
   - [LivePortrait Engine](#liveportrait-engine)
   - [Quick Start](#portrait-quick-start)
   - [Integrating Real Models](#integrating-real-portrait-models)
+- [Audio2Face 3D Facial Animation](#audio2face-3d-facial-animation) 🆕
+  - [Overview](#a2f-overview)
+  - [Setup & Configuration](#a2f-setup)
+  - [Usage](#a2f-usage)
+  - [ARKit-52 Blendshapes](#arkit-52-blendshapes)
 - [Configuration](#configuration)
   - [Environment Setup](#environment-setup)
   - [Advanced Configuration](#advanced-configuration)
@@ -66,6 +71,7 @@ A production-ready FastAPI service for diplomatic negotiations with WebRTC A/V s
 - **Lip-Sync Support** - ARPAbet/OVR phoneme mapping for accurate facial animation
 - **Avatar Support** - Video avatar generation with lipsync capabilities
 - **Listener Adapters** - Real-time audio processing with local STT and cloud realtime APIs
+- **NVIDIA Audio2Face** - 3D facial animation with ARKit-52 blendshape streaming 🆕
 
 ### Development & Deployment
 - **Comprehensive Testing** - 38+ tests with 95%+ coverage including edge cases
@@ -1321,6 +1327,302 @@ With real model (LivePortrait/Ditto on RTX 3060):
 - **Architecture details:** See `LIVEPORTRAIT_IMPLEMENTATION.md`
 - **Feature enhancements:** See `PORTRAIT_ENHANCEMENTS.md`
 - **Quick start guide:** See `PORTRAIT_QUICKSTART.md`
+
+---
+
+## Audio2Face 3D Facial Animation
+
+**NVIDIA Audio2Face integration for real-time 3D facial animation with ARKit-52 blendshapes.**
+
+Audio2Face is NVIDIA's state-of-the-art AI model that converts audio input into facial animation data (blendshape coefficients). This integration provides a gRPC client that streams audio to the NVIDIA Audio2Face Microservice and receives time-aligned ARKit-52 compatible blendshape weights, which are then exposed via WebSocket for Three.js frontend consumption.
+
+### A2F Overview
+
+**Architecture:**
+- **Backend**: Async gRPC client (`app/facial/a2f_client.py`) connects to NVIDIA Audio2Face Microservice
+- **Transport**: gRPC for A2F communication, WebSocket for browser streaming
+- **Frontend**: Three.js renderer (`static/head3d.js`) applies blendshapes to GLB model morph targets
+- **Format**: ARKit-52 standard (52 facial blendshapes) for cross-platform compatibility
+
+**Key Features:**
+- 🎭 Real-time audio-to-blendshape conversion
+- 🎨 ARKit-52 compatible output (works with MetaHuman, Ready Player Me, etc.)
+- 🚀 WebSocket streaming to browser (low-latency)
+- 🔧 Stub mode for development without NVIDIA service
+- 📊 Frame-by-frame synchronization with timestamps
+
+**Use Cases:**
+- Realistic 3D diplomatic avatars with accurate lip-sync
+- Interactive characters in grand strategy games
+- Real-time facial animation for any GLB model with ARKit blendshapes
+
+### A2F Setup
+
+#### Prerequisites
+
+1. **NVIDIA Audio2Face Microservice** (Production)
+   - Download from [NVIDIA Omniverse](https://docs.omniverse.nvidia.com/audio2face/latest/)
+   - Follow NVIDIA's setup guide to run the gRPC microservice
+   - Ensure service is accessible at `A2F_GRPC_HOST:A2F_GRPC_PORT`
+
+2. **3D Head Model** (GLB with ARKit-52 morph targets)
+   - Must contain all 52 ARKit blendshape morph targets
+   - Recommended sources:
+     - MetaHuman (Unreal Engine, export to GLB)
+     - Ready Player Me avatars
+     - Custom rigs with ARKit naming convention
+   - Place model at `/services/negotiation/static/models/head.glb`
+
+#### Installation
+
+1. **Install Dependencies** (using uv):
+   ```bash
+   cd services/negotiation
+   uv pip install -e .
+   ```
+   
+   Dependencies automatically installed:
+   - `grpcio>=1.66.1` - gRPC client
+   - `grpcio-tools>=1.66.1` - Proto compilation tools
+   - `protobuf>=5.28.0` - Protocol buffers
+
+2. **Configure Environment**:
+   ```bash
+   cp env.example .env
+   ```
+   
+   Edit `.env`:
+   ```bash
+   # NVIDIA Audio2Face Configuration
+   A2F_GRPC_HOST=127.0.0.1      # A2F service host
+   A2F_GRPC_PORT=50051          # A2F service port
+   A2F_MODEL_ID=audio2face_3d   # NVIDIA model identifier
+   ```
+
+3. **Development Mode (No NVIDIA Service)**:
+   
+   For development/testing without NVIDIA Audio2Face, use **stub mode**:
+   - Stub client generates procedural blendshapes from audio amplitude
+   - Provides simple jaw/mouth movements for testing
+   - Enable via WebSocket query parameter: `?use_stub=true` (default)
+
+#### Running the Service
+
+```bash
+cd services/negotiation
+python main.py
+# Service starts on http://127.0.0.1:8000
+```
+
+**Endpoints:**
+- `GET /a2f/health` - Health check and configuration status
+- `GET /a2f/blendshapes` - List all ARKit-52 blendshape names
+- `WS /a2f/stream?use_stub=true` - WebSocket for audio streaming
+
+### A2F Usage
+
+#### Web Interface
+
+Access the Audio2Face demo at:
+```
+http://127.0.0.1:8000/static/a2f_demo.html
+```
+
+**Demo Features:**
+- Interactive 3D head viewer with orbit controls
+- Audio file upload and streaming
+- Microphone recording (5-second clips)
+- Real-time blendshape visualization
+- Performance stats (FPS, frame count, latency)
+- Stub mode toggle for testing
+
+**Usage Flow:**
+1. **Load Model**: Click "Load 3D Head" (provide GLB path)
+2. **Connect**: Click "Connect" (uses stub mode by default)
+3. **Stream Audio**: 
+   - Upload audio file → Click "Stream Audio File"
+   - Or record from mic → Click "Record from Mic"
+4. **Watch Animation**: Head animates in real-time with blendshapes
+
+#### Programmatic Usage
+
+**Python Backend:**
+```python
+from app.facial import Audio2FaceClient, Audio2FaceConfig
+
+# Configure client
+config = Audio2FaceConfig(
+    host="127.0.0.1",
+    port=50051,
+    model_id="audio2face_3d"
+)
+
+# Create and connect
+client = Audio2FaceClient(config)
+await client.connect()
+
+# Stream audio chunks
+async def audio_generator():
+    with open("speech.wav", "rb") as f:
+        while chunk := f.read(4096):
+            yield chunk
+
+# Receive blendshape frames
+async for frame in client.stream_audio(audio_generator()):
+    print(f"Frame {frame.frame_index}: {len(frame.weights)} weights")
+    # frame.weights is list of 52 floats (0.0 to 1.0)
+    # frame.timestamp_ms is time in milliseconds
+```
+
+**JavaScript Frontend:**
+```javascript
+import { Head3D } from '/static/head3d.js';
+import { Audio2FaceClient } from '/static/a2f.js';
+
+// Initialize 3D renderer
+const head3d = new Head3D(canvasElement);
+await head3d.loadModel('/static/models/head.glb');
+
+// Connect to A2F service
+const a2f = new Audio2FaceClient({ useStub: true });
+await a2f.connect();
+
+// Handle blendshape frames
+a2f.on('frame', (frame) => {
+    head3d.applyBlendshapes(frame.weights);
+});
+
+// Stream audio
+const audioData = await loadAudioFile(file);
+await a2f.streamAudio(audioData);
+```
+
+#### WebSocket Protocol
+
+**Client → Server**: Binary PCM16 mono audio chunks
+```javascript
+ws.send(pcm16AudioBuffer);  // Send audio
+ws.send(new ArrayBuffer(0)); // Signal end
+```
+
+**Server → Client**: JSON blendshape frames
+```json
+{
+  "timestamp_ms": 123.45,
+  "weights": [0.0, 0.1, 0.0, ..., 0.0],  // 52 floats
+  "frame_index": 42
+}
+```
+
+**Completion message:**
+```json
+{ "done": true }
+```
+
+### ARKit-52 Blendshapes
+
+**Complete ARKit Blendshape List:**
+
+The system uses Apple's ARKit-52 standard for facial blendshapes. Each weight is a float from 0.0 (no activation) to 1.0 (full activation).
+
+| Index | Name | Description |
+|-------|------|-------------|
+| 0-4 | `browDownLeft`, `browDownRight`, `browInnerUp`, `browOuterUpLeft`, `browOuterUpRight` | Eyebrow movements |
+| 5-7 | `cheekPuff`, `cheekSquintLeft`, `cheekSquintRight` | Cheek deformations |
+| 8-21 | `eyeBlink*`, `eyeLook*`, `eyeSquint*`, `eyeWide*` | Eye movements and blinks |
+| 22-26 | `jawForward`, `jawLeft`, `jawOpen`, `jawRight` | Jaw movements |
+| 27-50 | `mouth*` | Mouth shapes (smile, frown, funnel, pucker, etc.) |
+| 51 | `noseSneerLeft`, `noseSneerRight` | Nose wrinkle |
+| 52 | `tongueOut` | Tongue extension |
+
+**Key Blendshapes for Speech:**
+- `jawOpen` (24) - Primary jaw opening for vowels
+- `mouthFunnel` (31) - "O" shapes
+- `mouthPucker` (37) - "OO" sounds
+- `mouthSmileLeft/Right` (43-44) - Smile/wide mouth
+- `mouthRollLower/Upper` (39-40) - Lip rolling
+
+**Reference:**
+- [Apple ARKit Documentation](https://developer.apple.com/documentation/arkit/arfaceanchor/blendshapelocation)
+- [ARKit Blendshape Coefficient Visualization](https://pooyadeperson.com/arkit-blendshape-coefficients-visualization)
+
+### Integration with TTS
+
+Audio2Face works seamlessly with the existing TTS streaming providers:
+
+```python
+# Example: Combine Cartesia TTS with Audio2Face
+from app.providers import CartesiaTTSStreamer
+from app.facial import Audio2FaceClient
+
+# Setup TTS
+tts = CartesiaTTSStreamer(api_key=settings.cartesia_api_key)
+await tts.start(voice_id="diplomat_en_us")
+
+# Setup A2F
+a2f = Audio2FaceClient(config)
+await a2f.connect()
+
+# Generate speech and animate
+async def process_text(text: str):
+    audio_chunks = []
+    
+    # Generate TTS audio
+    await tts.send_text(text, final=True)
+    async for event in tts.aiter_events():
+        if event.kind == "audio":
+            audio_chunk = base64.b64decode(event.pcm16_b64)
+            audio_chunks.append(audio_chunk)
+    
+    # Stream to A2F for blendshapes
+    async def audio_stream():
+        for chunk in audio_chunks:
+            yield chunk
+    
+    async for frame in a2f.stream_audio(audio_stream()):
+        # Send blendshapes to frontend via WebSocket
+        await websocket.send_json(frame.model_dump())
+```
+
+### Troubleshooting
+
+**Common Issues:**
+
+1. **"No mesh with morph targets found"**
+   - Ensure GLB has ARKit-52 morph target names
+   - Check model in Blender → Shape Keys
+   - Verify naming matches exactly (case-sensitive)
+
+2. **"Connection timeout" to A2F service**
+   - Check NVIDIA Audio2Face Microservice is running
+   - Verify `A2F_GRPC_HOST` and `A2F_GRPC_PORT` in `.env`
+   - Use stub mode for development: `?use_stub=true`
+
+3. **Blendshapes not animating**
+   - Check browser console for JavaScript errors
+   - Verify WebSocket connection: `ws-status` should be "Connected"
+   - Confirm audio is streaming (check frame count in stats)
+
+4. **Poor quality facial animation**
+   - NVIDIA Audio2Face produces high-quality results
+   - Stub mode only provides basic jaw movement
+   - Consider upgrading to full NVIDIA A2F service
+
+**Debug Mode:**
+```bash
+# Enable detailed logging
+export LOG_LEVEL=DEBUG
+python main.py
+```
+
+**Test Endpoints:**
+```bash
+# Check A2F health
+curl http://127.0.0.1:8000/a2f/health
+
+# List blendshapes
+curl http://127.0.0.1:8000/a2f/blendshapes
+```
 
 ---
 

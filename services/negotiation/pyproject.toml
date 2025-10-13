@@ -18,14 +18,15 @@ dependencies = [
     "jsonschema>=4.0.0",
     "ruamel.yaml>=0.17.0",
     # WebRTC and media processing
-    "aiortc==1.9.0",
-    "av==12.1.0", # PyAV for video processing
+    "aiortc>=1.10.0",  # Updated for av 13+ and FFmpeg 7.x support
+    "av>=13.0.0", # PyAV for video processing (13.0.0+ supports FFmpeg 7.x)
     # GPU and ML dependencies for portrait animation
-    "torch==2.3.1",
-    "torchvision==0.18.1",
-    "onnxruntime-gpu==1.18.0",
+    "torch>=2.3.1",
+    "torchvision>=0.18.1",
+    "onnxruntime-gpu>=1.18.0; python_version<'3.13'",
+    "onnxruntime>=1.18.0; python_version>='3.13'",
     # Optional dependencies for enhanced functionality
-    "numpy==2.0.2", # For video frame processing
+    "numpy>=2.0.0", # For video frame processing
     "psutil>=5.9.0", # For resource monitoring
     # Development and testing
     "pytest>=7.0.0",
@@ -41,7 +42,6 @@ dependencies = [
     "anthropic>=0.5.0",
     "coqui-tts>=0.24.0",
     "faster-whisper>=0.10.0",
-    "torch>=2.0.0",
     "torchaudio>=2.0.0",
     "soundfile>=0.12.0",
     "scipy>=1.11.0",
@@ -49,7 +49,6 @@ dependencies = [
     "aiohttp>=3.12.15",
     "google-genai>=1.38.0",
     "elevenlabs>=2.16.0",
-    "torchvision>=0.23.0",
     "dlib>=20.0.0",
     "face-alignment>=1.4.1",
     "opencv-python>=4.11.0.86",
@@ -62,6 +61,10 @@ dependencies = [
     # TTS Provider SDKs
     "python-socketio>=5.10.0",
     "azure-cognitiveservices-speech>=1.40.0",
+    # NVIDIA Audio2Face integration
+    "grpcio>=1.66.1",
+    "grpcio-tools>=1.66.1",
+    "protobuf>=5.28.0",
 ]
 
 [project.optional-dependencies]
