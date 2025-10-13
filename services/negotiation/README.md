@@ -1802,6 +1802,421 @@ However, the functional API (`playAndSendPcm`) is recommended for TTS integratio
 
 ---
 
+## Audio2Face Production Hardening
+
+### Backpressure Management
+
+The A2F integration includes intelligent backpressure to handle slow clients or network issues gracefully:
+
+**Key Principles:**
+- ✅ **NEVER drop audio** - Audio is the authoritative clock
+- ⚠️ **Drop old blendshape frames** when queue exceeds limits
+- 🔄 **Resync to latest frame** when backpressure detected
+- 📊 **Monitor dropped frames** for performance tuning
+
+**Implementation:**
+
+The `BlendshapeBackpressureQueue` (Python) and `BlendshapeQueue` (JavaScript) implement this strategy:
+
+```python
+# Backend: app/facial/blendshape_queue.py
+from app.facial.blendshape_queue import BlendshapeBackpressureQueue
+
+queue = BlendshapeBackpressureQueue(
+    max_queue_size=50,  # Drop oldest frames when exceeded
+    interpolation_window_ms=40,  # 30-50ms recommended
+    enable_interpolation=True,
+    drop_strategy="oldest"  # or "furthest_from_playhead"
+)
+
+# Enqueue from A2F
+await queue.enqueue(timestamp_ms, weights, frame_index)
+
+# Dequeue in render loop
+frame = await queue.dequeue_at_time(audio_playhead_ms)
+```
+
+**Frontend:**
+
+```javascript
+// static/a2f-enhanced.js
+import { EnhancedA2FClient, LatencyHUD } from '/static/a2f-enhanced.js';
+
+const client = new EnhancedA2FClient({
+    maxQueueSize: 50,
+    interpolationEnabled: true,
+    interpolationWindowMs: 40
+});
+
+await client.connect();
+
+// In render loop (called every frame):
+function render() {
+    const playheadMs = audioContext.currentTime * 1000;
+    const weights = client.getWeightsForPlayhead(playheadMs);
+    
+    if (weights) {
+        head3d.applyBlendshapes(weights);  // Apply to 3D model
+    }
+    
+    requestAnimationFrame(render);
+}
+```
+
+**Monitoring:**
+
+The queue tracks dropped frames for performance monitoring:
+
+```javascript
+const metrics = client.getMetrics();
+console.log(`Dropped: ${metrics.droppedCount} (${metrics.dropRate})`);
+```
+
+**Production Tuning:**
+- If drop rate > 5%: Increase `max_queue_size` or reduce network latency
+- If drop rate > 20%: Client is severely overloaded, consider reducing quality
+- Monitor logs for: `"Dropped blendshape frames (backpressure active)"`
+
+---
+
+### Frame Interpolation for Smooth Motion
+
+The A2F integration includes a **30-50ms interpolation queue** for silky-smooth facial animation:
+
+**Why Interpolation?**
+- A2F generates frames at ~30 FPS (33ms intervals)
+- Display refreshes at 60 FPS (16ms intervals)
+- Without interpolation: visible "stepping" in facial motion
+- With interpolation: smooth, natural-looking animation
+
+**Implementation:**
+
+```python
+# Backend interpolation (automatic)
+frame = await queue.dequeue_at_time(
+    playhead_ms,
+    interpolate=True  # Enabled by default
+)
+# Returns interpolated frame between consecutive A2F frames
+```
+
+```javascript
+// Frontend interpolation (automatic)
+const weights = client.getWeightsForPlayhead(playheadMs);
+// Automatically lerps between prev and next frames
+
+// Manually control interpolation:
+const client = new EnhancedA2FClient({
+    interpolationEnabled: true,  // Enable/disable
+    interpolationWindowMs: 40    // 30-50ms recommended
+});
+```
+
+**Technical Details:**
+
+The interpolation algorithm:
+1. Find frames immediately before and after playhead position
+2. Calculate interpolation factor: `t = (playhead - prev.time) / (next.time - prev.time)`
+3. Lerp each blendshape weight: `weight = prev + t * (next - prev)`
+4. Clamp to [0.0, 1.0] range
+
+**Example:**
+
+```
+Frame 0: jawOpen=0.0 at t=0ms
+Frame 1: jawOpen=0.6 at t=33ms
+Playhead: t=16ms (midpoint)
+
+Interpolated: jawOpen = 0.0 + 0.5 * (0.6 - 0.0) = 0.3
+```
+
+**Performance Impact:**
+- Interpolation adds <1ms per frame (negligible)
+- Significantly improves visual quality
+- Recommended to keep enabled for production
+
+---
+
+### Emotion & Style Controls
+
+Expose emotion biases to add personality to A2F-generated facial animation:
+
+**Available Controls:**
+- **Smile bias**: Diplomatic warmth (0.0-1.0)
+- **Frown bias**: Stern/serious expression (0.0-1.0)
+- **Surprise bias**: Eyebrow raise, attention (0.0-1.0)
+- **Seriousness**: Reduced smiling, tighter expression (0.0-1.0)
+- **Warmth**: Friendly, open demeanor (0.0-1.0)
+- **Intensity**: Overall expression multiplier (0.5-2.0)
+
+**Python API:**
+
+```python
+from app.facial.emotion_controls import EmotionBias, apply_emotion_bias, get_preset
+
+# Use preset
+bias = get_preset("diplomatic")  # friendly, stern, concerned, etc.
+
+# Or create custom bias
+bias = EmotionBias(
+    smile=0.3,
+    warmth=0.4,
+    intensity=1.1
+)
+
+# Apply to blendshapes
+modified_weights = apply_emotion_bias(base_weights, bias)
+```
+
+**JavaScript API:**
+
+```javascript
+// Set emotion with smooth transition
+client.setEmotion("friendly", transitionDuration=1.0);
+
+// Available presets: neutral, friendly, diplomatic, stern, concerned, negotiating
+
+// Emotion controller handles smooth blending (0.5s default)
+// Renders automatically apply current emotion to blendshapes
+```
+
+**Diplomatic Presets:**
+
+| Preset | Use Case | Smile | Warmth | Seriousness |
+|--------|----------|-------|--------|-------------|
+| `neutral` | Default state | 0.0 | 0.0 | 0.0 |
+| `friendly` | Alliance-building | 0.3 | 0.4 | 0.0 |
+| `diplomatic` | Standard negotiations | 0.15 | 0.3 | 0.1 |
+| `stern` | Delivering ultimatum | 0.0 | 0.0 | 0.6 |
+| `concerned` | Threat assessment | 0.0 | 0.0 | 0.3 |
+| `negotiating` | Trade discussions | 0.0 | 0.2 | 0.4 |
+
+**Example - Dynamic Emotion:**
+
+```javascript
+// React to game events
+if (playerProposedTreaty) {
+    client.setEmotion("friendly", 1.5);  // Warm up over 1.5s
+}
+
+if (playerThreatenedWar) {
+    client.setEmotion("stern", 0.5);  // Quick stern reaction
+}
+```
+
+**NVIDIA Model Hints:**
+
+Per NVIDIA's blog, A2F models support emotion conditioning natively. The controls above are **additive** - they layer on top of speech-driven animation without disrupting lip-sync. Future NVIDIA models may expose emotion parameters directly via gRPC API.
+
+---
+
+### Testing Checklist
+
+**Production-Ready A2F Integration Validation:**
+
+#### 1. GLB Model Validation
+
+Verify your 3D model contains all 52 ARKit blendshapes:
+
+```python
+from app.facial.testing_utils import validate_glb_arkit52
+
+result = validate_glb_arkit52("/path/to/head.glb")
+
+if result.is_valid:
+    print("✓ GLB has all ARKit-52 morph targets")
+else:
+    print("✗ Missing blendshapes:", result.missing_arkit_names)
+    print("Suggested mappings:", result.name_mapping)
+```
+
+**JavaScript:**
+
+```javascript
+// Load GLB in Three.js
+const gltf = await loader.loadAsync('/models/head.glb');
+const mesh = gltf.scene.children.find(c => c.morphTargetDictionary);
+
+if (mesh) {
+    const morphTargets = Object.keys(mesh.morphTargetDictionary);
+    console.log(`Found ${morphTargets.length} morph targets`);
+    
+    // Verify ARKit-52 names
+    const missingARKit = ARKIT52.filter(name => !morphTargets.includes(name));
+    if (missingARKit.length === 0) {
+        console.log('✓ All ARKit-52 blendshapes present');
+    } else {
+        console.warn('✗ Missing:', missingARKit);
+    }
+} else {
+    console.error('✗ No morph targets found in GLB');
+}
+```
+
+**Common Issues:**
+
+- **Naming mismatches**: `"jaw_open"` vs `"jawOpen"` - use `name_mapping` to find suggestions
+- **Missing targets**: Some models have incomplete sets - must have all 52 for proper animation
+- **Wrong mesh**: Morph targets must be on the face mesh, not hair/eyes/accessories
+
+**Ground Truth:** [Apple ARKit Blendshape Location](https://developer.apple.com/documentation/arkit/arfaceanchor/blendshapelocation)
+
+---
+
+#### 2. TTS + A2F PCM Tee
+
+Stream TTS audio to **both** AudioWorklet (playback) and A2F WebSocket (analysis):
+
+```javascript
+// Setup (once)
+await initAudioWorklet(24000);
+openA2F((names, weights) => {
+    head3d.applyBlendshapes(weights);
+});
+
+// In TTS event handler:
+ttsWs.onmessage = (event) => {
+    const data = JSON.parse(event.data);
+    
+    if (data.kind === 'audio') {
+        const pcm16 = base64ToArrayBuffer(data.pcm16_b64);
+        
+        // THIS IS THE KEY INTEGRATION:
+        playAndSendPcm(pcm16);  // Tees to BOTH audio AND A2F
+    }
+};
+```
+
+**Verify:**
+- ✓ Audio plays through speakers
+- ✓ Face moves in sync with audio
+- ✓ Animation continues even if tab is throttled (uses AudioWorklet, not Web Audio API)
+
+---
+
+#### 3. Latency & Sync Measurement
+
+Monitor TTFB and steady-state latency in your HUD:
+
+```javascript
+import { EnhancedA2FClient, LatencyHUD } from '/static/a2f-enhanced.js';
+
+const client = new EnhancedA2FClient({
+    enableLatencyTracking: true
+});
+
+const hud = new LatencyHUD('a2f-hud-container');
+
+// Update HUD periodically
+setInterval(() => {
+    const metrics = client.getMetrics();
+    hud.update(metrics);
+    
+    // Check targets
+    if (metrics.ttfb > 200) {
+        console.warn('⚠ TTFB slow:', metrics.ttfb, 'ms');
+    }
+    
+    if (Math.abs(metrics.audioVideoSkew) > 120) {
+        console.warn('⚠ A/V sync off:', metrics.audioVideoSkew, 'ms');
+    }
+}, 100);
+```
+
+**Target Metrics:**
+
+| Metric | Target | Acceptable | Poor |
+|--------|--------|------------|------|
+| TTFB (Time To First Blendshape) | <120ms | <200ms | >500ms |
+| Steady-state frame time | ~33ms (30 FPS) | ~40ms (25 FPS) | >50ms (20 FPS) |
+| A/V skew (face vs audio) | 80-120ms | ±150ms | >200ms |
+| Drop rate | 0% | <1% | >5% |
+
+**A/V Sync Calibration:**
+
+```javascript
+// If mouth feels early/late, adjust offset:
+setA2FOffset(100);  // Positive = delay mouth by 100ms
+
+// Test with phrase: "Pa pa pa" (plosives)
+// Peak jawOpen should align with "p" sound peaks
+```
+
+---
+
+#### 4. Production Checklist Script
+
+Run comprehensive validation:
+
+```python
+from app.facial.testing_utils import run_production_checklist
+
+results = run_production_checklist(
+    glb_path="/models/diplomat_head.glb",
+    test_audio_path="/audio/test_speech.wav"
+)
+
+if results["overall_status"] == "passed":
+    print("✓ Ready for production")
+else:
+    print("✗ Issues found:")
+    for error in results.get("errors", []):
+        print(f"  - {error}")
+```
+
+**Checklist includes:**
+- ✓ GLB has all ARKit-52 morph targets with correct naming
+- ✓ Blendshape generation produces valid output (52 floats, 0.0-1.0)
+- ✓ Latency < 200ms for first frame (TTFB)
+- ✓ Steady-state runs at 25+ FPS
+- ✓ A/V sync within ±120ms
+- ✓ Drop rate < 1%
+
+---
+
+### Why This is Future-Proof
+
+The A2F integration aligns with **NVIDIA's Audio2Face Microservice** architecture and open-sourced model:
+
+**1. Standard Blendshapes**
+- Uses **ARKit-52** format (Apple standard)
+- Compatible with MetaHuman, Ready Player Me, custom rigs
+- Export to Unreal Engine, Unity, Three.js, any 3D engine
+
+**2. Pluggable Transport**
+- gRPC for A2F Microservice (production)
+- WebSocket for browser clients (this implementation)
+- Easy to swap transports without changing animation logic
+
+**3. Audio Clock is Authority**
+- Audio timestamp drives scheduling (never drop audio)
+- Blendshapes are "suggestions" (can drop under load)
+- Matches NVIDIA's recommended architecture
+
+**4. Model-Agnostic**
+- Current: NVIDIA A2F gRPC API
+- Future: Run NVIDIA's open-source model locally via ONNX/TensorRT
+- Works with any service that outputs ARKit-52 weights + timestamps
+
+**5. Emotion Conditioning**
+- Biases are **additive** (layer on top of base A2F)
+- Ready for future NVIDIA models with native emotion parameters
+- No re-work needed when A2F adds emotion API
+
+**References:**
+- [NVIDIA Audio2Face Microservice](https://docs.omniverse.nvidia.com/audio2face/latest/)
+- [ARKit Blendshapes](https://developer.apple.com/documentation/arkit/arfaceanchor/blendshapelocation)
+- [NVIDIA Blog: Emotion Control Hints](https://developer.nvidia.com/blog/realistic-digital-avatars-with-audio2face/)
+
+**Migration Path:**
+
+When NVIDIA releases new A2F features:
+1. Update `a2f_client.py` gRPC stubs (auto-generated from `.proto`)
+2. Map new parameters to existing `EmotionBias` structure
+3. No client-side changes needed (abstraction handles it)
+
+---
+
 ### Legacy TTS Integration Example
 
 Audio2Face works seamlessly with the existing TTS streaming providers:
