@@ -1525,6 +1525,31 @@ ws.send(new ArrayBuffer(0)); // Signal end
 
 The system uses Apple's ARKit-52 standard for facial blendshapes. Each weight is a float from 0.0 (no activation) to 1.0 (full activation).
 
+**Utility Functions:**
+
+```python
+from app.facial import (
+    ARKIT52,              # List of 52 blendshape names
+    ARKIT52_INDEX,        # Dict mapping name → index
+    clamp01,              # Clamp float to [0.0, 1.0]
+    validate_arkit52_weights,  # Validate weights array
+    create_empty_arkit52, # Create [0.0] * 52 array
+)
+
+# Map blendshape name to index
+jaw_index = ARKIT52_INDEX["jawOpen"]  # → 24
+
+# Clamp weights to valid range
+safe_weight = clamp01(1.5)  # → 1.0
+
+# Validate weights array
+weights = [0.5] * 52
+is_valid = validate_arkit52_weights(weights)  # → True
+
+# Create neutral face
+neutral = create_empty_arkit52()  # → [0.0, 0.0, ..., 0.0]
+```
+
 | Index | Name | Description |
 |-------|------|-------------|
 | 0-4 | `browDownLeft`, `browDownRight`, `browInnerUp`, `browOuterUpLeft`, `browOuterUpRight` | Eyebrow movements |

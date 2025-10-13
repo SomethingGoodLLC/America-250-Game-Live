@@ -108,3 +108,20 @@ def create_empty_arkit52() -> List[float]:
     """
     return [0.0] * 52
 
+
+def clamp01(x: float) -> float:
+    """Clamp a value to the range [0.0, 1.0].
+    
+    Args:
+        x: Value to clamp
+        
+    Returns:
+        Value clamped to [0.0, 1.0]
+    """
+    return 0.0 if x < 0 else 1.0 if x > 1 else x
+
+
+# Alternative names for compatibility
+ARKIT52 = ARKIT52_NAMES  # Alias for backward compatibility
+ARKIT52_INDEX = _arkit52_index_map  # Alias for backward compatibility
+
