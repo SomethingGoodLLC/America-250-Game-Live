@@ -11,7 +11,7 @@ import asyncio
 import base64
 import logging
 import time
-from typing import Dict, Optional
+from typing import Dict, Optional, List
 import io
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, UploadFile, File, Form, HTTPException
@@ -51,6 +51,19 @@ class SessionResponse(BaseModel):
     """Session creation response"""
     session_id: str
     message: str
+
+
+class HealthResponse(BaseModel):
+    """Health check response"""
+    status: str
+    active_sessions: int
+    service_loaded: bool
+
+
+class MetricsResponse(BaseModel):
+    """Per-session metrics response"""
+    session_id: str
+    metrics: Dict
 
 
 class PortraitVideoTrack(VideoStreamTrack):
@@ -347,6 +360,81 @@ async def cleanup_connection(session_id: str):
     if pc:
         await pc.close()
         logger.info(f"WebRTC connection closed for session {session_id}")
+
+
+@router.get("/health", response_model=HealthResponse)
+async def health_check():
+    """
+    Health check endpoint for portrait service.
+    
+    Returns:
+        Service health status and active session count
+    """
+    service = await get_portrait_service()
+    
+    return HealthResponse(
+        status="healthy" if service else "degraded",
+        active_sessions=len(service.sessions) if service else 0,
+        service_loaded=service is not None
+    )
+
+
+@router.get("/metrics", response_model=List[MetricsResponse])
+async def get_all_metrics():
+    """
+    Get metrics for all active portrait sessions.
+    
+    Returns:
+        List of metrics for each session
+    """
+    service = await get_portrait_service()
+    
+    if not service:
+        raise HTTPException(status_code=503, detail="Portrait service not initialized")
+    
+    metrics_list = []
+    for session_id, session in service.sessions.items():
+        metrics_list.append(MetricsResponse(
+            session_id=session_id,
+            metrics=session.metrics.to_dict()
+        ))
+    
+    return metrics_list
+
+
+@router.get("/metrics/{session_id}", response_model=MetricsResponse)
+async def get_session_metrics(session_id: str):
+    """
+    Get metrics for a specific portrait session.
+    
+    Args:
+        session_id: Session identifier
+        
+    Returns:
+        Session metrics including:
+        - frames_generated: Total frames generated
+        - frames_dropped: Frames dropped due to GPU saturation
+        - audio_chunks_received: Total audio chunks received
+        - audio_buffer_ms: Current audio buffer duration
+        - last_frame_age_ms: Time since last frame generated
+        - avg_frame_time_ms: Average frame generation time
+        - actual_fps: Actual frames per second
+        - target_fps: Target FPS
+    """
+    service = await get_portrait_service()
+    
+    if not service:
+        raise HTTPException(status_code=503, detail="Portrait service not initialized")
+    
+    if session_id not in service.sessions:
+        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+    
+    session = service.sessions[session_id]
+    
+    return MetricsResponse(
+        session_id=session_id,
+        metrics=session.metrics.to_dict()
+    )
 
 
 @router.on_event("shutdown")
