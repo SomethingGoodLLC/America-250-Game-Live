@@ -18,10 +18,14 @@ dependencies = [
     "jsonschema>=4.0.0",
     "ruamel.yaml>=0.17.0",
     # WebRTC and media processing
-    "aiortc>=1.6.0",
-    "av>=10.0.0", # PyAV for video processing
+    "aiortc==1.9.0",
+    "av==12.1.0", # PyAV for video processing
+    # GPU and ML dependencies for portrait animation
+    "torch==2.3.1",
+    "torchvision==0.18.1",
+    "onnxruntime-gpu==1.18.0",
     # Optional dependencies for enhanced functionality
-    "numpy>=1.24.0", # For video frame processing
+    "numpy==2.0.2", # For video frame processing
     "psutil>=5.9.0", # For resource monitoring
     # Development and testing
     "pytest>=7.0.0",

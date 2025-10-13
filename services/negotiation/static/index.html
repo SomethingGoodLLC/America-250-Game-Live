@@ -55,6 +55,14 @@
 
             <!-- Right Panel: Controls -->
             <div class="control-panel">
+                <!-- Tab Navigation -->
+                <div class="tab-navigation">
+                    <button class="tab-btn active" data-tab="tts">TTS Controls</button>
+                    <button class="tab-btn" data-tab="portrait">Portrait</button>
+                </div>
+
+                <!-- TTS Controls Tab -->
+                <div id="tts-tab" class="tab-content active">
                 <!-- Provider Configuration -->
                 <section class="control-section">
                     <h2>Provider Configuration</h2>
@@ -159,6 +167,113 @@
                     <div id="event-log" class="event-log"></div>
                     <button id="clear-log-btn" class="btn btn-secondary btn-small">Clear Log</button>
                 </section>
+                </div>
+                <!-- End TTS Tab -->
+
+                <!-- Portrait Tab -->
+                <div id="portrait-tab" class="tab-content">
+                    <!-- Portrait Configuration -->
+                    <section class="control-section">
+                        <h2>Portrait Configuration</h2>
+                        
+                        <div class="form-group">
+                            <label for="portrait-engine-select">Engine:</label>
+                            <select id="portrait-engine-select" class="form-control">
+                                <option value="liveportrait">LivePortrait (Fast)</option>
+                                <option value="ditto">Ditto (Diffusion)</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="portrait-fps-select">FPS:</label>
+                            <select id="portrait-fps-select" class="form-control">
+                                <option value="15">15 FPS</option>
+                                <option value="25" selected>25 FPS (Recommended)</option>
+                                <option value="30">30 FPS</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="portrait-reference-image">Reference Portrait:</label>
+                            <input 
+                                type="file" 
+                                id="portrait-reference-image" 
+                                class="form-control" 
+                                accept="image/jpeg,image/png"
+                            >
+                            <small>Upload a portrait photo (JPEG/PNG, 512x512 recommended)</small>
+                        </div>
+
+                        <div id="portrait-preview" class="portrait-preview" style="display: none;">
+                            <img id="portrait-preview-img" alt="Reference Portrait" style="max-width: 100%; border-radius: 8px;">
+                        </div>
+                    </section>
+
+                    <!-- Portrait Connection -->
+                    <section class="control-section">
+                        <h2>Portrait Streaming</h2>
+                        
+                        <button id="portrait-init-btn" class="btn btn-primary btn-large" disabled>
+                            Initialize Portrait Session
+                        </button>
+                        <button id="portrait-connect-btn" class="btn btn-success btn-large" disabled>
+                            🎥 Connect Portrait Stream
+                        </button>
+                        <button id="portrait-disconnect-btn" class="btn btn-danger btn-large" disabled>
+                            Disconnect Portrait
+                        </button>
+
+                        <div class="form-group" style="margin-top: 16px;">
+                            <label>
+                                <input type="checkbox" id="portrait-audio-sync" checked>
+                                Sync with TTS Audio
+                            </label>
+                        </div>
+                    </section>
+
+                    <!-- Portrait Video Display -->
+                    <section class="control-section">
+                        <h2>Portrait Video</h2>
+                        <video 
+                            id="portraitVideo" 
+                            autoplay 
+                            playsinline 
+                            muted
+                            style="width: 100%; border-radius: 8px; background: #000;"
+                        ></video>
+                    </section>
+
+                    <!-- Portrait Metrics -->
+                    <section class="control-section">
+                        <h2>Performance Metrics</h2>
+                        <div class="metrics-grid">
+                            <div class="metric-item">
+                                <span class="metric-label">Video FPS:</span>
+                                <span id="portrait-fps" class="metric-value">0</span>
+                            </div>
+                            <div class="metric-item">
+                                <span class="metric-label">Frame Skew:</span>
+                                <span id="portrait-skew" class="metric-value">0 ms</span>
+                            </div>
+                            <div class="metric-item">
+                                <span class="metric-label">Audio Sync:</span>
+                                <span id="portrait-audio-sync-ms" class="metric-value">0 ms</span>
+                            </div>
+                            <div class="metric-item">
+                                <span class="metric-label">Connection:</span>
+                                <span id="portrait-connection-state" class="metric-value">Disconnected</span>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- Portrait Log -->
+                    <section class="control-section">
+                        <h2>Portrait Log</h2>
+                        <div id="portrait-log" class="event-log"></div>
+                        <button id="clear-portrait-log-btn" class="btn btn-secondary btn-small">Clear Log</button>
+                    </section>
+                </div>
+                <!-- End Portrait Tab -->
             </div>
         </div>
     </div>

@@ -14,6 +14,9 @@ A production-ready FastAPI service for diplomatic negotiations with WebRTC A/V s
   - [Supported Providers](#tts-providers)
   - [Usage Examples](#tts-usage-examples)
   - [Phoneme & Lip-Sync](#phoneme-lipsync)
+- [Portrait Animation](#portrait-animation) 🆕
+  - [LivePortrait Engine](#liveportrait-engine)
+  - [Quick Start](#portrait-quick-start)
 - [Configuration](#configuration)
   - [Environment Setup](#environment-setup)
   - [Advanced Configuration](#advanced-configuration)
@@ -47,6 +50,13 @@ A production-ready FastAPI service for diplomatic negotiations with WebRTC A/V s
 - **Structured Events** - Type-safe event system (`NewIntent`, `LiveSubtitle`, `Analysis`, `Safety`)
 - **Schema Validation** - Automatic Pydantic model validation with confidence scoring
 - **Backpressured Streaming** - Real-time subtitle generation with partial/final events
+
+### Portrait Animation Engine 🆕
+- **LivePortrait/Ditto Support** - Real-time portrait animation with GPU acceleration
+- **WebRTC Video Streaming** - Sub-200ms latency portrait delivery
+- **Audio-Driven Animation** - Synchronized lip-sync with TTS audio
+- **Session Management** - Multi-user portrait sessions with FIFO audio buffers
+- **Performance Monitoring** - Real-time FPS, sync, and latency metrics
 
 ### Audio/Video Processing
 - **STT Interfaces** - Pluggable Speech-to-Text (faster-whisper, cloud providers)
@@ -1108,6 +1118,52 @@ result = text_to_phonemes_with_timing(
 )
 # [{"phoneme": "HH", "start_ms": 0, "end_ms": 125}, ...]
 ```
+
+---
+
+## Portrait Animation
+
+### LivePortrait Engine
+
+The service now includes a **real-time portrait animation engine** that synchronizes animated talking heads with TTS audio output.
+
+**Key Features:**
+- 🎭 **GPU-accelerated** portrait animation at 15-30 FPS
+- 🎬 **WebRTC streaming** with <200ms end-to-end latency
+- 🎵 **Audio-driven** facial animation synchronized with speech
+- 🖼️ **Upload any portrait** image as reference (JPEG/PNG)
+- 📊 **Real-time metrics** for FPS, sync offset, and performance
+
+### Portrait Quick Start
+
+See **[PORTRAIT_QUICKSTART.md](./PORTRAIT_QUICKSTART.md)** for a 5-minute setup guide.
+
+**Quick Steps:**
+1. Open the web UI: `http://localhost:8000/static/index.html`
+2. Switch to **"Portrait"** tab
+3. Upload a reference portrait image
+4. Click **"Initialize Portrait Session"**
+5. Click **"Connect Portrait Stream"**
+6. Switch back to TTS tab and speak!
+
+**Architecture Details:**
+
+For full implementation details, see **[LIVEPORTRAIT_IMPLEMENTATION.md](./LIVEPORTRAIT_IMPLEMENTATION.md)**.
+
+**API Endpoints:**
+- `POST /portrait/session` - Initialize session with reference image
+- `POST /portrait/webrtc/offer` - WebRTC SDP negotiation
+- `WS /portrait/audio/{session_id}` - Stream audio for animation
+
+**Supported Engines:**
+- **LivePortrait** - Fast single-image talking head (recommended)
+- **Ditto** - Diffusion-based portrait animation (higher quality, slower)
+
+**Performance:**
+- Target: 25 FPS at 512x512 resolution
+- Audio sync: <200ms end-to-end
+- GPU Memory: ~2GB per session
+- WebRTC latency: <100ms
 
 ---
 

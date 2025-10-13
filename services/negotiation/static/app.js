@@ -47,6 +47,25 @@ class DiplomaticAvatarApp {
             elevenlabs: []
         };
         
+        // Portrait state
+        this.portrait = {
+            enabled: false,
+            sessionId: null,
+            engine: 'liveportrait',
+            fps: 25,
+            referenceImage: null,
+            peerConnection: null,
+            audioWebSocket: null,
+            videoElement: null,
+            stats: {
+                fps: 0,
+                skewMs: 0,
+                audioSyncMs: 0,
+                frameCount: 0,
+                lastFrameTime: 0
+            }
+        };
+        
         // Initialize after DOM load
         if (document.readyState === 'loading') {
             document.addEventListener('DOMContentLoaded', () => this.init());
@@ -157,6 +176,14 @@ class DiplomaticAvatarApp {
      * Initialize UI event handlers
      */
     initUIHandlers() {
+        // Tab navigation
+        document.querySelectorAll('.tab-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const targetTab = e.target.dataset.tab;
+                this.switchTab(targetTab);
+            });
+        });
+        
         // Provider selection
         document.getElementById('provider-select').addEventListener('change', (e) => {
             this.currentProvider = e.target.value;
@@ -218,12 +245,79 @@ class DiplomaticAvatarApp {
             document.getElementById('event-log').innerHTML = '';
         });
         
+        // Portrait handlers
+        this.initPortraitHandlers();
+        
         // Enable audio context on user interaction
         document.addEventListener('click', () => {
             if (this.audioContext && this.audioContext.state === 'suspended') {
                 this.audioContext.resume();
             }
         }, { once: true });
+    }
+    
+    /**
+     * Initialize portrait-specific event handlers
+     */
+    initPortraitHandlers() {
+        // Reference image upload
+        document.getElementById('portrait-reference-image').addEventListener('change', (e) => {
+            this.handlePortraitImageUpload(e);
+        });
+        
+        // Portrait engine selection
+        document.getElementById('portrait-engine-select').addEventListener('change', (e) => {
+            this.portrait.engine = e.target.value;
+        });
+        
+        // Portrait FPS selection
+        document.getElementById('portrait-fps-select').addEventListener('change', (e) => {
+            this.portrait.fps = parseInt(e.target.value);
+        });
+        
+        // Initialize portrait session
+        document.getElementById('portrait-init-btn').addEventListener('click', () => {
+            this.initPortraitSession();
+        });
+        
+        // Connect portrait stream
+        document.getElementById('portrait-connect-btn').addEventListener('click', () => {
+            this.connectPortraitStream();
+        });
+        
+        // Disconnect portrait
+        document.getElementById('portrait-disconnect-btn').addEventListener('click', () => {
+            this.disconnectPortrait();
+        });
+        
+        // Clear portrait log
+        document.getElementById('clear-portrait-log-btn').addEventListener('click', () => {
+            document.getElementById('portrait-log').innerHTML = '';
+        });
+        
+        // Get video element reference
+        this.portrait.videoElement = document.getElementById('portraitVideo');
+    }
+    
+    /**
+     * Switch between tabs
+     */
+    switchTab(tabName) {
+        // Update tab buttons
+        document.querySelectorAll('.tab-btn').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.tab === tabName);
+        });
+        
+        // Update tab content
+        document.querySelectorAll('.tab-content').forEach(content => {
+            if (content.id === `${tabName}-tab`) {
+                content.classList.add('active');
+            } else {
+                content.classList.remove('active');
+            }
+        });
+        
+        this.log(`Switched to ${tabName} tab`);
     }
     
     /**
@@ -479,7 +573,13 @@ class DiplomaticAvatarApp {
         });
         
         // Update latency stats
-        this.stats.lastAudioTimestamp = performance.now();
+        const timestamp = performance.now();
+        this.stats.lastAudioTimestamp = timestamp;
+        
+        // Send to portrait for animation if sync is enabled
+        if (document.getElementById('portrait-audio-sync')?.checked) {
+            await this.sendTTSChunksToPortrait(bytes.buffer, timestamp);
+        }
     }
     
     /**
@@ -679,6 +779,423 @@ class DiplomaticAvatarApp {
             console.warn(message);
         } else {
             console.log(message);
+        }
+    }
+    
+    // ========================================================================
+    // PORTRAIT METHODS
+    // ========================================================================
+    
+    /**
+     * Handle portrait image upload
+     */
+    handlePortraitImageUpload(event) {
+        const file = event.target.files[0];
+        if (!file) {
+            return;
+        }
+        
+        // Validate file type
+        if (!file.type.match(/image\/(jpeg|jpg|png)/)) {
+            this.portraitLog('Invalid image format. Use JPEG or PNG.', 'error');
+            return;
+        }
+        
+        // Store file
+        this.portrait.referenceImage = file;
+        
+        // Show preview
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            const preview = document.getElementById('portrait-preview');
+            const img = document.getElementById('portrait-preview-img');
+            img.src = e.target.result;
+            preview.style.display = 'block';
+            
+            // Enable init button
+            document.getElementById('portrait-init-btn').disabled = false;
+            
+            this.portraitLog(`Image loaded: ${file.name} (${(file.size / 1024).toFixed(1)} KB)`);
+        };
+        reader.readAsDataURL(file);
+    }
+    
+    /**
+     * Initialize portrait session with reference image
+     */
+    async initPortraitSession() {
+        if (!this.portrait.referenceImage) {
+            this.portraitLog('No reference image selected', 'error');
+            return;
+        }
+        
+        try {
+            this.portraitLog('Initializing portrait session...');
+            
+            // Generate session ID
+            this.portrait.sessionId = `portrait_${Date.now()}`;
+            
+            // Create form data
+            const formData = new FormData();
+            formData.append('session_id', this.portrait.sessionId);
+            formData.append('engine', this.portrait.engine);
+            formData.append('fps', this.portrait.fps);
+            formData.append('image', this.portrait.referenceImage);
+            
+            // Send to server
+            const response = await fetch('/portrait/session', {
+                method: 'POST',
+                body: formData
+            });
+            
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+            }
+            
+            const result = await response.json();
+            this.portraitLog(`Session initialized: ${result.message}`);
+            
+            // Enable connect button
+            document.getElementById('portrait-connect-btn').disabled = false;
+            document.getElementById('portrait-init-btn').disabled = true;
+            
+            this.updatePortraitConnectionState('Ready');
+            
+        } catch (error) {
+            console.error('Failed to initialize portrait session:', error);
+            this.portraitLog(`Initialization failed: ${error.message}`, 'error');
+        }
+    }
+    
+    /**
+     * Create portrait WebRTC peer connection
+     */
+    async connectPortraitStream() {
+        if (!this.portrait.sessionId) {
+            this.portraitLog('No active session. Initialize first.', 'error');
+            return;
+        }
+        
+        try {
+            this.portraitLog('Creating WebRTC connection...');
+            
+            // Create RTCPeerConnection
+            const pc = new RTCPeerConnection({
+                iceServers: [
+                    { urls: 'stun:stun.l.google.com:19302' }
+                ]
+            });
+            
+            this.portrait.peerConnection = pc;
+            
+            // Handle connection state
+            pc.onconnectionstatechange = () => {
+                this.portraitLog(`WebRTC state: ${pc.connectionState}`);
+                this.updatePortraitConnectionState(pc.connectionState);
+                
+                if (pc.connectionState === 'connected') {
+                    this.startPortraitMetrics();
+                }
+            };
+            
+            // Handle ICE connection state
+            pc.oniceconnectionstatechange = () => {
+                this.portraitLog(`ICE state: ${pc.iceConnectionState}`);
+            };
+            
+            // Handle incoming video track
+            pc.ontrack = (event) => {
+                this.portraitLog('Received video track');
+                if (this.portrait.videoElement) {
+                    this.portrait.videoElement.srcObject = event.streams[0];
+                }
+            };
+            
+            // Create offer
+            const offer = await pc.createOffer();
+            await pc.setLocalDescription(offer);
+            
+            // Wait for ICE gathering
+            await this.waitForICEGathering(pc);
+            
+            // Send offer to server
+            const response = await fetch('/portrait/webrtc/offer', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    session_id: this.portrait.sessionId,
+                    sdp: pc.localDescription.sdp,
+                    type: pc.localDescription.type
+                })
+            });
+            
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+            }
+            
+            const answer = await response.json();
+            
+            // Set remote description
+            await pc.setRemoteDescription(new RTCSessionDescription({
+                sdp: answer.sdp,
+                type: answer.type
+            }));
+            
+            this.portraitLog('WebRTC connection established');
+            
+            // Update UI
+            document.getElementById('portrait-connect-btn').disabled = true;
+            document.getElementById('portrait-disconnect-btn').disabled = false;
+            
+            // Connect audio stream if sync is enabled
+            if (document.getElementById('portrait-audio-sync').checked) {
+                await this.connectPortraitAudioStream();
+            }
+            
+        } catch (error) {
+            console.error('Failed to connect portrait stream:', error);
+            this.portraitLog(`Connection failed: ${error.message}`, 'error');
+            this.disconnectPortrait();
+        }
+    }
+    
+    /**
+     * Wait for ICE gathering to complete
+     */
+    waitForICEGathering(pc) {
+        return new Promise((resolve) => {
+            if (pc.iceGatheringState === 'complete') {
+                resolve();
+            } else {
+                const checkState = () => {
+                    if (pc.iceGatheringState === 'complete') {
+                        pc.removeEventListener('icegatheringstatechange', checkState);
+                        resolve();
+                    }
+                };
+                pc.addEventListener('icegatheringstatechange', checkState);
+            }
+        });
+    }
+    
+    /**
+     * Connect WebSocket for audio streaming to portrait
+     */
+    async connectPortraitAudioStream() {
+        if (!this.portrait.sessionId) {
+            return;
+        }
+        
+        try {
+            // Construct WebSocket URL
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const host = window.location.host;
+            const wsUrl = `${protocol}//${host}/portrait/audio/${this.portrait.sessionId}`;
+            
+            this.portraitLog('Connecting audio stream...');
+            
+            const ws = new WebSocket(wsUrl);
+            this.portrait.audioWebSocket = ws;
+            
+            ws.onopen = () => {
+                this.portraitLog('Audio stream connected');
+            };
+            
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                if (data.error) {
+                    this.portraitLog(`Audio stream error: ${data.error}`, 'error');
+                }
+            };
+            
+            ws.onerror = (error) => {
+                console.error('Audio WebSocket error:', error);
+                this.portraitLog('Audio stream error', 'error');
+            };
+            
+            ws.onclose = () => {
+                this.portraitLog('Audio stream disconnected');
+                this.portrait.audioWebSocket = null;
+            };
+            
+        } catch (error) {
+            console.error('Failed to connect audio stream:', error);
+            this.portraitLog(`Audio stream failed: ${error.message}`, 'error');
+        }
+    }
+    
+    /**
+     * Send TTS audio chunks to portrait for animation
+     * Called from handleAudioEvent when portrait sync is enabled
+     */
+    async sendTTSChunksToPortrait(pcm16Data, timestampMs) {
+        if (!this.portrait.audioWebSocket || 
+            this.portrait.audioWebSocket.readyState !== WebSocket.OPEN) {
+            return;
+        }
+        
+        try {
+            // Convert ArrayBuffer to base64
+            const bytes = new Uint8Array(pcm16Data);
+            let binary = '';
+            for (let i = 0; i < bytes.byteLength; i++) {
+                binary += String.fromCharCode(bytes[i]);
+            }
+            const pcm16_b64 = btoa(binary);
+            
+            // Send to portrait service
+            this.portrait.audioWebSocket.send(JSON.stringify({
+                pcm16_b64: pcm16_b64,
+                sample_rate: this.sampleRate,
+                timestamp_ms: timestampMs || performance.now()
+            }));
+            
+        } catch (error) {
+            console.error('Failed to send audio to portrait:', error);
+        }
+    }
+    
+    /**
+     * Disconnect portrait stream
+     */
+    disconnectPortrait() {
+        this.portraitLog('Disconnecting portrait...');
+        
+        // Close audio WebSocket
+        if (this.portrait.audioWebSocket) {
+            this.portrait.audioWebSocket.close();
+            this.portrait.audioWebSocket = null;
+        }
+        
+        // Close peer connection
+        if (this.portrait.peerConnection) {
+            this.portrait.peerConnection.close();
+            this.portrait.peerConnection = null;
+        }
+        
+        // Stop metrics
+        if (this.portrait.metricsInterval) {
+            clearInterval(this.portrait.metricsInterval);
+            this.portrait.metricsInterval = null;
+        }
+        
+        // Reset video
+        if (this.portrait.videoElement) {
+            this.portrait.videoElement.srcObject = null;
+        }
+        
+        // Reset UI
+        document.getElementById('portrait-connect-btn').disabled = false;
+        document.getElementById('portrait-disconnect-btn').disabled = true;
+        this.updatePortraitConnectionState('Disconnected');
+        
+        this.portraitLog('Portrait disconnected');
+    }
+    
+    /**
+     * Start metrics monitoring
+     */
+    startPortraitMetrics() {
+        this.portrait.stats.lastFrameTime = performance.now();
+        this.portrait.stats.frameCount = 0;
+        
+        this.portrait.metricsInterval = setInterval(() => {
+            this.updatePortraitMetrics();
+        }, 1000);
+    }
+    
+    /**
+     * Update portrait metrics
+     */
+    updatePortraitMetrics() {
+        const video = this.portrait.videoElement;
+        if (!video) return;
+        
+        // Calculate FPS
+        const now = performance.now();
+        const elapsed = (now - this.portrait.stats.lastFrameTime) / 1000;
+        if (elapsed > 0) {
+            this.portrait.stats.fps = this.portrait.stats.frameCount / elapsed;
+        }
+        
+        // Calculate frame skew (difference from target FPS)
+        const targetFrameTime = 1000 / this.portrait.fps;
+        const actualFrameTime = elapsed > 0 ? 1000 / this.portrait.stats.fps : 0;
+        this.portrait.stats.skewMs = actualFrameTime - targetFrameTime;
+        
+        // Calculate audio sync (if audio is playing)
+        if (this.audioContext && this.pcmPlayerNode) {
+            // Rough estimate based on video time vs audio playhead
+            const videoTimeMs = video.currentTime * 1000;
+            const audioPlayheadMs = this.stats.lastAudioTimestamp;
+            this.portrait.stats.audioSyncMs = videoTimeMs - audioPlayheadMs;
+        }
+        
+        // Update UI
+        document.getElementById('portrait-fps').textContent = 
+            this.portrait.stats.fps.toFixed(1);
+        document.getElementById('portrait-skew').textContent = 
+            `${this.portrait.stats.skewMs.toFixed(1)} ms`;
+        document.getElementById('portrait-audio-sync-ms').textContent = 
+            `${this.portrait.stats.audioSyncMs.toFixed(1)} ms`;
+        
+        // Reset counters
+        this.portrait.stats.lastFrameTime = now;
+        this.portrait.stats.frameCount = 0;
+        
+        // Monitor video frames
+        if (video.readyState >= 2) {
+            this.portrait.stats.frameCount++;
+        }
+    }
+    
+    /**
+     * Update portrait connection state display
+     */
+    updatePortraitConnectionState(state) {
+        const stateElement = document.getElementById('portrait-connection-state');
+        if (stateElement) {
+            stateElement.textContent = state;
+            
+            // Color code based on state
+            if (state === 'connected' || state === 'Ready') {
+                stateElement.style.color = 'var(--success-color)';
+            } else if (state === 'failed' || state === 'Disconnected') {
+                stateElement.style.color = 'var(--danger-color)';
+            } else {
+                stateElement.style.color = 'var(--warning-color)';
+            }
+        }
+    }
+    
+    /**
+     * Log message to portrait log
+     */
+    portraitLog(message, level = 'info') {
+        const logDiv = document.getElementById('portrait-log');
+        if (!logDiv) return;
+        
+        const timestamp = new Date().toLocaleTimeString();
+        
+        const entry = document.createElement('div');
+        entry.className = `log-entry log-${level}`;
+        entry.textContent = `[${timestamp}] ${message}`;
+        
+        logDiv.appendChild(entry);
+        logDiv.scrollTop = logDiv.scrollHeight;
+        
+        // Limit log entries
+        while (logDiv.children.length > 100) {
+            logDiv.removeChild(logDiv.firstChild);
+        }
+        
+        // Console log
+        if (level === 'error') {
+            console.error(`[Portrait] ${message}`);
+        } else if (level === 'warning') {
+            console.warn(`[Portrait] ${message}`);
+        } else {
+            console.log(`[Portrait] ${message}`);
         }
     }
 }

@@ -38,6 +38,7 @@ from tts.streaming import CartesiaTTSStreamer, AzureTTSStreamer, ElevenLabsTTSSt
 from tts.streaming.base import TTSStreamer
 from app.routers import stream_router
 from app.providers import cartesia_router, elevenlabs_router, azure_router
+from app.portrait.webrtc import router as portrait_router
 
 
 # Configure logging
@@ -70,6 +71,7 @@ app.include_router(stream_router, tags=["streaming"])
 app.include_router(cartesia_router, tags=["providers", "cartesia"])
 app.include_router(elevenlabs_router, tags=["providers", "elevenlabs"])
 app.include_router(azure_router, tags=["providers", "azure"])
+app.include_router(portrait_router, tags=["portrait"])
 
 # Mount static files
 STATIC_DIR = Path(__file__).parent.parent / "static"
