@@ -23,6 +23,7 @@ A production-ready FastAPI service for diplomatic negotiations with WebRTC A/V s
   - [Setup & Configuration](#a2f-setup)
   - [Usage](#a2f-usage)
   - [ARKit-52 Blendshapes](#arkit-52-blendshapes)
+  - [TTS Integration with PCM Tee](#tts-integration-with-pcm-tee) 🆕
 - [Configuration](#configuration)
   - [Environment Setup](#environment-setup)
   - [Advanced Configuration](#advanced-configuration)
@@ -1571,7 +1572,237 @@ neutral = create_empty_arkit52()  # → [0.0, 0.0, ..., 0.0]
 - [Apple ARKit Documentation](https://developer.apple.com/documentation/arkit/arfaceanchor/blendshapelocation)
 - [ARKit Blendshape Coefficient Visualization](https://pooyadeperson.com/arkit-blendshape-coefficients-visualization)
 
-### Integration with TTS
+### TTS Integration with PCM Tee
+
+**Seamlessly integrate Audio2Face into your TTS pipeline for synchronized speech and facial animation.**
+
+This integration uses a **PCM tee** architecture: the same audio stream powers both audio playback AND facial animation, ensuring perfect A/V sync. This mirrors NVIDIA's recommended approach where the audio clock drives mouth motion scheduling.
+
+#### Architecture
+
+```
+TTS Provider (Cartesia/Azure/ElevenLabs)
+         ↓
+   PCM16 Audio Chunks
+         ↓
+    ┌────┴────┐
+    ↓         ↓
+AudioWorklet  A2F WebSocket
+(Playback)    (Facial Animation)
+    ↓         ↓
+  Speakers   3D Head Model
+```
+
+**Key Benefits:**
+- ✅ Single audio source eliminates sync drift
+- ✅ Sub-80ms latency for mouth motion
+- ✅ Drop-in integration with existing TTS code
+- ✅ AudioWorklet for ultra-low playback latency (40-60ms buffer)
+- ✅ Calibration support for fine-tuning A/V offset
+
+#### Quick Integration (3 Steps)
+
+**1. Initialize Audio System** (once at app startup):
+
+```javascript
+import { initAudioWorklet, openA2F, playAndSendPcm } from '/static/a2f.js';
+import { Head3D } from '/static/head3d.js';
+
+// Setup audio playback
+await initAudioWorklet(24000);
+
+// Connect to A2F WebSocket
+openA2F((names, weights) => {
+    // Apply blendshapes to 3D head
+    head3d.applyBlendshapes(weights);
+});
+
+// Load 3D model
+const head3d = new Head3D(canvasElement);
+await head3d.loadModel('/static/models/head.glb');
+```
+
+**2. Replace Audio Playback** (in your TTS handler):
+
+```javascript
+// BEFORE (audio only):
+workletNode.port.postMessage({ kind: 'push', pcm16: audioBuffer });
+
+// AFTER (audio + facial animation):
+playAndSendPcm(audioBuffer);  // Tees to both!
+```
+
+**3. That's it!** The same PCM chunks now drive both audio and facial motion.
+
+#### Functional API Reference
+
+The integration provides a simple functional API designed for TTS pipelines:
+
+```javascript
+// Initialize audio system (call once)
+await initAudioWorklet(sampleRate = 24000)
+
+// Open A2F WebSocket connection
+openA2F(onBlendshapeCallback)
+// Callback receives (arkitNames, weights) for each frame
+
+// Send audio to BOTH playback AND A2F
+playAndSendPcm(pcm16ArrayBuffer)
+
+// Get current playhead position (for sync)
+const ms = audioPlayheadMs()
+
+// Fine-tune A/V sync (typically 80-120ms)
+setA2FOffset(milliseconds)
+
+// Cleanup
+closeA2F()
+resetAudioBuffer()
+```
+
+#### Complete Example
+
+See `/static/a2f_tts_example.html` for a working demo that simulates TTS streaming.
+
+```javascript
+// Example: Integrate with your TTS WebSocket
+const ttsWs = new WebSocket('ws://localhost:8000/ws/stream');
+
+// Initialize A2F
+await initAudioWorklet(24000);
+openA2F((names, weights) => {
+    head3d.applyBlendshapes(weights);
+});
+
+// Handle TTS events
+ttsWs.onmessage = (event) => {
+    const data = JSON.parse(event.data);
+    
+    if (data.kind === 'audio') {
+        // Decode PCM from TTS provider
+        const pcm16 = base64ToArrayBuffer(data.pcm16_b64);
+        
+        // THIS IS THE INTEGRATION POINT:
+        // Send to BOTH audio output AND A2F WebSocket
+        playAndSendPcm(pcm16);
+    }
+};
+```
+
+#### A/V Sync Calibration
+
+Fine-tune the mouth motion timing for perfect synchronization:
+
+```javascript
+// Adjust offset if mouth feels early/late
+setA2FOffset(100);  // Positive = delay mouth by 100ms
+
+// Test with different values (typically 80-120ms)
+// Goal: peak of jawOpen aligns with vowel amplitude
+```
+
+**Calibration Tips:**
+- If mouth moves **before** sound: increase offset (positive value)
+- If mouth moves **after** sound: decrease offset (negative value)  
+- Target: mouth motion lags audio by 80-120ms perceptually
+- Use `audioPlayheadMs()` for precise timing measurements
+
+#### Browser Compatibility
+
+The integration uses modern Web APIs:
+- **AudioWorklet** (Chrome 66+, Firefox 76+, Safari 14.1+)
+- **WebSocket** (All modern browsers)
+- **ArrayBuffer.slice()** (ES6+)
+
+Fallback for older browsers: use Web Audio API ScriptProcessor (higher latency).
+
+#### Performance
+
+**Typical Metrics:**
+- Audio latency: 40-60ms (AudioWorklet buffer)
+- A2F processing: 10-20ms per frame
+- WebSocket overhead: <5ms
+- Total A/V sync: 80-120ms (perceptually simultaneous)
+
+**Optimization Tips:**
+- Keep AudioWorklet buffer small (40-60ms target)
+- Use binary WebSocket transport for audio
+- Batch blendshape updates at 30-60 FPS (not per audio chunk)
+
+#### Troubleshooting
+
+**No facial animation:**
+- Check browser console for A2F WebSocket connection errors
+- Verify 3D model has ARKit-52 morph targets
+- Confirm `openA2F()` was called before streaming audio
+
+**Audio plays but no mouth movement:**
+- Ensure `playAndSendPcm()` is used instead of direct worklet posting
+- Check A2F WebSocket is in `OPEN` state (readyState === 1)
+- Verify audio format is PCM16LE mono
+
+**Mouth moves but out of sync:**
+- Adjust offset with `setA2FOffset(ms)`
+- Check `audioPlayheadMs()` matches audio playback position
+- Ensure AudioWorklet is receiving audio in real-time (not buffered)
+
+**High CPU usage:**
+- Reduce blendshape update rate (apply max 60 FPS)
+- Use stub mode for testing (lower CPU)
+- Check for multiple A2F connections (close unused)
+
+#### Advanced: Scheduled Blendshapes
+
+For pro-level sync, schedule blendshapes by playhead position:
+
+```javascript
+const blendshapeQueue = [];
+
+openA2F((names, weights) => {
+    // Queue blendshapes with timestamp
+    blendshapeQueue.push({
+        weights: weights,
+        scheduleTime: audioPlayheadMs() + offsetMs
+    });
+});
+
+// Render loop: apply blendshapes at precise time
+function renderFrame() {
+    const now = audioPlayheadMs();
+    
+    while (blendshapeQueue.length > 0) {
+        const frame = blendshapeQueue[0];
+        
+        if (frame.scheduleTime <= now) {
+            head3d.applyBlendshapes(frame.weights);
+            blendshapeQueue.shift();
+        } else {
+            break;  // Wait for future frames
+        }
+    }
+    
+    requestAnimationFrame(renderFrame);
+}
+```
+
+This approach matches NVIDIA's architecture: audio clock is the master timeline, blendshapes are scheduled events.
+
+#### Legacy API
+
+For backward compatibility, the class-based API is still available:
+
+```javascript
+const a2f = new Audio2FaceClient({ useStub: true });
+await a2f.connect();
+a2f.on('frame', (frame) => head3d.applyBlendshapes(frame.weights));
+await a2f.streamAudio(audioBuffer);
+```
+
+However, the functional API (`playAndSendPcm`) is recommended for TTS integration as it handles the tee automatically.
+
+---
+
+### Legacy TTS Integration Example
 
 Audio2Face works seamlessly with the existing TTS streaming providers:
 

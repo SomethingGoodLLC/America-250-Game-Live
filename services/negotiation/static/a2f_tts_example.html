@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>A2F + TTS Stream Integration - Samson</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            background: linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%);
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            color: #fff;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            display: grid;
+            grid-template-columns: 1fr 350px;
+            gap: 20px;
+        }
+        
+        .canvas-section {
+            background: #222;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+        }
+        
+        #stage {
+            width: 100%;
+            height: 600px;
+            display: block;
+            background: #1a1a1a;
+        }
+        
+        .controls {
+            background: #2a2a2a;
+            border-radius: 12px;
+            padding: 24px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+        }
+        
+        h1 {
+            margin: 0 0 24px 0;
+            font-size: 24px;
+            font-weight: 600;
+        }
+        
+        .section {
+            margin-bottom: 24px;
+            padding-bottom: 24px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .section:last-child {
+            border-bottom: none;
+        }
+        
+        h2 {
+            font-size: 16px;
+            margin: 0 0 12px 0;
+            color: #aaa;
+            font-weight: 500;
+        }
+        
+        .btn {
+            width: 100%;
+            padding: 12px;
+            background: #3b82f6;
+            border: none;
+            border-radius: 6px;
+            color: white;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-bottom: 8px;
+        }
+        
+        .btn:hover {
+            background: #2563eb;
+        }
+        
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .btn-success {
+            background: #10b981;
+        }
+        
+        .btn-success:hover {
+            background: #059669;
+        }
+        
+        input[type="text"] {
+            width: 100%;
+            padding: 10px;
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 6px;
+            color: #fff;
+            font-size: 14px;
+            box-sizing: border-box;
+            margin-bottom: 12px;
+        }
+        
+        .hud {
+            background: rgba(0, 0, 0, 0.5);
+            padding: 12px;
+            border-radius: 6px;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+        }
+        
+        .hud-item {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 6px;
+        }
+        
+        .hud-item:last-child {
+            margin-bottom: 0;
+        }
+        
+        .hud-label {
+            color: #888;
+        }
+        
+        .hud-value {
+            color: #3b82f6;
+            font-weight: 600;
+        }
+        
+        .status {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+            margin-left: 8px;
+        }
+        
+        .status-connected {
+            background: #10b981;
+        }
+        
+        .status-disconnected {
+            background: #6b7280;
+        }
+        
+        textarea {
+            width: 100%;
+            padding: 10px;
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 6px;
+            color: #fff;
+            font-size: 14px;
+            box-sizing: border-box;
+            resize: vertical;
+            min-height: 80px;
+            font-family: inherit;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="canvas-section">
+            <canvas id="stage" width="1280" height="720"></canvas>
+        </div>
+        
+        <div class="controls">
+            <h1>🎭 A2F + TTS Stream</h1>
+            
+            <div class="section">
+                <h2>Setup</h2>
+                <button class="btn" id="btnA2F">
+                    Connect A2F
+                    <span class="status status-disconnected" id="statusA2F">●</span>
+                </button>
+                <input type="text" id="glbUrl" placeholder="GLB URL (with ARKit-52 morphs)" value="/static/models/head.glb">
+                <button class="btn btn-success" id="btnLoadHead">Load 3D Head</button>
+            </div>
+            
+            <div class="section">
+                <h2>TTS Test</h2>
+                <textarea id="ttsText" placeholder="Enter text to speak...">Hello, this is a test of the Audio2Face system with text-to-speech integration. Watch my lips move!</textarea>
+                <button class="btn" id="btnSpeak" disabled>
+                    🔊 Speak (Mock TTS)
+                </button>
+                <p style="font-size: 12px; color: #888; margin: 8px 0 0 0;">
+                    This simulates PCM chunks from your TTS pipeline being tee'd to both audio output and A2F WebSocket.
+                </p>
+            </div>
+            
+            <div class="section">
+                <h2>Calibration</h2>
+                <label style="display: block; color: #aaa; font-size: 13px; margin-bottom: 8px;">
+                    A/V Offset: <span id="offsetValue">0</span> ms
+                </label>
+                <input type="range" id="offsetSlider" min="-200" max="200" value="0" step="10" 
+                       style="width: 100%; accent-color: #3b82f6;">
+                <p style="font-size: 12px; color: #888; margin: 8px 0 0 0;">
+                    Adjust if mouth motion feels early/late (typically 80-120ms)
+                </p>
+            </div>
+            
+            <div class="section">
+                <h2>HUD</h2>
+                <div class="hud">
+                    <div class="hud-item">
+                        <span class="hud-label">Playhead:</span>
+                        <span class="hud-value"><b id="playheadMs">0.0</b> ms</span>
+                    </div>
+                    <div class="hud-item">
+                        <span class="hud-label">Blendshapes:</span>
+                        <span class="hud-value" id="blendshapeCount">0</span>
+                    </div>
+                    <div class="hud-item">
+                        <span class="hud-label">Frames:</span>
+                        <span class="hud-value" id="frameCount">0</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        import { initHead, applyBlendshapesByName } from '/static/head3d.js';
+        import { initAudioWorklet, openA2F, playAndSendPcm, audioPlayheadMs, setA2FOffset, closeA2F } from '/static/a2f.js';
+
+        const btnA2F = document.getElementById('btnA2F');
+        const btnLoadHead = document.getElementById('btnLoadHead');
+        const btnSpeak = document.getElementById('btnSpeak');
+        const glbUrl = document.getElementById('glbUrl');
+        const canvas = document.getElementById('stage');
+        const statusA2F = document.getElementById('statusA2F');
+        const playheadMsEl = document.getElementById('playheadMs');
+        const blendshapeCountEl = document.getElementById('blendshapeCount');
+        const frameCountEl = document.getElementById('frameCount');
+        const offsetSlider = document.getElementById('offsetSlider');
+        const offsetValue = document.getElementById('offsetValue');
+
+        let head3d = null;
+        let isA2FConnected = false;
+        let totalFrames = 0;
+
+        // Initialize audio worklet on page load
+        await initAudioWorklet(24000);
+        console.log('✓ AudioWorklet initialized');
+
+        // Connect A2F WebSocket
+        btnA2F.onclick = () => {
+            if (!isA2FConnected) {
+                // Open connection and register blendshape callback
+                openA2F((names, weights) => {
+                    // Apply blendshapes to 3D head
+                    if (head3d) {
+                        applyBlendshapesByName(head3d, names, weights);
+                    }
+                    
+                    // Update stats
+                    totalFrames++;
+                    frameCountEl.textContent = totalFrames;
+                    
+                    const activeCount = weights.filter(w => w > 0.01).length;
+                    blendshapeCountEl.textContent = activeCount;
+                });
+                
+                isA2FConnected = true;
+                statusA2F.className = 'status status-connected';
+                statusA2F.textContent = '●';
+                btnA2F.textContent = 'Disconnect A2F ';
+                btnA2F.appendChild(statusA2F);
+                btnSpeak.disabled = false;
+                
+                console.log('✓ A2F WebSocket connected');
+            } else {
+                closeA2F();
+                isA2FConnected = false;
+                statusA2F.className = 'status status-disconnected';
+                btnA2F.textContent = 'Connect A2F ';
+                btnA2F.appendChild(statusA2F);
+                btnSpeak.disabled = true;
+                
+                console.log('✗ A2F WebSocket disconnected');
+            }
+        };
+
+        // Load 3D head model
+        btnLoadHead.onclick = async () => {
+            try {
+                btnLoadHead.disabled = true;
+                btnLoadHead.textContent = 'Loading...';
+                
+                head3d = await initHead(canvas, glbUrl.value);
+                
+                btnLoadHead.textContent = '✓ Head Loaded';
+                btnLoadHead.classList.add('btn-success');
+                console.log('✓ 3D head loaded');
+            } catch (err) {
+                btnLoadHead.textContent = '✗ Load Failed';
+                btnLoadHead.disabled = false;
+                console.error('Failed to load head:', err);
+            }
+        };
+
+        // Mock TTS: simulate PCM chunks coming from your TTS provider
+        btnSpeak.onclick = async () => {
+            btnSpeak.disabled = true;
+            btnSpeak.textContent = '🔊 Speaking...';
+            
+            // Simulate TTS generating PCM chunks
+            // In real integration, replace this with actual TTS stream
+            await simulateTTSStream();
+            
+            btnSpeak.textContent = '🔊 Speak (Mock TTS)';
+            btnSpeak.disabled = false;
+        };
+
+        /**
+         * Simulate TTS stream producing PCM chunks
+         * In production, replace this with your actual TTS provider (Cartesia, ElevenLabs, etc.)
+         */
+        async function simulateTTSStream() {
+            // Generate 3 seconds of test audio (440 Hz sine wave)
+            const sampleRate = 24000;
+            const duration = 3.0; // seconds
+            const frequency = 440; // A4 note
+            const totalSamples = Math.floor(sampleRate * duration);
+            
+            // Stream in chunks (as TTS would)
+            const chunkSize = 2400; // 100ms chunks at 24kHz
+            
+            for (let offset = 0; offset < totalSamples; offset += chunkSize) {
+                const remainingSamples = Math.min(chunkSize, totalSamples - offset);
+                const chunk = new Int16Array(remainingSamples);
+                
+                // Generate sine wave with envelope
+                for (let i = 0; i < remainingSamples; i++) {
+                    const t = (offset + i) / sampleRate;
+                    const envelope = Math.sin(Math.PI * t / duration); // Fade in/out
+                    const sample = Math.sin(2 * Math.PI * frequency * t) * envelope;
+                    chunk[i] = Math.floor(sample * 16000); // Scale to int16
+                }
+                
+                // THIS IS THE KEY INTEGRATION POINT:
+                // Send PCM chunk to BOTH audio output AND A2F WebSocket
+                playAndSendPcm(chunk.buffer);
+                
+                // Wait for chunk duration to simulate real-time streaming
+                await sleep(100);
+            }
+            
+            console.log('✓ Mock TTS stream completed');
+        }
+
+        // Update playhead HUD
+        setInterval(() => {
+            playheadMsEl.textContent = audioPlayheadMs().toFixed(1);
+        }, 50);
+
+        // Calibration offset slider
+        offsetSlider.oninput = () => {
+            const offset = parseInt(offsetSlider.value);
+            offsetValue.textContent = offset;
+            setA2FOffset(offset);
+        };
+
+        // Helper: sleep
+        function sleep(ms) {
+            return new Promise(resolve => setTimeout(resolve, ms));
+        }
+
+        console.log('🎭 A2F + TTS Integration Demo Ready');
+        console.log('📌 Integration guide:');
+        console.log('   1. In your TTS pipeline, wherever you push PCM to audio output...');
+        console.log('   2. Replace that with: playAndSendPcm(pcm16ArrayBuffer)');
+        console.log('   3. This tees the same audio to both playback AND A2F for tight sync');
+    </script>
+</body>
+</html>
+

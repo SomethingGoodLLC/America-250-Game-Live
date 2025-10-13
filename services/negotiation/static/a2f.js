@@ -13,7 +13,191 @@
  *   });
  *   
  *   await a2f.streamAudio(audioBuffer);
+ * 
+ * OR use functional API with PCM tee:
+ *   await initAudioWorklet();
+ *   openA2F();
+ *   
+ *   // In your TTS pipeline:
+ *   playAndSendPcm(pcm16ArrayBuffer); // Plays audio AND sends to A2F
  */
+
+// ============================================================================
+// FUNCTIONAL API (for TTS pipeline integration with PCM tee)
+// ============================================================================
+
+const ARKIT52 = [
+  "browDownLeft","browDownRight","browInnerUp","browOuterUpLeft","browOuterUpRight",
+  "cheekPuff","cheekSquintLeft","cheekSquintRight","eyeBlinkLeft","eyeBlinkRight",
+  "eyeLookDownLeft","eyeLookDownRight","eyeLookInLeft","eyeLookInRight",
+  "eyeLookOutLeft","eyeLookOutRight","eyeLookUpLeft","eyeLookUpRight",
+  "eyeSquintLeft","eyeSquintRight","eyeWideLeft","eyeWideRight","jawForward",
+  "jawLeft","jawOpen","jawRight","mouthClose","mouthDimpleLeft","mouthDimpleRight",
+  "mouthFrownLeft","mouthFrownRight","mouthFunnel","mouthLeft","mouthLowerDownLeft",
+  "mouthLowerDownRight","mouthPressLeft","mouthPressRight","mouthPucker","mouthRight",
+  "mouthRollLower","mouthRollUpper","mouthShrugLower","mouthShrugUpper",
+  "mouthSmileLeft","mouthSmileRight","mouthStretchLeft","mouthStretchRight",
+  "mouthUpperUpLeft","mouthUpperUpRight","noseSneerLeft","noseSneerRight","tongueOut"
+];
+
+let a2fWebSocket = null;
+let audioContext = null;
+let workletNode = null;
+let sampleRate = 24000;
+let playheadSamples = 0;
+let offsetMs = 0; // A/V sync calibration offset
+let onBlendshapeCallback = null;
+
+/**
+ * Initialize AudioWorklet for low-latency PCM playback
+ * Call this once at app startup
+ */
+export async function initAudioWorklet(rate = 24000) {
+  sampleRate = rate;
+  audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate });
+  
+  await audioContext.audioWorklet.addModule('/static/pcm-worklet.js');
+  workletNode = new AudioWorkletNode(audioContext, 'pcm-player');
+  
+  // Listen for playhead updates
+  workletNode.port.onmessage = (e) => {
+    if (e.data?.kind === 'playhead') {
+      playheadSamples = e.data.samples;
+    }
+  };
+  
+  workletNode.connect(audioContext.destination);
+  console.log('A2F: AudioWorklet initialized at', sampleRate, 'Hz');
+}
+
+/**
+ * Get current audio playhead position in milliseconds
+ * Use this for A/V sync scheduling
+ */
+export function audioPlayheadMs() {
+  return (playheadSamples / sampleRate) * 1000.0 + offsetMs;
+}
+
+/**
+ * Set A/V sync offset (calibration)
+ * Positive = delay mouth motion, Negative = advance it
+ */
+export function setA2FOffset(ms) {
+  offsetMs = ms;
+  console.log('A2F: Sync offset set to', ms, 'ms');
+}
+
+/**
+ * Open WebSocket connection to /a2f/stream
+ * @param {Function} onBlendshape - Callback(arkitNames, weights) for each frame
+ */
+export function openA2F(onBlendshape = null) {
+  const wsUrl = `ws://${location.host}/a2f/stream`;
+  console.log('A2F: Connecting to', wsUrl);
+  
+  a2fWebSocket = new WebSocket(wsUrl);
+  a2fWebSocket.binaryType = "arraybuffer";
+  
+  onBlendshapeCallback = onBlendshape;
+  
+  a2fWebSocket.onopen = () => {
+    console.log('A2F: WebSocket connected');
+  };
+  
+  a2fWebSocket.onmessage = (evt) => {
+    try {
+      const msg = JSON.parse(evt.data);
+      
+      if (msg.kind === 'blendshapes' && Array.isArray(msg.weights)) {
+        // Apply blendshapes immediately (or schedule based on audioPlayheadMs if needed)
+        if (onBlendshapeCallback) {
+          onBlendshapeCallback(ARKIT52, msg.weights);
+        }
+        
+        // Emit custom event for other listeners
+        window.dispatchEvent(new CustomEvent('a2f-blendshapes', {
+          detail: { names: ARKIT52, weights: msg.weights, timestamp: msg.timestamp_ms }
+        }));
+      } else if (msg.ready) {
+        console.log('A2F: Service ready', msg);
+      } else if (msg.done) {
+        console.log('A2F: Stream completed');
+      }
+    } catch (err) {
+      // Binary data or parse error - ignore
+    }
+  };
+  
+  a2fWebSocket.onerror = (err) => {
+    console.error('A2F: WebSocket error', err);
+  };
+  
+  a2fWebSocket.onclose = () => {
+    console.log('A2F: WebSocket closed');
+    a2fWebSocket = null;
+  };
+}
+
+/**
+ * Send PCM16 audio to A2F WebSocket
+ * @param {ArrayBuffer} pcm16ArrayBuffer - PCM16LE mono audio data
+ */
+export function sendPcmToA2F(pcm16ArrayBuffer) {
+  if (a2fWebSocket && a2fWebSocket.readyState === WebSocket.OPEN) {
+    a2fWebSocket.send(pcm16ArrayBuffer);
+  }
+}
+
+/**
+ * TEE audio to both playback AND A2F WebSocket
+ * This is the key integration point for your TTS pipeline
+ * 
+ * @param {ArrayBuffer} pcm16ArrayBuffer - PCM16LE mono audio data
+ */
+export function playAndSendPcm(pcm16ArrayBuffer) {
+  if (!workletNode) {
+    console.warn('A2F: AudioWorklet not initialized. Call initAudioWorklet() first.');
+    return;
+  }
+  
+  // Clone the buffer since we need to send it twice
+  // (AudioWorklet.postMessage with transfer would move ownership)
+  const audioBuffer = pcm16ArrayBuffer.slice(0);
+  const a2fBuffer = pcm16ArrayBuffer.slice(0);
+  
+  // 1. Send to audio output for playback
+  workletNode.port.postMessage(
+    { kind: 'push', pcm16: audioBuffer },
+    [audioBuffer] // Transfer ownership for performance
+  );
+  
+  // 2. Send to A2F WebSocket for facial animation
+  sendPcmToA2F(a2fBuffer);
+}
+
+/**
+ * Close A2F WebSocket connection
+ */
+export function closeA2F() {
+  if (a2fWebSocket) {
+    a2fWebSocket.close();
+    a2fWebSocket = null;
+  }
+}
+
+/**
+ * Reset audio playback buffer
+ */
+export function resetAudioBuffer() {
+  if (workletNode) {
+    workletNode.port.postMessage({ kind: 'reset' });
+    playheadSamples = 0;
+  }
+}
+
+// ============================================================================
+// CLASS-BASED API (legacy, for backward compatibility)
+// ============================================================================
 
 export class Audio2FaceClient {
     constructor(options = {}) {

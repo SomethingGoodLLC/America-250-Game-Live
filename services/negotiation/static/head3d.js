@@ -331,3 +331,40 @@ export function createPlaceholderHead(scene) {
     return head;
 }
 
+/**
+ * Utility: Apply blendshapes by name (for functional API integration)
+ * @param {Head3D} head3d - Head3D instance
+ * @param {Array<string>} names - ARKit blendshape names
+ * @param {Array<number>} weights - Corresponding weights (0.0-1.0)
+ */
+export function applyBlendshapesByName(head3d, names, weights) {
+    if (!head3d || !head3d.isLoaded) {
+        return;
+    }
+    
+    // Build weights array indexed by ARKit-52 order
+    const arkitWeights = new Array(52).fill(0.0);
+    
+    names.forEach((name, i) => {
+        const arkitIndex = ARKIT52_NAMES.indexOf(name);
+        if (arkitIndex >= 0 && i < weights.length) {
+            arkitWeights[arkitIndex] = weights[i];
+        }
+    });
+    
+    head3d.applyBlendshapes(arkitWeights);
+}
+
+/**
+ * Utility: Initialize head and return instance (simple wrapper)
+ */
+export async function initHead(canvasElement, modelPath = '/static/models/head.glb') {
+    const head = new Head3D(canvasElement, {
+        modelPath: modelPath,
+        enableControls: true
+    });
+    
+    await head.loadModel(modelPath);
+    return head;
+}
+
