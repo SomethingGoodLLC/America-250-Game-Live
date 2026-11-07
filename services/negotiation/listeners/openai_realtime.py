@@ -4,12 +4,14 @@ import asyncio
 import base64
 import json
 import os
-from typing import AsyncIterator, Dict, Any, Optional
+from collections.abc import AsyncIterator
+from typing import Any
 
 import numpy as np
-from scipy.signal import resample_poly
-import websockets
 import structlog
+import websockets
+from scipy.signal import resample_poly
+
 from .base import Listener
 
 
@@ -22,12 +24,12 @@ class OpenAIRealtimeListener(Listener):
     - Emits partial/final subtitle events
     """
 
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: dict[str, Any]):
         super().__init__(config)
         self.logger = structlog.get_logger(__name__)
-        self.api_key: Optional[str] = config.get("api_key") or os.getenv("OPENAI_API_KEY")
+        self.api_key: str | None = config.get("api_key") or os.getenv("OPENAI_API_KEY")
         self.model: str = config.get("model", "gpt-4o-realtime-preview-2024-10-01")
-        self.websocket: Optional[websockets.WebSocketClientProtocol] = None
+        self.websocket: websockets.WebSocketClientProtocol | None = None
         self.event_queue: asyncio.Queue = asyncio.Queue()
         self.running: bool = False
         self._send_lock = asyncio.Lock()
@@ -116,7 +118,7 @@ class OpenAIRealtimeListener(Listener):
         """Get final recognized text."""
         return self._last_final_text
 
-    async def stream_events(self) -> AsyncIterator[Dict[str, Any]]:
+    async def stream_events(self) -> AsyncIterator[dict[str, Any]]:
         """Stream events from OpenAI."""
         while self.running:
             try:
@@ -124,7 +126,7 @@ class OpenAIRealtimeListener(Listener):
                 if event.get("type") == "stop":
                     break
                 yield event
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 continue
             except Exception as e:
                 self.logger.error("Error in stream_events", error=str(e))
@@ -157,7 +159,7 @@ class OpenAIRealtimeListener(Listener):
                     delta = data.get("delta") or data.get("transcript", "")
                     if isinstance(delta, str) and delta:
                         await self.event_queue.put({"type": "subtitle", "text": delta, "final": False, "confidence": 0.9})
-                # Handle completed responses  
+                # Handle completed responses
                 elif typ in ("response.audio_transcript.done", "conversation.item.output_audio_transcript.done"):
                     text = data.get("transcript", "")
                     if isinstance(text, str) and text:
@@ -182,7 +184,7 @@ class OpenAIRealtimeListener(Listener):
         except Exception as e:
             self.logger.error("OpenAI Realtime receive loop failed", error=str(e))
 
-    async def _send_json(self, payload: Dict[str, Any]) -> None:
+    async def _send_json(self, payload: dict[str, Any]) -> None:
         if not self.websocket:
             return
         async with self._send_lock:

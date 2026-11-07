@@ -1,0 +1,21 @@
+{
+ "name": "reject_safe_passage_unknown_army",
+ "description": "",
+ "proposal": {
+  "spoken_line": "x",
+  "clauses": [
+   {
+    "type": "safe_passage",
+    "army_id": "ghosts",
+    "province_id": "charlestown",
+    "turns": 1
+   }
+  ]
+ },
+ "expect": {
+  "valid": false,
+  "error_codes": [
+   "unknown_army"
+  ]
+ }
+}

@@ -10,7 +10,6 @@ This module provides utilities to bias blendshapes for emotions like:
 These are additive controls that layer on top of A2F's speech-driven animation.
 """
 
-from typing import List, Dict, Optional
 from dataclasses import dataclass
 
 import structlog
@@ -23,10 +22,10 @@ logger = structlog.get_logger(__name__)
 @dataclass
 class EmotionBias:
     """Emotion bias parameters for blendshape modification.
-    
+
     Each parameter is a float from 0.0 (no effect) to 1.0 (maximum effect).
     These are multiplicative or additive biases applied to base A2F output.
-    
+
     Attributes:
         smile: Increase smile intensity (0.0-1.0)
         frown: Increase frown intensity (0.0-1.0)
@@ -41,7 +40,7 @@ class EmotionBias:
     seriousness: float = 0.0
     warmth: float = 0.0
     intensity: float = 1.0
-    
+
     def __post_init__(self):
         """Validate ranges."""
         self.smile = clamp01(self.smile)
@@ -71,41 +70,41 @@ _MOUTH_FUNNEL = ARKIT52_INDEX["mouthFunnel"]
 
 
 def apply_emotion_bias(
-    base_weights: List[float],
+    base_weights: list[float],
     bias: EmotionBias
-) -> List[float]:
+) -> list[float]:
     """Apply emotion bias to base blendshape weights.
-    
+
     This is the main entry point for emotion control. It takes A2F's
     base output and layers emotion biases on top.
-    
+
     Args:
         base_weights: Original ARKit-52 weights from A2F
         bias: Emotion bias parameters
-        
+
     Returns:
         Modified weights with emotion applied
-        
+
     Raises:
         ValueError: If base_weights is invalid
     """
     if not validate_arkit52_weights(base_weights):
         raise ValueError(f"Invalid base weights: expected 52, got {len(base_weights)}")
-    
+
     # Clone weights to avoid mutating input
     weights = base_weights.copy()
-    
+
     # Apply global intensity multiplier
     if bias.intensity != 1.0:
         weights = [clamp01(w * bias.intensity) for w in weights]
-    
+
     # Apply smile bias
     if bias.smile > 0:
         weights[_SMILE_LEFT] = clamp01(weights[_SMILE_LEFT] + bias.smile * 0.4)
         weights[_SMILE_RIGHT] = clamp01(weights[_SMILE_RIGHT] + bias.smile * 0.4)
         weights[_CHEEK_SQUINT_LEFT] = clamp01(weights[_CHEEK_SQUINT_LEFT] + bias.smile * 0.2)
         weights[_CHEEK_SQUINT_RIGHT] = clamp01(weights[_CHEEK_SQUINT_RIGHT] + bias.smile * 0.2)
-    
+
     # Apply frown bias
     if bias.frown > 0:
         weights[_FROWN_LEFT] = clamp01(weights[_FROWN_LEFT] + bias.frown * 0.3)
@@ -115,7 +114,7 @@ def apply_emotion_bias(
         # Reduce smile
         weights[_SMILE_LEFT] = clamp01(weights[_SMILE_LEFT] * (1.0 - bias.frown * 0.5))
         weights[_SMILE_RIGHT] = clamp01(weights[_SMILE_RIGHT] * (1.0 - bias.frown * 0.5))
-    
+
     # Apply surprise bias (raise eyebrows)
     if bias.surprise > 0:
         weights[_BROW_INNER_UP] = clamp01(weights[_BROW_INNER_UP] + bias.surprise * 0.5)
@@ -123,7 +122,7 @@ def apply_emotion_bias(
         weights[_BROW_OUTER_UP_RIGHT] = clamp01(weights[_BROW_OUTER_UP_RIGHT] + bias.surprise * 0.4)
         # Slightly open mouth
         weights[_JAW_OPEN] = clamp01(weights[_JAW_OPEN] + bias.surprise * 0.1)
-    
+
     # Apply seriousness (tighten expression)
     if bias.seriousness > 0:
         # Reduce smile
@@ -134,7 +133,7 @@ def apply_emotion_bias(
         # Lower brows slightly
         weights[_BROW_DOWN_LEFT] = clamp01(weights[_BROW_DOWN_LEFT] + bias.seriousness * 0.15)
         weights[_BROW_DOWN_RIGHT] = clamp01(weights[_BROW_DOWN_RIGHT] + bias.seriousness * 0.15)
-    
+
     # Apply warmth (diplomatic friendliness)
     if bias.warmth > 0:
         weights[_SMILE_LEFT] = clamp01(weights[_SMILE_LEFT] + bias.warmth * 0.25)
@@ -143,12 +142,12 @@ def apply_emotion_bias(
         weights[_CHEEK_SQUINT_RIGHT] = clamp01(weights[_CHEEK_SQUINT_RIGHT] + bias.warmth * 0.15)
         weights[_BROW_OUTER_UP_LEFT] = clamp01(weights[_BROW_OUTER_UP_LEFT] + bias.warmth * 0.1)
         weights[_BROW_OUTER_UP_RIGHT] = clamp01(weights[_BROW_OUTER_UP_RIGHT] + bias.warmth * 0.1)
-    
+
     return weights
 
 
 # Preset emotion biases for common diplomatic scenarios
-DIPLOMATIC_PRESETS: Dict[str, EmotionBias] = {
+DIPLOMATIC_PRESETS: dict[str, EmotionBias] = {
     "neutral": EmotionBias(
         smile=0.0,
         frown=0.0,
@@ -187,12 +186,12 @@ DIPLOMATIC_PRESETS: Dict[str, EmotionBias] = {
 }
 
 
-def get_preset(name: str) -> Optional[EmotionBias]:
+def get_preset(name: str) -> EmotionBias | None:
     """Get a preset emotion bias by name.
-    
+
     Args:
         name: Preset name (e.g., "friendly", "stern")
-        
+
     Returns:
         EmotionBias instance, or None if not found
     """
@@ -205,19 +204,19 @@ def blend_biases(
     t: float
 ) -> EmotionBias:
     """Blend between two emotion biases.
-    
+
     Useful for smooth transitions between emotional states.
-    
+
     Args:
         bias_a: Starting emotion bias
         bias_b: Target emotion bias
         t: Blend factor (0.0 = all A, 1.0 = all B)
-        
+
     Returns:
         Blended emotion bias
     """
     t = clamp01(t)
-    
+
     return EmotionBias(
         smile=bias_a.smile + t * (bias_b.smile - bias_a.smile),
         frown=bias_a.frown + t * (bias_b.frown - bias_a.frown),
@@ -230,22 +229,22 @@ def blend_biases(
 
 class EmotionController:
     """Stateful controller for managing emotion transitions.
-    
+
     This class maintains current emotion state and handles smooth
     transitions between different emotional expressions.
-    
+
     Usage:
         controller = EmotionController()
         controller.set_emotion("friendly", transition_duration=1.0)
-        
+
         # In render loop:
         current_bias = controller.update(delta_time)
         weights = apply_emotion_bias(base_weights, current_bias)
     """
-    
+
     def __init__(self, initial_emotion: str = "neutral"):
         """Initialize emotion controller.
-        
+
         Args:
             initial_emotion: Starting emotion preset name
         """
@@ -254,19 +253,19 @@ class EmotionController:
         self.transition_progress = 1.0  # 0.0 to 1.0
         self.transition_duration = 0.0
         self.transition_elapsed = 0.0
-        
+
         logger.info(
             "EmotionController initialized",
             initial_emotion=initial_emotion
         )
-    
+
     def set_emotion(
         self,
         emotion: str,
         transition_duration: float = 0.5
     ) -> None:
         """Set target emotion with smooth transition.
-        
+
         Args:
             emotion: Target emotion preset name
             transition_duration: Transition time in seconds (0 = instant)
@@ -275,25 +274,25 @@ class EmotionController:
         if target is None:
             logger.warning(f"Unknown emotion preset: {emotion}")
             return
-        
+
         self.target_bias = target
         self.transition_duration = max(0.0, transition_duration)
         self.transition_elapsed = 0.0
         self.transition_progress = 0.0 if transition_duration > 0 else 1.0
-        
+
         logger.info(
             "Emotion transition started",
             target_emotion=emotion,
             duration=transition_duration
         )
-    
+
     def set_custom_bias(
         self,
         bias: EmotionBias,
         transition_duration: float = 0.5
     ) -> None:
         """Set custom emotion bias with transition.
-        
+
         Args:
             bias: Custom emotion bias
             transition_duration: Transition time in seconds
@@ -302,31 +301,31 @@ class EmotionController:
         self.transition_duration = max(0.0, transition_duration)
         self.transition_elapsed = 0.0
         self.transition_progress = 0.0 if transition_duration > 0 else 1.0
-    
+
     def update(self, delta_time: float) -> EmotionBias:
         """Update emotion state and return current bias.
-        
+
         Call this every frame in your render loop.
-        
+
         Args:
             delta_time: Time since last update in seconds
-            
+
         Returns:
             Current emotion bias (interpolated if transitioning)
         """
         if self.transition_progress >= 1.0:
             # Transition complete
             return self.current_bias
-        
+
         # Update transition progress
         self.transition_elapsed += delta_time
-        
+
         if self.transition_duration > 0:
             self.transition_progress = self.transition_elapsed / self.transition_duration
             self.transition_progress = clamp01(self.transition_progress)
         else:
             self.transition_progress = 1.0
-        
+
         # Blend between current and target
         if self.transition_progress >= 1.0:
             # Transition complete
@@ -339,20 +338,20 @@ class EmotionController:
                 self.target_bias,
                 self.transition_progress
             )
-        
+
         return self.current_bias
-    
+
     def get_current_bias(self) -> EmotionBias:
         """Get current emotion bias without updating.
-        
+
         Returns:
             Current emotion bias
         """
         return self.current_bias
-    
+
     def is_transitioning(self) -> bool:
         """Check if currently transitioning between emotions.
-        
+
         Returns:
             True if transition in progress
         """

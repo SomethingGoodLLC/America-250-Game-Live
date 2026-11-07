@@ -1,17 +1,16 @@
 """WebRTC track publishing utilities for negotiation providers."""
 
 import asyncio
-from typing import Optional, Dict, Any, List
 from dataclasses import dataclass
-import structlog
+from typing import Any
 
-from aiortc import RTCPeerConnection, MediaStreamTrack, RTCDataChannel
-from av import VideoFrame
-from aiortc.mediastreams import VideoStreamTrack, AudioStreamTrack
+import structlog
+from aiortc import MediaStreamTrack, RTCPeerConnection
+from aiortc.mediastreams import AudioStreamTrack, VideoStreamTrack
 
 from core.webrtc_manager import WebRTCManager
-from providers.video_sources.base import AvatarVideoTrack
 from providers.types import VideoSourceConfig
+from providers.video_sources.base import AvatarVideoTrack, VideoSource
 
 
 @dataclass
@@ -20,7 +19,7 @@ class TrackPublication:
     track: MediaStreamTrack
     kind: str  # "video" or "audio"
     source: str  # "avatar", "tts", "provider"
-    metadata: Optional[Dict[str, Any]] = None
+    metadata: dict[str, Any] | None = None
     is_active: bool = True
 
 
@@ -34,8 +33,8 @@ class TrackPublisher:
     def __init__(self, webrtc_manager: WebRTCManager):
         self.webrtc_manager = webrtc_manager
         self.logger = structlog.get_logger(__name__)
-        self._published_tracks: Dict[str, TrackPublication] = {}
-        self._session_tracks: Dict[str, List[str]] = {}  # session_id -> track_ids
+        self._published_tracks: dict[str, TrackPublication] = {}
+        self._session_tracks: dict[str, list[str]] = {}  # session_id -> track_ids
 
     async def publish_avatar_video(
         self,
@@ -55,8 +54,9 @@ class TrackPublisher:
         """
         try:
             # Import here to avoid circular imports
-            from providers.video_sources.base import BaseVideoSource
-            from providers.video_sources.placeholder_loop import PlaceholderLoopVideoSource
+            from providers.video_sources.placeholder_loop import (
+                PlaceholderLoopVideoSource,
+            )
 
             # Create video source based on configuration
             if video_source_config.source_type == "placeholder":
@@ -301,7 +301,7 @@ class TrackPublisher:
 
         return unpublished_count
 
-    async def get_session_tracks(self, session_id: str) -> List[TrackPublication]:
+    async def get_session_tracks(self, session_id: str) -> list[TrackPublication]:
         """Get all tracks published for a session.
 
         Args:
@@ -323,7 +323,7 @@ class TrackPublisher:
     async def update_track_metadata(
         self,
         track_id: str,
-        metadata: Dict[str, Any]
+        metadata: dict[str, Any]
     ) -> bool:
         """Update metadata for a published track.
 
@@ -447,7 +447,7 @@ class FrameTrack(VideoStreamTrack):
         """
         if self._is_stopped:
             raise Exception("FrameTrack has been stopped")
-            
+
         try:
             # Initialize frame generator if needed
             if self._frame_generator is None:
@@ -469,7 +469,7 @@ class FrameTrack(VideoStreamTrack):
             # Validate frame array
             if frame_array is None:
                 raise ValueError("Received None frame from video source")
-                
+
             if not isinstance(frame_array, np.ndarray):
                 raise ValueError(f"Expected numpy array, got {type(frame_array)}")
 
@@ -488,7 +488,7 @@ class FrameTrack(VideoStreamTrack):
             else:
                 # Unsupported format - create blank frame
                 self.logger.warning(
-                    "Unsupported frame format", 
+                    "Unsupported frame format",
                     shape=frame_array.shape,
                     dtype=str(frame_array.dtype)
                 )
@@ -506,7 +506,7 @@ class FrameTrack(VideoStreamTrack):
             # Return a blank frame on error to prevent stream interruption
             import av
             import numpy as np
-            
+
             try:
                 # Create a simple colored frame to indicate error
                 width, height = self.video_source.config.resolution
@@ -531,7 +531,7 @@ class FrameTrack(VideoStreamTrack):
 
 async def attach_avatar_track(
     peer: RTCPeerConnection,
-    source: 'VideoSource',
+    source: VideoSource,
     session_id: str = None
 ) -> FrameTrack:
     """Attach an avatar video track to a WebRTC peer connection.
@@ -590,9 +590,11 @@ async def attach_avatar_track_simple(pc: RTCPeerConnection, use_veo3: bool = Fal
     try:
         # Import video sources with error handling
         try:
-            from providers.video_sources.placeholder_loop import PlaceholderLoopVideoSource
             from providers.types import VideoSourceConfig
-            
+            from providers.video_sources.placeholder_loop import (
+                PlaceholderLoopVideoSource,
+            )
+
             # Create video source config
             config = VideoSourceConfig(
                 source_type="placeholder",
@@ -604,44 +606,44 @@ async def attach_avatar_track_simple(pc: RTCPeerConnection, use_veo3: bool = Fal
             # Create and start video source
             source = PlaceholderLoopVideoSource(config)
             await source.start()
-            
+
             # Use the FrameTrack class defined above (line 419)
             track = FrameTrack(source)
             pc.addTrack(track)
-            
+
         except ImportError as e:
             # Fallback to a simple mock video track if imports fail
             logger = structlog.get_logger(__name__)
             logger.warning("Failed to import video sources, using mock track", error=str(e))
-            
+
             # Create a minimal mock video track
             class MockVideoTrack(VideoStreamTrack):
                 def __init__(self):
                     super().__init__()
                     self.counter = 0
-                    
+
                 async def recv(self):
                     import av
                     import numpy as np
-                    
+
                     # Create a simple colored frame
                     self.counter += 1
                     width, height = 320, 240
-                    
+
                     # Generate a simple pattern
-                    frame_array = np.full((height, width, 3), 
-                                        [50 + (self.counter % 100), 80, 120], 
+                    frame_array = np.full((height, width, 3),
+                                        [50 + (self.counter % 100), 80, 120],
                                         dtype=np.uint8)
-                    
+
                     frame = av.VideoFrame.from_ndarray(frame_array, format="rgb24")
                     frame.pts = self.counter
                     frame.time_base = av.Fraction(1, 30)
-                    
+
                     return frame
-            
+
             track = MockVideoTrack()
             pc.addTrack(track)
-            
+
     except Exception as e:
         logger = structlog.get_logger(__name__)
         logger.error("Failed to attach avatar track", error=str(e))

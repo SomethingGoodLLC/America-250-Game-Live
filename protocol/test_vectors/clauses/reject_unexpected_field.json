@@ -1,0 +1,20 @@
+{
+ "name": "reject_unexpected_field",
+ "description": "",
+ "proposal": {
+  "spoken_line": "x",
+  "clauses": [
+   {
+    "type": "ceasefire",
+    "turns": 2,
+    "province_id": "boston"
+   }
+  ]
+ },
+ "expect": {
+  "valid": false,
+  "error_codes": [
+   "unexpected_field"
+  ]
+ }
+}

@@ -1,0 +1,19 @@
+{
+ "name": "reject_turns_int_overflow",
+ "description": "4294967299 must not narrow to 3 in the C++ parser; both sides reject it as malformed.",
+ "proposal": {
+  "spoken_line": "x",
+  "clauses": [
+   {
+    "type": "ceasefire",
+    "turns": 4294967299
+   }
+  ]
+ },
+ "expect": {
+  "valid": false,
+  "error_codes": [
+   "malformed_clause"
+  ]
+ }
+}

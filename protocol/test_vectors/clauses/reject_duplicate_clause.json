@@ -1,0 +1,23 @@
+{
+ "name": "reject_duplicate_clause",
+ "description": "",
+ "proposal": {
+  "spoken_line": "x",
+  "clauses": [
+   {
+    "type": "ceasefire",
+    "turns": 1
+   },
+   {
+    "type": "ceasefire",
+    "turns": 2
+   }
+  ]
+ },
+ "expect": {
+  "valid": false,
+  "error_codes": [
+   "duplicate_clause_type"
+  ]
+ }
+}

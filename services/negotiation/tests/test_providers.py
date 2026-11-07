@@ -1,14 +1,18 @@
 """Tests for negotiation providers."""
 
-import asyncio
-import pytest
 from datetime import datetime
-from unittest.mock import AsyncMock
 
-from providers.base import Provider, ProviderEvent, NewIntent, LiveSubtitle, Analysis, Safety
-from providers.mock_local import MockLocalProvider
+import pytest
+
+from providers.base import Analysis, LiveSubtitle, NewIntent, Provider, Safety
 from providers.gemini_veo3 import Veo3Provider
-from schemas.models import SpeakerTurnModel, WorldContextModel, ProposalModel, ConcessionModel, CounterOfferModel, UltimatumModel, SmallTalkModel
+from providers.mock_local import MockLocalProvider
+from schemas.models import (
+    ProposalModel,
+    SmallTalkModel,
+    SpeakerTurnModel,
+    WorldContextModel,
+)
 
 
 @pytest.fixture
@@ -502,7 +506,7 @@ class TestProviderValidation:
     @pytest.mark.asyncio
     async def test_schema_validation_on_creation(self, world_context):
         """Test that Pydantic models validate on creation."""
-        provider = MockLocalProvider({})
+        MockLocalProvider({})
 
         # Test valid intent
         valid_intent = ProposalModel(
@@ -519,7 +523,7 @@ class TestProviderValidation:
 
         # Test invalid intent (should raise validation error)
         try:
-            invalid_intent = ProposalModel(
+            ProposalModel(
                 type="invalid_type",  # Invalid literal
                 speaker_id="test_speaker",
                 content="Test",
@@ -527,7 +531,7 @@ class TestProviderValidation:
                 terms={},
                 timestamp=datetime.now()
             )
-            assert False, "Should have raised validation error"
+            raise AssertionError("Should have raised validation error")
         except Exception:
             pass  # Expected
 

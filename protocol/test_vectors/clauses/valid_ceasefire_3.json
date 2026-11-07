@@ -1,0 +1,17 @@
+{
+ "name": "valid_ceasefire_3",
+ "description": "",
+ "proposal": {
+  "spoken_line": "Three days' truce.",
+  "clauses": [
+   {
+    "type": "ceasefire",
+    "turns": 3
+   }
+  ]
+ },
+ "expect": {
+  "valid": true,
+  "error_codes": []
+ }
+}

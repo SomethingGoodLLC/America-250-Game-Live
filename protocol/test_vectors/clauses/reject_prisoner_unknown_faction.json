@@ -1,0 +1,21 @@
+{
+ "name": "reject_prisoner_unknown_faction",
+ "description": "",
+ "proposal": {
+  "spoken_line": "x",
+  "clauses": [
+   {
+    "type": "prisoner_exchange",
+    "counts": {
+     "french": 1
+    }
+   }
+  ]
+ },
+ "expect": {
+  "valid": false,
+  "error_codes": [
+   "unknown_faction"
+  ]
+ }
+}

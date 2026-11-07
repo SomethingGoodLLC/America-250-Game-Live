@@ -1,29 +1,35 @@
 """OpenAI/ChatGPT provider for negotiation analysis."""
 
-import asyncio
-from typing import AsyncGenerator, Dict, Any, List, Optional
+from collections.abc import AsyncGenerator
 from datetime import datetime
+from typing import Any
 
-from schemas.models import SpeakerTurnModel, IntentModel, WorldContextModel, SmallTalkModel
-from .base import Provider, ProviderEvent, NewIntent, LiveSubtitle, Analysis, Safety
 from core.settings import settings
+from schemas.models import (
+    IntentModel,
+    SmallTalkModel,
+    SpeakerTurnModel,
+    WorldContextModel,
+)
+
+from .base import NewIntent, Provider, ProviderEvent, Safety
 
 
 class OpenAIProvider(Provider):
     """Provider using OpenAI's GPT models for negotiation analysis.
-    
+
     TODO: Implement actual OpenAI API integration
     TODO: Add proper error handling and rate limiting
     TODO: Implement function calling for structured outputs
     TODO: Add streaming support for real-time responses
     """
 
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: dict[str, Any]):
         super().__init__(config)
         self.api_key = config.get("api_key") or settings.openai_api_key
         self.model = config.get("model") or settings.openai_model
         self.org_id = config.get("org_id") or settings.openai_org_id
-        
+
         # TODO: Initialize OpenAI client
         # self.client = openai.AsyncOpenAI(
         #     api_key=self.api_key,
@@ -32,23 +38,23 @@ class OpenAIProvider(Provider):
 
     async def stream_dialogue(
         self,
-        turns: List[SpeakerTurnModel],
+        turns: list[SpeakerTurnModel],
         world_context: WorldContextModel,
-        system_guidelines: Optional[str] = None
+        system_guidelines: str | None = None
     ) -> AsyncGenerator[ProviderEvent, None]:
         """Stream dialogue processing using OpenAI GPT."""
-        
+
         # TODO: Implement actual OpenAI integration
         # TODO: Add system prompt for diplomatic negotiation
         # TODO: Implement function calling for structured intent detection
         # TODO: Add streaming response handling
-        
+
         yield Safety(
             flag="openai_stub",
             detail="OpenAI provider is a stub - implement actual integration",
             severity="info"
         )
-        
+
         if turns:
             # Mock response for now
             yield NewIntent(

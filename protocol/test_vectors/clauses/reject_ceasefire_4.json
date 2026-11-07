@@ -1,0 +1,19 @@
+{
+ "name": "reject_ceasefire_4",
+ "description": "",
+ "proposal": {
+  "spoken_line": "x",
+  "clauses": [
+   {
+    "type": "ceasefire",
+    "turns": 4
+   }
+  ]
+ },
+ "expect": {
+  "valid": false,
+  "error_codes": [
+   "ceasefire_too_long"
+  ]
+ }
+}

@@ -1,0 +1,21 @@
+{
+ "name": "reject_safe_passage_too_long",
+ "description": "",
+ "proposal": {
+  "spoken_line": "x",
+  "clauses": [
+   {
+    "type": "safe_passage",
+    "army_id": "continental_militia",
+    "province_id": "charlestown",
+    "turns": 9
+   }
+  ]
+ },
+ "expect": {
+  "valid": false,
+  "error_codes": [
+   "safe_passage_too_long"
+  ]
+ }
+}

@@ -5,11 +5,11 @@ This script tests the core functionality without requiring a browser.
 """
 
 import asyncio
-import json
-import yaml
-from ruamel.yaml import YAML
+
 from aiortc import RTCPeerConnection
 from pydantic import BaseModel
+from ruamel.yaml import YAML
+
 
 class SDPIn(BaseModel):
     sdp: str
@@ -39,7 +39,7 @@ def test_webrtc_sdp():
     pc = RTCPeerConnection()
 
     # Create a simple offer
-    offer = pc.createOffer()
+    pc.createOffer()
 
     # Test our data model
     sdp_data = SDPIn(sdp="test sdp", type="offer")

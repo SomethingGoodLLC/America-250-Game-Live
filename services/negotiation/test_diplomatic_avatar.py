@@ -5,14 +5,15 @@ Test script for Revolutionary War diplomatic avatars
 
 from diplomatic_avatar import DiplomaticAvatar, create_character_avatar
 
+
 # Test 1: Single character speech
 def test_washington_speech():
     print("=" * 60)
     print("TEST 1: George Washington Speech")
     print("=" * 60)
-    
+
     avatar = create_character_avatar("george_washington")
-    
+
     video = avatar.speak(
         text="We shall secure liberty for these colonies, "
              "or we shall perish in the attempt.",
@@ -21,7 +22,7 @@ def test_washington_speech():
         still_mode=True,  # Formal speech posture
         enhance_video=True
     )
-    
+
     print(f"\n✅ Washington video: {video}\n")
 
 
@@ -30,10 +31,10 @@ def test_diplomatic_negotiation():
     print("=" * 60)
     print("TEST 2: Franklin-Cornwallis Negotiation")
     print("=" * 60)
-    
+
     franklin = create_character_avatar("benjamin_franklin")
     cornwallis = create_character_avatar("lord_cornwallis")
-    
+
     # Franklin's opening
     franklin_video = franklin.speak(
         text="Your Lordship, perhaps we can reach an accord "
@@ -41,7 +42,7 @@ def test_diplomatic_negotiation():
         output_name="franklin_negotiation_01",
         still_mode=False  # Natural conversation movement
     )
-    
+
     # Cornwallis's response
     cornwallis_video = cornwallis.speak(
         text="I am prepared to listen, Doctor Franklin, "
@@ -49,8 +50,8 @@ def test_diplomatic_negotiation():
         output_name="cornwallis_negotiation_01",
         emotion="diplomatic"
     )
-    
-    print(f"\n✅ Negotiation videos generated:")
+
+    print("\n✅ Negotiation videos generated:")
     print(f"   Franklin: {franklin_video}")
     print(f"   Cornwallis: {cornwallis_video}\n")
 
@@ -64,19 +65,19 @@ def quick_test():
         portrait_path="test_portrait.jpg",  # Your test image
         voice_id="YOUR_VOICE_ID"
     )
-    
+
     video = avatar.speak(
         text="This is a test of the diplomatic avatar system.",
         output_name="quick_test"
     )
-    
+
     print(f"Video: {video}")
 
 
 if __name__ == "__main__":
     # Run tests
     import sys
-    
+
     if len(sys.argv) > 1:
         test_name = sys.argv[1]
         if test_name == "washington":

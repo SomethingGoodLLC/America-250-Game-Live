@@ -1,0 +1,19 @@
+{
+ "name": "valid_safe_passage",
+ "description": "",
+ "proposal": {
+  "spoken_line": "Pass.",
+  "clauses": [
+   {
+    "type": "safe_passage",
+    "army_id": "continental_militia",
+    "province_id": "charlestown",
+    "turns": 2
+   }
+  ]
+ },
+ "expect": {
+  "valid": true,
+  "error_codes": []
+ }
+}

@@ -1,14 +1,20 @@
 """Tests for MockLocalProvider."""
 
-import pytest
-import asyncio
 from datetime import datetime
-from typing import List
-from unittest.mock import AsyncMock
 
-from schemas.models import SpeakerTurnModel, WorldContextModel, ProposalModel, ConcessionModel, CounterOfferModel, UltimatumModel, SmallTalkModel
+import pytest
+
+from providers.base import LiveSubtitle, NewIntent, Safety
 from providers.mock_local import MockLocalProvider
-from providers.base import NewIntent, LiveSubtitle, Analysis, Safety
+from schemas.models import (
+    ConcessionModel,
+    CounterOfferModel,
+    ProposalModel,
+    SmallTalkModel,
+    SpeakerTurnModel,
+    UltimatumModel,
+    WorldContextModel,
+)
 
 
 class TestMockLocalProvider:
@@ -329,7 +335,7 @@ class TestMockLocalProvider:
         assert isinstance(detected_intent, CounterOfferModel)
         assert "trade access" in detected_intent.content.lower()
         # Accept both "troops" and "military forces" as valid variations
-        assert ("withdraw troops" in detected_intent.content.lower() or 
+        assert ("withdraw troops" in detected_intent.content.lower() or
                 "military forces" in detected_intent.content.lower())
 
         # Validate intent using validators

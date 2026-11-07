@@ -1,10 +1,11 @@
 """Tests for session manager."""
 
-import pytest
 from datetime import datetime
 
-from core.session_manager import SessionManager, NegotiationSession
-from schemas.models import WorldContextModel, SpeakerTurnModel
+import pytest
+
+from core.session_manager import SessionManager
+from schemas.models import WorldContextModel
 
 
 @pytest.fixture

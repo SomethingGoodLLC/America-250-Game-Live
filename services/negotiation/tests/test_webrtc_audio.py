@@ -1,9 +1,10 @@
 """Tests for WebRTC audio functionality and TTS integration."""
 
-import pytest
 import asyncio
-from unittest.mock import Mock, patch, AsyncMock
-from aiortc import RTCPeerConnection, RTCSessionDescription
+from fractions import Fraction
+from unittest.mock import AsyncMock, Mock, patch
+
+import pytest
 
 from app.main import app
 from tts.elevenlabs import ElevenLabsProvider
@@ -97,13 +98,13 @@ class TestWebRTCAudioIntegration:
         """Test that TTS provider correctly detects ElevenLabs API key."""
         # Test with API key
         with patch.dict('os.environ', {'ELEVENLABS_API_KEY': 'test_key'}):
-            from app.main import ElevenLabsProvider
+            pass
             # This would be called during session creation
             # We can't easily test the exact logic without mocking the session creation
 
         # Test without API key (should fallback to XTTS)
         with patch.dict('os.environ', {}, clear=True):
-            from app.main import XTTSProvider
+            pass
             # Should fallback to XTTS when no API key
 
     def test_audio_track_replacement_during_ai_response(self):
@@ -120,7 +121,7 @@ class TestWebRTCAudioIntegration:
         from app.main import SESSIONS
         mock_pc = Mock()
         mock_tts_provider = Mock()
-        mock_audio_track = Mock()
+        Mock()
 
         SESSIONS[session_id] = {
             "pc": mock_pc,
@@ -151,8 +152,9 @@ class TestWebRTCAudioIntegration:
 
         async def run_test():
             # Simulate AI response generation
-            from app.main import generate_teller_avatar
             from unittest.mock import AsyncMock
+
+            from app.main import generate_teller_avatar
 
             # Mock send_yaml_func
             send_yaml_func = AsyncMock()

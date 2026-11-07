@@ -1,0 +1,22 @@
+{
+ "name": "reject_prisoners_exceed_held",
+ "description": "",
+ "proposal": {
+  "spoken_line": "x",
+  "clauses": [
+   {
+    "type": "prisoner_exchange",
+    "counts": {
+     "british": 4,
+     "continental": 0
+    }
+   }
+  ]
+ },
+ "expect": {
+  "valid": false,
+  "error_codes": [
+   "prisoners_exceed_held"
+  ]
+ }
+}

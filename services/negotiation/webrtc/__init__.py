@@ -1,6 +1,6 @@
 """WebRTC utilities for negotiation service."""
 
-from .publish import TrackPublisher, TrackPublication
+from .publish import TrackPublication, TrackPublisher
 
 __all__ = [
     "TrackPublisher",

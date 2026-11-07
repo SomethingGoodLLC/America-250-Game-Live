@@ -1,0 +1,10 @@
+CompileFlags:
+  CompilationDatabase: .
+  Add:
+    - -Wno-unused-command-line-argument
+  Remove:
+    - -Werror
+    - -fno-temp-file
+Diagnostics:
+  UnusedIncludes: None
+  MissingIncludes: None

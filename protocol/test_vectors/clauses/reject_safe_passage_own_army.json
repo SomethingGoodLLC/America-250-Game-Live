@@ -1,0 +1,21 @@
+{
+ "name": "reject_safe_passage_own_army",
+ "description": "",
+ "proposal": {
+  "spoken_line": "x",
+  "clauses": [
+   {
+    "type": "safe_passage",
+    "army_id": "british_regulars",
+    "province_id": "boston",
+    "turns": 1
+   }
+  ]
+ },
+ "expect": {
+  "valid": false,
+  "error_codes": [
+   "army_not_counterpart"
+  ]
+ }
+}

@@ -2,11 +2,13 @@
 
 import asyncio
 import struct
-from typing import AsyncGenerator, Dict, Any
-
-from aiortc.mediastreams import MediaStreamTrack, AudioStreamTrack
-import numpy as np
+from collections.abc import AsyncGenerator
 from fractions import Fraction
+from typing import Any
+
+import av
+import numpy as np
+from aiortc.mediastreams import AudioStreamTrack, MediaStreamTrack
 
 from .base import TTSProvider
 
@@ -14,7 +16,7 @@ from .base import TTSProvider
 class ElevenLabsProvider(TTSProvider):
     """TTS provider using ElevenLabs official SDK."""
 
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: dict[str, Any]):
         super().__init__(config)
         self.api_key = config.get("api_key", "")
         self.voice_id = config.get("voice_id", "JBFqnCBsd6RMkjVDRZzb")  # George voice (from your example)
@@ -26,8 +28,8 @@ class ElevenLabsProvider(TTSProvider):
 
         # Initialize ElevenLabs client
         try:
-            from elevenlabs.client import ElevenLabs
             import structlog
+            from elevenlabs.client import ElevenLabs
             logger = structlog.get_logger(__name__)
             self.client = ElevenLabs(api_key=self.api_key)
             logger.info("ElevenLabs client initialized successfully")
@@ -104,6 +106,7 @@ class ElevenLabsProvider(TTSProvider):
 
         try:
             import io
+
             import av
 
             # Use PyAV to decode MP3 to PCM
@@ -209,6 +212,7 @@ class ElevenLabsAudioTrack(AudioStreamTrack):
     async def recv(self):
         """Receive the next audio frame with proper timing."""
         import time
+
         import structlog
         logger = structlog.get_logger(__name__)
 

@@ -393,3 +393,22 @@ monitoring/
 grafana/
 prometheus/
 services/negotiation/teller-avatar/
+
+# Unreal Engine
+Binaries/
+Intermediate/
+Saved/
+DerivedDataCache/
+.vs/
+*.xcworkspace
+unreal/PA250Sim/build/
+# Machine-local clangd DB (regenerate via UBT -Mode=GenerateClangDatabase)
+unreal/PlayAmerica250/compile_commands.json
+compile_commands.json
+
+# Canonical sim data and shared clause vectors. The broad data/ and *.json
+# rules above must not hide these; they are source, not datasets.
+!protocol/test_vectors/
+!protocol/test_vectors/**
+!unreal/PA250Sim/data/
+!unreal/PA250Sim/data/**

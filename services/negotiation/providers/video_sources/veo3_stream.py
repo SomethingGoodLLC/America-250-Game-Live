@@ -1,13 +1,14 @@
 """Real AI video generation using Gemini Veo3, RunwayML, and Stability AI."""
 
 import asyncio
-import aiohttp
-import json
-import base64
 import os
 import time
-from typing import Dict, Any, Optional, AsyncIterator
+from collections.abc import AsyncIterator
+from typing import Any
+
+import aiohttp
 import structlog
+
 from .base import VideoSource
 
 # Import Gemini client
@@ -23,28 +24,28 @@ except ImportError:
 
 class GeminiVeo3VideoGenerator:
     """Real AI video generation using Gemini Veo3."""
-    
+
     def __init__(self, api_key: str):
         self.api_key = api_key
         self.client = None
         self.logger = structlog.get_logger(__name__)
-        
+
     def __enter__(self):
         if not GEMINI_AVAILABLE:
             raise ImportError("google-genai library not installed. Run: pip install google-genai")
         self.client = genai.Client(api_key=self.api_key)
         return self
-        
+
     def __exit__(self, exc_type, exc_val, exc_tb):
         pass
-    
+
     def generate_video(self, prompt: str, duration: int = 8) -> Any:
         """Generate real video using Gemini Veo3."""
         self.logger.info("Starting Gemini Veo3 video generation", prompt=prompt, duration=duration)
-        
+
         if not self.client:
             raise RuntimeError("Client not initialized. Use 'with' statement.")
-        
+
         # Start video generation operation
         operation = self.client.models.generate_videos(
             model="veo-3.0-generate-001",
@@ -55,25 +56,25 @@ class GeminiVeo3VideoGenerator:
                 duration_seconds=duration,
             ),
         )
-        
+
         self.logger.info("Gemini Veo3 generation started", operation_name=operation.name)
         return operation
-    
+
     def wait_for_completion(self, operation) -> Any:
         """Wait for video generation to complete."""
         self.logger.info("Waiting for Gemini Veo3 generation to complete...")
-        
+
         while not operation.done:
             self.logger.info("Generation in progress...")
             time.sleep(10)
             operation = self.client.operations.get(operation)
-        
+
         if operation.error:
             self.logger.error("Generation failed", error=operation.error)
             raise Exception(f"Generation failed: {operation.error}")
-        
+
         self.logger.info("Generation completed successfully")
-        
+
         result = operation.result
         # Handle content safety filter outcomes explicitly so callers can retry with a modified prompt
         if result and hasattr(result, 'rai_media_filtered_count') and result.rai_media_filtered_count:
@@ -91,15 +92,15 @@ class GeminiVeo3VideoGenerator:
         else:
             self.logger.error("Generation result is empty or invalid", result=result)
             raise Exception("Generation result is empty or invalid")
-    
+
     def download_video(self, generated_video, output_path: str) -> str:
         """Download the generated video."""
         self.logger.info("Downloading generated video", output_path=output_path)
-        
+
         # Download and save the video file using the correct method
         self.client.files.download(file=generated_video.video)
         generated_video.video.save(output_path)
-        
+
         self.logger.info("Video downloaded successfully", path=output_path)
         return output_path
 
@@ -110,7 +111,7 @@ class Veo3StreamVideoSource(VideoSource):
     def __init__(self, config):
         super().__init__(config)
         self.logger = structlog.get_logger(__name__)
-        
+
         # Handle both dict and VideoSourceConfig objects
         if hasattr(config, 'source_type'):  # VideoSourceConfig dataclass
             self.model = getattr(config, 'source_type', "gemini-veo3")
@@ -141,14 +142,14 @@ class Veo3StreamVideoSource(VideoSource):
         self.current_video_task = None
         self.current_intent = "NEUTRAL"
         self.current_text = ""
-        
+
         # Get API keys from environment
         self.gemini_key = os.getenv("GEMINI_API_KEY")
         self.runway_key = os.getenv("RUNWAY_API_KEY")
         self.stability_key = os.getenv("STABILITY_API_KEY")
-        
-        self.logger.info("Initialized Veo3 video source", 
-                        fps=self.fps, 
+
+        self.logger.info("Initialized Veo3 video source",
+                        fps=self.fps,
                         resolution=self.resolution,
                         model=self.model,
                         style=self.style,
@@ -161,10 +162,10 @@ class Veo3StreamVideoSource(VideoSource):
         """Start video generation."""
         if self.running:
             return
-            
+
         self.running = True
         self.logger.info("Starting Veo3 video generation")
-        
+
         # Start video generation task
         if self.use_real_veo3 and any([self.gemini_key, self.runway_key, self.stability_key]):
             self.current_video_task = asyncio.create_task(self._generate_real_video())
@@ -174,23 +175,23 @@ class Veo3StreamVideoSource(VideoSource):
     async def stop(self) -> None:
         """Stop video generation."""
         self.running = False
-        
+
         if self.current_video_task:
             self.current_video_task.cancel()
             try:
                 await self.current_video_task
             except asyncio.CancelledError:
                 pass
-        
+
         self.logger.info("Stopped Veo3 video generation")
 
-    async def stream_frames(self) -> AsyncIterator[Dict[str, Any]]:
+    async def stream_frames(self) -> AsyncIterator[dict[str, Any]]:
         """Stream video frames."""
         while self.running:
             try:
                 frame = await asyncio.wait_for(self.frame_buffer.get(), timeout=1.0)
                 yield frame
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 continue
             except Exception as e:
                 self.logger.error("Error streaming frame", error=str(e))
@@ -205,31 +206,31 @@ class Veo3StreamVideoSource(VideoSource):
     async def _generate_real_video(self) -> None:
         """Generate real video using AI models."""
         self.logger.info("Starting real AI video generation")
-        
+
         while self.running:
             try:
                 # Create diplomatic prompt based on current context
                 prompt = self._create_diplomatic_prompt()
-                
+
                 # Try to generate real video
                 video_result = await self._try_video_generation(prompt)
-                
+
                 if video_result:
                     await self._stream_real_video_frames(video_result)
                 else:
                     # Fallback to enhanced mock for this cycle
                     await self._generate_enhanced_mock_cycle()
-                
+
                 # Wait before next generation cycle
                 await asyncio.sleep(5)
-                
+
             except Exception as e:
                 self.logger.error("Error in real video generation", error=str(e))
                 await asyncio.sleep(2)
 
-    async def _try_video_generation(self, prompt: str) -> Optional[Dict[str, Any]]:
+    async def _try_video_generation(self, prompt: str) -> dict[str, Any] | None:
         """Try video generation with available services."""
-        
+
         # Try Gemini Veo3 first
         if self.gemini_key:
             try:
@@ -238,7 +239,7 @@ class Veo3StreamVideoSource(VideoSource):
                     return result
             except Exception as e:
                 self.logger.warning("Gemini generation failed", error=str(e))
-        
+
         # Try RunwayML
         if self.runway_key:
             try:
@@ -247,7 +248,7 @@ class Veo3StreamVideoSource(VideoSource):
                     return result
             except Exception as e:
                 self.logger.warning("RunwayML generation failed", error=str(e))
-        
+
         # Try Stability AI
         if self.stability_key:
             try:
@@ -256,24 +257,24 @@ class Veo3StreamVideoSource(VideoSource):
                     return result
             except Exception as e:
                 self.logger.warning("Stability AI generation failed", error=str(e))
-        
+
         return None
 
-    async def _generate_with_gemini(self, prompt: str) -> Optional[Dict[str, Any]]:
+    async def _generate_with_gemini(self, prompt: str) -> dict[str, Any] | None:
         """Generate video using Gemini Veo3 - REAL IMPLEMENTATION."""
         self.logger.info("Attempting real Gemini Veo3 generation", prompt=prompt)
-        
+
         if not GEMINI_AVAILABLE:
             self.logger.warning("google-genai library not available, falling back to mock")
             return None
-        
+
         try:
             # Use the working GeminiVeo3VideoGenerator
             with GeminiVeo3VideoGenerator(self.gemini_key) as generator:
                 # Create diplomatic prompts with fallback
                 primary_prompt = self._create_enhanced_diplomatic_prompt(prompt)
                 silent_prompt = self._create_silent_diplomatic_prompt(prompt)
-                
+
                 try:
                     # Attempt with primary prompt (includes speaking)
                     operation = generator.generate_video(primary_prompt, duration=8)
@@ -287,11 +288,11 @@ class Veo3StreamVideoSource(VideoSource):
                         generated_video = generator.wait_for_completion(operation)
                     else:
                         raise
-                
+
                 # Save video to temporary file for streaming
                 output_path = f"/tmp/diplomatic_video_{int(time.time())}.mp4"
                 generator.download_video(generated_video, output_path)
-                
+
                 return {
                     "status": "completed",
                     "video_path": output_path,
@@ -299,20 +300,20 @@ class Veo3StreamVideoSource(VideoSource):
                     "duration": 8,
                     "provider": "gemini_veo3"
                 }
-                
+
         except Exception as e:
             self.logger.error("Real Gemini Veo3 generation failed", error=str(e))
             return None
 
-    async def _generate_with_runway(self, prompt: str) -> Optional[Dict[str, Any]]:
+    async def _generate_with_runway(self, prompt: str) -> dict[str, Any] | None:
         """Generate video using RunwayML."""
         self.logger.info("Attempting RunwayML generation")
-        
+
         headers = {
             "Authorization": f"Bearer {self.runway_key}",
             "Content-Type": "application/json"
         }
-        
+
         payload = {
             "model": "gen3a_turbo",
             "prompt": prompt,
@@ -320,7 +321,7 @@ class Veo3StreamVideoSource(VideoSource):
             "resolution": "1280x768",
             "seed": int(time.time())
         }
-        
+
         async with aiohttp.ClientSession() as session:
             try:
                 async with session.post(
@@ -329,7 +330,7 @@ class Veo3StreamVideoSource(VideoSource):
                     json=payload,
                     timeout=aiohttp.ClientTimeout(total=60)
                 ) as response:
-                    
+
                     if response.status == 200:
                         result = await response.json()
                         self.logger.info("RunwayML generation successful", task_id=result.get("id"))
@@ -338,20 +339,20 @@ class Veo3StreamVideoSource(VideoSource):
                         error_text = await response.text()
                         self.logger.error("RunwayML API error", status=response.status, error=error_text)
                         return None
-                        
+
             except Exception as e:
                 self.logger.error("RunwayML request failed", error=str(e))
                 return None
 
-    async def _generate_with_stability(self, prompt: str) -> Optional[Dict[str, Any]]:
+    async def _generate_with_stability(self, prompt: str) -> dict[str, Any] | None:
         """Generate video using Stability AI."""
         self.logger.info("Attempting Stability AI generation")
-        
+
         headers = {
             "Authorization": f"Bearer {self.stability_key}",
             "Content-Type": "application/json"
         }
-        
+
         payload = {
             "prompt": prompt,
             "duration": 4,
@@ -359,7 +360,7 @@ class Veo3StreamVideoSource(VideoSource):
             "motion": 127,
             "seed": int(time.time())
         }
-        
+
         async with aiohttp.ClientSession() as session:
             try:
                 async with session.post(
@@ -368,7 +369,7 @@ class Veo3StreamVideoSource(VideoSource):
                     json=payload,
                     timeout=aiohttp.ClientTimeout(total=60)
                 ) as response:
-                    
+
                     if response.status == 200:
                         result = await response.json()
                         self.logger.info("Stability AI generation successful", id=result.get("id"))
@@ -377,7 +378,7 @@ class Veo3StreamVideoSource(VideoSource):
                         error_text = await response.text()
                         self.logger.error("Stability AI API error", status=response.status, error=error_text)
                         return None
-                        
+
             except Exception as e:
                 self.logger.error("Stability AI request failed", error=str(e))
                 return None
@@ -385,7 +386,7 @@ class Veo3StreamVideoSource(VideoSource):
     def _create_diplomatic_prompt(self) -> str:
         """Create AI prompt based on diplomatic context."""
         base_character = f"A {self.style} diplomat in formal attire"
-        
+
         if self.current_intent == "ULTIMATUM":
             character = "A stern British military general from the 1700s in full red military uniform with gold braiding, white powdered wig, and tricorn hat"
             action = "delivering a stern ultimatum with authority and gravitas"
@@ -400,15 +401,15 @@ class Veo3StreamVideoSource(VideoSource):
         else:
             character = base_character
             action = "speaking diplomatically with appropriate gestures"
-        
+
         setting = "standing in a military tent with maps on the table, dramatic candlelight"
         quality = "High quality, cinematic, historical accuracy, 4K resolution"
-        
+
         prompt = f"{character} {action}. The character is {setting}. {quality}."
-        
+
         self.logger.debug("Created prompt", prompt=prompt[:100], intent=self.current_intent)
         return prompt
-    
+
     def _create_enhanced_diplomatic_prompt(self, base_prompt: str) -> str:
         """Create enhanced diplomatic prompt with speaking for Veo3."""
         if self.current_intent == "ULTIMATUM":
@@ -447,7 +448,7 @@ class Veo3StreamVideoSource(VideoSource):
                 "Shot on a 50mm full‑frame lens at f/1.8 with shallow depth of field, natural film grain, soft rim lighting, "
                 "skin subsurface scattering, physically‑based materials, and historically accurate textures. High dynamic range, cinematic color grading."
             )
-    
+
     def _create_silent_diplomatic_prompt(self, base_prompt: str) -> str:
         """Create silent diplomatic prompt to avoid audio RAI filters."""
         if self.current_intent == "ULTIMATUM":
@@ -483,14 +484,14 @@ class Veo3StreamVideoSource(VideoSource):
                 "skin subsurface scattering, physically‑based materials, and historically accurate textures. High dynamic range, cinematic color grading."
             )
 
-    async def _stream_real_video_frames(self, video_result: Dict[str, Any]) -> None:
+    async def _stream_real_video_frames(self, video_result: dict[str, Any]) -> None:
         """Stream frames from real video generation result."""
         # For now, generate enhanced frames while waiting for real video
         # In production, this would stream actual video frames
         for i in range(120):  # 4 seconds at 30fps
             if not self.running:
                 break
-                
+
             frame = self._create_enhanced_diplomatic_frame(i)
             await self.frame_buffer.put(frame)
             await asyncio.sleep(self.frame_interval)
@@ -500,15 +501,15 @@ class Veo3StreamVideoSource(VideoSource):
         for i in range(120):  # 4 seconds at 30fps
             if not self.running:
                 break
-                
+
             frame = self._create_enhanced_diplomatic_frame(i)
             await self.frame_buffer.put(frame)
             await asyncio.sleep(self.frame_interval)
 
-    def _create_enhanced_diplomatic_frame(self, frame_num: int) -> Dict[str, Any]:
+    def _create_enhanced_diplomatic_frame(self, frame_num: int) -> dict[str, Any]:
         """Create enhanced diplomatic frame with better animation."""
         speaking = (frame_num % 20) < 14  # More realistic speaking pattern
-        
+
         frame_data = {
             "timestamp": int(time.time() * 1000),
             "frame_number": self.frame_count,
@@ -527,7 +528,7 @@ class Veo3StreamVideoSource(VideoSource):
                 "frame_type": "real_ai_simulation"
             }
         }
-        
+
         self.frame_count += 1
         return frame_data
 
@@ -535,24 +536,24 @@ class Veo3StreamVideoSource(VideoSource):
         """Generate enhanced frame data."""
         # Create more sophisticated frame data
         width, height = self.resolution
-        
+
         # Generate RGB data with diplomatic avatar simulation
         frame_data = bytearray(width * height * 3)
-        
+
         # Fill with diplomatic scene colors
         for i in range(0, len(frame_data), 3):
             # Simulate diplomatic setting with varying colors
             frame_data[i] = 45 + (i % 50)      # Red component
-            frame_data[i + 1] = 35 + (i % 40)  # Green component  
+            frame_data[i + 1] = 35 + (i % 40)  # Green component
             frame_data[i + 2] = 25 + (i % 30)  # Blue component
-        
+
         return bytes(frame_data)
 
     def _get_emotion_for_intent(self) -> str:
         """Get appropriate emotion for diplomatic intent."""
         emotion_map = {
             "ULTIMATUM": "stern",
-            "PROPOSAL": "confident", 
+            "PROPOSAL": "confident",
             "CONCESSION": "respectful",
             "SMALL_TALK": "pleasant",
             "NEUTRAL": "diplomatic"
@@ -571,13 +572,13 @@ class Veo3StreamVideoSource(VideoSource):
                 self.logger.error("Error in mock video generation", error=str(e))
                 await asyncio.sleep(1)
 
-    def _create_diplomatic_frame(self) -> Dict[str, Any]:
+    def _create_diplomatic_frame(self) -> dict[str, Any]:
         """Create a diplomatic avatar frame."""
         import random
-        
+
         # Simulate speaking animation
         speaking = random.choice([True, False, False, True, True, False])
-        
+
         frame_data = {
             "timestamp": int(time.time() * 1000),
             "frame_number": self.frame_count,
@@ -593,7 +594,7 @@ class Veo3StreamVideoSource(VideoSource):
                 "background": "diplomatic_setting"
             }
         }
-        
+
         return frame_data
 
     def _generate_frame_data(self) -> bytes:

@@ -1,8 +1,9 @@
 """Grok realtime listener adapter for bidirectional audio streaming."""
 
 import asyncio
-import json
-from typing import AsyncIterator, Dict, Any
+from collections.abc import AsyncIterator
+from typing import Any
+
 from .base import Listener
 
 
@@ -16,7 +17,7 @@ class GrokRealtimeListener(Listener):
     3. Audio format specifications
     """
 
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: dict[str, Any]):
         super().__init__(config)
         self.api_key = config.get("api_key")
         self.model = config.get("model", "grok-beta")
@@ -59,7 +60,7 @@ class GrokRealtimeListener(Listener):
         """Get final recognized text."""
         return "Final transcript from Grok realtime"  # Placeholder
 
-    async def stream_events(self) -> AsyncIterator[Dict[str, Any]]:
+    async def stream_events(self) -> AsyncIterator[dict[str, Any]]:
         """Stream events from Grok."""
         while self.running:
             try:
@@ -67,7 +68,7 @@ class GrokRealtimeListener(Listener):
                 if event.get("type") == "stop":
                     break
                 yield event
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 continue
             except Exception as e:
                 print(f"Error in stream_events: {e}")

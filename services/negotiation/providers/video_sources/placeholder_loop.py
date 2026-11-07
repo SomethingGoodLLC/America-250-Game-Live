@@ -1,20 +1,20 @@
 """Placeholder video source that loops MP4 video files."""
 
 import asyncio
-import os
 import math
+import os
+from collections.abc import AsyncGenerator, AsyncIterator
 from pathlib import Path
-from typing import AsyncGenerator, Optional, AsyncIterator
+
 try:
     import av
     import numpy as np
 except ImportError:
     av = None
     np = None
-import structlog
 
-from .base import BaseVideoSource, VideoFrame
 from ..types import VideoSourceConfig
+from .base import BaseVideoSource, VideoFrame
 
 
 class PlaceholderLoopVideoSource(BaseVideoSource):
@@ -100,7 +100,7 @@ class PlaceholderLoopVideoSource(BaseVideoSource):
             self._video_stream = None
             self._frame_iter = None
 
-    async def get_frame(self) -> Optional[VideoFrame]:
+    async def get_frame(self) -> VideoFrame | None:
         """Get the next frame from video file or synthetic generation."""
         if not self._is_running:
             return None
@@ -116,7 +116,7 @@ class PlaceholderLoopVideoSource(BaseVideoSource):
             self.logger.error("Error getting frame", error=str(e))
             return None
 
-    async def _get_video_frame(self) -> Optional[VideoFrame]:
+    async def _get_video_frame(self) -> VideoFrame | None:
         """Get next frame from video file."""
         if not self._container or not self._video_stream:
             return None
@@ -177,7 +177,7 @@ class PlaceholderLoopVideoSource(BaseVideoSource):
             # Control frame rate
             await asyncio.sleep(1.0 / self.config.framerate)
 
-    async def _get_synthetic_frame(self) -> Optional[VideoFrame]:
+    async def _get_synthetic_frame(self) -> VideoFrame | None:
         """Get synthetic frame when video file is not available."""
         width, height = self.config.resolution
 

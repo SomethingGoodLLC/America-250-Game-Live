@@ -1,6 +1,7 @@
 """YAML middleware for FastAPI to handle application/x-yaml content type."""
 
-from typing import Callable
+from collections.abc import Callable
+
 from fastapi import Request, Response
 from fastapi.responses import Response as FastAPIResponse
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -10,7 +11,7 @@ from .yaml_utils import yaml_helper
 
 class YAMLResponse(FastAPIResponse):
     """Custom response class for YAML content."""
-    
+
     media_type = "application/x-yaml"
 
     def render(self, content) -> bytes:

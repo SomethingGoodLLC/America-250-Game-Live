@@ -22,68 +22,67 @@ Viseme IDs:
 Reference: https://developer.oculus.com/documentation/native/audio-ovrlipsync/
 """
 
-from typing import List, Dict, Tuple, Optional
 import structlog
 
 logger = structlog.get_logger(__name__)
 
 
 # ARPAbet to OVR Lip Sync viseme mapping
-ARPABET_TO_OVR: Dict[str, str] = {
+ARPABET_TO_OVR: dict[str, str] = {
     # Silence
     "SIL": "SIL",
     "SP": "SIL",
-    
+
     # Bilabial stops (lips together)
     "P": "PP",
     "B": "PP",
     "M": "PP",
-    
+
     # Labiodental fricatives (lower lip to teeth)
     "F": "FF",
     "V": "FF",
-    
+
     # Dental fricatives (tongue between teeth)
     "TH": "TH",
     "DH": "TH",
-    
+
     # Alveolar stops (tongue to ridge)
     "T": "DD",
     "D": "DD",
     "N": "DD",
     "L": "DD",
-    
+
     # Velar stops (back of tongue)
     "K": "KK",
     "G": "KK",
     "NG": "KK",
-    
+
     # Palatal/postalveolar (tongue near palate)
     "CH": "CH",
     "JH": "CH",
     "SH": "CH",
     "ZH": "CH",
-    
+
     # Alveolar fricatives (narrow gap)
     "S": "SS",
     "Z": "SS",
-    
+
     # Retroflex approximant
     "R": "RR",
     "ER": "RR",
-    
+
     # Open vowels
     "AA": "AA",  # father
     "AE": "AA",  # at
     "AH": "AA",  # hut
     "AW": "AA",  # cow (starts open)
     "AY": "AA",  # hide (starts open)
-    
+
     # Mid vowels
     "EH": "E",   # bed
     "EY": "E",   # ate
     "AO": "O",   # ought
-    
+
     # Close vowels
     "IH": "I",   # it
     "IY": "I",   # eat
@@ -91,7 +90,7 @@ ARPABET_TO_OVR: Dict[str, str] = {
     "OY": "O",   # toy
     "UH": "U",   # hood
     "UW": "U",   # two
-    
+
     # Glides/approximants
     "W": "U",    # Similar to U
     "Y": "I",    # Similar to I
@@ -109,13 +108,13 @@ for phoneme, viseme in _base_map.items():
 
 def arpabet_to_ovr_viseme(phoneme: str) -> str:
     """Convert single ARPAbet phoneme to OVR viseme key.
-    
+
     Args:
         phoneme: ARPAbet phoneme (e.g., "AA", "B", "SH", "AA1")
-    
+
     Returns:
         OVR viseme key (e.g., "AA", "PP", "CH", "SIL")
-    
+
     Examples:
         >>> arpabet_to_ovr_viseme("AA")
         'AA'
@@ -130,16 +129,16 @@ def arpabet_to_ovr_viseme(phoneme: str) -> str:
     if phoneme not in ARPABET_TO_OVR:
         phoneme_base = phoneme.rstrip("012")
         return ARPABET_TO_OVR.get(phoneme_base, "SIL")
-    
+
     return ARPABET_TO_OVR.get(phoneme, "SIL")
 
 
 class VisemeEvent:
     """A viseme event with timing information."""
-    
+
     def __init__(self, viseme: str, start_ms: float, end_ms: float):
         """Initialize viseme event.
-        
+
         Args:
             viseme: OVR viseme key (e.g., "PP", "AA")
             start_ms: Start time in milliseconds
@@ -148,12 +147,12 @@ class VisemeEvent:
         self.viseme = viseme
         self.start_ms = start_ms
         self.end_ms = end_ms
-    
+
     @property
     def duration_ms(self) -> float:
         """Get duration in milliseconds."""
         return self.end_ms - self.start_ms
-    
+
     def to_dict(self) -> dict:
         """Convert to dictionary."""
         return {
@@ -162,23 +161,23 @@ class VisemeEvent:
             "end_ms": round(self.end_ms, 2),
             "duration_ms": round(self.duration_ms, 2)
         }
-    
+
     def __repr__(self) -> str:
         return f"VisemeEvent({self.viseme}, {self.start_ms:.1f}-{self.end_ms:.1f}ms)"
 
 
 def phonemes_to_visemes(
-    phoneme_timestamps: List[Dict[str, any]],
+    phoneme_timestamps: list[dict[str, any]],
     collapse_similar: bool = True,
     min_duration_ms: float = 30.0
-) -> List[Dict[str, any]]:
+) -> list[dict[str, any]]:
     """Convert phoneme timestamps to viseme events.
-    
+
     This function:
     1. Converts each phoneme to its corresponding viseme
     2. Optionally collapses consecutive similar visemes
     3. Filters out very short visemes (below min_duration_ms)
-    
+
     Args:
         phoneme_timestamps: List of dicts with keys:
             - phoneme: ARPAbet phoneme
@@ -186,14 +185,14 @@ def phonemes_to_visemes(
             - end_ms: End time in milliseconds
         collapse_similar: If True, merge consecutive identical visemes
         min_duration_ms: Minimum duration for a viseme (shorter ones are merged)
-    
+
     Returns:
         List of viseme event dicts with keys:
             - viseme: OVR viseme key
             - start_ms: Start time
             - end_ms: End time
             - duration_ms: Duration
-    
+
     Example:
         >>> phonemes = [
         ...     {"phoneme": "HH", "start_ms": 0, "end_ms": 50},
@@ -212,47 +211,47 @@ def phonemes_to_visemes(
     """
     if not phoneme_timestamps:
         return []
-    
+
     # Convert phonemes to visemes
     viseme_events = []
     for p in phoneme_timestamps:
         phoneme = p.get("phoneme", "SIL")
         start_ms = p.get("start_ms", 0)
         end_ms = p.get("end_ms", 0)
-        
+
         viseme = arpabet_to_ovr_viseme(phoneme)
         viseme_events.append(VisemeEvent(viseme, start_ms, end_ms))
-    
+
     # Collapse consecutive similar visemes if requested
     if collapse_similar:
         viseme_events = collapse_visemes(viseme_events, min_duration_ms)
-    
+
     # Convert to dict format
     return [v.to_dict() for v in viseme_events]
 
 
 def collapse_visemes(
-    viseme_events: List[VisemeEvent],
+    viseme_events: list[VisemeEvent],
     min_duration_ms: float = 30.0
-) -> List[VisemeEvent]:
+) -> list[VisemeEvent]:
     """Collapse consecutive identical visemes into single events.
-    
+
     This reduces the number of viseme changes and creates smoother animation.
     Very short visemes (< min_duration_ms) are also merged with neighbors.
-    
+
     Args:
         viseme_events: List of VisemeEvent objects
         min_duration_ms: Minimum duration for a viseme
-    
+
     Returns:
         List of collapsed VisemeEvent objects
     """
     if not viseme_events:
         return []
-    
+
     collapsed = []
     current = viseme_events[0]
-    
+
     for next_event in viseme_events[1:]:
         # If same viseme, extend the current event
         if next_event.viseme == current.viseme:
@@ -269,30 +268,30 @@ def collapse_visemes(
             else:
                 # Keep current
                 collapsed.append(current)
-            
+
             current = next_event
-    
+
     # Add last event
     if current.duration_ms >= min_duration_ms or not collapsed:
         collapsed.append(current)
     elif collapsed:
         collapsed[-1].end_ms = current.end_ms
-    
+
     logger.debug(
         "Collapsed visemes",
         original_count=len(viseme_events),
         collapsed_count=len(collapsed)
     )
-    
+
     return collapsed
 
 
 def get_viseme_name(viseme_key: str) -> str:
     """Get human-readable name for a viseme.
-    
+
     Args:
         viseme_key: OVR viseme key (e.g., "PP", "AA")
-    
+
     Returns:
         Human-readable name
     """
@@ -317,31 +316,31 @@ def get_viseme_name(viseme_key: str) -> str:
 
 # Precomputed phoneme durations for estimation (in milliseconds)
 # Based on typical English speech at normal speed
-PHONEME_DURATIONS: Dict[str, Tuple[float, float]] = {
+PHONEME_DURATIONS: dict[str, tuple[float, float]] = {
     # Stops (short)
     "P": (50, 100), "B": (50, 100), "T": (50, 100),
     "D": (50, 100), "K": (50, 100), "G": (50, 100),
-    
+
     # Fricatives (medium)
     "F": (80, 150), "V": (80, 150), "TH": (80, 150), "DH": (80, 150),
     "S": (100, 180), "Z": (100, 180), "SH": (100, 180), "ZH": (100, 180),
     "HH": (60, 100),
-    
+
     # Affricates
     "CH": (100, 150), "JH": (100, 150),
-    
+
     # Nasals and liquids
     "M": (60, 120), "N": (60, 120), "NG": (60, 120),
     "L": (60, 120), "R": (70, 130),
-    
+
     # Short vowels
     "IH": (80, 140), "EH": (80, 140), "AE": (80, 140), "UH": (80, 140),
-    
+
     # Long vowels and diphthongs
     "IY": (100, 200), "EY": (100, 200), "AA": (100, 200), "AO": (100, 200),
     "OW": (100, 200), "UW": (100, 200), "AW": (120, 220), "AY": (120, 220),
     "OY": (120, 220), "ER": (100, 180), "AH": (80, 140),
-    
+
     # Glides
     "W": (60, 100), "Y": (60, 100),
 }
@@ -349,10 +348,10 @@ PHONEME_DURATIONS: Dict[str, Tuple[float, float]] = {
 
 def estimate_phoneme_duration(phoneme: str) -> float:
     """Estimate typical duration for a phoneme in milliseconds.
-    
+
     Args:
         phoneme: ARPAbet phoneme
-    
+
     Returns:
         Estimated duration in milliseconds (average of min/max)
     """

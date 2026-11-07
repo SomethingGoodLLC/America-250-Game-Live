@@ -3,7 +3,7 @@
 import pytest
 
 from core.content_safety import ContentSafetyFilter
-from schemas.models import SpeakerTurnModel, ContentSafetyModel
+from schemas.models import SpeakerTurnModel
 
 
 @pytest.fixture

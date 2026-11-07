@@ -2,18 +2,16 @@
 """Generate pydantic models from JSON schemas."""
 
 import json
-import os
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 
-import pydantic
-from pydantic import BaseModel, Field
+from pydantic import Field
 
 
-def load_schema(schema_name: str) -> Dict[str, Any]:
+def load_schema(schema_name: str) -> dict[str, Any]:
     """Load a JSON schema from the protocol/schemas directory."""
     schema_path = Path(__file__).parent.parent.parent.parent / "protocol" / "schemas" / f"{schema_name}.json"
-    with open(schema_path, 'r') as f:
+    with open(schema_path) as f:
         return json.load(f)
 
 
@@ -28,7 +26,7 @@ def create_pydantic_model_from_schema(schema_name: str) -> str:
     required_fields = set(schema.get('required', []))
 
     for field_name, field_schema in schema.get('properties', {}).items():
-        field_type = get_pydantic_type(field_schema)
+        get_pydantic_type(field_schema)
         default = ... if field_name in required_fields else None
         description = field_schema.get('description', '')
 
@@ -46,7 +44,7 @@ class {class_name}(BaseModel):
     return model_code.strip()
 
 
-def get_pydantic_type(schema: Dict[str, Any]) -> str:
+def get_pydantic_type(schema: dict[str, Any]) -> str:
     """Convert JSON schema type to pydantic type."""
     schema_type = schema.get('type', 'object')
 
@@ -83,7 +81,7 @@ def get_pydantic_type(schema: Dict[str, Any]) -> str:
 
 def main():
     """Generate all pydantic models from schemas."""
-    schema_dir = Path(__file__).parent.parent.parent.parent / "protocol" / "schemas"
+    Path(__file__).parent.parent.parent.parent / "protocol" / "schemas"
     output_file = Path(__file__).parent / "models.py"
 
     schema_files = [

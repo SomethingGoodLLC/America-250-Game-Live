@@ -1,9 +1,9 @@
 """Configuration management for negotiation service providers."""
 
 import os
-from typing import Optional, Dict, Any, List
-from pathlib import Path
 from dataclasses import dataclass
+from typing import Any
+
 import structlog
 
 
@@ -11,10 +11,10 @@ import structlog
 class ProviderConfig:
     """Configuration for negotiation providers."""
     # API Keys (loaded from environment)
-    gemini_api_key: Optional[str] = None
-    openai_api_key: Optional[str] = None
-    anthropic_api_key: Optional[str] = None
-    grok_api_key: Optional[str] = None
+    gemini_api_key: str | None = None
+    openai_api_key: str | None = None
+    anthropic_api_key: str | None = None
+    grok_api_key: str | None = None
 
     # Model configurations
     gemini_model: str = "gemini-2.5-pro"
@@ -61,7 +61,7 @@ class ProviderConfig:
 
     # Video+dialogue provider settings
     use_veo3: int = 0
-    veo3_api_key: Optional[str] = None
+    veo3_api_key: str | None = None
     avatar_style: str = "colonial_diplomat"
     voice_id: str = "en_male_01"
     latency_target_ms: int = 800
@@ -70,11 +70,11 @@ class ProviderConfig:
 @dataclass
 class WebRTCConfig:
     """Configuration for WebRTC connections."""
-    stun_servers: List[str] = None
-    turn_servers: List[str] = None
+    stun_servers: list[str] = None
+    turn_servers: list[str] = None
     enable_turn: bool = False
-    turn_username: Optional[str] = None
-    turn_password: Optional[str] = None
+    turn_username: str | None = None
+    turn_password: str | None = None
 
     # Connection settings
     connection_timeout: int = 30
@@ -92,7 +92,7 @@ class LoggingConfig:
     format: str = "json"
     enable_structured_logging: bool = True
     log_to_file: bool = False
-    log_file_path: Optional[str] = None
+    log_file_path: str | None = None
 
 
 class ConfigManager:
@@ -234,7 +234,6 @@ class ConfigManager:
             enable_intent_detection=self.enable_intent_detection,
             use_veo3=self.use_veo3,
             veo3_api_key=self.veo3_api_key,
-            avatar_style=self.avatar_style,
             voice_id=self.voice_id,
             latency_target_ms=self.latency_target_ms
         )
@@ -261,7 +260,7 @@ class ConfigManager:
             log_file_path=self.log_file_path
         )
 
-    def get_provider_config_for_provider(self, provider_name: str) -> Dict[str, Any]:
+    def get_provider_config_for_provider(self, provider_name: str) -> dict[str, Any]:
         """Get configuration specific to a provider.
 
         Args:
@@ -306,7 +305,7 @@ class ConfigManager:
 
         return base_config
 
-    def validate_configuration(self) -> List[str]:
+    def validate_configuration(self) -> list[str]:
         """Validate the configuration and return list of issues.
 
         Returns:

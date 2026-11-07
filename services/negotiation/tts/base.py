@@ -1,8 +1,8 @@
 """Base TTS interface."""
 
-import asyncio
 from abc import ABC, abstractmethod
-from typing import AsyncGenerator, Dict, Any
+from collections.abc import AsyncGenerator
+from typing import Any
 
 from aiortc.mediastreams import MediaStreamTrack
 
@@ -10,7 +10,7 @@ from aiortc.mediastreams import MediaStreamTrack
 class TTSProvider(ABC):
     """Base class for Text-to-Speech providers."""
 
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: dict[str, Any]):
         self.config = config
 
     @abstractmethod

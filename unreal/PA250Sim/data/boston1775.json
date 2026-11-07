@@ -1,0 +1,494 @@
+{
+ "schema_version": 1,
+ "scenario": "boston1775",
+ "seed": 1775,
+ "player_faction": "continental",
+ "ai_objective": "lexington",
+ "map": {
+  "width": 1000,
+  "height": 700,
+  "land": [
+   [
+    0.0,
+    0.0
+   ],
+   [
+    640.0,
+    0.0
+   ],
+   [
+    660.0,
+    180.0
+   ],
+   [
+    700.0,
+    260.0
+   ],
+   [
+    790.0,
+    290.0
+   ],
+   [
+    790.0,
+    330.0
+   ],
+   [
+    770.0,
+    430.0
+   ],
+   [
+    870.0,
+    480.0
+   ],
+   [
+    880.0,
+    560.0
+   ],
+   [
+    840.0,
+    640.0
+   ],
+   [
+    780.0,
+    700.0
+   ],
+   [
+    0.0,
+    700.0
+   ]
+  ],
+  "rivers": [
+   {
+    "name": "Charles River",
+    "width": 24,
+    "points": [
+     [
+      400.0,
+      540.0
+     ],
+     [
+      520.0,
+      500.0
+     ],
+     [
+      620.0,
+      480.0
+     ],
+     [
+      720.0,
+      462.0
+     ],
+     [
+      800.0,
+      452.0
+     ]
+    ]
+   }
+  ],
+  "roads": [
+   [
+    "boston",
+    "charlestown",
+    "cambridge",
+    "lexington",
+    "concord"
+   ],
+   [
+    "boston",
+    "roxbury"
+   ]
+  ],
+  "water": [
+   {
+    "name": "Back Bay",
+    "points": [
+     [
+      520,
+      500
+     ],
+     [
+      660,
+      505
+     ],
+     [
+      650,
+      550
+     ],
+     [
+      670,
+      590
+     ],
+     [
+      700,
+      605
+     ],
+     [
+      705,
+      630
+     ],
+     [
+      650,
+      600
+     ],
+     [
+      470,
+      570
+     ],
+     [
+      480,
+      530
+     ]
+    ]
+   },
+   {
+    "name": "Charles Basin",
+    "points": [
+     [
+      540,
+      325
+     ],
+     [
+      600,
+      330
+     ],
+     [
+      620,
+      440
+     ],
+     [
+      720,
+      447
+     ],
+     [
+      660,
+      505
+     ],
+     [
+      520,
+      500
+     ],
+     [
+      560,
+      420
+     ]
+    ]
+   }
+  ],
+  "title": "Boston & Environs, 1775"
+ },
+ "provinces": [
+  {
+   "id": "boston",
+   "name": "Boston",
+   "owner": "british",
+   "adjacent": [
+    "charlestown",
+    "roxbury"
+   ],
+   "polygon": [
+    [
+     660.0,
+     505.0
+    ],
+    [
+     780.0,
+     490.0
+    ],
+    [
+     850.0,
+     545.0
+    ],
+    [
+     815.0,
+     600.0
+    ],
+    [
+     745.0,
+     610.0
+    ],
+    [
+     735.0,
+     630.0
+    ],
+    [
+     705.0,
+     630.0
+    ],
+    [
+     700.0,
+     605.0
+    ],
+    [
+     670.0,
+     590.0
+    ],
+    [
+     650.0,
+     550.0
+    ]
+   ],
+   "label": [
+    755,
+    550
+   ],
+   "supply_value": 1
+  },
+  {
+   "id": "charlestown",
+   "name": "Charlestown",
+   "owner": "british",
+   "adjacent": [
+    "boston",
+    "cambridge"
+   ],
+   "polygon": [
+    [
+     600.0,
+     330.0
+    ],
+    [
+     700.0,
+     300.0
+    ],
+    [
+     760.0,
+     380.0
+    ],
+    [
+     720.0,
+     445.0
+    ],
+    [
+     620.0,
+     440.0
+    ]
+   ],
+   "label": [
+    680,
+    385
+   ],
+   "supply_value": 1
+  },
+  {
+   "id": "cambridge",
+   "name": "Cambridge",
+   "owner": "continental",
+   "adjacent": [
+    "charlestown",
+    "lexington"
+   ],
+   "polygon": [
+    [
+     250.0,
+     420.0
+    ],
+    [
+     280.0,
+     230.0
+    ],
+    [
+     520.0,
+     320.0
+    ],
+    [
+     560.0,
+     420.0
+    ],
+    [
+     520.0,
+     500.0
+    ],
+    [
+     380.0,
+     520.0
+    ]
+   ],
+   "label": [
+    410,
+    410
+   ],
+   "supply_value": 1
+  },
+  {
+   "id": "lexington",
+   "name": "Lexington",
+   "owner": "continental",
+   "adjacent": [
+    "cambridge",
+    "concord"
+   ],
+   "polygon": [
+    [
+     240.0,
+     40.0
+    ],
+    [
+     580.0,
+     30.0
+    ],
+    [
+     620.0,
+     230.0
+    ],
+    [
+     520.0,
+     320.0
+    ],
+    [
+     280.0,
+     230.0
+    ]
+   ],
+   "label": [
+    430,
+    150
+   ],
+   "supply_value": 1
+  },
+  {
+   "id": "concord",
+   "name": "Concord",
+   "owner": "continental",
+   "adjacent": [
+    "lexington"
+   ],
+   "polygon": [
+    [
+     0.0,
+     40.0
+    ],
+    [
+     240.0,
+     40.0
+    ],
+    [
+     280.0,
+     230.0
+    ],
+    [
+     250.0,
+     420.0
+    ],
+    [
+     0.0,
+     420.0
+    ]
+   ],
+   "label": [
+    110,
+    240
+   ],
+   "supply_value": 1
+  },
+  {
+   "id": "roxbury",
+   "name": "Roxbury",
+   "owner": "continental",
+   "adjacent": [
+    "boston"
+   ],
+   "polygon": [
+    [
+     470.0,
+     570.0
+    ],
+    [
+     650.0,
+     600.0
+    ],
+    [
+     705.0,
+     630.0
+    ],
+    [
+     735.0,
+     630.0
+    ],
+    [
+     800.0,
+     650.0
+    ],
+    [
+     760.0,
+     700.0
+    ],
+    [
+     470.0,
+     700.0
+    ]
+   ],
+   "label": [
+    600,
+    670
+   ],
+   "supply_value": 1
+  }
+ ],
+ "armies": [
+  {
+   "id": "british_regulars",
+   "name": "British Regulars",
+   "faction": "british",
+   "province": "boston",
+   "units": {
+    "line_infantry": 24,
+    "militia": 0
+   },
+   "morale": 80
+  },
+  {
+   "id": "continental_militia",
+   "name": "Massachusetts Militia",
+   "faction": "continental",
+   "province": "lexington",
+   "units": {
+    "line_infantry": 4,
+    "militia": 18
+   },
+   "morale": 70
+  }
+ ],
+ "supplies": {
+  "british": 10,
+  "continental": 10
+ },
+ "relations": {
+  "british": -20
+ },
+ "prisoners_held": {
+  "british": 3,
+  "continental": 2
+ },
+ "factions": {
+  "british": {
+   "display_name": "British Crown",
+   "envoy_name": "General Thomas Gage",
+   "envoy_title": "Military Governor of Massachusetts",
+   "allowed_clause_types": [
+    "ceasefire",
+    "prisoner_exchange",
+    "safe_passage",
+    "cede_province"
+   ],
+   "protected_provinces": [
+    "boston"
+   ],
+   "max_ceasefire_turns": 3,
+   "max_safe_passage_turns": 3
+  },
+  "continental": {
+   "display_name": "Massachusetts Provincial Congress",
+   "envoy_name": "",
+   "envoy_title": "",
+   "allowed_clause_types": [
+    "ceasefire",
+    "prisoner_exchange",
+    "safe_passage",
+    "cede_province"
+   ],
+   "protected_provinces": [],
+   "max_ceasefire_turns": 3,
+   "max_safe_passage_turns": 3
+  }
+ }
+}

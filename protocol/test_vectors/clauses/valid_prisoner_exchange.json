@@ -1,0 +1,20 @@
+{
+ "name": "valid_prisoner_exchange",
+ "description": "",
+ "proposal": {
+  "spoken_line": "Return our men.",
+  "clauses": [
+   {
+    "type": "prisoner_exchange",
+    "counts": {
+     "british": 2,
+     "continental": 2
+    }
+   }
+  ]
+ },
+ "expect": {
+  "valid": true,
+  "error_codes": []
+ }
+}

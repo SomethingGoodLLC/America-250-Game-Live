@@ -1,0 +1,22 @@
+{
+ "name": "reject_prisoner_negative",
+ "description": "",
+ "proposal": {
+  "spoken_line": "x",
+  "clauses": [
+   {
+    "type": "prisoner_exchange",
+    "counts": {
+     "british": -1,
+     "continental": 2
+    }
+   }
+  ]
+ },
+ "expect": {
+  "valid": false,
+  "error_codes": [
+   "prisoner_count_negative"
+  ]
+ }
+}

@@ -1,0 +1,19 @@
+{
+ "name": "reject_unknown_province",
+ "description": "",
+ "proposal": {
+  "spoken_line": "x",
+  "clauses": [
+   {
+    "type": "cede_province",
+    "province_id": "atlantis"
+   }
+  ]
+ },
+ "expect": {
+  "valid": false,
+  "error_codes": [
+   "unknown_province"
+  ]
+ }
+}

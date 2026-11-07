@@ -1,12 +1,10 @@
 """End-to-end integration tests for TTS functionality."""
 
-import pytest
 import asyncio
-import json
-from unittest.mock import Mock, patch, AsyncMock
-from fastapi.testclient import TestClient
+from unittest.mock import AsyncMock, Mock, patch
 
-from app.main import app
+from tts.elevenlabs import ElevenLabsProvider
+from tts.xtts import XTTSProvider
 
 
 class TestTTSEndToEndIntegration:
@@ -100,7 +98,7 @@ a=rtpmap:111 opus/48000/2
         from app.main import SESSIONS
         mock_pc = Mock()
         mock_tts_provider = Mock()
-        mock_audio_track = Mock()
+        Mock()
 
         SESSIONS[session_id] = {
             "pc": mock_pc,
@@ -250,7 +248,7 @@ class TestAudioQualityAndPerformance:
             test_text = "Memory usage test with moderately sized text."
 
             # Generate audio multiple times to test memory stability
-            for i in range(3):
+            for _i in range(3):
                 audio_chunks = []
                 async for chunk in provider.synthesize_speech(test_text):
                     audio_chunks.append(chunk)

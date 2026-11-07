@@ -1,15 +1,14 @@
 """Tests for LLM integration and video generation."""
 
 import asyncio
-import pytest
 import os
-from unittest.mock import Mock, AsyncMock, patch
-from aiortc import RTCPeerConnection, RTCSessionDescription
+
+import pytest
+
+from listeners.base import Listener
 
 # Import our modules
 from main import app
-from listeners.base import Listener, make_listener_from_env
-from providers.mock_local import MockLocalProvider
 from providers.gemini_veo3 import Veo3Provider
 from providers.video_sources.placeholder_loop import PlaceholderLoopVideoSource
 

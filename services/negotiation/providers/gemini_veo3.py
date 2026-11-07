@@ -1,25 +1,29 @@
 """Gemini Veo3 provider for video+dialogue negotiation pipeline."""
 
 import asyncio
-import re
-from typing import AsyncGenerator, AsyncIterator, Dict, Any, List, Optional, Protocol, Iterable
+from collections.abc import AsyncGenerator, AsyncIterator, Iterable
 from datetime import datetime
+from typing import (
+    Any,
+    Protocol,
+)
+
 import structlog
 from ruamel.yaml import YAML
 
 from schemas.models import (
-    SpeakerTurnModel, IntentModel, WorldContextModel,
-    ProposalModel, ConcessionModel, CounterOfferModel,
-    UltimatumModel, SmallTalkModel
+    SpeakerTurnModel,
+    WorldContextModel,
 )
 from schemas.validators import validator
-from .base import Provider, ProviderEvent, NewIntent, LiveSubtitle, Analysis, Safety
-from .types import VideoSourceConfig
-from ._safety import screen_intent
-from ._scoring import score_intent
-from ._backpressure import BoundedAIO
 from stt.base import STTProvider
 from tts.base import TTSProvider
+
+from ._backpressure import BoundedAIO
+from ._safety import screen_intent
+from ._scoring import score_intent
+from .base import Provider, ProviderEvent
+from .types import VideoSourceConfig
 from .video_sources import create_video_source
 
 
@@ -43,9 +47,9 @@ class Veo3Provider(Provider):
         voice_id: str = "en_male_01",
         latency_target_ms: int = 800,
         use_veo3: bool = False,
-        video_source: Optional[VideoSource] = None,
-        stt_provider: Optional[STTProvider] = None,
-        tts_provider: Optional[TTSProvider] = None,
+        video_source: VideoSource | None = None,
+        stt_provider: STTProvider | None = None,
+        tts_provider: TTSProvider | None = None,
     ):
         """Initialize the Veo3 provider.
 
@@ -118,8 +122,8 @@ class Veo3Provider(Provider):
 
     async def stream_dialogue(
         self,
-        turns: Iterable[Dict[str, Any]],
-        world_context: Dict[str, Any],
+        turns: Iterable[dict[str, Any]],
+        world_context: dict[str, Any],
         system_guidelines: str,
     ) -> AsyncIterator[ProviderEvent]:
         """Stream dialogue processing with video, subtitles, and intent detection.
@@ -132,14 +136,14 @@ class Veo3Provider(Provider):
         Yields:
             ProviderEvent: Events including subtitles, intents, analysis, safety
         """
-        subs_q: Optional[BoundedAIO] = None
-        intent_q: Optional[BoundedAIO] = None
+        subs_q: BoundedAIO | None = None
+        intent_q: BoundedAIO | None = None
 
         try:
             # Convert inputs to models for internal processing
             turn_models = [SpeakerTurnModel(**turn) if isinstance(turn, dict) else turn for turn in turns]
             world_model = WorldContextModel(**world_context) if isinstance(world_context, dict) else world_context
-            
+
             # Build system prompt
             system_prompt = self._build_system_prompt(world_model, system_guidelines)
 
@@ -150,7 +154,7 @@ class Veo3Provider(Provider):
             except Exception as e:
                 self.logger.error("Failed to start video source", error=str(e))
                 # Continue without video - audio/text processing can still work
-                
+
             # Create backpressured queues
             subs_q = BoundedAIO(maxsize=50)
             intent_q = BoundedAIO(maxsize=20)
@@ -186,20 +190,19 @@ class Veo3Provider(Provider):
             )
         finally:
             # Cleanup resources in reverse order
-            cleanup_tasks = []
-            
+
             if subs_q:
                 try:
                     await subs_q.close()
                 except Exception as e:
                     self.logger.warning("Error closing subtitle queue", error=str(e))
-                    
+
             if intent_q:
                 try:
                     await intent_q.close()
                 except Exception as e:
                     self.logger.warning("Error closing intent queue", error=str(e))
-                    
+
             if self.video_source:
                 try:
                     await self.video_source.stop()
@@ -207,7 +210,7 @@ class Veo3Provider(Provider):
                 except Exception as e:
                     self.logger.warning("Error stopping video source", error=str(e))
 
-    def _build_system_prompt(self, world_context: WorldContextModel, system_guidelines: Optional[str] = None) -> str:
+    def _build_system_prompt(self, world_context: WorldContextModel, system_guidelines: str | None = None) -> str:
         """Build YAML system prompt from world context and guidelines.
 
         Args:
@@ -249,7 +252,7 @@ class Veo3Provider(Provider):
     async def _stream_subtitles(
         self,
         queue: BoundedAIO,
-        turns: List[SpeakerTurnModel],
+        turns: list[SpeakerTurnModel],
         system_prompt: str
     ) -> None:
         """Stream subtitle events from player turns.
@@ -308,7 +311,7 @@ class Veo3Provider(Provider):
         except Exception as e:
             self.logger.error("Error streaming subtitles", error=str(e))
 
-    def _split_into_clauses(self, text: str) -> List[str]:
+    def _split_into_clauses(self, text: str) -> list[str]:
         """Split text into clauses for progressive subtitle streaming.
 
         Args:
@@ -335,7 +338,7 @@ class Veo3Provider(Provider):
     async def _detect_intents(
         self,
         queue: BoundedAIO,
-        turns: List[SpeakerTurnModel],
+        turns: list[SpeakerTurnModel],
         world_context: WorldContextModel,
         system_prompt: str
     ) -> None:
@@ -374,12 +377,12 @@ class Veo3Provider(Provider):
                     intent_type = intent_dict.get('type', '').lower()
                     schema_name = {
                         'proposal': 'proposal',
-                        'concession': 'concession', 
+                        'concession': 'concession',
                         'counter_offer': 'counter_offer',
                         'ultimatum': 'ultimatum',
                         'small_talk': 'small_talk'
                     }.get(intent_type, 'small_talk')
-                    
+
                     validated_intent = validator.validate_or_raise(intent_dict, schema_name)
                 except Exception as e:
                     self.logger.error("Intent validation failed", error=str(e), intent=intent_dict)
@@ -418,7 +421,7 @@ class Veo3Provider(Provider):
         except Exception as e:
             self.logger.error("Error detecting intents", error=str(e))
 
-    async def _mock_function_call(self, text: str, system_prompt: str) -> Optional[str]:
+    async def _mock_function_call(self, text: str, system_prompt: str) -> str | None:
         """Mock function calling that returns YAML intent data.
 
         Args:
@@ -437,7 +440,7 @@ class Veo3Provider(Provider):
         if any(word in text_lower for word in ["trade", "deal", "exchange", "offer"]):
             return f"""
 type: proposal
-speaker_id: "{last_turn.speaker_id if 'last_turn' in locals() else 'ai_diplomat'}"
+speaker_id: "ai_diplomat"
 content: "I propose a trade agreement based on current diplomatic relations."
 intent_type: trade
 confidence: 0.85
@@ -531,7 +534,7 @@ timestamp: "{datetime.now().isoformat()}"
     async def validate_and_score_intent(
         self,
         intent: Any,
-        world_context: Dict[str, Any]
+        world_context: dict[str, Any]
     ) -> tuple[Any, float, str]:
         """Validate and score intent using schema validation and context-aware scoring.
 
@@ -550,12 +553,12 @@ timestamp: "{datetime.now().isoformat()}"
             if hasattr(intent, 'timestamp') and hasattr(intent.timestamp, 'isoformat'):
                 intent_dict = intent.model_dump()
                 intent_dict['timestamp'] = intent.timestamp.isoformat()
-                
+
                 # Validate against schema using the dict with string timestamp
-                validated_dict = validator.validate_intent(intent_dict)
+                validator.validate_intent(intent_dict)
             else:
                 # Validate against schema
-                validated_dict = validator.validate_intent(intent)
+                validator.validate_intent(intent)
 
             # Calculate context-aware confidence score
             confidence = self._calculate_confidence_score(intent, world_context)
@@ -577,7 +580,7 @@ timestamp: "{datetime.now().isoformat()}"
     def _calculate_confidence_score(
         self,
         intent: Any,
-        world_context: Dict[str, Any]
+        world_context: dict[str, Any]
     ) -> float:
         """Calculate context-aware confidence score for intent."""
         base_score = 0.9  # Start with high confidence for Veo3 provider
@@ -608,7 +611,7 @@ timestamp: "{datetime.now().isoformat()}"
     def _generate_validation_justification(
         self,
         intent: Any,
-        world_context: Dict[str, Any],
+        world_context: dict[str, Any],
         confidence: float
     ) -> str:
         """Generate justification for validation and scoring decision."""

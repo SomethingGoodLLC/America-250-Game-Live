@@ -1,0 +1,24 @@
+{
+ "name": "valid_ceasefire_and_prisoners",
+ "description": "",
+ "proposal": {
+  "spoken_line": "Both.",
+  "clauses": [
+   {
+    "type": "ceasefire",
+    "turns": 3
+   },
+   {
+    "type": "prisoner_exchange",
+    "counts": {
+     "british": 1,
+     "continental": 1
+    }
+   }
+  ]
+ },
+ "expect": {
+  "valid": true,
+  "error_codes": []
+ }
+}

@@ -1,16 +1,18 @@
 """Base provider interface for negotiation providers."""
 
 from __future__ import annotations
-from typing import AsyncIterator, Protocol, Any, Dict, Iterable, Union, List
+
+from collections.abc import AsyncIterator, Iterable
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Any, Protocol
 
 
 @dataclass
 class ProviderEvent:
     """Event emitted by negotiation providers."""
     type: str
-    payload: Dict[str, Any]
+    payload: dict[str, Any]
     final: bool = False
     timestamp: datetime = None
 
@@ -27,7 +29,7 @@ class ProviderEvent:
 @dataclass
 class NewIntent:
     """New diplomatic intent detected."""
-    intent: Dict[str, Any]
+    intent: dict[str, Any]
     confidence: float
     justification: str
 
@@ -46,7 +48,7 @@ class LiveSubtitle:
 class Analysis:
     """Analysis result with metadata."""
     analysis_type: str
-    result: Dict[str, Any]
+    result: dict[str, Any]
     confidence: float
 
 
@@ -54,7 +56,7 @@ class Analysis:
 class Safety:
     """Safety check result."""
     is_safe: bool
-    flags: List[str]
+    flags: list[str]
     severity: str
     reason: str
 
@@ -64,8 +66,8 @@ class Provider(Protocol):
 
     async def stream_dialogue(
         self,
-        turns: Iterable[Dict[str, Any]],        # sequence of speaker_turn.v1 YAML objects
-        world_context: Dict[str, Any],          # world_context.v1 YAML object
+        turns: Iterable[dict[str, Any]],        # sequence of speaker_turn.v1 YAML objects
+        world_context: dict[str, Any],          # world_context.v1 YAML object
         system_guidelines: str,                 # safety/tone/system text
     ) -> AsyncIterator[ProviderEvent]:
         """Stream dialogue processing and emit events."""
@@ -74,7 +76,7 @@ class Provider(Protocol):
     async def validate_and_score_intent(
         self,
         intent: Any,
-        world_context: Dict[str, Any]
+        world_context: dict[str, Any]
     ) -> tuple[Any, float, str]:
         """Validate and score an intent against schemas and context.
 

@@ -1,7 +1,7 @@
 """Backpressure utilities for providers."""
 
 import asyncio
-from typing import Any, Optional
+from typing import Any
 
 
 class BoundedAIO:
@@ -38,7 +38,7 @@ class BoundedAIO:
         """Get an item from the queue."""
         if self.closed and self.queue.empty():
             raise StopAsyncIteration
-        
+
         item = await self.queue.get()
         if item is self._sentinel:
             raise StopAsyncIteration
@@ -48,7 +48,7 @@ class BoundedAIO:
         """Try to get an item without waiting."""
         if self.closed and self.queue.empty():
             raise StopAsyncIteration
-        
+
         try:
             item = self.queue.get_nowait()
             if item is self._sentinel:

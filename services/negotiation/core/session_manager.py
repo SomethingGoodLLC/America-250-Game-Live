@@ -1,20 +1,19 @@
 """Session management for negotiation service."""
 
 import asyncio
-import uuid
 from datetime import datetime, timedelta
-from typing import Dict, List, Any, Optional
+from typing import Any
 
 import structlog
 
-from schemas.models import (
-    WorldContextModel,
-    NegotiationReportModel,
-    SpeakerTurnModel,
-    IntentModel
-)
 from core.logging_config import get_logger_with_correlation
 from core.settings import settings
+from schemas.models import (
+    IntentModel,
+    NegotiationReportModel,
+    SpeakerTurnModel,
+    WorldContextModel,
+)
 
 
 class NegotiationSession:
@@ -24,10 +23,10 @@ class NegotiationSession:
         self.session_id = session_id
         self.world_context = world_context
         self.start_time = datetime.now()
-        self.end_time: Optional[datetime] = None
-        self.transcript: List[SpeakerTurnModel] = []
-        self.intents: List[IntentModel] = []
-        self.justifications: List[Dict[str, Any]] = []
+        self.end_time: datetime | None = None
+        self.transcript: list[SpeakerTurnModel] = []
+        self.intents: list[IntentModel] = []
+        self.justifications: list[dict[str, Any]] = []
         self.is_active = True
         self.mic_enabled = False
         self.push_to_talk_active = False
@@ -50,9 +49,9 @@ class SessionManager:
     """Manages negotiation sessions."""
 
     def __init__(self):
-        self.sessions: Dict[str, NegotiationSession] = {}
+        self.sessions: dict[str, NegotiationSession] = {}
         self.logger = structlog.get_logger(__name__)
-        self._cleanup_task: Optional[asyncio.Task] = None
+        self._cleanup_task: asyncio.Task | None = None
         self._start_cleanup_task()
 
     def _start_cleanup_task(self):
@@ -72,11 +71,11 @@ class SessionManager:
                     session_id for session_id, session in self.sessions.items()
                     if session.is_expired()
                 ]
-                
+
                 for session_id in expired_sessions:
                     self.logger.info("Cleaning up expired session", session_id=session_id)
                     await self.end_session(session_id)
-                
+
                 # Check for max concurrent sessions
                 if len(self.sessions) > settings.max_concurrent_sessions:
                     # Remove oldest sessions
@@ -85,11 +84,11 @@ class SessionManager:
                         key=lambda x: x[1].last_activity
                     )
                     sessions_to_remove = len(self.sessions) - settings.max_concurrent_sessions
-                    
+
                     for session_id, _ in oldest_sessions[:sessions_to_remove]:
                         self.logger.info("Removing session due to limit", session_id=session_id)
                         await self.end_session(session_id)
-                
+
                 await asyncio.sleep(60)  # Check every minute
             except Exception as e:
                 self.logger.error("Error in cleanup task", error=str(e))
@@ -116,7 +115,7 @@ class SessionManager:
         """Check if a session exists."""
         return session_id in self.sessions
 
-    async def end_session(self, session_id: str) -> Optional[NegotiationReportModel]:
+    async def end_session(self, session_id: str) -> NegotiationReportModel | None:
         """End a session and return the report."""
         session = self.sessions.get(session_id)
         if not session:
@@ -145,7 +144,7 @@ class SessionManager:
         session.logger.info("Session ended")
         return report
 
-    async def get_session_report(self, session_id: str) -> Optional[NegotiationReportModel]:
+    async def get_session_report(self, session_id: str) -> NegotiationReportModel | None:
         """Get the report for a session (if ended)."""
         session = self.sessions.get(session_id)
         if not session or session.is_active:
@@ -172,7 +171,7 @@ class SessionManager:
             session.update_activity()
             session.logger.info("Mic state updated", enabled=enabled)
 
-    async def handle_push_to_talk(self, session_id: str, data: Dict[str, Any]) -> None:
+    async def handle_push_to_talk(self, session_id: str, data: dict[str, Any]) -> None:
         """Handle push-to-talk events."""
         session = self.sessions.get(session_id)
         if session:
@@ -180,7 +179,7 @@ class SessionManager:
             session.update_activity()
             session.logger.info("PTT state updated", active=session.push_to_talk_active)
 
-    async def handle_text_message(self, session_id: str, data: Dict[str, Any]) -> None:
+    async def handle_text_message(self, session_id: str, data: dict[str, Any]) -> None:
         """Handle text messages from client."""
         session = self.sessions.get(session_id)
         if session:
@@ -195,7 +194,7 @@ class SessionManager:
             session.update_activity()
             session.logger.info("Text message added to transcript", speaker_id=turn.speaker_id)
 
-    async def inject_intents(self, session_id: str, intents: List[IntentModel]) -> None:
+    async def inject_intents(self, session_id: str, intents: list[IntentModel]) -> None:
         """Inject intents into a session (for development/testing)."""
         session = self.sessions.get(session_id)
         if session:
@@ -203,7 +202,7 @@ class SessionManager:
             session.update_activity()
             session.logger.info("Injected intents", count=len(intents))
 
-    def _generate_outcome(self, session: NegotiationSession) -> Dict[str, Any]:
+    def _generate_outcome(self, session: NegotiationSession) -> dict[str, Any]:
         """Generate a simple outcome based on session data."""
         # This is a placeholder - in a real implementation, this would use
         # the negotiation provider to determine the actual outcome

@@ -1,0 +1,76 @@
+# Diplomacy clauses (Play America 250 vertical slice).
+# Sits beside proposal.yaml; it does NOT replace it. The legacy dialogue intents
+# (trade, alliance, peace, war, resource_sharing, concession, counter_offer, ultimatum, small_talk)
+# stay non-authoritative. Only the sim (PA250Sim) can change campaign state, and only through a
+# validated DiplomacyResult. `spoken_line` is display-only and is never parsed for state.
+$schema: "http://json-schema.org/draft-07/schema#"
+$id: "diplomacy_clauses.v1"
+title: DiplomacyProposal
+type: object
+additionalProperties: false
+required: [spoken_line, clauses]
+properties:
+  spoken_line:
+    type: string
+    maxLength: 600
+    description: "What the envoy says aloud. Display and TTS only."
+  clauses:
+    type: array
+    maxItems: 4
+    description: "Binding terms. Types must come from the context's allowed_clause_types; at most one per type."
+    items:
+      oneOf:
+        - $ref: "#/definitions/ceasefire"
+        - $ref: "#/definitions/prisoner_exchange"
+        - $ref: "#/definitions/safe_passage"
+        - $ref: "#/definitions/cede_province"
+definitions:
+  ceasefire:
+    type: object
+    additionalProperties: false
+    required: [type, turns]
+    properties:
+      type: {const: ceasefire}
+      turns: {type: integer, minimum: 1, maximum: 3, description: "Red line: at most max_ceasefire_turns (3)."}
+  prisoner_exchange:
+    type: object
+    additionalProperties: false
+    required: [type, counts]
+    properties:
+      type: {const: prisoner_exchange}
+      counts:
+        type: object
+        additionalProperties: false
+        properties:
+          british: {type: integer, minimum: 0, description: "Prisoners the British release; never more than held."}
+          continental: {type: integer, minimum: 0, description: "Prisoners the Continentals release; never more than held."}
+  safe_passage:
+    type: object
+    additionalProperties: false
+    required: [type, army_id, province_id, turns]
+    properties:
+      type: {const: safe_passage}
+      army_id: {type: string, description: "A counterpart army id present in the context."}
+      province_id: {type: string, description: "A province owned by the envoy's faction."}
+      turns: {type: integer, minimum: 1, maximum: 3}
+  cede_province:
+    type: object
+    additionalProperties: false
+    required: [type, province_id]
+    properties:
+      type: {const: cede_province}
+      province_id: {type: string, description: "A province owned by the envoy's faction and not in protected_provinces (Boston is protected for the British)."}
+# Validation rules beyond JSON Schema (single source of truth: protocol/test_vectors/clauses/*.json,
+# consumed by the C++ tests and by pytest): unknown clause types, types outside allowed_clause_types,
+# unknown ids, red lines, duplicates, and malformed fields are rejected; the sim re-validates before applying.
+control_messages:
+  diplomacy_proposal:
+    description: "Sent by main:app on the control socket after each envoy reply (JSON mode: ?format=json)."
+    type: object
+    required: [type, spoken_line, clauses, rejected, provider]
+    properties:
+      type: {const: diplomacy_proposal}
+      spoken_line: {type: string}
+      clauses: {type: array, description: "Python-validated clauses only; [] when nothing valid was proposed."}
+      rejected: {type: array, items: {type: string}, description: "Validator errors for a refused proposal (logging only)."}
+      provider: {type: string, enum: [claude, mock]}

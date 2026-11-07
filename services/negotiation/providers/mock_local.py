@@ -2,12 +2,26 @@
 
 import asyncio
 import re
-from typing import AsyncGenerator, Dict, Any, List, Optional
+from collections.abc import AsyncGenerator
 from datetime import datetime
+from typing import Any
+
 import structlog
 
-from schemas.models import SpeakerTurnModel, IntentModel, WorldContextModel, ProposalModel, ConcessionModel, CounterOfferModel, UltimatumModel, SmallTalkModel
-from .base import Provider, ProviderEvent, NewIntent, LiveSubtitle, Analysis, Safety
+from diplomacy.models import DiplomacyContext
+from diplomacy.scripted import scripted_reply
+from schemas.models import (
+    ConcessionModel,
+    CounterOfferModel,
+    IntentModel,
+    ProposalModel,
+    SmallTalkModel,
+    SpeakerTurnModel,
+    UltimatumModel,
+    WorldContextModel,
+)
+
+from .base import Provider, ProviderEvent
 
 
 class MockLocalProvider(Provider):
@@ -21,9 +35,11 @@ class MockLocalProvider(Provider):
     - Otherwise: small talk + low-stakes proposal
     """
 
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: dict[str, Any]):
         super().__init__(config)
         self.strict = config.get("strict", False)
+        # `compromised` simulates a jailbroken model that emits red-line clauses (adversarial tests).
+        self.compromised = bool(config.get("compromised", False))
         self.logger = structlog.get_logger(__name__)
 
         # Pre-compiled regex patterns for efficient matching
@@ -37,9 +53,9 @@ class MockLocalProvider(Provider):
 
     async def stream_dialogue(
         self,
-        turns: List[SpeakerTurnModel],
+        turns: list[SpeakerTurnModel],
         world_context: WorldContextModel,
-        system_guidelines: Optional[str] = None
+        system_guidelines: str | None = None
     ) -> AsyncGenerator[ProviderEvent, None]:
         """Stream deterministic dialogue processing based on key phrases."""
 
@@ -120,19 +136,26 @@ class MockLocalProvider(Provider):
             )
             return
 
+        # Diplomacy-game sessions carry a read-only DiplomacyContext in current_state.
+        dctx = self._diplomacy_context(world_context)
+        scripted = scripted_reply(text, dctx, self.compromised) if dctx else None
+
         # Generate AI conversational response first
-        ai_response = await self._generate_ai_response(text, last_turn, world_context)
-        
+        if scripted:
+            ai_response = scripted["spoken_line"]
+        else:
+            ai_response = await self._generate_ai_response(text, last_turn, world_context)
+
         # Generate live subtitles for the AI response (not player turn)
         yield ProviderEvent(
             type="subtitle",
             payload={"text": ai_response[:len(ai_response)//2] + "...", "speaker": "AI"},
             final=False
         )
-        
+
         # Simulate processing delay
         await asyncio.sleep(0.2)
-        
+
         # Final AI response
         yield ProviderEvent(
             type="subtitle",
@@ -154,6 +177,16 @@ class MockLocalProvider(Provider):
                 }
             )
 
+        if dctx:
+            yield ProviderEvent(
+                type="diplomacy_proposal",
+                payload={"proposal": {
+                    "spoken_line": ai_response,
+                    "clauses": scripted["clauses"] if scripted else [],
+                }},
+                final=True,
+            )
+
         # Always yield analysis
         yield ProviderEvent(
             type="analysis",
@@ -168,6 +201,16 @@ class MockLocalProvider(Provider):
             }
         )
 
+    @staticmethod
+    def _diplomacy_context(world_context: WorldContextModel) -> DiplomacyContext | None:
+        raw = (world_context.current_state or {}).get("diplomacy_context")
+        if not isinstance(raw, dict):
+            return None
+        try:
+            return DiplomacyContext(**raw)
+        except Exception:
+            return None
+
     async def _generate_ai_response(
         self,
         user_text: str,
@@ -175,38 +218,38 @@ class MockLocalProvider(Provider):
         world_context: WorldContextModel
     ) -> str:
         """Generate a conversational AI response based on user input."""
-        
+
         # Analyze user input for appropriate response
         text_lower = user_text.lower()
-        
+
         # Diplomatic responses based on content
         if self._patterns["counter_offer"].search(user_text):
             return "That's an interesting proposal. We'll need to consider the implications of troop withdrawal, but trade access could indeed benefit both our peoples."
-            
+
         elif self._patterns["ultimatum"].search(user_text):
             return "I understand the urgency of your position. However, ultimatums rarely lead to lasting peace. Perhaps we can find a more diplomatic solution?"
-            
+
         elif self._patterns["trade"].search(user_text):
             return "Trade relations are indeed vital for our mutual prosperity. I'm open to discussing the terms of such an agreement."
-            
+
         elif self._patterns["aggressive"].search(user_text):
             return "I hear your concerns, but aggressive rhetoric will not serve our diplomatic goals. Let us focus on constructive dialogue."
-            
+
         elif self._patterns["cooperative"].search(user_text):
             return "I appreciate your cooperative spirit. Such an approach will surely lead to mutually beneficial outcomes."
-            
+
         elif "establish" in text_lower and "agreement" in text_lower:
             return "Establishing formal agreements requires careful consideration of all parties' interests. What specific terms did you have in mind?"
-            
+
         elif "propose" in text_lower:
             return "Your proposal has merit. Let me consider how we might structure this to benefit both our nations."
-            
+
         elif "withdraw" in text_lower and "troops" in text_lower:
             return "Military positioning is always a sensitive matter. We'd need substantial guarantees before considering any troop movements."
-            
+
         elif "access" in text_lower and ("trade" in text_lower or "grant" in text_lower):
             return "Trade access is something we can certainly discuss. What assurances can you provide regarding fair treatment of our merchants?"
-            
+
         else:
             # Default diplomatic responses
             responses = [
@@ -225,7 +268,7 @@ class MockLocalProvider(Provider):
         text: str,
         turn: SpeakerTurnModel,
         world_context: WorldContextModel
-    ) -> Optional[IntentModel]:
+    ) -> IntentModel | None:
         """Detect intent based on deterministic key phrase matching."""
 
         # Priority order: counter_offer > ultimatum > other patterns
@@ -315,7 +358,7 @@ class MockLocalProvider(Provider):
 
         return any(re.search(pattern, text, re.IGNORECASE) for pattern in unsafe_patterns)
 
-    def _get_matched_patterns(self, text: str) -> List[str]:
+    def _get_matched_patterns(self, text: str) -> list[str]:
         """Get list of matched pattern names."""
         matched = []
         for name, pattern in self._patterns.items():
@@ -358,12 +401,12 @@ class MockLocalProvider(Provider):
             if hasattr(intent, 'timestamp') and hasattr(intent.timestamp, 'isoformat'):
                 intent_dict = intent.model_dump()
                 intent_dict['timestamp'] = intent.timestamp.isoformat()
-                
+
                 # Validate against schema using the dict with string timestamp
-                validated_dict = validator.validate_intent(intent_dict)
+                validator.validate_intent(intent_dict)
             else:
                 # Validate against schema
-                validated_dict = validator.validate_intent(intent)
+                validator.validate_intent(intent)
 
             # Calculate context-aware confidence score
             confidence = self._calculate_confidence_score(intent, world_context)

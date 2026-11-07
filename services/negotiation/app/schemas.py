@@ -5,8 +5,9 @@ must stream to clients, enabling consistent frontend handling regardless
 of the underlying provider (Azure, ElevenLabs, Cartesia, etc.).
 """
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
-from typing import List, Literal, Optional
 
 
 class PhonemeTimestamp(BaseModel):
@@ -18,7 +19,7 @@ class PhonemeTimestamp(BaseModel):
 
 class VisemeEvent(BaseModel):
     """Viseme (visual phoneme) event for lip sync.
-    
+
     Viseme IDs typically follow SAPI/Azure conventions (0-21)
     or custom mappings depending on the avatar system.
     """
@@ -28,12 +29,12 @@ class VisemeEvent(BaseModel):
 
 class BlendshapeFrame(BaseModel):
     """ARKit-compatible blendshape frame for facial animation.
-    
+
     Blendshapes follow ARKit's 55 blendshape model for facial expressions.
     Weight values are normalized [0.0, 1.0].
     """
     t_ms: float = Field(..., description="Timestamp in milliseconds")
-    weights: List[float] = Field(
+    weights: list[float] = Field(
         ...,
         description="55 blendshape weights in ARKit order",
         min_length=55,
@@ -43,7 +44,7 @@ class BlendshapeFrame(BaseModel):
 
 class StreamEvent(BaseModel):
     """Normalized event streamed from TTS providers to clients.
-    
+
     All TTS providers (Azure, ElevenLabs, Cartesia) must convert their
     native events to this normalized format before sending to the client.
     """
@@ -51,37 +52,37 @@ class StreamEvent(BaseModel):
         ...,
         description="Event type identifier"
     )
-    
+
     # Audio data (kind="audio")
-    pcm16_b64: Optional[str] = Field(
+    pcm16_b64: str | None = Field(
         None,
         description="Base64-encoded PCM16LE audio chunk"
     )
-    sample_rate: Optional[int] = Field(
+    sample_rate: int | None = Field(
         None,
         description="Audio sample rate in Hz (typically 24000)"
     )
-    
+
     # Phoneme data (kind="phonemes")
-    phonemes: Optional[List[PhonemeTimestamp]] = Field(
+    phonemes: list[PhonemeTimestamp] | None = Field(
         None,
         description="List of phonemes with timing for the current chunk"
     )
-    
+
     # Viseme data (kind="viseme")
-    viseme: Optional[VisemeEvent] = Field(
+    viseme: VisemeEvent | None = Field(
         None,
         description="Single viseme event for lip sync"
     )
-    
+
     # Blendshape data (kind="blendshapes")
-    blendshapes: Optional[List[BlendshapeFrame]] = Field(
+    blendshapes: list[BlendshapeFrame] | None = Field(
         None,
         description="Blendshape animation frames for facial expressions"
     )
-    
+
     # Error data (kind="error")
-    error: Optional[str] = Field(
+    error: str | None = Field(
         None,
         description="Error message if kind='error'"
     )

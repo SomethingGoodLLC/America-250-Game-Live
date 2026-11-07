@@ -1,16 +1,16 @@
 """Base video source interface for avatar generation."""
 
 from __future__ import annotations
-from typing import AsyncIterator, Protocol
-import numpy as np  # frames as HxWxC uint8
+
 import asyncio
 from abc import ABC, abstractmethod
-from typing import AsyncGenerator, Optional, Dict, Any
+from collections.abc import AsyncGenerator, AsyncIterator
 from dataclasses import dataclass
-import logging
+from typing import Protocol
 
-from aiortc.mediastreams import VideoStreamTrack
+import numpy as np  # frames as HxWxC uint8
 import structlog
+from aiortc.mediastreams import VideoStreamTrack
 
 from ..types import VideoSourceConfig
 
@@ -56,7 +56,7 @@ class BaseVideoSource(ABC):
         self._is_running = False
 
     @abstractmethod
-    async def get_frame(self) -> Optional[VideoFrame]:
+    async def get_frame(self) -> VideoFrame | None:
         """Get the next video frame.
 
         Returns:
@@ -90,7 +90,7 @@ class BaseVideoSource(ABC):
         """Get the total number of frames generated."""
         return self._frame_count
 
-    async def wait_for_frame(self, timeout_seconds: float = 1.0) -> Optional[VideoFrame]:
+    async def wait_for_frame(self, timeout_seconds: float = 1.0) -> VideoFrame | None:
         """Wait for the next frame with timeout.
 
         Args:
@@ -102,7 +102,7 @@ class BaseVideoSource(ABC):
         try:
             frame = await asyncio.wait_for(self.get_frame(), timeout=timeout_seconds)
             return frame
-        except asyncio.TimeoutError:
+        except TimeoutError:
             self.logger.warning("Timeout waiting for video frame")
             return None
 

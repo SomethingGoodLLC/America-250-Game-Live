@@ -2,9 +2,9 @@
 
 import asyncio
 import time
-import json
-import base64
-from typing import AsyncIterator, Dict, Any, List
+from collections.abc import AsyncIterator
+from typing import Any
+
 import structlog
 
 from .base import Listener
@@ -13,7 +13,7 @@ from .base import Listener
 class RealLLMListener(Listener):
     """Real LLM listener that processes audio and generates responses."""
 
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: dict[str, Any]):
         super().__init__(config)
         self.logger = structlog.get_logger(__name__)
 
@@ -80,7 +80,7 @@ class RealLLMListener(Listener):
         full_text = " ".join(self.transcript_parts)
         return full_text.strip() if full_text else "Audio processed but no clear speech detected"
 
-    async def stream_events(self) -> AsyncIterator[Dict[str, Any]]:
+    async def stream_events(self) -> AsyncIterator[dict[str, Any]]:
         """Stream real-time events from the listener."""
         while self.running:
             try:
@@ -92,7 +92,7 @@ class RealLLMListener(Listener):
                 if "type" in event:
                     yield event
 
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 continue
             except Exception as e:
                 self.logger.error("Error streaming events", error=str(e))
@@ -175,7 +175,7 @@ class RealLLMListener(Listener):
                 self.logger.error("Error in audio stream processing", error=str(e))
                 await asyncio.sleep(1)
 
-    async def analyze_intent(self, text: str) -> Dict[str, Any]:
+    async def analyze_intent(self, text: str) -> dict[str, Any]:
         """Analyze text for diplomatic intent."""
         try:
             if self.use_real_llm and self.api_key:
@@ -198,7 +198,7 @@ class RealLLMListener(Listener):
             self.logger.error("Error analyzing intent", error=str(e))
             return {"type": "unknown", "confidence": 0.0}
 
-    async def _analyze_with_llm(self, text: str) -> Dict[str, Any]:
+    async def _analyze_with_llm(self, text: str) -> dict[str, Any]:
         """Analyze text using real LLM."""
         await asyncio.sleep(0.3)  # Simulate API delay
 
@@ -244,7 +244,7 @@ class RealLLMListener(Listener):
                 "sentiment": "neutral"
             }
 
-    def _mock_intent_analysis(self, text: str) -> Dict[str, Any]:
+    def _mock_intent_analysis(self, text: str) -> dict[str, Any]:
         """Mock intent analysis."""
         # Simple keyword-based analysis
         text_lower = text.lower()

@@ -2,12 +2,13 @@
 
 import os
 from typing import Optional
+
 import structlog
 
-from .base import BaseVideoSource, AvatarVideoTrack, VideoFrame
+from ..types import VideoSourceConfig
+from .base import AvatarVideoTrack, BaseVideoSource, VideoFrame
 from .placeholder_loop import PlaceholderLoopVideoSource
 from .veo3_stream import Veo3StreamVideoSource
-from ..types import VideoSourceConfig
 
 __all__ = [
     "BaseVideoSource",

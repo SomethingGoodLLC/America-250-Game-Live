@@ -1,0 +1,17 @@
+{
+ "name": "valid_cede_charlestown",
+ "description": "",
+ "proposal": {
+  "spoken_line": "Take it.",
+  "clauses": [
+   {
+    "type": "cede_province",
+    "province_id": "charlestown"
+   }
+  ]
+ },
+ "expect": {
+  "valid": true,
+  "error_codes": []
+ }
+}

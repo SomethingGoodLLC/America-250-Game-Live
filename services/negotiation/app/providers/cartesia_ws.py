@@ -13,7 +13,7 @@ Query Parameters:
 
 Example Usage:
     const ws = new WebSocket('ws://localhost:8000/ws/cartesia?voice_id=abc123&model=sonic-english');
-    
+
     ws.onopen = () => {
         // Send text to synthesize
         ws.send(JSON.stringify({
@@ -21,7 +21,7 @@ Example Usage:
             text: 'Hello world'
         }));
     };
-    
+
     ws.onmessage = (event) => {
         const data = JSON.parse(event.data);
         if (data.type === 'chunk') {
@@ -32,14 +32,14 @@ Example Usage:
 """
 
 import asyncio
-from typing import Optional
 
 import structlog
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, HTTPException
+from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 
 from core.settings import settings
-from ._bridge import bridge_client_server, ConnectionRateLimiter, check_origin
+
+from ._bridge import ConnectionRateLimiter, bridge_client_server, check_origin
 
 logger = structlog.get_logger(__name__)
 router = APIRouter()
@@ -54,28 +54,28 @@ ALLOWED_ORIGINS = ["http://localhost:*", "http://127.0.0.1:*", "https://*.your-d
 @router.websocket("/ws/cartesia")
 async def cartesia_websocket_proxy(
     websocket: WebSocket,
-    voice_id: Optional[str] = Query(None, description="Voice ID for synthesis"),
+    voice_id: str | None = Query(None, description="Voice ID for synthesis"),
     model: str = Query("sonic-english", description="Cartesia model ID"),
     sample_rate: int = Query(24000, description="Audio sample rate in Hz"),
     output_format: str = Query("pcm_s16le", description="Audio output format"),
 ):
     """WebSocket proxy endpoint for Cartesia streaming TTS.
-    
+
     This endpoint creates a bridge between the browser client and Cartesia's API,
     keeping the API key secure on the server side.
-    
+
     Protocol Flow:
     1. Client connects with query parameters (voice_id, model, etc.)
     2. Server establishes connection to Cartesia and sends session init
     3. Server bridges all subsequent messages between client and Cartesia
     4. Client sends text messages, receives audio + phoneme timestamps
-    
+
     Security:
     - API key is never exposed to the client
     - Origin checking prevents unauthorized domains from using the proxy
     - Rate limiting prevents abuse (max 3 connections per IP)
     - Connection timeout after prolonged inactivity
-    
+
     Args:
         websocket: FastAPI WebSocket connection
         voice_id: Optional Cartesia voice ID
@@ -85,7 +85,7 @@ async def cartesia_websocket_proxy(
     """
     client_ip = websocket.client.host if websocket.client else "unknown"
     origin = websocket.headers.get("origin")
-    
+
     logger.info(
         "Cartesia WebSocket connection attempt",
         client_ip=client_ip,
@@ -93,30 +93,30 @@ async def cartesia_websocket_proxy(
         voice_id=voice_id,
         model=model
     )
-    
+
     # Check origin
     if not check_origin(origin, ALLOWED_ORIGINS):
         logger.warning("Rejected connection from disallowed origin", origin=origin)
         await websocket.close(code=4003, reason="Origin not allowed")
         return
-    
+
     # Check API key configuration
     if not settings.cartesia_api_key:
         logger.error("CARTESIA_API_KEY not configured")
         await websocket.close(code=4000, reason="Service not configured")
         return
-    
+
     # Rate limiting
     if not await rate_limiter.acquire(client_ip):
         logger.warning("Rate limit exceeded for client", client_ip=client_ip)
         await websocket.close(code=4029, reason="Too many connections")
         return
-    
+
     try:
         # Accept WebSocket connection
         await websocket.accept()
         logger.info("Cartesia WebSocket accepted", client_ip=client_ip)
-        
+
         # Build Cartesia WebSocket URL
         # Cartesia uses query param for API key in WebSocket URL
         cartesia_url = (
@@ -124,7 +124,7 @@ async def cartesia_websocket_proxy(
             f"?api_key={settings.cartesia_api_key}"
             f"&cartesia_version=2024-06-10"
         )
-        
+
         # Prepare session initialization message
         # Send immediately after connecting to Cartesia
         init_message = {
@@ -140,18 +140,18 @@ async def cartesia_websocket_proxy(
             "add_timestamps": True,
             "phoneme_timestamps": True,
         }
-        
+
         # Add voice if specified
         if voice_id:
             init_message["voice"] = {"mode": "id", "id": voice_id}
-        
+
         logger.info(
             "Initializing Cartesia session",
             model=model,
             voice_id=voice_id,
             sample_rate=sample_rate
         )
-        
+
         # Bridge messages between client and Cartesia
         # The bridge will handle all message forwarding bidirectionally
         await bridge_client_server(
@@ -163,19 +163,19 @@ async def cartesia_websocket_proxy(
             transform_server_msg=None,  # Pass through Cartesia responses
             on_error=lambda e: logger.error("Bridge error", error=str(e))
         )
-        
+
         logger.info("Cartesia WebSocket session completed", client_ip=client_ip)
-    
+
     except WebSocketDisconnect:
         logger.info("Cartesia WebSocket disconnected by client", client_ip=client_ip)
-    
+
     except Exception as e:
         logger.error("Cartesia WebSocket error", error=str(e), client_ip=client_ip)
         try:
             await websocket.close(code=4000, reason="Internal error")
-        except:
+        except Exception:
             pass
-    
+
     finally:
         # Release rate limiter slot
         await rate_limiter.release(client_ip)
@@ -185,19 +185,19 @@ async def cartesia_websocket_proxy(
 @router.get("/cartesia/voices")
 async def list_cartesia_voices():
     """List available Cartesia voices.
-    
+
     This is a helper endpoint for clients to discover available voices
     without exposing the API key.
-    
+
     Returns:
         JSON list of available voices with metadata
     """
     if not settings.cartesia_api_key:
         raise HTTPException(status_code=503, detail="Cartesia not configured")
-    
+
     try:
         import httpx
-        
+
         async with httpx.AsyncClient() as client:
             response = await client.get(
                 "https://api.cartesia.ai/voices",
@@ -205,21 +205,21 @@ async def list_cartesia_voices():
                 timeout=10.0
             )
             response.raise_for_status()
-            
+
             voices = response.json()
-            
+
             logger.info("Fetched Cartesia voices", count=len(voices))
             return JSONResponse(content=voices)
-    
+
     except Exception as e:
         logger.error("Failed to fetch Cartesia voices", error=str(e))
-        raise HTTPException(status_code=500, detail=f"Failed to fetch voices: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch voices: {str(e)}") from e
 
 
 @router.get("/cartesia/models")
 async def list_cartesia_models():
     """List available Cartesia models.
-    
+
     Returns:
         JSON list of available models
     """
@@ -241,6 +241,6 @@ async def list_cartesia_models():
             "sample_rate": 24000
         }
     ]
-    
+
     return JSONResponse(content={"models": models})
 

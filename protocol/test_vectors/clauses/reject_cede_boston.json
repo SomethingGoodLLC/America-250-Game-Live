@@ -1,0 +1,19 @@
+{
+ "name": "reject_cede_boston",
+ "description": "",
+ "proposal": {
+  "spoken_line": "Boston is yours.",
+  "clauses": [
+   {
+    "type": "cede_province",
+    "province_id": "boston"
+   }
+  ]
+ },
+ "expect": {
+  "valid": false,
+  "error_codes": [
+   "red_line_protected_province"
+  ]
+ }
+}

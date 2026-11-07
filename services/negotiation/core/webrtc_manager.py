@@ -1,14 +1,16 @@
 """WebRTC functionality using aiortc."""
 
 import asyncio
-import os
-from typing import Dict, Any, Optional
-
-from aiortc import RTCPeerConnection, RTCSessionDescription, RTCConfiguration, RTCIceServer
-from aiortc.mediastreams import MediaStreamTrack, VideoStreamTrack, AudioStreamTrack
-from aiortc.contrib.media import MediaPlayer, MediaRelay
 
 import structlog
+from aiortc import (
+    RTCConfiguration,
+    RTCIceServer,
+    RTCPeerConnection,
+    RTCSessionDescription,
+)
+from aiortc.contrib.media import MediaRelay
+from aiortc.mediastreams import MediaStreamTrack, VideoStreamTrack
 
 from .settings import settings
 
@@ -27,7 +29,7 @@ class PlaceholderVideoTrack(VideoStreamTrack):
         # For now, return a simple placeholder
         import av
         import numpy as np
-        
+
         # Create a simple colored frame
         frame = av.VideoFrame.from_ndarray(
             np.zeros((480, 640, 3), dtype=np.uint8), format="rgb24"
@@ -35,7 +37,7 @@ class PlaceholderVideoTrack(VideoStreamTrack):
         frame.pts = self.frame_count
         frame.time_base = av.Fraction(1, 30)  # 30 FPS
         self.frame_count += 1
-        
+
         await asyncio.sleep(1/30)  # 30 FPS
         return frame
 
@@ -44,7 +46,7 @@ class WebRTCManager:
     """Manages WebRTC peer connections for A/V streaming."""
 
     def __init__(self):
-        self.peer_connections: Dict[str, RTCPeerConnection] = {}
+        self.peer_connections: dict[str, RTCPeerConnection] = {}
         self.media_relay = MediaRelay()
         self.logger = structlog.get_logger(__name__)
 
@@ -52,7 +54,7 @@ class WebRTCManager:
         ice_servers = [RTCIceServer(urls=settings.stun_servers)]
         if settings.turn_servers:
             ice_servers.append(RTCIceServer(urls=settings.turn_servers))
-            
+
         self.rtc_config = RTCConfiguration(iceServers=ice_servers)
 
     async def handle_offer(self, session_id: str, sdp_offer: str) -> str:
@@ -91,7 +93,7 @@ class WebRTCManager:
             # Add avatar video track
             avatar_track = PlaceholderVideoTrack(avatar_style=settings.avatar_style)
             pc.addTrack(avatar_track)
-            
+
             # TODO: Add TTS audio track
             # audio_track = TTSAudioTrack(voice_id=settings.voice_id)
             # pc.addTrack(audio_track)

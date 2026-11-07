@@ -1,12 +1,13 @@
 """XTTS TTS provider."""
 
 import asyncio
-import numpy as np
 import struct
-from typing import AsyncGenerator, Dict, Any
+from collections.abc import AsyncGenerator
+from typing import Any
 
-from aiortc.mediastreams import MediaStreamTrack, AudioStreamTrack
 import av
+import numpy as np
+from aiortc.mediastreams import AudioStreamTrack, MediaStreamTrack
 
 from .base import TTSProvider
 
@@ -14,7 +15,7 @@ from .base import TTSProvider
 class XTTSProvider(TTSProvider):
     """TTS provider using Coqui XTTS with a simple text-to-audio implementation."""
 
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: dict[str, Any]):
         super().__init__(config)
         # Simple implementation for now - no actual XTTS model
         self.model_path = config.get("model_path", "models/xtts")
@@ -116,6 +117,7 @@ class TTSGeneratedAudioTrack(AudioStreamTrack):
     async def recv(self):
         """Receive the next audio frame with proper timing."""
         import time
+
         import structlog
         logger = structlog.get_logger(__name__)
 

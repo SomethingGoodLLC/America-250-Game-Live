@@ -2,17 +2,17 @@
 
 import asyncio
 import json
+
+import aiohttp
 import pytest
 import websockets
-import aiohttp
-from unittest.mock import Mock, AsyncMock, patch
-from aiortc import RTCPeerConnection, RTCSessionDescription
+from aiortc import RTCSessionDescription
+
+from listeners.base import Listener
 
 # Import our modules
 from main import app
-from listeners.base import Listener, make_listener_from_env
 from providers.mock_local import MockLocalProvider
-from providers.gemini_veo3 import Veo3Provider
 
 
 class MockWebRTCConnection:

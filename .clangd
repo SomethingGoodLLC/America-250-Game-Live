@@ -1,0 +1,18 @@
+# Unreal Engine sources: use the UBT-generated compile database.
+# Regenerate:
+#   "/Users/Shared/Epic Games/UE_5.8/Engine/Build/BatchFiles/Mac/Build.sh" \
+#     -Mode=GenerateClangDatabase \
+#     -OutputDir=unreal/PlayAmerica250 \
+#     PlayAmerica250Editor Mac Development \
+#     -Project="$PWD/unreal/PlayAmerica250/PlayAmerica250.uproject"
+# then expand @*.rsp entries into arguments (clangd is unreliable with rsp + spaces).
+CompileFlags:
+  CompilationDatabase: unreal/PlayAmerica250
+  Add:
+    - -Wno-unused-command-line-argument
+  Remove:
+    - -Werror
+    - -fno-temp-file
+Diagnostics:
+  UnusedIncludes: None
+  MissingIncludes: None

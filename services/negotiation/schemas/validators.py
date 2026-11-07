@@ -1,18 +1,13 @@
 """YAML schema validation for negotiation protocols."""
 
-import yaml
-from typing import Dict, Any, Union, Optional
 from pathlib import Path
-import json
+from typing import Any
+
 import structlog
-from jsonschema import validate, ValidationError, Draft7Validator
+from jsonschema import Draft7Validator, ValidationError, validate
 from ruamel.yaml import YAML
 
-from .models import (
-    IntentModel, SpeakerTurnModel, WorldContextModel,
-    ProposalModel, ConcessionModel, CounterOfferModel,
-    UltimatumModel, SmallTalkModel, ContentSafetyModel
-)
+from .models import ContentSafetyModel, IntentModel, SpeakerTurnModel, WorldContextModel
 
 
 class SchemaValidator:
@@ -22,7 +17,7 @@ class SchemaValidator:
     and provides validation methods for different types of negotiation data.
     """
 
-    def __init__(self, schema_dir: Optional[Path] = None):
+    def __init__(self, schema_dir: Path | None = None):
         self.logger = structlog.get_logger(__name__)
         self.ruamel_yaml = YAML(typ='safe')
 
@@ -32,7 +27,7 @@ class SchemaValidator:
             possible_paths = [
                 # From services/negotiation/schemas/validators.py, go up to project root
                 Path(__file__).parent.parent.parent.parent / "protocol" / "schemas",
-                Path(__file__).parent.parent.parent / "protocol" / "schemas", 
+                Path(__file__).parent.parent.parent / "protocol" / "schemas",
                 Path(__file__).parent.parent / "protocol" / "schemas",
                 Path(__file__).parent / "protocol" / "schemas"
             ]
@@ -59,7 +54,7 @@ class SchemaValidator:
 
         for schema_file in self.schema_dir.glob("*.yaml"):
             try:
-                with open(schema_file, 'r', encoding='utf-8') as f:
+                with open(schema_file, encoding='utf-8') as f:
                     schema_data = self.ruamel_yaml.load(f)
 
                 schema_name = schema_file.stem
@@ -80,7 +75,7 @@ class SchemaValidator:
         obj: Any,
         schema_name: str,
         version: str = "v1"
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Validate an object against a schema and raise on failure.
 
         Args:
@@ -105,7 +100,7 @@ class SchemaValidator:
                 available = list(self._schemas.keys())
                 raise KeyError(f"Schema '{full_schema_name}' or '{schema_name}' not found. Available: {available}")
 
-        schema = self._schemas[full_schema_name]
+        self._schemas[full_schema_name]
         validator = self._validators[full_schema_name]
 
         # Convert to dict if it's a Pydantic model
@@ -124,8 +119,8 @@ class SchemaValidator:
 
     def validate_intent(
         self,
-        intent: Union[IntentModel, Dict[str, Any]]
-    ) -> Dict[str, Any]:
+        intent: IntentModel | dict[str, Any]
+    ) -> dict[str, Any]:
         """Validate a diplomatic intent against the appropriate schema.
 
         Args:
@@ -157,8 +152,8 @@ class SchemaValidator:
 
     def validate_speaker_turn(
         self,
-        turn: Union[SpeakerTurnModel, Dict[str, Any]]
-    ) -> Dict[str, Any]:
+        turn: SpeakerTurnModel | dict[str, Any]
+    ) -> dict[str, Any]:
         """Validate a speaker turn against the schema.
 
         Args:
@@ -174,8 +169,8 @@ class SchemaValidator:
 
     def validate_world_context(
         self,
-        context: Union[WorldContextModel, Dict[str, Any]]
-    ) -> Dict[str, Any]:
+        context: WorldContextModel | dict[str, Any]
+    ) -> dict[str, Any]:
         """Validate world context against the schema.
 
         Args:
@@ -191,8 +186,8 @@ class SchemaValidator:
 
     def validate_content_safety(
         self,
-        safety_report: Union[ContentSafetyModel, Dict[str, Any]]
-    ) -> Dict[str, Any]:
+        safety_report: ContentSafetyModel | dict[str, Any]
+    ) -> dict[str, Any]:
         """Validate content safety report against the schema.
 
         Args:
@@ -209,8 +204,8 @@ class SchemaValidator:
     def validate_with_schema(
         self,
         obj: Any,
-        schema_data: Dict[str, Any]
-    ) -> Dict[str, Any]:
+        schema_data: dict[str, Any]
+    ) -> dict[str, Any]:
         """Validate an object against a custom schema.
 
         Args:
@@ -254,7 +249,7 @@ class SchemaValidator:
         except (ValidationError, KeyError):
             return False
 
-    def get_schema(self, schema_name: str, version: str = "v1") -> Optional[Dict[str, Any]]:
+    def get_schema(self, schema_name: str, version: str = "v1") -> dict[str, Any] | None:
         """Get a schema by name and version.
 
         Args:
@@ -275,14 +270,14 @@ class NegotiationValidator:
     negotiation workflows and data structures.
     """
 
-    def __init__(self, schema_dir: Optional[Path] = None):
+    def __init__(self, schema_dir: Path | None = None):
         self.schema_validator = SchemaValidator(schema_dir)
         self.logger = structlog.get_logger(__name__)
 
     async def validate_negotiation_report(
         self,
-        report: Dict[str, Any]
-    ) -> Dict[str, Any]:
+        report: dict[str, Any]
+    ) -> dict[str, Any]:
         """Validate a complete negotiation report.
 
         Args:
@@ -300,7 +295,7 @@ class NegotiationValidator:
                 try:
                     self.schema_validator.validate_speaker_turn(turn)
                 except ValidationError as e:
-                    raise ValidationError(f"Invalid speaker turn at index {i}: {str(e)}")
+                    raise ValidationError(f"Invalid speaker turn at index {i}: {str(e)}") from e
 
         # Validate intents
         if "intents" in report:
@@ -308,7 +303,7 @@ class NegotiationValidator:
                 try:
                     self.schema_validator.validate_intent(intent)
                 except ValidationError as e:
-                    raise ValidationError(f"Invalid intent at index {i}: {str(e)}")
+                    raise ValidationError(f"Invalid intent at index {i}: {str(e)}") from e
 
         # Validate world context
         if "initiator_faction" in report and "counterpart_faction" in report:
@@ -324,8 +319,8 @@ class NegotiationValidator:
 
     async def validate_provider_event(
         self,
-        event: Dict[str, Any]
-    ) -> Dict[str, Any]:
+        event: dict[str, Any]
+    ) -> dict[str, Any]:
         """Validate a provider event structure.
 
         Args:

@@ -1,8 +1,9 @@
 """Local STT listener using faster-whisper for real-time transcription."""
 
 import asyncio
-import time
-from typing import AsyncIterator, Dict, Any
+from collections.abc import AsyncIterator
+from typing import Any
+
 try:
     import numpy as np
     from faster_whisper import WhisperModel
@@ -21,7 +22,7 @@ class LocalSTTListener(Listener):
     Provides real-time transcription with VAD (Voice Activity Detection).
     """
 
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: dict[str, Any]):
         super().__init__(config)
         self.model = None
         self.vad_model = None
@@ -49,7 +50,6 @@ class LocalSTTListener(Listener):
 
             # Load VAD model
             try:
-                import torch
                 from silero_vad import load_silero_vad
                 self.vad_model = load_silero_vad()
             except ImportError:
@@ -94,7 +94,7 @@ class LocalSTTListener(Listener):
         """Get final transcript when user stops speaking."""
         if not HAS_WHISPER:
             return "Mock local STT final transcript"
-            
+
         # Force process any remaining audio
         if self.audio_buffer:
             await self._process_chunk()
@@ -105,7 +105,7 @@ class LocalSTTListener(Listener):
         # Return concatenated transcript
         return " ".join(self.transcript_buffer).strip()
 
-    async def stream_events(self) -> AsyncIterator[Dict[str, Any]]:
+    async def stream_events(self) -> AsyncIterator[dict[str, Any]]:
         """Stream real-time events."""
         while self.running:
             try:
@@ -113,7 +113,7 @@ class LocalSTTListener(Listener):
                 if event.get("type") == "stop":
                     break
                 yield event
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 continue
             except Exception as e:
                 print(f"Error in stream_events: {e}")
@@ -160,7 +160,7 @@ class LocalSTTListener(Listener):
         """Check if audio contains speech using VAD."""
         if not HAS_WHISPER or np is None:
             return True  # Assume speech in mock mode
-            
+
         try:
             if self.vad_model == "energy":
                 # Simple energy-based VAD

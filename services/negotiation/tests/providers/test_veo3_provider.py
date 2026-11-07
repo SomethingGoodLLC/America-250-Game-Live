@@ -1,12 +1,12 @@
 """Tests for Veo3Provider implementation."""
 
-import pytest
-import asyncio
 from datetime import datetime
-from unittest.mock import Mock, AsyncMock
+from unittest.mock import Mock
 
-from schemas.models import SpeakerTurnModel, WorldContextModel
+import pytest
+
 from providers.gemini_veo3 import Veo3Provider
+from schemas.models import SpeakerTurnModel, WorldContextModel
 
 
 class TestVeo3Provider:

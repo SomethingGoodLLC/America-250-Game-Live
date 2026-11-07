@@ -1,30 +1,43 @@
 # /services/negotiation/app.py
 from __future__ import annotations
+
 import asyncio
+import json
 import os
-import uuid
+import sys
 import time
+import uuid
 from datetime import datetime
-from typing import Dict, Any, Optional
 from pathlib import Path
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
-from fastapi.responses import HTMLResponse, PlainTextResponse
-from fastapi.staticfiles import StaticFiles
-from starlette.websockets import WebSocketState
-from ruamel.yaml import YAML
-from pydantic import BaseModel
+from typing import Any
+
+import structlog
 from aiortc import RTCPeerConnection
 from aiortc.contrib.media import MediaBlackhole
-from webrtc.publish import attach_avatar_track_simple as attach_avatar_track
-from providers.mock_local import MockLocalProvider
-from providers.gemini_veo3 import Veo3Provider  # stub uses placeholder video unless USE_VEO3=1
-from schemas.validators import validator
-from schemas.models import SpeakerTurnModel, WorldContextModel
-from listeners.base import make_listener_from_env
-from tts.elevenlabs import ElevenLabsProvider
-import structlog
-from core.logging_config import setup_logging
 from dotenv import load_dotenv
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
+from ruamel.yaml import YAML
+from starlette.websockets import WebSocketState
+
+from core.logging_config import setup_logging
+from diplomacy.avatar import render_avatar_line
+from diplomacy.models import DiplomacyContext
+from diplomacy.service import (
+    finalize_proposal,
+    llm_provider_name,
+    world_context_from_diplomacy,
+)
+from listeners.base import make_listener_from_env
+from providers.claude_provider import ClaudeProvider
+from providers.gemini_veo3 import (
+    Veo3Provider,  # stub uses placeholder video unless USE_VEO3=1
+)
+from providers.mock_local import MockLocalProvider
+from schemas.models import SpeakerTurnModel, WorldContextModel
+from tts.elevenlabs import ElevenLabsProvider
 
 # Load environment variables from .env file
 load_dotenv()
@@ -38,7 +51,7 @@ yaml = YAML()
 app = FastAPI(title="Negotiation Service (YAML/WebRTC)")
 app.mount("/assets", StaticFiles(directory="assets"), name="assets")
 
-SESSIONS: Dict[str, Dict[str, Any]] = {}
+SESSIONS: dict[str, dict[str, Any]] = {}
 
 DEFAULT_WORLD_CONTEXT = {
     "scenario_tags": ["default_scenario"],
@@ -48,7 +61,7 @@ DEFAULT_WORLD_CONTEXT = {
 }
 
 
-def sanitize_world_context(raw: Dict[str, Any] | None, session_id: str) -> Dict[str, Any]:
+def sanitize_world_context(raw: dict[str, Any] | None, session_id: str) -> dict[str, Any]:
     ctx = raw.copy() if isinstance(raw, dict) else {}
     scenario_tags = ctx.get("scenario_tags")
     if not isinstance(scenario_tags, list) or not scenario_tags:
@@ -82,8 +95,95 @@ def _dump_yaml(obj: Any) -> str:
     yaml.dump(obj, buf)
     return buf.getvalue()
 
+
+def _decode_control(msg: str, fmt: str) -> dict[str, Any]:
+    """Control messages are YAML by default; ``?format=json`` switches the socket to JSON."""
+    if fmt == "json":
+        obj = json.loads(msg)
+    else:
+        obj = yaml.load(msg)
+    return obj if isinstance(obj, dict) else {}
+
+
+async def _screen_spoken_line(text: str) -> str:
+    """Content-safety filter on provider output. Only high-severity flags block (war talk is on-topic)."""
+    try:
+        from core.content_safety import ContentSafetyFilter
+
+        verdict = await ContentSafetyFilter({}).check_content(text)
+        if getattr(verdict, "severity", "low") == "high":
+            logger.warning("Spoken line blocked by content safety", flags=getattr(verdict, "flags", None))
+            return "I would rather not say more on that, sir."
+    except Exception as e:  # filter failure must not take the negotiation down
+        logger.warning("Content safety check failed", error=str(e))
+    return text
+
+
+async def generate_game_response(sess: dict[str, Any], user_text: str, send_func: Any) -> None:
+    """Unreal-client path: provider -> validated proposal -> avatar file. WebRTC is not involved."""
+    ctx: DiplomacyContext = sess["diplomacy_context"]
+    try:
+        await send_func({"type": "ai_thinking", "text": "..."})
+        wc_dict = sess["world_context"]
+        world_context = WorldContextModel(**wc_dict)
+        turns = [t if isinstance(t, SpeakerTurnModel) else SpeakerTurnModel(**t) for t in sess["turns"][-8:]]
+
+        spoken, raw, provider_name = "", None, "mock"
+        order = ["claude", "mock"] if llm_provider_name() == "claude" else ["mock"]
+        for name in order:
+            provider = ClaudeProvider({}) if name == "claude" else MockLocalProvider(
+                {"strict": False, "compromised": bool(sess.get("compromised"))})
+            try:
+                spoken, raw = "", None
+                async for ev in provider.stream_dialogue(turns=turns, world_context=world_context):
+                    if ev.type == "subtitle" and ev.is_final:
+                        spoken = str(ev.payload.get("text", ""))
+                    elif ev.type == "diplomacy_proposal":
+                        raw = ev.payload.get("proposal")
+                provider_name = name
+                break
+            except Exception as e:
+                logger.error("Diplomacy provider failed; falling back", provider=name, error=str(e))
+            finally:
+                if isinstance(provider, ClaudeProvider):
+                    await provider.close()  # one client per reply; do not leak its connection pool
+        if raw is None:
+            raw = {"spoken_line": spoken, "clauses": []}
+        spoken = await _screen_spoken_line(str(raw.get("spoken_line", spoken)) if isinstance(raw, dict) else spoken)
+
+        if isinstance(raw, dict):
+            raw = dict(raw, spoken_line=spoken)
+        wire, errors = finalize_proposal(ctx, raw)
+        sess["turns"].append({
+            "speaker": "AI", "text": spoken, "speaker_id": wc_dict["counterpart_faction"]["id"],
+            "timestamp": datetime.utcnow().isoformat(),
+        })
+        logger.info("Diplomacy reply", provider=provider_name, spoken=spoken, clauses=len(wire["clauses"]), rejected=errors)
+        await send_func({"type": "ai_response", "text": spoken, "final": True})
+        await send_func({
+            "type": "diplomacy_proposal", "spoken_line": spoken, "clauses": wire["clauses"],
+            "rejected": errors, "provider": provider_name,
+        })
+
+        job_id = f"pa250_{sess.get('session_id', 'x')}_{int(time.time() * 1000)}"
+        line = await render_avatar_line(spoken, job_id)
+        if line.audio_file:
+            ready: dict[str, Any] = {"type": "sadtalker_video_ready", "audio_file": line.audio_file, "text": spoken,
+                                     "job_id": job_id, "backend": line.backend}
+            if line.video_file:
+                ready["video_file"] = line.video_file
+            await send_func(ready)
+        else:
+            await send_func({"type": "avatar_unavailable", "text": spoken, "job_id": job_id, "notes": line.notes})
+    except Exception as e:
+        logger.error("Error generating game response", error=str(e))
+        await send_func({"type": "representative_unavailable", "text": "The envoy cannot be reached."})
+
 async def generate_ai_response(sess: dict, user_text: str, send_yaml_func):
     """Generate AI response to user input and trigger avatar generation."""
+    if sess.get("model") == "game":
+        await generate_game_response(sess, user_text, send_yaml_func)
+        return
     try:
         logger.info("Generating AI response", user_text=user_text)
         if sess["model"] == "veo3":
@@ -102,7 +202,7 @@ async def generate_ai_response(sess: dict, user_text: str, send_yaml_func):
             system_guidelines="You are a diplomatic AI negotiator. Respond conversationally to the human's statement. Be engaging and strategic."
         ):
             logger.info("Provider event received", event_type=ev.type, payload_keys=list(ev.payload.keys()) if ev.payload else [])
-            
+
             if ev.type == "subtitle":
                 logger.info("Sending AI response", text=ev.payload.get("text", ""), final=ev.is_final)
                 await send_yaml_func({"type": "ai_response", "text": ev.payload.get("text", ""), "final": ev.is_final})
@@ -116,7 +216,7 @@ async def generate_ai_response(sess: dict, user_text: str, send_yaml_func):
                     }
                     sess["turns"].append(ai_turn)
                     logger.info("Added AI turn to session", ai_text=ai_text)
-                    
+
                     # Generate avatar based on model type
                     logger.info("Generating avatar for model type", model_type=sess["model"])
                     if sess["model"] == "veo3":
@@ -134,7 +234,7 @@ async def generate_ai_response(sess: dict, user_text: str, send_yaml_func):
                     elif sess["model"] == "did":
                         logger.info("Calling generate_wav2lip_avatar for D-ID cloud lip-sync")
                         await generate_wav2lip_avatar(ai_text, send_yaml_func, sess.get("session_id"))
-                        
+
             elif ev.type == "intent":
                 logger.info("Sending AI intent", intent_type=ev.payload.get("intent", {}).get("type", "unknown"))
                 await send_yaml_func({"type": "ai_intent", "payload": ev.payload})
@@ -145,7 +245,7 @@ async def generate_ai_response(sess: dict, user_text: str, send_yaml_func):
 async def generate_veo3_avatar(ai_text: str, send_yaml_func):
     try:
         logger.info("Generating Veo3 avatar", text=ai_text)
-        veo3 = Veo3Provider(use_veo3=True)
+        Veo3Provider(use_veo3=True)
         await send_yaml_func({"type": "avatar_generating", "text": "🎬 Generating avatar response..."})
         await asyncio.sleep(2)
         await send_yaml_func({"type": "avatar_ready", "text": f"🎭 Avatar ready: {ai_text}", "video_url": "/api/avatar/latest.mp4", "final": True})
@@ -177,8 +277,8 @@ async def generate_and_save_tts_audio(tts_provider, text: str, job_id: str, send
             audio_file_path = f"{audio_dir}/{job_id}.wav"
 
             # Convert to WAV format and save
-            import wave
             import io
+            import wave
 
             # Create WAV file in memory
             with io.BytesIO() as wav_buffer:
@@ -213,50 +313,50 @@ async def generate_sadtalker_video_from_audio(
     text: str,
     job_id: str,
     send_yaml_func
-) -> Optional[str]:
+) -> str | None:
     """Generate SadTalker video from audio file.
-    
+
     Args:
         audio_file_path: Path to the TTS audio file
         text: The text being spoken
         job_id: Unique job identifier
         send_yaml_func: Function to send status updates
-        
+
     Returns:
         Path to generated video file, or None if generation failed
     """
     try:
         logger.info("Starting SadTalker video generation", audio_file=audio_file_path)
-        
+
         # Send generation status
         await send_yaml_func({
             "type": "sadtalker_generating",
             "text": "🎨 Generating animated portrait..."
         })
-        
+
         # Get configuration from environment
         sadtalker_dir = Path(os.getenv("SADTALKER_DIR", "~/Projects/SadTalker")).expanduser()
         portrait_path = Path(os.getenv("PORTRAIT_PATH", "assets/avatars/british_general_frame.jpg"))
         device = os.getenv("SADTALKER_DEVICE", "mps")
         enhance = os.getenv("SADTALKER_ENHANCE", "true").lower() == "true"
         still_mode = os.getenv("SADTALKER_STILL_MODE", "false").lower() == "true"
-        
+
         # Verify SadTalker is installed
         inference_script = sadtalker_dir / "inference.py"
         if not inference_script.exists():
             logger.error("SadTalker not found", path=str(inference_script))
             return None
-        
+
         # Create output directory
         video_dir = Path("diplomatic_videos")
         video_dir.mkdir(exist_ok=True)
         result_dir = video_dir / f"result_{job_id}"
         result_dir.mkdir(exist_ok=True)
-        
+
         # Build SadTalker command
         venv_python = sadtalker_dir / ".venv" / "bin" / "python"
         python_exe = str(venv_python) if venv_python.exists() else sys.executable
-        
+
         cmd = [
             python_exe,
             str(inference_script),
@@ -265,20 +365,20 @@ async def generate_sadtalker_video_from_audio(
             "--result_dir", str(result_dir.absolute()),
             "--batch_size", "1",
         ]
-        
+
         # SadTalker uses --cpu flag for CPU, or no flag for GPU/MPS
         if device == "cpu":
             cmd.append("--cpu")
         # For MPS or GPU, don't add device flag - it auto-detects
-        
+
         if still_mode:
             cmd.append("--still")
-        
+
         if enhance:
             cmd.extend(["--enhancer", "gfpgan"])
-        
+
         logger.info("Running SadTalker", command=" ".join(cmd))
-        
+
         # Run SadTalker
         process = await asyncio.create_subprocess_exec(
             *cmd,
@@ -287,29 +387,29 @@ async def generate_sadtalker_video_from_audio(
             stderr=asyncio.subprocess.PIPE,
             env={**os.environ, "PYTORCH_ENABLE_MPS_FALLBACK": "1"}
         )
-        
+
         stdout, stderr = await process.communicate()
-        
+
         if process.returncode != 0:
-            logger.error("SadTalker failed", 
+            logger.error("SadTalker failed",
                         returncode=process.returncode,
                         stderr=stderr.decode()[:500])
             return None
-        
+
         logger.info("SadTalker completed", stdout=stdout.decode()[:200])
-        
+
         # Find the generated video
         generated_videos = list(result_dir.glob("*.mp4"))
         if not generated_videos:
             logger.error("No video generated by SadTalker", result_dir=str(result_dir))
             return None
-        
+
         video_file = generated_videos[0]
         logger.info("SadTalker video generated successfully", video_path=str(video_file))
-        
+
         # Return relative path for web serving
         return str(video_file.relative_to(Path.cwd()))
-        
+
     except Exception as e:
         logger.error("Error generating SadTalker video", error=str(e), exc_info=True)
         return None
@@ -328,13 +428,13 @@ async def create_audio_track_from_file(file_path: str, tts_provider):
             sample_width = wav_file.getsampwidth()
             frame_rate = wav_file.getframerate()
             n_frames = wav_file.getnframes()
-            
-            logger.info("WAV file info", 
-                       channels=channels, 
-                       sample_width=sample_width, 
-                       frame_rate=frame_rate, 
+
+            logger.info("WAV file info",
+                       channels=channels,
+                       sample_width=sample_width,
+                       frame_rate=frame_rate,
                        n_frames=n_frames)
-            
+
             # Read the raw PCM data (without WAV header)
             pcm_data = wav_file.readframes(n_frames)
 
@@ -360,55 +460,55 @@ async def generate_wav2lip_avatar(ai_text: str, send_yaml_func, session_id: str 
     """Generate Wav2Lip avatar with fast lip-sync (~5-10 seconds)."""
     try:
         logger.info("Generating Wav2Lip avatar", text=ai_text)
-        
+
         # Send avatar generation status
         await send_yaml_func({
             "type": "avatar_generating",
             "text": "🎬 Wav2Lip generating lip-sync video...",
             "final": False
         })
-        
+
         # Generate TTS audio and create video
         if session_id and session_id in SESSIONS:
             sess = SESSIONS[session_id]
             tts_provider = sess.get("tts_provider")
             pc = sess.get("pc")
-            
+
             logger.info("TTS setup check", has_tts_provider=tts_provider is not None, has_peer_connection=pc is not None)
-            
+
             if tts_provider and pc:
                 try:
                     logger.info("Generating TTS audio for AI response", text=ai_text[:50])
-                    
+
                     # Update the audio track with new TTS data using job system
                     if "audio_track" in sess and "tts_provider" in sess:
                         logger.info("Starting TTS job for audio generation")
-                        audio_track = sess["audio_track"]
+                        sess["audio_track"]
                         tts_provider = sess["tts_provider"]
-                        
+
                         # Create a job ID for this TTS request
                         job_id = f"tts_{session_id}_{int(time.time())}"
                         sess["current_tts_job"] = job_id
-                        
+
                         # Generate audio asynchronously and save to file
                         audio_file_path = await generate_and_save_tts_audio(
                             tts_provider, ai_text, job_id, send_yaml_func
                         )
-                        
+
                         if audio_file_path:
                             # Load the saved audio file and create audio track
                             new_audio_track = await create_audio_track_from_file(
                                 audio_file_path, tts_provider
                             )
                             logger.info("Created audio track from saved file")
-                            
+
                             # Replace the track in the sender
                             audio_sender = sess["audio_sender"]
                             logger.info("Replacing track in sender", old_track_id=id(audio_sender.track), new_track_id=id(new_audio_track))
                             audio_sender.replaceTrack(new_audio_track)
                             sess["audio_track"] = new_audio_track
                             logger.info("Successfully updated audio track with AI response from file")
-                            
+
                             # Send job completion status
                             await send_yaml_func({
                                 "type": "tts_job_completed",
@@ -416,21 +516,24 @@ async def generate_wav2lip_avatar(ai_text: str, send_yaml_func, session_id: str 
                                 "audio_file": audio_file_path,
                                 "text": ai_text
                             })
-                            
+
                             # Generate talking avatar video with D-ID
                             did_enabled = os.getenv("DID_ENABLED", "true").lower() == "true"
                             video_path = None
-                            
+
                             if did_enabled and os.getenv("DID_API_KEY"):
                                 try:
-                                    from video_providers.did_video import DIDVideoProvider
                                     from pathlib import Path
-                                    
+
+                                    from video_providers.did_video import (
+                                        DIDVideoProvider,
+                                    )
+
                                     # Use local portrait path - D-ID will upload it
                                     portrait_path = os.getenv("PORTRAIT_PATH", "assets/avatars/british_general_frame.jpg")
-                                    
+
                                     logger.info("Generating D-ID video with text", text=ai_text[:50], portrait=portrait_path)
-                                    
+
                                     # Send progress update to client
                                     await send_yaml_func({
                                         "type": "avatar_status",
@@ -438,11 +541,11 @@ async def generate_wav2lip_avatar(ai_text: str, send_yaml_func, session_id: str 
                                         "message": "⏳ Generating photorealistic lip-sync video (20-40s)...",
                                         "generator": "did"
                                     })
-                                    
+
                                     # Generate video with D-ID's built-in TTS
                                     provider = DIDVideoProvider()
                                     output_path = Path(f"diplomatic_videos/did/did_{job_id}.mp4")
-                                    
+
                                     # Use text directly - D-ID handles TTS internally
                                     video_path = await provider.generate_video(
                                         text=ai_text,
@@ -450,9 +553,9 @@ async def generate_wav2lip_avatar(ai_text: str, send_yaml_func, session_id: str 
                                         output_path=output_path,
                                         voice_id="en-US-GuyNeural"  # Male voice for British general
                                     )
-                                    
+
                                     logger.info("✅ D-ID video generated successfully!", path=video_path)
-                                    
+
                                 except Exception as did_error:
                                     logger.error("D-ID generation failed, using audio only", error=str(did_error))
                                     import traceback
@@ -461,7 +564,7 @@ async def generate_wav2lip_avatar(ai_text: str, send_yaml_func, session_id: str 
                             else:
                                 if not os.getenv("DID_API_KEY"):
                                     logger.info("D-ID disabled: No API key set. Get one at https://studio.d-id.com/account-settings")
-                            
+
                             # Send ready event
                             await send_yaml_func({
                                 "type": "sadtalker_video_ready",  # Reuse same event type
@@ -471,7 +574,7 @@ async def generate_wav2lip_avatar(ai_text: str, send_yaml_func, session_id: str 
                                 "job_id": job_id,
                                 "generator": "did" if video_path else "audio_only"
                             })
-                            
+
                             if video_path:
                                 logger.info("D-ID avatar ready for playback", video_file=video_path)
                             else:
@@ -485,12 +588,12 @@ async def generate_wav2lip_avatar(ai_text: str, send_yaml_func, session_id: str 
                             })
                     else:
                         logger.error("No stored audio track or TTS provider found for update")
-                        
+
                 except Exception as tts_error:
                     logger.error("Failed to generate TTS audio", error=str(tts_error), error_type=type(tts_error))
                     import traceback
                     logger.error("TTS error traceback", traceback=traceback.format_exc())
-                    
+
     except Exception as e:
         logger.error("Error generating Wav2Lip avatar", error=str(e))
 
@@ -558,17 +661,17 @@ async def generate_sadtalker_avatar(ai_text: str, send_yaml_func, session_id: st
                                 "audio_file": audio_file_path,
                                 "text": ai_text
                             })
-                            
+
                             # Check if SadTalker is enabled (disabled by default for speed)
                             sadtalker_enabled = os.getenv("SADTALKER_ENABLED", "false").lower() == "true"
                             video_path = None
-                            
+
                             if sadtalker_enabled:
                                 # Generate SadTalker video from the audio (SLOW: ~20min for 10sec speech)
                                 video_path = await generate_sadtalker_video_from_audio(
                                     audio_file_path, ai_text, job_id, send_yaml_func
                                 )
-                            
+
                             if video_path and sadtalker_enabled:
                                 # Trigger SadTalker video playback
                                 await send_yaml_func({
@@ -609,22 +712,20 @@ async def generate_sadtalker_avatar(ai_text: str, send_yaml_func, session_id: st
 @app.get("/", response_class=HTMLResponse)
 async def root():
     # Serve the enhanced test page
-    with open("web/enhanced_test_client.html", "r", encoding="utf-8") as f:
+    with open("web/enhanced_test_client.html", encoding="utf-8") as f:
         return HTMLResponse(f.read())
 
 @app.get("/sadtalker-avatar-component.html", response_class=HTMLResponse)
 async def sadtalker_avatar_component():
     # Serve the SadTalker Avatar component
-    with open("web/sadtalker-avatar-component.html", "r", encoding="utf-8") as f:
+    with open("web/sadtalker-avatar-component.html", encoding="utf-8") as f:
         return HTMLResponse(f.read())
 
 @app.get("/gemini-realtime-component.html", response_class=HTMLResponse)
 async def gemini_avatar_component():
     # Serve the Gemini Realtime Avatar component
-    with open("web/gemini-realtime-component.html", "r", encoding="utf-8") as f:
+    with open("web/gemini-realtime-component.html", encoding="utf-8") as f:
         return HTMLResponse(f.read())
-
-from fastapi.staticfiles import StaticFiles
 
 # Create generated audio directory if it doesn't exist
 os.makedirs("generated_audio", exist_ok=True)
@@ -639,11 +740,31 @@ app.mount("/generated_audio", StaticFiles(directory="generated_audio"), name="ge
 async def create_session(request: Request):
     try:
         body = await request.json()
-    except:
+    except Exception:
         body = {}
     session_id = str(uuid.uuid4())[:8]
     model = body.get("model", "gemini_realtime")  # Default to Gemini Realtime for real-time performance
     logger.info("Session creation request", session_id=session_id, requested_model=model, body_keys=list(body.keys()) if body else [])
+
+    raw_dctx = body.get("diplomacy_context")
+    if isinstance(raw_dctx, dict):
+        # Unreal-client session: no WebRTC; DiplomacyContext from the sim is the only world input.
+        try:
+            dctx = DiplomacyContext(**raw_dctx)
+        except Exception as e:
+            return JSONResponse({"error": f"invalid diplomacy_context: {e}"}, status_code=422)
+        env = body.get("envoy") if isinstance(body.get("envoy"), dict) else {}
+        world_context = world_context_from_diplomacy(raw_dctx, str(env.get("name", "")), str(env.get("title", "")))
+        SESSIONS[session_id] = {
+            "pc": None, "model": "game", "ws_clients": set(), "turns": [], "world_context": world_context,
+            "initiator_id": world_context["initiator_faction"]["id"],
+            "counterpart_id": world_context["counterpart_faction"]["id"],
+            "provider_task": None, "provider_tasks": [], "listener": None, "session_id": session_id,
+            "tts_provider": None, "diplomacy_context": dctx,
+            "compromised": bool(body.get("compromised_mock", False)),
+        }
+        return {"session_id": session_id, "provider": llm_provider_name()}
+
     pc = RTCPeerConnection()
     world_context = sanitize_world_context(body.get("world_context"), session_id)
     initiator_id = world_context["initiator_faction"]["id"]
@@ -707,23 +828,23 @@ async def sdp_offer(sid: str, sdp_in: SDPIn):
     # Validate and set remote description
     from aiortc import RTCSessionDescription
     from fastapi import HTTPException
-    
+
     # Basic SDP validation
     if not sdp_in.sdp or not sdp_in.sdp.strip():
         logger.error("Empty SDP offer received")
         raise HTTPException(status_code=400, detail="SDP offer cannot be empty")
-        
+
     if not sdp_in.sdp.startswith("v="):
         logger.error("Invalid SDP format - missing version line")
         raise HTTPException(status_code=400, detail="Invalid SDP format")
-    
+
     # Required SDP lines for a basic offer
     required_lines = ["o=", "s=", "m="]
     for req_line in required_lines:
         if req_line not in sdp_in.sdp:
             logger.error(f"Missing required SDP line: {req_line}")
             raise HTTPException(status_code=400, detail=f"Missing required SDP line: {req_line}")
-    
+
     try:
         # Use string type directly (aiortc accepts strings)
         remote_desc = RTCSessionDescription(sdp=sdp_in.sdp, type=sdp_in.type)
@@ -731,7 +852,7 @@ async def sdp_offer(sid: str, sdp_in: SDPIn):
         logger.info("Remote description set successfully")
     except Exception as e:
         logger.error("Failed to set remote description", error=str(e))
-        raise HTTPException(status_code=400, detail=f"Failed to set remote description: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Failed to set remote description: {str(e)}") from e
 
     # Add audio track during initial setup for TTS functionality
     # Video track will be added after connection to avoid aiortc direction bug
@@ -792,7 +913,7 @@ async def sdp_offer(sid: str, sdp_in: SDPIn):
         logger.info("Local description set successfully")
         # Return the answer SDP as JSON (browser expects JSON)
         return {"type": answer.type, "sdp": answer.sdp}
-        
+
     except ValueError as e:
         if "None is not in list" in str(e):
             logger.error("aiortc direction bug encountered - attempting workaround", error=str(e))
@@ -800,7 +921,7 @@ async def sdp_offer(sid: str, sdp_in: SDPIn):
             try:
                 # Create fresh peer connection
                 new_pc = RTCPeerConnection()
-                
+
                 # Re-attach the same event handlers
                 @new_pc.on("track")
                 async def on_track_retry(track):
@@ -821,37 +942,41 @@ async def sdp_offer(sid: str, sdp_in: SDPIn):
                                     break
                         except Exception as e:
                             logger.error("Audio track error in retry", error=str(e))
-                
+
                 # Set remote description on new connection
                 from aiortc import RTCSessionDescription
                 remote_desc = RTCSessionDescription(sdp=sdp_in.sdp, type=sdp_in.type)
                 await new_pc.setRemoteDescription(remote_desc)
-                
+
                 # Skip video track on retry as well
                 logger.info("Skipping video track on retry to avoid direction bug")
-                
+
                 # Create answer with new connection
                 answer = await new_pc.createAnswer()
                 await new_pc.setLocalDescription(answer)
-                
+
                 # Replace the old peer connection
                 sess["pc"] = new_pc
-                
+
                 logger.info("Successfully created answer with fresh RTCPeerConnection")
                 return {"type": answer.type, "sdp": answer.sdp}
-                
+
             except Exception as retry_error:
                 logger.error("Retry with fresh RTCPeerConnection failed", error=str(retry_error))
                 from fastapi import HTTPException
-                raise HTTPException(status_code=500, detail=f"WebRTC connection failed: {str(retry_error)}")
+                raise HTTPException(
+                    status_code=500, detail=f"WebRTC connection failed: {str(retry_error)}"
+                ) from retry_error
         else:
             logger.error("Failed to create/set local description", error=str(e))
             from fastapi import HTTPException
-            raise HTTPException(status_code=400, detail=f"ValueError in local description: {str(e)}")
+            raise HTTPException(
+                status_code=400, detail=f"ValueError in local description: {str(e)}"
+            ) from e
     except Exception as e:
         logger.error("Failed to create/set local description", error=str(e))
         from fastapi import HTTPException
-        raise HTTPException(status_code=500, detail=f"Failed to create local description: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to create local description: {str(e)}") from e
 
 @app.get("/health")
 async def health_check():
@@ -1013,9 +1138,11 @@ async def ws_control(ws: WebSocket, sid: str):
     await ws.accept()
     sess = SESSIONS[sid]
     sess["ws_clients"].add(ws)
+    # Default stays YAML. ``?format=json`` is for clients (Unreal) without a YAML parser.
+    fmt = ws.query_params.get("format", "yaml").lower()
     async def send_yaml(ev: dict):
         if ws.client_state == WebSocketState.CONNECTED:
-            await ws.send_text(_dump_yaml(ev))
+            await ws.send_text(json.dumps(ev) if fmt == "json" else _dump_yaml(ev))
     async def pump_subtitles():
         if sess["listener"]:
             async for ev in sess["listener"].stream_events():
@@ -1041,9 +1168,14 @@ async def ws_control(ws: WebSocket, sid: str):
     try:
         while True:
             msg = await ws.receive_text()
-            obj = yaml.load(msg) or {}
+            try:
+                obj = _decode_control(msg, fmt)
+            except Exception:
+                await send_yaml({"type": "error", "message": "malformed control message"})
+                continue
             if obj.get("type") == "player_utterance":
                 text = obj.get("text","")
+                logger.info("Player utterance", text=text, session_id=sid)
                 turn_entry = {
                     "speaker": "PLAYER",
                     "speaker_id": sess.get("initiator_id", f"player::{sid}"),

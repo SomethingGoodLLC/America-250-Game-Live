@@ -1,14 +1,12 @@
 """Tests for browser WebRTC integration."""
 
 import asyncio
-import json
-import pytest
-from unittest.mock import Mock, patch
+
 from aiortc import RTCPeerConnection, RTCSessionDescription
+from fastapi.testclient import TestClient
 
 # Import our modules
 from main import app
-from fastapi.testclient import TestClient
 
 
 class TestWebRTCBrowserIntegration:
@@ -85,7 +83,6 @@ a=candidate:1 1 UDP 2130706431 127.0.0.1 9 typ host""",
         print("4. Testing with real RTC objects...")
 
         # Create proper RTCSessionDescription
-        from aiortc import RTCSessionDescription
         offer_desc = RTCSessionDescription(
             sdp=browser_offer["sdp"],
             type=browser_offer["type"]
@@ -132,7 +129,7 @@ a=candidate:1 1 UDP 2130706431 127.0.0.1 9 typ host""",
 
             async def recv(self):
                 # Simulate audio frames
-                for i in range(10):
+                for _i in range(10):
                     yield MockAudioFrame(b"\x00" * 160)  # 10ms of audio
 
         class MockAudioFrame:

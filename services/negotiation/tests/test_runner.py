@@ -3,13 +3,10 @@
 
 import asyncio
 import json
-import subprocess
 import sys
-import time
-from pathlib import Path
+
 import aiohttp
 import websockets
-from typing import Dict, Any
 
 
 class NegotiationSystemTester:
@@ -98,7 +95,7 @@ class NegotiationSystemTester:
                     self.log_test("WebSocket Connection", False, "Invalid response format")
                     return False
 
-        except asyncio.TimeoutError:
+        except TimeoutError:
             self.log_test("WebSocket Connection", False, "Timeout waiting for response")
             return False
         except Exception as e:
@@ -218,7 +215,9 @@ a=candidate:1 1 UDP 2130706431 127.0.0.1 9 typ host""",
     async def test_video_generation(self):
         """Test video generation."""
         try:
-            from providers.video_sources.placeholder_loop import PlaceholderLoopVideoSource
+            from providers.video_sources.placeholder_loop import (
+                PlaceholderLoopVideoSource,
+            )
 
             config = {
                 "source_type": "placeholder",

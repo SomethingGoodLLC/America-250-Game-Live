@@ -1,0 +1,11 @@
+{
+ "name": "valid_missing_clauses_key",
+ "description": "",
+ "proposal": {
+  "spoken_line": "Good day."
+ },
+ "expect": {
+  "valid": true,
+  "error_codes": []
+ }
+}

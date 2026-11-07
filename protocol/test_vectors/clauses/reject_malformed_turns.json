@@ -1,0 +1,19 @@
+{
+ "name": "reject_malformed_turns",
+ "description": "",
+ "proposal": {
+  "spoken_line": "x",
+  "clauses": [
+   {
+    "type": "ceasefire",
+    "turns": "three"
+   }
+  ]
+ },
+ "expect": {
+  "valid": false,
+  "error_codes": [
+   "malformed_clause"
+  ]
+ }
+}

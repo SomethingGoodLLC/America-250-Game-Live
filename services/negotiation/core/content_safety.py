@@ -1,7 +1,7 @@
 """Content safety filtering."""
 
 import re
-from typing import Dict, Any, List
+from typing import Any
 
 from schemas.models import ContentSafetyModel, SpeakerTurnModel
 
@@ -9,7 +9,7 @@ from schemas.models import ContentSafetyModel, SpeakerTurnModel
 class ContentSafetyFilter:
     """Rule-based content safety filter with provider support."""
 
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: dict[str, Any]):
         self.config = config
         self.use_provider = config.get("use_provider", False)
         self.provider_config = config.get("provider_config", {})
@@ -78,7 +78,7 @@ class ContentSafetyFilter:
         """Check a speaker turn for safety issues."""
         return await self.check_content(turn.text)
 
-    def _contains_pattern(self, content: str, patterns: List[str]) -> bool:
+    def _contains_pattern(self, content: str, patterns: list[str]) -> bool:
         """Check if content contains any of the given patterns."""
         for pattern in patterns:
             if re.search(pattern, content, re.IGNORECASE):

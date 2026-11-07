@@ -1,0 +1,19 @@
+{
+ "name": "reject_cede_not_owned_by_envoy",
+ "description": "",
+ "proposal": {
+  "spoken_line": "x",
+  "clauses": [
+   {
+    "type": "cede_province",
+    "province_id": "cambridge"
+   }
+  ]
+ },
+ "expect": {
+  "valid": false,
+  "error_codes": [
+   "province_not_owned_by_envoy"
+  ]
+ }
+}

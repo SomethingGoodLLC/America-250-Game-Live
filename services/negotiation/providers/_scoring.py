@@ -1,9 +1,9 @@
 """Intent scoring utilities for negotiation providers."""
 
-from typing import Dict, Any, Optional
+from typing import Any
 
 
-def score_intent(intent: Dict[str, Any], world_context: Dict[str, Any]) -> Dict[str, float]:
+def score_intent(intent: dict[str, Any], world_context: dict[str, Any]) -> dict[str, float]:
     """Score an intent based on deterministic heuristics.
 
     Args:
@@ -12,7 +12,7 @@ def score_intent(intent: Dict[str, Any], world_context: Dict[str, Any]) -> Dict[
 
     Returns:
         Dictionary with scores: {"trust": 0..1, "leverage": 0..1, "face_saving": 0..1, "confidence": 0..1}
-    
+
     Raises:
         TypeError: If inputs are not dictionaries
         ValueError: If intent or world_context are empty
@@ -22,7 +22,7 @@ def score_intent(intent: Dict[str, Any], world_context: Dict[str, Any]) -> Dict[
         raise TypeError("intent must be a dictionary")
     if not isinstance(world_context, dict):
         raise TypeError("world_context must be a dictionary")
-    
+
     if not intent:
         raise ValueError("intent cannot be empty")
 
@@ -72,7 +72,7 @@ def score_intent(intent: Dict[str, Any], world_context: Dict[str, Any]) -> Dict[
         for phrase in face_saving_phrases:
             if phrase in content:
                 face_saving_bonus += 0.1
-        
+
         scores["face_saving"] = min(1.0, scores["face_saving"] + face_saving_bonus)
 
         # Confidence based on content quality
@@ -113,7 +113,7 @@ def score_intent(intent: Dict[str, Any], world_context: Dict[str, Any]) -> Dict[
     return scores
 
 
-def calculate_overall_score(scores: Dict[str, float]) -> float:
+def calculate_overall_score(scores: dict[str, float]) -> float:
     """Calculate overall score from individual scores.
 
     Args:
@@ -121,14 +121,14 @@ def calculate_overall_score(scores: Dict[str, float]) -> float:
 
     Returns:
         Overall score between 0.0 and 1.0
-    
+
     Raises:
         TypeError: If scores is not a dictionary
         ValueError: If required score keys are missing
     """
     if not isinstance(scores, dict):
         raise TypeError("scores must be a dictionary")
-    
+
     required_keys = {"trust", "leverage", "face_saving", "confidence"}
     if not required_keys.issubset(scores.keys()):
         missing = required_keys - scores.keys()
@@ -144,7 +144,7 @@ def calculate_overall_score(scores: Dict[str, float]) -> float:
 
     try:
         overall = sum(
-            scores[key] * weights[key] 
+            scores[key] * weights[key]
             for key in weights.keys()
             if key in scores and isinstance(scores[key], (int, float))
         )

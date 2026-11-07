@@ -1,10 +1,10 @@
 """Provider type definitions and event structures."""
 
 from __future__ import annotations
-from dataclasses import dataclass
-from typing import Any, Dict, Literal, Optional, TypedDict, List
-from datetime import datetime
 
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Any, Literal, TypedDict
 
 # Event type constants
 EventType = Literal["intent", "subtitle", "analysis", "safety"]
@@ -13,9 +13,9 @@ EventType = Literal["intent", "subtitle", "analysis", "safety"]
 class IntentPayload(TypedDict, total=False):
     """YAML-validated diplomatic intent payload."""
     kind: str
-    demand: Dict[str, Any]
-    offer: Dict[str, Any]
-    rationale: List[str]  # Use List instead of list for compatibility
+    demand: dict[str, Any]
+    offer: dict[str, Any]
+    rationale: list[str]  # Use List instead of list for compatibility
     confidence: float
 
 
@@ -27,9 +27,9 @@ class ProviderEvent:
     during dialogue processing.
     """
     type: EventType
-    payload: Dict[str, Any] | IntentPayload
+    payload: dict[str, Any] | IntentPayload
     is_final: bool = False
-    tag: Optional[str] = None  # for analysis events
+    tag: str | None = None  # for analysis events
     timestamp: datetime = None
 
     def __post_init__(self):
@@ -47,7 +47,7 @@ SafetyEvent = ProviderEvent  # type: "safety"
 @dataclass
 class ProviderConfig:
     """Configuration for provider initialization."""
-    api_key: Optional[str] = None
+    api_key: str | None = None
     model_name: str = "default"
     timeout_seconds: int = 30
     max_retries: int = 3
@@ -71,7 +71,7 @@ class VideoSourceConfig:
 class ProcessingContext:
     """Context information for provider processing."""
     session_id: str
-    world_context: Dict[str, Any]
-    system_guidelines: Optional[str] = None
-    processing_deadline: Optional[datetime] = None
-    resource_constraints: Optional[Dict[str, Any]] = None
+    world_context: dict[str, Any]
+    system_guidelines: str | None = None
+    processing_deadline: datetime | None = None
+    resource_constraints: dict[str, Any] | None = None

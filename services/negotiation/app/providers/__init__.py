@@ -8,9 +8,9 @@ This package contains WebSocket proxies that bridge browser clients to TTS provi
 These proxies keep API keys server-side and handle rate limiting.
 """
 
+from .azure_token import router as azure_router
 from .cartesia_ws import router as cartesia_router
 from .elevenlabs_ws import router as elevenlabs_router
-from .azure_token import router as azure_router
 
 __all__ = ["cartesia_router", "elevenlabs_router", "azure_router"]
 

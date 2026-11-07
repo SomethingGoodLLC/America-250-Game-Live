@@ -1,20 +1,26 @@
 """Google Gemini LLM provider for negotiation analysis."""
 
-import asyncio
-from typing import AsyncGenerator, Dict, Any, List, Optional
+from collections.abc import AsyncGenerator
 from datetime import datetime
+from typing import Any
 
-from schemas.models import SpeakerTurnModel, IntentModel, WorldContextModel, SmallTalkModel
-from .base import Provider, ProviderEvent, NewIntent, LiveSubtitle, Analysis, Safety
 from core.settings import settings
+from schemas.models import (
+    IntentModel,
+    SmallTalkModel,
+    SpeakerTurnModel,
+    WorldContextModel,
+)
+
+from .base import Analysis, NewIntent, Provider, ProviderEvent, Safety
 
 
 class GeminiProvider(Provider):
     """Provider using Google's Gemini LLM for negotiation analysis.
-    
+
     This provider focuses on text analysis using Gemini 2.5 Pro,
     separate from the Veo3Provider which handles video generation.
-    
+
     TODO: Implement actual Gemini API integration
     TODO: Add proper error handling and rate limiting
     TODO: Implement function calling for structured outputs
@@ -22,12 +28,12 @@ class GeminiProvider(Provider):
     TODO: Add proper authentication with Google Cloud
     """
 
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: dict[str, Any]):
         super().__init__(config)
         self.api_key = config.get("api_key") or settings.gemini_api_key
         self.model = config.get("model") or settings.gemini_model  # gemini-2.5-pro
         self.project_id = config.get("project_id") or settings.gemini_project_id
-        
+
         # TODO: Initialize Gemini client
         # import google.generativeai as genai
         # genai.configure(api_key=self.api_key)
@@ -35,37 +41,37 @@ class GeminiProvider(Provider):
 
     async def stream_dialogue(
         self,
-        turns: List[SpeakerTurnModel],
+        turns: list[SpeakerTurnModel],
         world_context: WorldContextModel,
-        system_guidelines: Optional[str] = None
+        system_guidelines: str | None = None
     ) -> AsyncGenerator[ProviderEvent, None]:
         """Stream dialogue processing using Gemini LLM."""
-        
+
         # TODO: Implement actual Gemini LLM integration
         # TODO: Create diplomatic negotiation system prompt
         # TODO: Implement function calling for structured intent detection
         # TODO: Add streaming response handling
         # TODO: Process conversation context and world state
-        
+
         yield Safety(
             flag="gemini_llm_stub",
             detail="Gemini LLM provider is a stub - implement actual integration",
             severity="info"
         )
-        
+
         if turns:
             last_turn = turns[-1]
-            
+
             # TODO: Replace with actual Gemini API call
             # system_prompt = self._build_system_prompt(world_context, system_guidelines)
             # conversation_context = self._build_conversation_context(turns)
-            # 
+            #
             # response = await self.client.generate_content_async(
             #     contents=[system_prompt, conversation_context],
             #     tools=[self._get_intent_detection_tools()],
             #     stream=True
             # )
-            
+
             # Mock response for now
             yield NewIntent(
                 intent=SmallTalkModel(
@@ -78,7 +84,7 @@ class GeminiProvider(Provider):
                 confidence=0.1,
                 justification="Stub implementation - needs actual Gemini LLM integration"
             )
-            
+
             yield Analysis(
                 tag="gemini_analysis",
                 payload={
@@ -89,20 +95,20 @@ class GeminiProvider(Provider):
                 }
             )
 
-    def _build_system_prompt(self, world_context: WorldContextModel, guidelines: Optional[str]) -> str:
+    def _build_system_prompt(self, world_context: WorldContextModel, guidelines: str | None) -> str:
         """Build system prompt for diplomatic negotiation analysis."""
         # TODO: Implement comprehensive system prompt
         base_prompt = """You are a diplomatic negotiation analyst. Analyze the conversation and detect diplomatic intents such as proposals, concessions, counter-offers, ultimatums, or small talk."""
-        
+
         if guidelines:
             base_prompt += f"\n\nAdditional guidelines: {guidelines}"
-            
+
         if world_context.scenario_tags:
             base_prompt += f"\n\nScenario context: {', '.join(world_context.scenario_tags)}"
-            
+
         return base_prompt
 
-    def _build_conversation_context(self, turns: List[SpeakerTurnModel]) -> str:
+    def _build_conversation_context(self, turns: list[SpeakerTurnModel]) -> str:
         """Build conversation context from turns."""
         # TODO: Implement proper context building
         context_lines = []
@@ -110,7 +116,7 @@ class GeminiProvider(Provider):
             context_lines.append(f"{turn.speaker_id}: {turn.text}")
         return "\n".join(context_lines)
 
-    def _get_intent_detection_tools(self) -> List[Dict[str, Any]]:
+    def _get_intent_detection_tools(self) -> list[dict[str, Any]]:
         """Get function calling tools for intent detection."""
         # TODO: Implement actual function calling schema
         return [

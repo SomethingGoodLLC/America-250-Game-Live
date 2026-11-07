@@ -1,7 +1,8 @@
 """Faster-Whisper STT provider."""
 
 import asyncio
-from typing import AsyncGenerator, Dict, Any
+from collections.abc import AsyncGenerator
+from typing import Any
 
 from aiortc.mediastreams import MediaStreamTrack
 
@@ -11,7 +12,7 @@ from .base import STTProvider
 class FasterWhisperProvider(STTProvider):
     """STT provider using faster-whisper."""
 
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: dict[str, Any]):
         super().__init__(config)
         # TODO: Initialize faster-whisper model
         self.model_size = config.get("model_size", "base")

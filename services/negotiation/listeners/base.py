@@ -1,9 +1,10 @@
 """Base listener interface for real-time audio processing."""
 from __future__ import annotations
-import asyncio
+
 import os
 from abc import ABC, abstractmethod
-from typing import AsyncIterator, Dict, Any
+from collections.abc import AsyncIterator
+from typing import Any
 
 
 class Listener(ABC):
@@ -14,7 +15,7 @@ class Listener(ABC):
     - Final text for intent analysis
     """
 
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: dict[str, Any]):
         self.config = config
 
     @abstractmethod
@@ -47,7 +48,7 @@ class Listener(ABC):
         pass
 
     @abstractmethod
-    async def stream_events(self) -> AsyncIterator[Dict[str, Any]]:
+    async def stream_events(self) -> AsyncIterator[dict[str, Any]]:
         """Stream real-time events from the listener.
 
         Yields:

@@ -1,0 +1,24 @@
+{
+ "name": "reject_type_not_allowed",
+ "description": "",
+ "proposal": {
+  "spoken_line": "x",
+  "clauses": [
+   {
+    "type": "cede_province",
+    "province_id": "charlestown"
+   }
+  ]
+ },
+ "expect": {
+  "valid": false,
+  "error_codes": [
+   "clause_type_not_allowed"
+  ]
+ },
+ "context_patch": {
+  "allowed_clause_types": [
+   "ceasefire"
+  ]
+ }
+}

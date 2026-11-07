@@ -1,13 +1,13 @@
 """Tests for TTS (Text-to-Speech) providers and functionality."""
 
-import pytest
 import asyncio
-from unittest.mock import Mock, patch, AsyncMock
-import numpy as np
 from fractions import Fraction
+from unittest.mock import AsyncMock, patch
 
-from tts.elevenlabs import ElevenLabsProvider, ElevenLabsAudioTrack
-from tts.xtts import XTTSProvider, TTSGeneratedAudioTrack
+import numpy as np
+
+from tts.elevenlabs import ElevenLabsAudioTrack, ElevenLabsProvider
+from tts.xtts import TTSGeneratedAudioTrack, XTTSProvider
 
 
 class TestXTTSProvider:

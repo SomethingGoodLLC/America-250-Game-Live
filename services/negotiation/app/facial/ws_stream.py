@@ -15,15 +15,14 @@ Protocol:
 4. Server sends {"done": true} when streaming complete
 """
 
-import asyncio
-from typing import AsyncIterator, Optional
 import os
+from collections.abc import AsyncIterator
 
 import structlog
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
+from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
-from .a2f_client import Audio2FaceClient, Audio2FaceStubClient, Audio2FaceConfig
+from .a2f_client import Audio2FaceClient, Audio2FaceConfig, Audio2FaceStubClient
 from .arkit52 import ARKIT52_NAMES, validate_arkit52_weights
 
 logger = structlog.get_logger(__name__)
@@ -41,7 +40,7 @@ class BlendshapeFrameMessage(BaseModel):
 class ErrorMessage(BaseModel):
     """WebSocket error message."""
     error: str
-    details: Optional[str] = None
+    details: str | None = None
 
 
 class DoneMessage(BaseModel):
@@ -51,10 +50,10 @@ class DoneMessage(BaseModel):
 
 async def audio_chunk_generator(websocket: WebSocket) -> AsyncIterator[bytes]:
     """Generate audio chunks from WebSocket binary messages.
-    
+
     Args:
         websocket: Active WebSocket connection
-        
+
     Yields:
         PCM16 audio bytes
     """
@@ -62,13 +61,13 @@ async def audio_chunk_generator(websocket: WebSocket) -> AsyncIterator[bytes]:
         while True:
             # Receive binary audio data
             data = await websocket.receive_bytes()
-            
+
             if len(data) == 0:
                 # Empty chunk signals end of audio
                 break
-            
+
             yield data
-            
+
     except WebSocketDisconnect:
         logger.info("Client disconnected during audio streaming")
     except Exception as e:
@@ -85,22 +84,22 @@ async def stream_a2f(
     )
 ):
     """WebSocket endpoint for Audio2Face streaming.
-    
+
     Query Parameters:
         use_stub: If True, use procedural stub instead of real A2F service.
                   Set to False when NVIDIA A2F service is available.
-    
+
     Protocol:
         Client -> Server: Binary PCM16 mono audio chunks
         Server -> Client: JSON blendshape frames
-        
+
     Example usage:
         ws = new WebSocket('ws://localhost:8000/a2f/stream?use_stub=true');
         ws.binaryType = 'arraybuffer';
-        
+
         // Send audio
         ws.send(pcm16AudioBuffer);
-        
+
         // Receive blendshapes
         ws.onmessage = (event) => {
             const frame = JSON.parse(event.data);
@@ -110,9 +109,9 @@ async def stream_a2f(
         };
     """
     await websocket.accept()
-    
-    client: Optional[Audio2FaceClient] = None
-    
+
+    client: Audio2FaceClient | None = None
+
     try:
         # Load configuration from environment
         config = Audio2FaceConfig(
@@ -121,7 +120,7 @@ async def stream_a2f(
             model_id=os.getenv("A2F_MODEL_ID", "audio2face_3d"),
             sample_rate=int(os.getenv("AUDIO_SAMPLE_RATE", "16000"))
         )
-        
+
         # Create client (stub or real)
         if use_stub:
             client = Audio2FaceStubClient(config)
@@ -129,16 +128,16 @@ async def stream_a2f(
         else:
             client = Audio2FaceClient(config)
             logger.info("Using real Audio2Face gRPC client")
-        
+
         # Connect to A2F service
         await client.connect()
-        
+
         # Send initial ready message
         await websocket.send_json({"ready": True, "stub_mode": use_stub})
-        
+
         # Create audio chunk generator
         audio_chunks = audio_chunk_generator(websocket)
-        
+
         # Stream audio and send blendshape frames
         frame_count = 0
         async for frame in client.stream_audio(audio_chunks):
@@ -150,31 +149,31 @@ async def stream_a2f(
                     weight_count=len(frame.weights)
                 )
                 continue
-            
+
             # Send frame to client
             message = BlendshapeFrameMessage(
                 timestamp_ms=frame.timestamp_ms,
                 weights=frame.weights,
                 frame_index=frame.frame_index
             )
-            
+
             await websocket.send_json(message.model_dump())
             frame_count += 1
-        
+
         # Send completion message
         await websocket.send_json(DoneMessage().model_dump())
-        
+
         logger.info(
             "Audio2Face streaming session completed",
             total_frames=frame_count
         )
-        
+
     except WebSocketDisconnect:
         logger.info("Client disconnected from Audio2Face stream")
-        
+
     except Exception as e:
         logger.error("Error during Audio2Face streaming", error=str(e))
-        
+
         # Try to send error message to client
         try:
             error_msg = ErrorMessage(
@@ -182,26 +181,26 @@ async def stream_a2f(
                 details=str(e)
             )
             await websocket.send_json(error_msg.model_dump())
-        except:
+        except Exception:
             pass
-        
+
     finally:
         # Clean up
         if client and client.is_connected:
             await client.disconnect()
-        
+
         try:
             await websocket.close()
-        except:
+        except Exception:
             pass
 
 
 @router.get("/blendshapes")
 async def list_blendshapes():
     """Get list of ARKit-52 blendshape names.
-    
+
     Useful for debugging and documentation.
-    
+
     Returns:
         {
             "count": 52,
@@ -217,7 +216,7 @@ async def list_blendshapes():
 @router.get("/health")
 async def a2f_health_check():
     """Health check for Audio2Face integration.
-    
+
     Returns:
         Service status and configuration
     """
@@ -226,7 +225,7 @@ async def a2f_health_check():
         port=int(os.getenv("A2F_GRPC_PORT", "50051")),
         model_id=os.getenv("A2F_MODEL_ID", "audio2face_3d")
     )
-    
+
     return {
         "status": "ready",
         "service": "audio2face",

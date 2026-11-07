@@ -2,9 +2,8 @@
 
 import asyncio
 import os
-import tempfile
-from pathlib import Path
-from unittest.mock import patch, MagicMock, AsyncMock
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 
 try:
@@ -12,11 +11,11 @@ try:
 except ImportError:
     np = None
 
-from providers.video_sources.base import BaseVideoSource, VideoFrame, AvatarVideoTrack
+from providers.types import VideoSourceConfig
+from providers.video_sources import create_video_source
+from providers.video_sources.base import AvatarVideoTrack, BaseVideoSource, VideoFrame
 from providers.video_sources.placeholder_loop import PlaceholderLoopVideoSource
 from providers.video_sources.veo3_stream import Veo3StreamVideoSource
-from providers.video_sources import create_video_source
-from providers.types import VideoSourceConfig
 
 
 class TestVideoFrame:
@@ -106,7 +105,8 @@ class TestPlaceholderLoopVideoSource:
 
             # Test frames() method
             frame_array = None
-            async for frame_array in video_source.frames():
+            async for frame in video_source.frames():
+                frame_array = frame
                 break
 
             if np is not None:

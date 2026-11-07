@@ -1,0 +1,15 @@
+{
+ "name": "reject_unexpected_top_level_field",
+ "description": "",
+ "proposal": {
+  "spoken_line": "x",
+  "clauses": [],
+  "set_owner": "boston"
+ },
+ "expect": {
+  "valid": false,
+  "error_codes": [
+   "unexpected_field"
+  ]
+ }
+}

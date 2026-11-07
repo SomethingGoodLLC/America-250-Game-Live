@@ -1,14 +1,19 @@
 """Tests for Veo3Provider (stub implementation)."""
 
-import pytest
-import asyncio
 from datetime import datetime
-from typing import List
-from unittest.mock import AsyncMock, patch
 
-from schemas.models import SpeakerTurnModel, WorldContextModel, ProposalModel, ConcessionModel, CounterOfferModel, UltimatumModel, SmallTalkModel
+import pytest
+
+from providers.base import Analysis, LiveSubtitle, NewIntent, Safety
 from providers.gemini_veo3 import Veo3Provider
-from providers.base import NewIntent, LiveSubtitle, Analysis, Safety
+from schemas.models import (
+    ConcessionModel,
+    CounterOfferModel,
+    ProposalModel,
+    SpeakerTurnModel,
+    UltimatumModel,
+    WorldContextModel,
+)
 
 
 class TestVeo3Provider:

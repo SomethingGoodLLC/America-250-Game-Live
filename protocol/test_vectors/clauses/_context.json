@@ -1,0 +1,37 @@
+{
+ "allowed_clause_types": [
+  "ceasefire",
+  "prisoner_exchange",
+  "safe_passage",
+  "cede_province"
+ ],
+ "armies": {
+  "british_regulars": "british",
+  "continental_militia": "continental"
+ },
+ "counterpart": "continental",
+ "faction": "british",
+ "limits": {
+  "max_ceasefire_turns": 3,
+  "max_safe_passage_turns": 3
+ },
+ "memory": [],
+ "prisoners_held": {
+  "british": 3,
+  "continental": 2
+ },
+ "protected_provinces": [
+  "boston"
+ ],
+ "provinces": {
+  "boston": "british",
+  "cambridge": "continental",
+  "charlestown": "british",
+  "concord": "continental",
+  "lexington": "continental",
+  "roxbury": "continental"
+ },
+ "relation": -20,
+ "treaties": [],
+ "turn": 0
+}

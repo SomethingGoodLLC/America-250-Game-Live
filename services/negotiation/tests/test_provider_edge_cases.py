@@ -1,12 +1,19 @@
 """Edge case tests for negotiation providers."""
 
 import asyncio
-import pytest
 from datetime import datetime
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
-from providers import MockLocalProvider, Veo3Provider, NewIntent, LiveSubtitle, Analysis, Safety
-from schemas.models import SpeakerTurnModel, WorldContextModel, ProposalModel
+import pytest
+
+from providers import (
+    Analysis,
+    MockLocalProvider,
+    NewIntent,
+    Safety,
+    Veo3Provider,
+)
+from schemas.models import ProposalModel, SpeakerTurnModel, WorldContextModel
 
 
 @pytest.fixture
@@ -65,7 +72,7 @@ class TestProviderEdgeCases:
         # Should handle long text gracefully
         new_intent_events = [e for e in events if isinstance(e, NewIntent)]
         assert len(new_intent_events) >= 1
-        
+
         # Check that confidence is adjusted for very long content
         if new_intent_events:
             intent_event = new_intent_events[0]
@@ -91,7 +98,7 @@ class TestProviderEdgeCases:
         # Should handle special characters gracefully
         assert len(events) >= 2
         new_intent_events = [e for e in events if isinstance(e, NewIntent)]
-        
+
         # Should still detect patterns despite special characters
         if new_intent_events:
             intent = new_intent_events[0].intent
@@ -163,7 +170,7 @@ class TestProviderEdgeCases:
     async def test_provider_cleanup(self, minimal_world_context):
         """Test provider cleanup and resource management."""
         provider = MockLocalProvider({})
-        
+
         # Use provider normally
         turns = [SpeakerTurnModel(
             speaker_id="test_player",
@@ -177,7 +184,7 @@ class TestProviderEdgeCases:
 
         # Cleanup should not raise errors
         await provider.close()
-        
+
         # Should be able to call close multiple times
         await provider.close()
 
@@ -204,7 +211,7 @@ class TestProviderEdgeCases:
         validated_intent, score, justification = await provider.validate_and_score_intent(
             intent, minimal_world_context
         )
-        
+
         assert validated_intent is not None
         assert 0.0 <= score <= 1.0
         assert isinstance(justification, str)
@@ -215,7 +222,7 @@ class TestProviderEdgeCases:
         provider = Veo3Provider({})
 
         # Mock network delay/timeout
-        with patch('asyncio.sleep', side_effect=asyncio.TimeoutError("Simulated timeout")):
+        with patch('asyncio.sleep', side_effect=TimeoutError("Simulated timeout")):
             turns = [SpeakerTurnModel(
                 speaker_id="test_player",
                 text="Hello",
@@ -226,7 +233,7 @@ class TestProviderEdgeCases:
             try:
                 async for event in provider.stream_dialogue(turns, minimal_world_context):
                     events.append(event)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 # Should handle timeout gracefully in real implementation
                 pass
 
@@ -298,31 +305,31 @@ class TestProviderPerformance:
         )]
 
         response_times = []
-        
+
         for _ in range(5):
             start_time = asyncio.get_event_loop().time()
-            
+
             events = []
             async for event in provider.stream_dialogue(turns, minimal_world_context):
                 events.append(event)
-            
+
             end_time = asyncio.get_event_loop().time()
             response_times.append(end_time - start_time)
 
         # Response times should be reasonably consistent (within 2x of each other)
         min_time = min(response_times)
         max_time = max(response_times)
-        
+
         assert max_time <= min_time * 3, f"Response times too variable: {response_times}"
 
     @pytest.mark.asyncio
     async def test_pattern_matching_efficiency(self, minimal_world_context):
         """Test that pattern matching is efficient."""
         provider = MockLocalProvider({})
-        
+
         # Test with text that matches multiple patterns
         complex_text = "We need to discuss trade deals and military cooperation for peace"
-        
+
         turns = [SpeakerTurnModel(
             speaker_id="test_player",
             text=complex_text,
@@ -330,11 +337,11 @@ class TestProviderPerformance:
         )]
 
         start_time = asyncio.get_event_loop().time()
-        
+
         events = []
         async for event in provider.stream_dialogue(turns, minimal_world_context):
             events.append(event)
-        
+
         end_time = asyncio.get_event_loop().time()
         processing_time = end_time - start_time
 
