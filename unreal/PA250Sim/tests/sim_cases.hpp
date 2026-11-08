@@ -478,6 +478,150 @@ static void test_jailbreak_spoken() {
     CHECK(state_hash(a) == state_hash(s));
 }
 
+
+static void test_defect() {
+    CampaignState s = fresh();
+    auto ctx = build_diplomacy_context(s, "british");
+    CHECK(ctx.defect_price > 50);
+    // Words alone, a thin purse, or too little for the price: rejected, nothing changes.
+    auto poor = proposal_from(R"({"spoken_line":"x","clauses":[{"type":"defect","title":"colonel","gold":100,"provinces":[]}]})");
+    CHECK(!validate_proposal(ctx, poor).empty());
+    CHECK(state_hash(apply_diplomacy(s, accepted(poor))) == state_hash(s));
+    auto broke = proposal_from(R"({"spoken_line":"x","clauses":[{"type":"defect","title":"mayor_of_boston","gold":9000,"provinces":[]}]})");
+    CHECK(!validate_proposal(ctx, broke).empty());
+    auto mixed = proposal_from(R"({"spoken_line":"x","clauses":[{"type":"ceasefire","days":2},{"type":"defect","title":"mayor_of_boston","gold":300,"provinces":["cambridge","roxbury"]}]})");
+    CHECK(!validate_proposal(ctx, mixed).empty());  // defect_must_be_alone
+    auto not_mine = proposal_from(R"({"spoken_line":"x","clauses":[{"type":"defect","title":"mayor_of_boston","gold":300,"provinces":["boston","roxbury"]}]})");
+    CHECK(!validate_proposal(ctx, not_mine).empty());
+    // A real offer: Mayor of Boston + gold + two fiefs turns him.
+    auto ok = proposal_from(R"({"spoken_line":"x","clauses":[{"type":"defect","title":"mayor_of_boston","gold":300,"provinces":["cambridge","roxbury"]}]})");
+    CHECK(validate_proposal(ctx, ok).empty());
+    CampaignState a = apply_diplomacy(s, accepted(ok));
+    CHECK(a.factions.at("british").envoy_defected);
+    CHECK(a.player_gold == 200);
+    CHECK(a.provinces.at("boston").owner == "continental");
+    CHECK(a.armies.at("british_regulars").faction == "continental");
+    CHECK(a.fiefs.count("cambridge") == 1);
+    CHECK(a.relations.at("british") == -100);
+    CHECK(a.armies.count("british_reprisal") == 1);  // the Crown answers
+    CHECK(a.armies.at("british_reprisal").faction == "british");
+    // He stays turned: no more clauses, and the state survives save/load.
+    auto after_ctx = build_diplomacy_context(a, "british");
+    auto again = proposal_from(R"({"spoken_line":"x","clauses":[{"type":"ceasefire","days":2}]})");
+    CHECK(!validate_proposal(after_ctx, again).empty());
+    CHECK(state_hash(deserialize(serialize(a))) == state_hash(a));
+    for (int i = 0; i < 48; ++i) a = advance_hour(a).state;  // sim keeps running with no British army
+}
+
+static void test_defect_battle_participants() {
+    CampaignState s = fresh();
+    auto offer = proposal_from(R"({"clauses":[{"type":"defect","title":"mayor_of_boston","gold":300,"provinces":[]}]})");
+    s = apply_diplomacy(s, accepted(offer));
+    s.armies.at("continental_militia").province = "boston";
+    s = advance_hour(s).state;
+    auto setup = build_battle_setup(s, "boston");
+    CHECK(setup.valid);
+    const std::string selected = setup.sides.at(kContinental).army_id;
+    const std::string reserve = selected == "british_regulars" ? "continental_militia" : "british_regulars";
+    const Army before = s.armies.at(reserve);
+    BattleResult result;
+    result.province_id = "boston";
+    result.winner = kBritish;
+    result.objective_holder = kBritish;
+    result.losses[kContinental] = s.armies.at(selected).units;
+    auto after = apply_battle_result(s, result);
+    CHECK(after.armies.count(selected) == 0);
+    CHECK(after.armies.at(reserve).morale == before.morale);
+    CHECK(after.armies.at(reserve).province == before.province);
+    CHECK(after.armies.at(reserve).units == before.units);
+    CHECK(after.armies.at(reserve).previous_province == before.previous_province);
+    CHECK(!after.pending_battle.active);
+}
+
+static void test_surrender_honors_of_war() {
+    CampaignState s = fresh();
+    auto prop = proposal_from(R"({"spoken_line":"x","clauses":[{"type":"surrender","army_id":"british_regulars","days":14}]})");
+    // Not cornered, and sitting in Boston (a red line): refused, nothing changes.
+    auto ctx0 = build_diplomacy_context(s, "british");
+    CHECK(!validate_proposal(ctx0, prop).empty());
+    CHECK(state_hash(apply_diplomacy(s, accepted(prop))) == state_hash(s));
+    // Cornered at Charlestown by a force at least 1.5x its size.
+    s.armies["british_regulars"].province = "charlestown";
+    s.provinces.at("charlestown").owner = "british";
+    s.armies["continental_militia"].province = "charlestown";
+    s.armies["continental_militia"].units = {{"militia", 500}};
+    auto ctx = build_diplomacy_context(s, "british");
+    CHECK(validate_proposal(ctx, prop).empty());
+    const auto before_units = s.armies.at("british_regulars").units;
+    CampaignState a = apply_diplomacy(s, accepted(prop));
+    CHECK(a.armies.at("british_regulars").units == before_units);  // unharmed
+    CHECK(a.armies.at("british_regulars").province == "boston");   // marched out to its base
+    CHECK(a.provinces.at("charlestown").owner == "continental");   // ground yielded
+    CHECK(has_cf(a));                                              // paroled
+    CHECK(a.treaties[0].hours_remaining == 14 * 24);
+    CHECK(!a.factions.at("british").envoy_defected);
+    // Too-long parole, and a foreign army, are refused.
+    auto longp = proposal_from(R"({"spoken_line":"x","clauses":[{"type":"surrender","army_id":"british_regulars","days":90}]})");
+    CHECK(!validate_proposal(ctx, longp).empty());
+    auto foreign = proposal_from(R"({"spoken_line":"x","clauses":[{"type":"surrender","army_id":"continental_militia","days":5}]})");
+    CHECK(!validate_proposal(ctx, foreign).empty());
+    CHECK(state_hash(deserialize(serialize(a))) == state_hash(a));
+    // Multiple individually valid int32 unit counts must not overflow the context total.
+    s.armies.at("british_regulars").units = {{"line_infantry", 2000000000}, {"militia", 2000000000}};
+    s.armies.at("continental_militia").units = {{"militia", 2000000000}};
+    auto large = build_diplomacy_context(s, "british");
+    CHECK(large.army_strengths.at("british_regulars") == INT64_C(4000000000));
+    CHECK(context_from_json(context_to_json(large)).army_strengths == large.army_strengths);
+    CHECK(!validate_proposal(large, prop).empty());
+}
+
+static void test_offense_vassalage_failure() {
+    CampaignState s = fresh();
+    auto ctx = build_diplomacy_context(s, "british");
+    CHECK(ctx.mood == "calm" && ctx.snubbed_hours_left == 0);
+    // Washington-style slight: he takes offense and will not treat for 3 days.
+    auto off = proposal_from(R"({"spoken_line":"x","clauses":[{"type":"take_offense","reason":"disrespect","days":3}]})");
+    CHECK(validate_proposal(ctx, off).empty());
+    CampaignState a = apply_diplomacy(s, accepted(off));
+    auto actx = build_diplomacy_context(a, "british");
+    CHECK(actx.snubbed_hours_left == 72);
+    CHECK(actx.mood == "insulted");
+    CHECK(a.relations.at("british") == s.relations.at("british") - 10);
+    auto cf = proposal_from(R"({"spoken_line":"x","clauses":[{"type":"ceasefire","days":2}]})");
+    CHECK(!validate_proposal(actx, cf).empty());  // envoy_refuses_to_negotiate
+    for (int i = 0; i < 72; ++i) {
+        a = advance_hour(a).state;
+        a.pending_battle = {};
+    }
+    CHECK(build_diplomacy_context(a, "british").snubbed_hours_left == 0);  // the snub ends
+    auto bad = proposal_from(R"({"spoken_line":"x","clauses":[{"type":"take_offense","reason":"boredom","days":3}]})");
+    CHECK(!validate_proposal(ctx, bad).empty());
+    // Failed talks add up and eventually earn a snub.
+    CampaignState f = s;
+    for (int i = 0; i < 4; ++i) f = register_diplomacy_failure(f, "british");
+    CHECK(build_diplomacy_context(f, "british").snubbed_hours_left > 0);
+    CHECK(f.relations.at("british") < s.relations.at("british"));
+    // The Crown's vassalage offer: gold is not capped, the player decides, and it keeps the peace.
+    auto vas = proposal_from(R"({"spoken_line":"x","clauses":[{"type":"vassalage","title":"baron","gold":5000,"provinces":[]}]})");
+    CHECK(validate_proposal(ctx, vas).empty());
+    CampaignState v = apply_diplomacy(s, accepted(vas));
+    CHECK(v.player_vassal && v.player_title == "baron");
+    CHECK(v.player_gold == s.player_gold + 5000);
+    CHECK(has_cf(v) || !v.treaties.empty());
+    CHECK(!validate_proposal(build_diplomacy_context(v, "british"), vas).empty());  // already_vassal
+    auto boston = proposal_from(R"({"spoken_line":"x","clauses":[{"type":"vassalage","title":"baron","gold":0,"provinces":["boston"]}]})");
+    CHECK(!validate_proposal(ctx, boston).empty());  // the Crown will not hand out Boston as a fief
+    CHECK(state_hash(deserialize(serialize(v))) == state_hash(v));
+    // Income: the treasury is not capped at its starting value.
+    CampaignState m = s;
+    const int g0 = m.player_gold;
+    for (int i = 0; i < 24 * 35; ++i) {
+        m = advance_hour(m).state;
+        m.pending_battle = {};
+    }
+    CHECK(m.player_gold > g0);
+}
+
 inline int run_all(Reporter& rep, const std::string& data_dir, const std::string& vector_dir,
                    bool write_golden = false) {
     g_reporter() = &rep;
@@ -510,6 +654,10 @@ inline int run_all(Reporter& rep, const std::string& data_dir, const std::string
         {"shared_clause_vectors", test_shared_clause_vectors},
         {"controller_flow", test_controller_flow},
         {"jailbreak_spoken", test_jailbreak_spoken},
+        {"defect", test_defect},
+        {"offense_vassalage_failure", test_offense_vassalage_failure},
+        {"defect_battle_participants", test_defect_battle_participants},
+        {"surrender_honors_of_war", test_surrender_honors_of_war},
     };
     for (auto& c : cases) {
         int before = g_failed();

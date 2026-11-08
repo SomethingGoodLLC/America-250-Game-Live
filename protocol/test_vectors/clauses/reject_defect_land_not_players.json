@@ -1,0 +1,24 @@
+{
+ "name": "reject_defect_land_not_players",
+ "description": "cannot grant land the player does not own",
+ "proposal": {
+  "spoken_line": "...",
+  "clauses": [
+   {
+    "type": "defect",
+    "title": "mayor_of_boston",
+    "gold": 300,
+    "provinces": [
+     "boston",
+     "roxbury"
+    ]
+   }
+  ]
+ },
+ "expect": {
+  "valid": false,
+  "error_codes": [
+   "province_not_owned_by_player"
+  ]
+ }
+}

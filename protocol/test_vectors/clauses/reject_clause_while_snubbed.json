@@ -1,0 +1,24 @@
+{
+ "name": "reject_clause_while_snubbed",
+ "description": "a snubbed envoy takes no clauses",
+ "proposal": {
+  "spoken_line": "...",
+  "clauses": [
+   {
+    "type": "ceasefire",
+    "days": 2
+   }
+  ]
+ },
+ "expect": {
+  "valid": false,
+  "error_codes": [
+   "envoy_refuses_to_negotiate"
+  ]
+ },
+ "context_patch": {
+  "snubbed_hours_left": 48,
+  "mood": "insulted",
+  "grievance": 30
+ }
+}

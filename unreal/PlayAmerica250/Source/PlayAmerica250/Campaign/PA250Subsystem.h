@@ -76,6 +76,10 @@ public:
 	bool AcceptProposalJson(const FString& ProposalJson, FString& OutError);
 	UFUNCTION(BlueprintCallable, Category = "PA250")
 	bool LeaveDiplomacy(FString& OutError);
+	// An envoy act that does not end the talks (e.g. taking offense); re-validated by the sim.
+	bool ApplyEnvoyActJson(const FString& ProposalJson, FString& OutError);
+	// The player talked and walked away without agreement: the envoy likes them less.
+	bool RegisterDiplomacyFailure(FString& OutError);
 
 	UFUNCTION(BlueprintCallable, Category = "PA250")
 	bool SaveCampaign(FString& OutError);

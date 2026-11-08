@@ -3,6 +3,7 @@
 
 #include "CoreMinimal.h"
 #include "RFGameMode.h"
+#include "PA250TicketLedger.h"
 #include "pa250/types.hpp"
 #include "PA250BattleGameMode.generated.h"
 
@@ -12,6 +13,11 @@ class UMusketTuning;
 class UPA250BattleHUD;
 class UPA250SpawnScreen;
 class UPA250VolleyCoordinator;
+class UPA250WeaponTuning;
+class UPA250BotTuning;
+class UPA250MeleeTuning;
+class UPA250FactionVisuals;
+class UPA250CombatProfiles;
 
 UCLASS()
 class PLAYAMERICA250_API APA250BattleGameMode : public ARFGameMode
@@ -34,11 +40,18 @@ public:
 	float AutoplayTimeDilation = 10.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle")
-	float BleedIntervalSeconds = 12.f;
+	float BleedIntervalSeconds = 5.f;
 
 	/** Battle respawns per campaign unit (see FConquestTuning::SoldiersPerUnit). */
 	UPROPERTY(EditAnywhere, Category = "PA250|Battle")
 	int32 SoldiersPerUnit = 4;
+
+	/** Active-reload preset: Authentic (15-45 s) is the permanent default. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle")
+	uint8 ReloadPreset = 1; // 1 = Authentic (15-45 s), the permanent default; 0 = Arcade (~10 s)
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle")
+	float DeathCamSeconds = 3.f;
 
 	// ---- HUD / spawn queries ----
 	int32 TicketsRemaining(FName Faction) const;
@@ -54,8 +67,35 @@ public:
 	const pa250::BattleResult& GetResult() const { return Result; }
 	bool IsAutoplayMode() const { return bAutoplayBots; }
 	UMusketTuning* GetTuning() const;
+	UPA250WeaponTuning* GetWeaponTuning() const { return WeaponTuningAsset; }
+	UPA250BotTuning* GetBotTuning() const { return BotTuningAsset; }
+	UPA250FactionVisuals* GetFactionVisuals() const { return FactionVisualsAsset; }
 	UPA250VolleyCoordinator* GetVolleys() const { return Volleys; }
 	void NotifyShot(ARFCharacter* Shooter, const FVector& Dir, bool bHit);
+	void NotifyProjectileHit(ARFCharacter* Shooter, ARFCharacter* Victim, float Damage);
+	void PushKillFeed(const FString& Line);
+	/** Bots report each finished reload (seconds, fumbles) by training profile for the battle trace. */
+	void RecordAIReload(FName Training, float Seconds, int32 Fumbles);
+	/** Where a routing squad runs: the side's spawn area, else Fallback. */
+	FVector GetRearPoint(FName Faction, const FVector& Fallback) const;
+	/** Militia muster state for tests / HUD: men still to arrive and the cap on militia in the field. */
+	int32 GetMusterCap(FName Faction) const { return MusterCap.FindRef(Faction); }
+	/** Pure muster plan: of Count places, how many non-militia, how many militia at the start, and the
+	 *  cap on militia alive once companies have arrived. */
+	static void MusterPlan(int32 Count, int32 MilitiaUnits, int32 TotalUnits, float InitialFraction, float MaxAliveScale,
+		int32& OutOthers, int32& OutInitialMilitia, int32& OutMilitiaCap);
+	/** Pure: men in the next company - never past the cap, never more men in the field than tickets left. */
+	static int32 MusterWave(int32 MilitiaCap, int32 MilitiaAlive, int32 TicketsLeft, int32 SideAlive, int32 WaveSize);
+	UPA250CombatProfiles* GetCombatProfiles() const { return CombatProfilesAsset; }
+	const TArray<FString>& GetKillFeed() const { return KillFeed; }
+	int32 GetBattleResultEmitCount() const { return BattleResultEmitCount; }
+	/** Deaths so far, both sides (FTEST_BotSpacing kill criterion). */
+	int32 GetTotalDeaths() const
+	{
+		int32 N = 0;
+		for (const auto& FK : Ledger.Deaths) for (const auto& CK : FK.Value) N += CK.Value;
+		return N;
+	}
 
 	/** Player or autoplay: spend a ticket and spawn at the chosen post/base. */
 	bool RequestSpawn(AController* Controller, FName UnitClass, APA250ControlPoint* PostOrNull);
@@ -97,19 +137,23 @@ private:
 	ARFCharacter* SpawnBot(FName Faction, FName UnitClass, APA250ControlPoint* PreferredPost);
 	void ConfigureSoldier(ARFCharacter* Soldier, FName Faction, FName UnitClass);
 	FName ChooseClassFor(FName Faction, FName Preferred) const;
-	bool TrySpendTicket(FName Faction, FName UnitClass);
+	bool CanSpawn(FName Faction) const;
+	void SpendDeathTicket(FName Faction, FName UnitClass);
 	void BleedTickets(float DeltaSeconds);
 	int32 PoolTotal(FName Faction) const;
 	int32 CountAlive(FName Faction, FName UnitClass) const;
 	AActor* PickStart(FName Faction) const;
 	FTransform PickSpawnTransform(FName Faction, APA250ControlPoint* PreferredPost) const;
 	void ShowSpawnScreen(APlayerController* PC);
+	void CloseSpawnScreenToSpectate(APlayerController* PC);
+	void BeginDeathCamThenSpawn(APlayerController* PC);
 	void EndBattle(FName Winner, const FString& Reason);
 	void FinishAndReturn();
 	void WriteBattleFile(const FString& Reason) const;
 	FName PluralityHolder() const;
 	FName OtherFaction(FName F) const { return F == TEXT("british") ? FName(TEXT("continental")) : FName(TEXT("british")); }
 	void CheckTicketExhaustion();
+	void RegisterConsoleCommands();
 
 	bool bInitialized = false;
 	bool bBattleOver = false;
@@ -117,9 +161,8 @@ private:
 	bool bSelftest = false;
 	bool bDebugBattle = false;
 	float StartTime = 0.f;
-	float BleedAccum = 0.f;
-	int32 BleedTicks = 0;
 	int32 PostFlips = 0;
+	float SpacingReportTimer = 5.f;
 	FString Banner;
 	FString EndReason;
 	FName PlayerFaction;
@@ -129,13 +172,39 @@ private:
 	pa250::BattleSetup Setup;
 	pa250::BattleResult Result;
 	TMap<FName, TMap<FName, int32>> InitialPool;
-	TMap<FName, TMap<FName, int32>> Pool;
+	/** Remaining tickets (death + bleed) and per-class deaths. HUD shows Ledger.Pool. */
+	FPA250TicketLedger Ledger;
 	TMap<FName, TArray<TWeakObjectPtr<AActor>>> Starts;
 	TMap<TWeakObjectPtr<AController>, FName> ControllerFaction;
 	TMap<TWeakObjectPtr<AController>, FName> ControllerClass;
 	TArray<TWeakObjectPtr<APA250ControlPoint>> Posts;
+	TArray<FString> KillFeed;
+	int32 BattleResultEmitCount = 0;
 	UPROPERTY(Transient)
 	TObjectPtr<UMusketTuning> Tuning;
+	UPROPERTY(Transient)
+	TObjectPtr<UPA250WeaponTuning> WeaponTuningAsset;
+	UPROPERTY(Transient)
+	TObjectPtr<UPA250BotTuning> BotTuningAsset;
+	UPROPERTY(Transient)
+	TObjectPtr<UPA250MeleeTuning> MeleeTuningAsset;
+	UPROPERTY(Transient)
+	TObjectPtr<UPA250FactionVisuals> FactionVisualsAsset;
+
+	UPROPERTY()
+	TObjectPtr<UPA250CombatProfiles> CombatProfilesAsset;
+
+	int32 BotProfileSerial = 0;
+	TMap<FName, int32> MusterCap;              // max militia alive for a side (0 = no muster)
+	TMap<FName, float> MusterTimer;
+	TMap<FName, int32> MusterArrivals;
+	TMap<FName, TArray<TWeakObjectPtr<AActor>>> MusterPoints;
+	void SpawnInitialForces(FName Faction, int32 Count);
+	void TickMuster(float DeltaSeconds);
+	ARFCharacter* SpawnBotAt(FName Faction, FName UnitClass, const FTransform& At);
+	TMap<FName, TArray<float>> AIReloadSeconds;
+	TMap<FName, int32> AIReloadFumbles;
+	FString ReloadByTrainingJson() const;
 	UPROPERTY(Transient)
 	TObjectPtr<UPA250BattleHUD> Hud;
 	UPROPERTY(Transient)

@@ -1,0 +1,27 @@
+{
+ "name": "reject_defect_already_defected",
+ "description": "a turned envoy takes no further clauses",
+ "proposal": {
+  "spoken_line": "...",
+  "clauses": [
+   {
+    "type": "defect",
+    "title": "mayor_of_boston",
+    "gold": 300,
+    "provinces": [
+     "cambridge",
+     "roxbury"
+    ]
+   }
+  ]
+ },
+ "expect": {
+  "valid": false,
+  "error_codes": [
+   "envoy_already_defected"
+  ]
+ },
+ "context_patch": {
+  "envoy_defected": true
+ }
+}

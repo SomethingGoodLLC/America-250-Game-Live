@@ -5,13 +5,17 @@ An original Unreal Engine 5.8 game. C++ for the authoritative simulation, Bluepr
 ## Locked decisions
 - Simulation is authoritative and deterministic; UI, audio and video are not.
 - Campaign state lives in the PA250Sim C++ core (`unreal/PA250Sim`), which has no UObject or Unreal headers. A `UGameInstanceSubsystem` exposes it to Unreal.
-- Pure functions: `advance_hour`, `enqueue_command`, `plan_path`, `apply_battle_result`, `validate_proposal`, `apply_diplomacy`.
+- Pure functions: `advance_hour`, `enqueue_command`, `plan_path`, `apply_battle_result`, `validate_proposal`, `apply_diplomacy`, `register_diplomacy_failure`.
 - Determinism: seeds come from CampaignState, never the wall clock. Containers that affect results are ordered. Sim advances in fixed 1-hour ticks; UE speed only changes how many ticks are requested per real second.
 - State-changing diplomacy clauses, only after validation:
  - `ceasefire(days)` (stored as hours_remaining = days*24)
  - `prisoner_exchange(counts)`
  - `safe_passage(army_id, province_id, days)`
  - `cede_province(province_id)`
+- `defect` (GAME INVENTION, British envoy only): the envoy turns traitor when the player's real offer (title + gold/10 + 15 per granted province) meets the sim's price; it must be the only clause and is the one sanctioned way Boston can change hands (title `mayor_of_boston`). `cede_province` of Boston stays forbidden.
+- `surrender(army_id, days)` (GAME INVENTION, British): honors of war after Fort Necessity 1754. A cornered army (enemy strength in/beside its province >= 1.5x) marches out unharmed, yields the ground, and is paroled up to 30 days. Never inside a protected province.
+- `vassalage` (GAME INVENTION, British envoy offers, the player must accept): gold uncapped, never Boston as a fief; the player becomes the Crown's vassal under a permanent peace.
+- `take_offense(reason, days 1-7)` (GAME INVENTION): a slighted envoy refuses all clauses for those days; grievance and attitude persist in FactionInfo. `register_diplomacy_failure` is the pure function for talks that end without agreement.
 - The spoken line is display-only and never parsed for state.
 - British red lines for the slice: never cede Boston; ceasefire 1–365 days and safe_passage 1–90 days (GAME INVENTION); prisoner counts no higher than held.
 - Old dialogue intents (trade, alliance, peace, war, resource_sharing, concession, counter_offer, ultimatum, small_talk) stay non-authoritative. Do not rewrite `protocol/schemas/proposal.yaml`; add new schemas beside it.

@@ -1,0 +1,37 @@
+{
+ "name": "reject_surrender_large_aggregate",
+ "description": "Strength comparison must use wide arithmetic in C++ and Python.",
+ "proposal": {
+  "spoken_line": "...",
+  "clauses": [
+   {
+    "type": "surrender",
+    "army_id": "british_regulars",
+    "days": 14
+   }
+  ]
+ },
+ "expect": {
+  "valid": false,
+  "error_codes": [
+   "not_cornered"
+  ]
+ },
+ "context_patch": {
+  "army_provinces": {
+   "british_regulars": "charlestown",
+   "continental_militia": "charlestown",
+   "reinforcement": "charlestown"
+  },
+  "army_strengths": {
+   "british_regulars": 2000000000,
+   "continental_militia": 2000000000,
+   "reinforcement": 500000000
+  },
+  "armies": {
+   "british_regulars": "british",
+   "continental_militia": "continental",
+   "reinforcement": "continental"
+  }
+ }
+}

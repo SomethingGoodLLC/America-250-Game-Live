@@ -655,14 +655,19 @@
     "ceasefire",
     "prisoner_exchange",
     "safe_passage",
-    "cede_province"
+    "cede_province",
+    "defect",
+    "surrender",
+    "vassalage",
+    "take_offense"
    ],
    "protected_provinces": [
     "boston"
    ],
    "max_ceasefire_days": 365,
    "max_safe_passage_days": 90,
-   "controls_harbor": true
+   "controls_harbor": true,
+   "envoy_loyalty": 70
   },
   "continental": {
    "display_name": "Massachusetts Provincial Congress",

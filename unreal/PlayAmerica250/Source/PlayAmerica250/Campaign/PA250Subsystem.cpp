@@ -354,6 +354,32 @@ bool UPA250Subsystem::AcceptProposalJson(const FString& ProposalJson, FString& O
 	PA250_FORWARD(Controller.finish_diplomacy(&Result, Err))
 }
 
+bool UPA250Subsystem::ApplyEnvoyActJson(const FString& ProposalJson, FString& OutError)
+{
+	if (Controller.flow() != pa250::Flow::Diplomacy)
+	{
+		OutError = TEXT("not in diplomacy");
+		return false;
+	}
+	pa250::DiplomacyResult Result;
+	Result.faction = Controller.diplomacy_context().faction;
+	Result.accepted = true;
+	const auto ParseErrors = pa250::proposal_from_json(ToStd(ProposalJson), Result.proposal);
+	if (!ParseErrors.empty())
+	{
+		OutError = ToFStr(ParseErrors.front());
+		return false;
+	}
+	if (!pa250::validate_proposal(Controller.diplomacy_context(), Result.proposal).empty())
+	{
+		OutError = TEXT("refused by the sim");
+		return false;
+	}
+	PA250_FORWARD(Controller.apply_envoy_act(Result, Err))
+}
+
+bool UPA250Subsystem::RegisterDiplomacyFailure(FString& OutError) { PA250_FORWARD(Controller.register_failure(Err)) }
+
 FString UPA250Subsystem::GetStateHash() const { return Controller.has_campaign() ? ToFStr(Controller.hash_hex()) : FString(); }
 
 EPA250Flow UPA250Subsystem::GetFlow() const

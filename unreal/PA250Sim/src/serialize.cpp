@@ -126,7 +126,12 @@ json faction_to_json(const FactionInfo& f) {
             {"protected_provinces", f.protected_provinces},
             {"max_ceasefire_days", f.max_ceasefire_days},
             {"max_safe_passage_days", f.max_safe_passage_days},
-            {"controls_harbor", f.controls_harbor}};
+            {"controls_harbor", f.controls_harbor},
+            {"envoy_loyalty", f.envoy_loyalty},
+            {"envoy_defected", f.envoy_defected},
+            {"envoy_title_granted", f.envoy_title_granted},
+            {"grievance", f.grievance},
+            {"snub_until_hour", f.snub_until_hour}};
 }
 FactionInfo faction_from_json(const json& j) {
     FactionInfo f;
@@ -138,6 +143,11 @@ FactionInfo faction_from_json(const json& j) {
     f.max_ceasefire_days = j.value("max_ceasefire_days", j.value("max_ceasefire_turns", 365));
     f.max_safe_passage_days = j.value("max_safe_passage_days", j.value("max_safe_passage_turns", 90));
     f.controls_harbor = j.value("controls_harbor", false);
+    f.envoy_loyalty = j.value("envoy_loyalty", 0);
+    f.envoy_defected = j.value("envoy_defected", false);
+    f.envoy_title_granted = j.value("envoy_title_granted", "");
+    f.grievance = j.value("grievance", 0);
+    f.snub_until_hour = j.value("snub_until_hour", int64_t{0});
     return f;
 }
 json province_to_json(const Province& p) {
@@ -247,6 +257,10 @@ CampaignState state_from_json(const json& j, bool is_save) {
     s.supplies = j.at("supplies").get<std::map<std::string, int>>();
     s.relations = j.at("relations").get<std::map<std::string, int>>();
     s.prisoners_held = j.at("prisoners_held").get<std::map<std::string, int>>();
+    s.player_gold = j.value("player_gold", 500);
+    s.player_vassal = j.value("player_vassal", false);
+    s.player_title = j.value("player_title", "");
+    s.fiefs = j.value("fiefs", std::map<std::string, std::string>{});
     if (is_save) {
         for (const auto& t : j.at("treaties")) s.treaties.push_back(treaty_from_json(t));
         for (const auto& m : j.at("memory"))
@@ -311,6 +325,10 @@ std::string serialize(const CampaignState& s) {
     j["supplies"] = s.supplies;
     j["relations"] = s.relations;
     j["prisoners_held"] = s.prisoners_held;
+    j["player_gold"] = s.player_gold;
+    j["player_vassal"] = s.player_vassal;
+    j["player_title"] = s.player_title;
+    j["fiefs"] = s.fiefs;
     j["treaties"] = json::array();
     for (const auto& t : s.treaties) j["treaties"].push_back(treaty_to_json(t));
     j["memory"] = json::array();
@@ -360,6 +378,18 @@ std::string context_to_json(const DiplomacyContext& c) {
     j["treaties"] = json::array();
     for (const auto& t : c.treaties) j["treaties"].push_back(treaty_to_json(t));
     j["memory"] = c.memory;
+    j["envoy_loyalty"] = c.envoy_loyalty;
+    j["envoy_defected"] = c.envoy_defected;
+    j["player_gold"] = c.player_gold;
+    j["defect_price"] = c.defect_price;
+    j["titles"] = c.titles;
+    j["army_provinces"] = c.army_provinces;
+    j["army_strengths"] = c.army_strengths;
+    j["adjacency"] = c.adjacency;
+    j["grievance"] = c.grievance;
+    j["snubbed_hours_left"] = c.snubbed_hours_left;
+    j["mood"] = c.mood;
+    j["player_vassal"] = c.player_vassal;
     return j.dump();
 }
 
@@ -395,6 +425,18 @@ DiplomacyContext context_from_json(const std::string& text) {
             }
         }
         c.memory = j.value("memory", std::vector<std::string>{});
+        c.envoy_loyalty = j.value("envoy_loyalty", 0);
+        c.envoy_defected = j.value("envoy_defected", false);
+        c.player_gold = j.value("player_gold", 0);
+        c.defect_price = j.value("defect_price", 0);
+        c.titles = j.value("titles", std::map<std::string, int>{});
+        c.army_provinces = j.value("army_provinces", std::map<std::string, std::string>{});
+        c.army_strengths = j.value("army_strengths", std::map<std::string, int64_t>{});
+        c.adjacency = j.value("adjacency", std::map<std::string, std::vector<std::string>>{});
+        c.grievance = j.value("grievance", 0);
+        c.snubbed_hours_left = j.value("snubbed_hours_left", 0);
+        c.mood = j.value("mood", "calm");
+        c.player_vassal = j.value("player_vassal", false);
         return c;
     } catch (const json::exception& e) {
         throw std::runtime_error(std::string("context parse error: ") + e.what());
@@ -413,6 +455,14 @@ json clause_to_json(const Clause& c) {
         j.update({{"army_id", c.army_id}, {"province_id", c.province_id}, {"days", c.days}});
     else if (c.type == "cede_province")
         j["province_id"] = c.province_id;
+    else if (c.type == "defect")
+        j.update({{"title", c.title}, {"gold", c.gold}, {"provinces", c.provinces}});
+    else if (c.type == "surrender")
+        j.update({{"army_id", c.army_id}, {"days", c.days}});
+    else if (c.type == "vassalage")
+        j.update({{"title", c.title}, {"gold", c.gold}, {"provinces", c.provinces}});
+    else if (c.type == "take_offense")
+        j.update({{"reason", c.reason}, {"days", c.days}});
     return j;
 }
 
@@ -473,7 +523,11 @@ std::vector<std::string> proposal_from_json(const std::string& text, DiplomacyPr
             {"ceasefire", {"type", "days"}},
             {"prisoner_exchange", {"type", "counts"}},
             {"safe_passage", {"type", "army_id", "province_id", "days"}},
-            {"cede_province", {"type", "province_id"}}};
+            {"cede_province", {"type", "province_id"}},
+            {"defect", {"type", "title", "gold", "provinces"}},
+            {"surrender", {"type", "army_id", "days"}},
+            {"vassalage", {"type", "title", "gold", "provinces"}},
+            {"take_offense", {"type", "reason", "days"}}};
         auto kf = kFields.find(c.type);
         for (auto it = cj.begin(); it != cj.end(); ++it) {
             const std::string& k = it.key();
@@ -488,6 +542,29 @@ std::vector<std::string> proposal_from_json(const std::string& text, DiplomacyPr
                     errors.push_back(err("malformed_clause", k));
                 else
                     (k == "army_id" ? c.army_id : c.province_id) = it.value().get<std::string>();
+            } else if (k == "reason") {
+                if (!it.value().is_string())
+                    errors.push_back(err("malformed_clause", "reason"));
+                else
+                    c.reason = it.value().get<std::string>();
+            } else if (k == "title") {
+                if (!it.value().is_string())
+                    errors.push_back(err("malformed_clause", "title"));
+                else
+                    c.title = it.value().get<std::string>();
+            } else if (k == "gold") {
+                if (!int_field(it.value(), c.gold)) errors.push_back(err("malformed_clause", "gold"));
+            } else if (k == "provinces") {
+                if (!it.value().is_array()) {
+                    errors.push_back(err("malformed_clause", "provinces"));
+                    continue;
+                }
+                for (const auto& pv : it.value()) {
+                    if (!pv.is_string())
+                        errors.push_back(err("malformed_clause", "provinces"));
+                    else
+                        c.provinces.push_back(pv.get<std::string>());
+                }
             } else if (k == "counts") {
                 c.has_counts = true;
                 if (!it.value().is_object()) {

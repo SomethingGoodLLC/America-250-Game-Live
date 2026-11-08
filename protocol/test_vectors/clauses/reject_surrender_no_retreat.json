@@ -1,0 +1,35 @@
+{
+ "name": "reject_surrender_no_retreat",
+ "description": "the army needs somewhere of its own to march to",
+ "proposal": {
+  "spoken_line": "...",
+  "clauses": [
+   {
+    "type": "surrender",
+    "army_id": "british_regulars",
+    "days": 14
+   }
+  ]
+ },
+ "expect": {
+  "valid": false,
+  "error_codes": [
+   "no_retreat"
+  ]
+ },
+ "context_patch": {
+  "army_provinces": {
+   "british_regulars": "charlestown",
+   "continental_militia": "charlestown"
+  },
+  "army_strengths": {
+   "british_regulars": 30,
+   "continental_militia": 50
+  },
+  "adjacency": {
+   "charlestown": [
+    "cambridge"
+   ]
+  }
+ }
+}

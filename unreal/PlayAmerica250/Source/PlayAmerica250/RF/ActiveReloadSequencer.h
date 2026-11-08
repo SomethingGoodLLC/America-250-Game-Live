@@ -34,6 +34,15 @@ struct FActiveReloadTuningPlain
 	float JamChanceOnMiss = 0.12f;
 	float JamClearHoldSeconds = 1.25f;
 	float PerfectDamageBonus = 0.15f;
+	/** Center of the sweet/perfect windows as a fraction of each phase (legacy 0.5). */
+	float WindowCenter = 0.5f;
+	/** Preset mode: a phase that runs out un-pressed completes normally (base reload) instead of
+	 *  counting as a miss. Legacy DA_MusketTuning path leaves this false. */
+	bool bTimeoutCompletesPhase = false;
+	/** Preset mode: a fumble pauses (MissDelay) and the step continues where it was, instead of restarting. */
+	bool bMissResumesProgress = false;
+	/** Preset mode: after one fumble in a step, further early presses in that step are ignored (no mash penalty). */
+	bool bIgnoreRepeatMiss = false;
 };
 
 struct FActiveReloadStats
@@ -93,6 +102,8 @@ private:
 	float SpeedScale = 1.f;
 	float PendingDamageBonus = 0.f;
 	float JamHold = 0.f;
+	float ResumeTime = 0.f;
+	bool bMissedInPhase = false;
 	int32 PerfectHits = 0;
 	int32 PhasesCompleted = 0;
 	FActiveReloadStats Stats;

@@ -1,0 +1,21 @@
+{
+ "name": "reject_defect_gold_exceeds_treasury",
+ "description": "cannot promise more gold than the treasury holds",
+ "proposal": {
+  "spoken_line": "...",
+  "clauses": [
+   {
+    "type": "defect",
+    "title": "mayor_of_boston",
+    "gold": 9000,
+    "provinces": []
+   }
+  ]
+ },
+ "expect": {
+  "valid": false,
+  "error_codes": [
+   "gold_exceeds_treasury"
+  ]
+ }
+}

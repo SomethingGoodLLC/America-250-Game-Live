@@ -41,9 +41,10 @@ def _turn(speaker: str, text: str) -> SpeakerTurnModel:
 
 def test_tool_schema_clause_enum_comes_only_from_allowed_types() -> None:
     schema = build_tool_schema(["ceasefire", "prisoner_exchange"])
-    enum = schema["properties"]["clauses"]["items"]["properties"]["type"]["enum"]
-    assert enum == ["ceasefire", "prisoner_exchange"]
-    assert schema["properties"]["clauses"]["items"]["additionalProperties"] is False
+    variants = schema["properties"]["clauses"]["items"]["anyOf"]
+    assert [v["properties"]["type"]["enum"] for v in variants] == [["ceasefire"], ["prisoner_exchange"]]
+    assert all(v["additionalProperties"] is False for v in variants)
+    assert all("type" in v["required"] for v in variants)
 
 
 def test_turns_to_messages_alternates_and_ends_with_user() -> None:

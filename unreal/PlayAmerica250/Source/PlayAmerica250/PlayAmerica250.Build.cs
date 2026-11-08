@@ -14,6 +14,7 @@ public class PlayAmerica250 : ModuleRules
 			"Engine",
 			"InputCore",
 			"EnhancedInput",
+			"ProceduralMeshComponent",
 			"AIModule",
 			"StateTreeModule",
 			"GameplayStateTreeModule",
@@ -32,7 +33,8 @@ public class PlayAmerica250 : ModuleRules
 			"Projects",
 			"NavigationSystem",
 			"MediaUtils",
-			"Media"
+			"Media",
+			"FunctionalTesting"
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[] { "ImageWrapper" });

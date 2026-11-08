@@ -185,6 +185,28 @@ bool CampaignController::finish_diplomacy(const DiplomacyResult* result, std::st
     return true;
 }
 
+bool CampaignController::apply_envoy_act(const DiplomacyResult& result, std::string& error) {
+    if (flow_ != Flow::Diplomacy || result.faction != context_.faction) {
+        error = "no matching diplomacy in progress";
+        return false;
+    }
+    state_ = apply_diplomacy(state_, result);
+    context_ = build_diplomacy_context(state_, context_.faction);
+    record("envoy_act", result.proposal.clauses.empty() ? "" : result.proposal.clauses[0].type);
+    return true;
+}
+
+bool CampaignController::register_failure(std::string& error) {
+    if (flow_ != Flow::Diplomacy) {
+        error = "only in diplomacy flow";
+        return false;
+    }
+    state_ = register_diplomacy_failure(state_, context_.faction);
+    context_ = build_diplomacy_context(state_, context_.faction);
+    record("diplomacy_failure", context_.mood);
+    return true;
+}
+
 bool CampaignController::save(const std::string& path, std::string& error) {
     if (!started_ || flow_ != Flow::Campaign) {
         error = "save only in campaign flow at an hour boundary";

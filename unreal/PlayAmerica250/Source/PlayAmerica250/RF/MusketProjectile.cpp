@@ -3,12 +3,17 @@
 #include "Components/StaticMeshComponent.h"
 #include "GameFramework/ProjectileMovementComponent.h"
 #include "Kismet/GameplayStatics.h"
+#include "GameFramework/PlayerController.h"
+#include "Materials/MaterialInstanceDynamic.h"
+#include "PA250BattleGameMode.h"
+#include "PA250WeaponTuning.h"
+#include "PA250BattleAudio.h"
 #include "RFCharacter.h"
 #include "UObject/ConstructorHelpers.h"
 
 AMusketProjectile::AMusketProjectile()
 {
-	PrimaryActorTick.bCanEverTick = false;
+	PrimaryActorTick.bCanEverTick = true; // tracer length
 
 	CollisionComponent = CreateDefaultSubobject<USphereComponent>(TEXT("SphereComponent"));
 	CollisionComponent->InitSphereRadius(5.f);
@@ -24,27 +29,50 @@ AMusketProjectile::AMusketProjectile()
 	BallMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("BallMesh"));
 	BallMesh->SetupAttachment(RootComponent);
 	BallMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	BallMesh->SetRelativeScale3D(FVector(0.1f));
+	BallMesh->SetRelativeScale3D(FVector(0.06f));
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> SphereMesh(TEXT("/Engine/BasicShapes/Sphere.Sphere"));
 	if (SphereMesh.Succeeded())
 	{
 		BallMesh->SetStaticMesh(SphereMesh.Object);
 	}
 
+	TracerMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("TracerMesh"));
+	TracerMesh->SetupAttachment(RootComponent);
+	TracerMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	TracerMesh->SetCastShadow(false);
+	TracerMesh->SetRelativeRotation(FRotator(90.f, 0.f, 0.f)); // cylinder axis (Z) -> flight axis (X)
+	TracerMesh->SetVisibility(false);
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> TracerCyl(TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
+	if (TracerCyl.Succeeded())
+	{
+		TracerMesh->SetStaticMesh(TracerCyl.Object);
+	}
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> Glow(TEXT("/Engine/EngineMaterials/EmissiveMeshMaterial.EmissiveMeshMaterial"));
+	if (Glow.Succeeded())
+	{
+		TracerMesh->SetMaterial(0, Glow.Object);
+	}
+
 	ProjectileMovement = CreateDefaultSubobject<UProjectileMovementComponent>(TEXT("ProjectileMovement"));
 	ProjectileMovement->UpdatedComponent = CollisionComponent;
-	ProjectileMovement->InitialSpeed = 3000.f;
-	ProjectileMovement->MaxSpeed = 3000.f;
+	ProjectileMovement->InitialSpeed = 30000.f;
+	ProjectileMovement->MaxSpeed = 30000.f;
 	ProjectileMovement->bRotationFollowsVelocity = true;
 	ProjectileMovement->bShouldBounce = false;
-	ProjectileMovement->ProjectileGravityScale = 0.3f;  // musket balls are fast; gentle drop
+	ProjectileMovement->ProjectileGravityScale = 0.3f;
 
-	InitialLifeSpan = 10.f;
+	InitialLifeSpan = 2.f; // 200 m max range at 300 m/s is ~0.7 s
 }
 
 void AMusketProjectile::BeginPlay()
 {
 	Super::BeginPlay();
+	SpawnLocation = GetActorLocation();
+	if (UMaterialInstanceDynamic* MID = TracerMesh->CreateAndSetMaterialInstanceDynamic(0))
+	{
+		MID->SetVectorParameterValue(TEXT("Color"), TracerColor);
+	}
+	UpdateTracer();
 	if (AActor* Shooter = GetInstigator())
 	{
 		CollisionComponent->IgnoreActorWhenMoving(Shooter, true);
@@ -54,6 +82,14 @@ void AMusketProjectile::BeginPlay()
 void AMusketProjectile::OnHit(UPrimitiveComponent* HitComp, AActor* OtherActor, UPrimitiveComponent* OtherComp,
                               FVector NormalImpulse, const FHitResult& Hit)
 {
+	if (!HasAuthority())
+	{
+		Destroy();
+		return;
+	}
+	// Impact sound: a dull thud on a man, a dirt burst on anything else.
+	FPA250BattleAudio::PlayAt(this, Cast<ARFCharacter>(OtherActor) ? TEXT("impact_body") : TEXT("impact_ground"),
+		Hit.ImpactPoint, EPA250SoundRange::Near, 1.f, 0.1f);
 	if (OtherActor && OtherActor != this && OtherActor != GetInstigator())
 	{
 		bool bApply = true;
@@ -68,13 +104,77 @@ void AMusketProjectile::OnHit(UPrimitiveComponent* HitComp, AActor* OtherActor, 
 		}
 		if (bApply)
 		{
-			UGameplayStatics::ApplyPointDamage(OtherActor, Damage, GetVelocity().GetSafeNormal(), Hit,
+			float Applied = Damage;
+			const float DistCm = FVector::Dist(SpawnLocation, Hit.ImpactPoint);
+			if (WeaponTuning)
+			{
+				Applied = WeaponTuning->Values.DamageAtDistanceCm(DistCm);
+				if (Applied <= 0.f)
+				{
+					Destroy();
+					return;
+				}
+				// Head heuristic: hits above mid-capsule count as headshots.
+				if (const APawn* Pawn = Cast<APawn>(OtherActor))
+				{
+					const float MidZ = Pawn->GetActorLocation().Z + 40.f;
+					if (Hit.ImpactPoint.Z >= MidZ + 35.f)
+					{
+						Applied *= WeaponTuning->Values.HeadMultiplier;
+					}
+				}
+				// Preserve perfect-reload bonus baked into Damage relative to near torso.
+				const float Near = FMath::Max(1.f, WeaponTuning->Values.TorsoDamageNear);
+				Applied *= (Damage / Near);
+			}
+			UGameplayStatics::ApplyPointDamage(OtherActor, Applied, GetVelocity().GetSafeNormal(), Hit,
 			                                   GetInstigatorController(), this, nullptr);
 			if (OtherComp && OtherComp->IsSimulatingPhysics())
 			{
 				OtherComp->AddImpulseAtLocation(GetVelocity() * 0.5f, Hit.ImpactPoint);
 			}
+			if (APA250BattleGameMode* GM = GetWorld() ? GetWorld()->GetAuthGameMode<APA250BattleGameMode>() : nullptr)
+			{
+				GM->NotifyProjectileHit(Cast<ARFCharacter>(GetInstigator()), Cast<ARFCharacter>(OtherActor), Applied);
+			}
 		}
 	}
 	Destroy();
+}
+
+void AMusketProjectile::Tick(float DeltaSeconds)
+{
+	Super::Tick(DeltaSeconds);
+	UpdateTracer();
+	// Whiz when the ball passes within 5 m of the listener (not for the listener's own shots).
+	const FVector Now = GetActorLocation();
+	FVector Listener;
+	if (!bWhizzed && bHavePrev && FPA250BattleAudio::GetListener(this, Listener))
+	{
+		const APlayerController* PC = GetWorld()->GetFirstPlayerController();
+		const bool bOwnShot = PC && GetInstigator() && GetInstigator() == PC->GetPawn();
+		const FVector Closest = FMath::ClosestPointOnSegment(Listener, PrevLocation, Now);
+		if (!bOwnShot && FVector::Dist(Closest, Listener) < 500.f && FVector::Dist(SpawnLocation, Listener) > 800.f)
+		{
+			bWhizzed = true;
+			FPA250BattleAudio::PlayAt(this, TEXT("ball_whiz"), Closest, EPA250SoundRange::Whiz, 1.f, 0.12f);
+		}
+	}
+	PrevLocation = Now;
+	bHavePrev = true;
+}
+
+void AMusketProjectile::UpdateTracer()
+{
+	if (!TracerMesh) return;
+	// The streak trails the ball and never reaches back past the muzzle (no streak in the shooter's face).
+	const float Len = FMath::Min(TracerLengthCm, FVector::Dist(SpawnLocation, GetActorLocation()));
+	if (Len < 20.f)
+	{
+		TracerMesh->SetVisibility(false);
+		return;
+	}
+	TracerMesh->SetRelativeLocation(FVector(-0.5f * Len, 0.f, 0.f));
+	TracerMesh->SetRelativeScale3D(FVector(TracerThicknessCm / 100.f, TracerThicknessCm / 100.f, Len / 100.f));
+	TracerMesh->SetVisibility(true);
 }

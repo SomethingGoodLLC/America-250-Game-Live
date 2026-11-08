@@ -20,6 +20,8 @@ void FActiveReloadSequencer::BeginReload()
 	SpeedScale = 1.f;
 	PendingDamageBonus = 0.f;
 	JamHold = 0.f;
+	ResumeTime = 0.f;
+	bMissedInPhase = false;
 	EnterPhase(EActiveReloadPhase::PrimePan);
 }
 
@@ -73,26 +75,28 @@ float FActiveReloadSequencer::GetPhaseProgress() const
 
 float FActiveReloadSequencer::GetSweetStart() const
 {
-	return FMath::Clamp(0.5f - Tuning.SweetZoneFraction * 0.5f, 0.f, 1.f);
+	return FMath::Clamp(Tuning.WindowCenter - Tuning.SweetZoneFraction * 0.5f, 0.f, 1.f);
 }
 
 float FActiveReloadSequencer::GetSweetEnd() const
 {
-	return FMath::Clamp(0.5f + Tuning.SweetZoneFraction * 0.5f, 0.f, 1.f);
+	return FMath::Clamp(Tuning.WindowCenter + Tuning.SweetZoneFraction * 0.5f, 0.f, 1.f);
 }
 
 float FActiveReloadSequencer::GetPerfectStart() const
 {
-	return FMath::Clamp(0.5f - Tuning.PerfectZoneFraction * 0.5f, 0.f, 1.f);
+	return FMath::Clamp(Tuning.WindowCenter - Tuning.PerfectZoneFraction * 0.5f, 0.f, 1.f);
 }
 
 float FActiveReloadSequencer::GetPerfectEnd() const
 {
-	return FMath::Clamp(0.5f + Tuning.PerfectZoneFraction * 0.5f, 0.f, 1.f);
+	return FMath::Clamp(Tuning.WindowCenter + Tuning.PerfectZoneFraction * 0.5f, 0.f, 1.f);
 }
 
 void FActiveReloadSequencer::GoToNextCombatPhase()
 {
+	bMissedInPhase = false;
+	ResumeTime = 0.f;
 	if (PhasesCompleted <= 0)
 	{
 		EnterPhase(EActiveReloadPhase::PrimePan);
@@ -137,6 +141,8 @@ void FActiveReloadSequencer::AdvanceAfterHit(EActiveReloadHit Hit, FRandomStream
 		break;
 	case EActiveReloadHit::Miss:
 		++Stats.Miss;
+		bMissedInPhase = true;
+		ResumeTime = Tuning.bMissResumesProgress ? PhaseTime : 0.f;
 		{
 			const float Roll = JamRng ? JamRng->FRand() : FMath::FRand();
 			if (Roll < Tuning.JamChanceOnMiss)
@@ -179,11 +185,20 @@ void FActiveReloadSequencer::Tick(float DeltaSeconds)
 		if (PhaseTime >= PhaseLen)
 		{
 			EnterPhase(ResumePhase);
+			PhaseTime = ResumeTime;
 		}
 		return;
 	}
 	if (PhaseTime >= PhaseLen && (Phase == EActiveReloadPhase::PrimePan || Phase == EActiveReloadPhase::RamCharge || Phase == EActiveReloadPhase::ShoulderAim))
 	{
+		if (Tuning.bTimeoutCompletesPhase)
+		{
+			// Base path: no press is a normal, unhurried reload (no stat, no bonus, no jam roll).
+			++PhasesCompleted;
+			if (PhasesCompleted >= 3) FinishReload();
+			else GoToNextCombatPhase();
+			return;
+		}
 		AdvanceAfterHit(EActiveReloadHit::Miss, nullptr);
 	}
 }
@@ -195,6 +210,10 @@ EActiveReloadHit FActiveReloadSequencer::TryCommit()
 		return EActiveReloadHit::None;
 	}
 	const EActiveReloadHit Hit = Classify(GetPhaseProgress());
+	if (Hit == EActiveReloadHit::Miss && Tuning.bIgnoreRepeatMiss && bMissedInPhase)
+	{
+		return EActiveReloadHit::None; // already fumbled this step; mashing costs nothing more
+	}
 	AdvanceAfterHit(Hit, nullptr);
 	return Hit;
 }
@@ -237,6 +256,7 @@ bool FActiveReloadSequencer::TryClearJam(bool bHolding, float DeltaSeconds)
 	{
 		JamHold = 0.f;
 		EnterPhase(ResumePhase);
+		PhaseTime = ResumeTime;
 		return true;
 	}
 	return false;
@@ -253,11 +273,11 @@ FString FActiveReloadSequencer::PhaseLabel() const
 {
 	switch (Phase)
 	{
-	case EActiveReloadPhase::PrimePan: return TEXT("Prime Pan");
-	case EActiveReloadPhase::RamCharge: return TEXT("Ram Charge");
-	case EActiveReloadPhase::ShoulderAim: return TEXT("Shoulder & Aim");
-	case EActiveReloadPhase::MissDelay: return TEXT("Recovering");
-	case EActiveReloadPhase::Jammed: return TEXT("Jammed!");
+	case EActiveReloadPhase::PrimePan: return TEXT("1/3  Prime the pan");
+	case EActiveReloadPhase::RamCharge: return TEXT("2/3  Ram the ball");
+	case EActiveReloadPhase::ShoulderAim: return TEXT("3/3  Shoulder arms");
+	case EActiveReloadPhase::MissDelay: return TEXT("Fumbled - redoing step");
+	case EActiveReloadPhase::Jammed: return TEXT("JAMMED");
 	case EActiveReloadPhase::Complete: return TEXT("Loaded");
 	default: return TEXT("");
 	}

@@ -1,0 +1,30 @@
+{
+ "name": "reject_surrender_in_protected_province",
+ "description": "an army inside Boston cannot give Boston away",
+ "proposal": {
+  "spoken_line": "...",
+  "clauses": [
+   {
+    "type": "surrender",
+    "army_id": "british_regulars",
+    "days": 14
+   }
+  ]
+ },
+ "expect": {
+  "valid": false,
+  "error_codes": [
+   "red_line_protected_province"
+  ]
+ },
+ "context_patch": {
+  "army_provinces": {
+   "british_regulars": "boston",
+   "continental_militia": "boston"
+  },
+  "army_strengths": {
+   "british_regulars": 30,
+   "continental_militia": 50
+  }
+ }
+}

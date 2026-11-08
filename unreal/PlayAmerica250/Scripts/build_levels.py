@@ -158,8 +158,8 @@ def make_tuning():
         conquest = unreal.ConquestTuning()
         conquest.set_editor_property("capture_seconds", 3.5)
         conquest.set_editor_property("capture_per_attacker_scale", 0.35)
-        conquest.set_editor_property("bleed_interval_seconds", 8.0)
-        conquest.set_editor_property("post_radius", 1200.0)
+        conquest.set_editor_property("bleed_interval_seconds", 5.0)
+        conquest.set_editor_property("post_radius", 1000.0)
         conquest.set_editor_property("time_limit_seconds", 720.0)
         conquest.set_editor_property("bots_per_side", 16)
         v.set_editor_property("conquest", conquest)
@@ -167,7 +167,30 @@ def make_tuning():
         LOG("PA250: nested ConquestTuning not applied yet (%s)" % e)
     asset.set_editor_property("values", v)
     unreal.EditorAssetLibrary.save_loaded_asset(asset)
-    return asset
+    make_conquest_data_assets()
+
+
+def make_conquest_data_assets():
+    """Create DA_WeaponTuning / DA_BotTuning / DA_MeleeTuning / DA_FactionVisuals with C++ defaults."""
+    specs = (
+        ("DA_WeaponTuning", "PA250WeaponTuning"),
+        ("DA_BotTuning", "PA250BotTuning"),
+        ("DA_MeleeTuning", "PA250MeleeTuning"),
+        ("DA_FactionVisuals", "PA250FactionVisuals"),
+        ("DA_CombatProfiles", "PA250CombatProfiles"),
+    )
+    for name, cls_name in specs:
+        path = "/Game/PA250/Data/%s" % name
+        if unreal.EditorAssetLibrary.does_asset_exist(path):
+            continue
+        cls = getattr(unreal, cls_name, None)
+        if cls is None:
+            LOG("PA250: skip %s (class %s not bound yet)" % (name, cls_name))
+            continue
+        asset = tools().create_asset(name, "/Game/PA250/Data", cls, unreal.DataAssetFactory())
+        if asset:
+            unreal.EditorAssetLibrary.save_loaded_asset(asset)
+            LOG("PA250: created %s" % path)
 
 
 def spawn(cls, loc=(0, 0, 0), rot=(0, 0, 0), label=None, scale=None):
@@ -1064,18 +1087,68 @@ def place_stone_wall(label, p0, p1, stone_mat, rng):
                         (length / n + 25, 80, 120), stone_mat, rot_yaw=yaw)
             blk.set_actor_hidden_in_game(True)
             blk.static_mesh_component.set_visibility(False)
+            tag(blk, "PA250Cover")  # bots use tagged walls as firing positions
         return
     for i in range(n):
         t = (i + 0.5) / n
         x, y = p0[0] + (p1[0] - p0[0]) * t, p0[1] + (p1[1] - p0[1]) * t
         hgt = rng.uniform(95, 135)
         if mesh:
-            fit_native("%s_%d" % (label, i), mesh, (x, y, ground_z(x, y) - 10), hgt,
-                       (0, yaw + rng.uniform(-6, 6), 0))
+            a = fit_native("%s_%d" % (label, i), mesh, (x, y, ground_z(x, y) - 10), hgt,
+                           (0, yaw + rng.uniform(-6, 6), 0))
         else:
-            block("%s_%d" % (label, i), (x, y, ground_z(x, y) + hgt * 0.5 - 10),
-                  (length / n + 25, rng.uniform(60, 80), hgt), stone_mat,
-                  rot_yaw=yaw + rng.uniform(-3, 3))
+            a = block("%s_%d" % (label, i), (x, y, ground_z(x, y) + hgt * 0.5 - 10),
+                      (length / n + 25, rng.uniform(60, 80), hgt), stone_mat,
+                      rot_yaw=yaw + rng.uniform(-3, 3))
+        tag(a, "PA250Cover")
+
+
+# Battle Road (GAME INVENTION layout, after the 19 April 1775 running fight): field walls flank the
+# Boston road where the British column approaches, and militia companies muster in from the north,
+# south and west. Walls are 1.1 m collision (chest covered, shoulder clear) tagged PA250Cover.
+BATTLE_ROAD_WALLS = (
+    ("BattleRoad_RoadN", (6500, -3250), (2700, -3600)),   # parallel to the road, ~17 m north of it
+    ("BattleRoad_RoadS", (6400, 350), (2900, 700)),       # parallel to the road, ~17 m south
+    ("BattleRoad_FieldN1", (5200, -6200), (5000, -3900)),  # cross walls facing the approach
+    ("BattleRoad_FieldS1", (4700, 1100), (4900, 3500)),
+    ("BattleRoad_FieldN2", (1800, -6400), (2000, -4000)),
+    ("BattleRoad_FieldS2", (3100, 1900), (3300, 4400)),
+)
+MUSTER_POINTS = (  # label, xy; tagged "continental_muster"
+    ("Muster_Continental_North", (300, -6800)),
+    ("Muster_Continental_South", (1500, 5400)),
+    ("Muster_Continental_West", (-6800, -2600)),
+)
+
+
+def place_battle_road(stone, rng):
+    for label, p0, p1 in BATTLE_ROAD_WALLS:
+        place_stone_wall(label, p0, p1, stone, rng)
+    for label, (x, y) in MUSTER_POINTS:
+        tag(spawn(unreal.PlayerStart, (x, y, ground_z(x, y) + 120), (0, 0, 0), label), "continental_muster")
+
+
+def build_lexington_battle_road():
+    """Add the Battle Road walls + muster points to the existing L_Lexington (idempotent; leaves
+    everything else in the level untouched) and tag the existing stone walls as cover."""
+    import random
+
+    les = unreal.get_editor_subsystem(unreal.LevelEditorSubsystem)
+    les.load_level(MAPS + "/L_Lexington")
+    actors = unreal.get_editor_subsystem(unreal.EditorActorSubsystem).get_all_level_actors()
+    removed = tagged = 0
+    for a in actors:
+        label = a.get_actor_label()
+        if label.startswith("BattleRoad_") or label.startswith("Muster_"):
+            a.destroy_actor()
+            removed += 1
+        elif label.startswith("Wall_") and isinstance(a, unreal.StaticMeshActor):
+            tag(a, "PA250Cover")
+            tagged += 1
+    stone = make_material("MI_PA250_Stone", (0.42, 0.41, 0.38))
+    place_battle_road(stone, random.Random(17750419))
+    save(les)
+    LOG("PA250: Battle Road on L_Lexington (removed %d old, tagged %d existing walls)" % (removed, tagged))
 
 
 def dress_meadow(rng):
@@ -1220,6 +1293,7 @@ def build_lexington():
         place_stone_wall("Wall_" + side, p0, p1, stone, rng)
     # Field walls along the Boston road east of the Common.
     place_stone_wall("Wall_E", (3200, -2000), (9000, -1000), stone, rng)
+    place_battle_road(stone, rng)
 
     # Split-rail fences around the Common, clear of the posts and buildings.
     place_split_rail("Fence_NE", (2100, -2900), (2400, 500), wood)
@@ -1500,10 +1574,49 @@ def build_diplomacy():
     LOG("PA250: built L_DiplomacyRoom")
 
 
+def build_ftest_bot_spacing():
+    """Flat Lexington-like layout for APA250BotSpacingTest (3 CPs, battle GM)."""
+    make_tuning()
+    les = new_level("/Game/Tests/FTEST_BotSpacing")
+    set_game_mode("PA250BattleGameMode")
+    # Flat ground pad.
+    ground = spawn(unreal.StaticMeshActor, (0, 0, 0), (0, 0, 0), "Ground")
+    ground.set_actor_scale3d(unreal.Vector(120, 120, 1))
+    gcomp = ground.static_mesh_component
+    gcomp.set_mobility(unreal.ComponentMobility.STATIC)
+    gcomp.set_static_mesh(unreal.EditorAssetLibrary.load_asset("/Engine/BasicShapes/Cube"))
+    posts = (
+        ("green", (0, 0, 100), ""),
+        ("meetinghouse", (-4000, -2000, 100), "continental"),
+        ("buckman", (-4000, 2000, 100), "continental"),
+    )
+    for pid, loc, owner in posts:
+        a = spawn(unreal.PA250ControlPoint, loc, (0, 0, 0), "CP_%s" % pid)
+        a.set_editor_property("post_id", pid)
+        if owner:
+            a.set_editor_property("initial_owner", owner)
+        a.set_editor_property("radius", 1000.0)
+    # Functional test actor.
+    try:
+        ft = spawn(unreal.PA250BotSpacingTest, (0, 0, 200), (0, 0, 0), "FTEST_BotSpacing")
+        ft.set_editor_property("duration_seconds", 90.0)
+    except Exception as e:
+        LOG("PA250: APA250BotSpacingTest spawn skipped (%s)" % e)
+    # Spawns
+    for tag_name, xy in (("british", (5000, 0)), ("continental", (-6000, 0))):
+        ps = spawn(unreal.PlayerStart, (xy[0], xy[1], 120), (0, 180 if tag_name == "british" else 0, 0), "Start_%s" % tag_name)
+        tag(ps, tag_name)
+    save(les)
+    LOG("PA250: built /Game/Tests/FTEST_BotSpacing")
+
+
 BUILDERS = {
     "campaign": build_campaign,
     "lexington": build_lexington,
     "diplomacy": build_diplomacy,
+    "ftest_bot_spacing": build_ftest_bot_spacing,
+    "lexington_battle_road": build_lexington_battle_road,
+    "data": make_tuning,  # DataAssets only (creates missing DA_*; never overwrites existing ones)
 }
 try:
     from pa250_levels_extra import register  # optional per-milestone extensions

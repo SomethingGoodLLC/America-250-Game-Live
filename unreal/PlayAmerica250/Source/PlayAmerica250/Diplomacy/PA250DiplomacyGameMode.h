@@ -66,6 +66,7 @@ private:
 	bool bGotCeasefire = false;
 	bool bGotResponse = false;
 	bool bGotProposal = false;
+	bool bPlayerSpoke = false;
 	FTimerHandle ScriptTimer;
 
 	UPROPERTY(Transient)

@@ -101,6 +101,8 @@ CampaignState apply_battle_result(const CampaignState& in, const BattleResult& r
     }
     for (auto& kv : s.armies) {
         Army& a = kv.second;
+        // Only the two armies whose tickets were included fought this battle.
+        if (kv.first != pb.attacker_army && kv.first != pb.defender_army) continue;
         if (a.province != r.province_id) continue;
         if (a.faction == r.winner) {
             a.morale = detail::clamp_int(a.morale + 5, 0, 100);
@@ -119,7 +121,8 @@ CampaignState apply_battle_result(const CampaignState& in, const BattleResult& r
         it->second.hours_into_edge = 0;
     }
     for (auto it = s.armies.begin(); it != s.armies.end();) {
-        if (detail::total_units(it->second) <= 0) {
+        if ((it->first == pb.attacker_army || it->first == pb.defender_army) &&
+            detail::total_units(it->second) <= 0) {
             detail::add_log(s, "army destroyed: " + it->first);
             it = s.armies.erase(it);
         } else {

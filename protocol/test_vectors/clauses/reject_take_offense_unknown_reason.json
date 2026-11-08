@@ -1,0 +1,20 @@
+{
+ "name": "reject_take_offense_unknown_reason",
+ "description": "reasons come from a fixed list",
+ "proposal": {
+  "spoken_line": "...",
+  "clauses": [
+   {
+    "type": "take_offense",
+    "reason": "boredom",
+    "days": 3
+   }
+  ]
+ },
+ "expect": {
+  "valid": false,
+  "error_codes": [
+   "unknown_offense_reason"
+  ]
+ }
+}

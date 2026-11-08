@@ -1,0 +1,19 @@
+{
+ "name": "valid_vassalage_uncapped_gold",
+ "description": "the Crown may offer any amount of gold",
+ "proposal": {
+  "spoken_line": "...",
+  "clauses": [
+   {
+    "type": "vassalage",
+    "title": "baron",
+    "gold": 5000,
+    "provinces": []
+   }
+  ]
+ },
+ "expect": {
+  "valid": true,
+  "error_codes": []
+ }
+}

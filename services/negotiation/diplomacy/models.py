@@ -12,6 +12,10 @@ ALLOWED_CLAUSE_TYPES: tuple[str, ...] = (
     "prisoner_exchange",
     "safe_passage",
     "cede_province",
+    "defect",
+    "surrender",
+    "vassalage",
+    "take_offense",
 )
 
 # Keys permitted per clause type (strict: anything else is rejected, matching the C++ parser).
@@ -20,6 +24,10 @@ CLAUSE_FIELDS: dict[str, tuple[str, ...]] = {
     "prisoner_exchange": ("type", "counts"),
     "safe_passage": ("type", "army_id", "province_id", "days"),
     "cede_province": ("type", "province_id"),
+    "defect": ("type", "title", "gold", "provinces"),
+    "surrender": ("type", "army_id", "days"),
+    "vassalage": ("type", "title", "gold", "provinces"),
+    "take_offense": ("type", "reason", "days"),
 }
 
 
@@ -48,6 +56,18 @@ class DiplomacyContext(BaseModel):
     prisoners_held: dict[str, int]
     treaties: list[Treaty] = Field(default_factory=list)
     memory: list[str] = Field(default_factory=list)
+    envoy_loyalty: int = 0
+    envoy_defected: bool = False
+    player_gold: int = 0
+    defect_price: int = 0
+    titles: dict[str, int] = Field(default_factory=dict)
+    army_provinces: dict[str, str] = Field(default_factory=dict)
+    army_strengths: dict[str, int] = Field(default_factory=dict)
+    adjacency: dict[str, list[str]] = Field(default_factory=dict)
+    grievance: int = 0
+    snubbed_hours_left: int = 0
+    mood: str = "calm"
+    player_vassal: bool = False
 
     @property
     def max_ceasefire_days(self) -> int:
@@ -67,6 +87,10 @@ class Clause(BaseModel):
     has_counts: bool = False
     army_id: str = ""
     province_id: str = ""
+    title: str = ""
+    gold: int = -1
+    provinces: list[str] = Field(default_factory=list)
+    reason: str = ""
 
     def to_wire(self) -> dict[str, Any]:
         t = self.type
@@ -83,6 +107,14 @@ class Clause(BaseModel):
             }
         if t == "cede_province":
             return {"type": t, "province_id": self.province_id}
+        if t == "take_offense":
+            return {"type": t, "reason": self.reason, "days": self.days}
+        if t in ("defect", "vassalage"):
+            return {"type": t, "title": self.title, "gold": self.gold, "provinces": list(self.provinces)}
+        if t == "surrender":
+            return {"type": t, "army_id": self.army_id, "days": self.days}
+        if t == "defect":
+            return {"type": t, "title": self.title, "gold": self.gold, "provinces": list(self.provinces)}
         return {"type": t}
 
 
@@ -138,7 +170,27 @@ def parse_proposal(raw: Any) -> tuple[DiplomacyProposal, list[str]]:
             if allowed_keys is not None and k not in allowed_keys:
                 errors.append(_err("unexpected_field", f"{clause.type}.{k}"))
                 continue
-            if k == "days":
+            if k == "gold":
+                if _is_int(v):
+                    clause.gold = v
+                else:
+                    errors.append(_err("malformed_clause", "gold"))
+            elif k == "reason":
+                if isinstance(v, str):
+                    clause.reason = v
+                else:
+                    errors.append(_err("malformed_clause", "reason"))
+            elif k == "title":
+                if isinstance(v, str):
+                    clause.title = v
+                else:
+                    errors.append(_err("malformed_clause", "title"))
+            elif k == "provinces":
+                if isinstance(v, list) and all(isinstance(x, str) for x in v):
+                    clause.provinces = list(v)
+                else:
+                    errors.append(_err("malformed_clause", "provinces"))
+            elif k == "days":
                 if _is_int(v):
                     clause.days = v
                 else:

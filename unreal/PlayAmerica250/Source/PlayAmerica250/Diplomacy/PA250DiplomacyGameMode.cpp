@@ -235,6 +235,24 @@ FString APA250DiplomacyGameMode::DescribeClause(const TSharedPtr<FJsonObject>& C
 	{
 		return FString::Printf(TEXT("The British cede %s to you"), *ProvName(C->GetStringField(TEXT("province_id"))));
 	}
+	if (Type == TEXT("vassalage"))
+	{
+		FString Title;
+		C->TryGetStringField(TEXT("title"), Title);
+		Title.ReplaceInline(TEXT("_"), TEXT(" "));
+		return FString::Printf(TEXT("Swear yourself a vassal of the Crown: title %s, %d gold, the King's peace on your army"), *Title, (int32)C->GetNumberField(TEXT("gold")));
+	}
+	if (Type == TEXT("surrender"))
+	{
+		return FString::Printf(TEXT("%s marches out with the honors of war (parole %d days)"), *C->GetStringField(TEXT("army_id")), (int32)C->GetNumberField(TEXT("days")));
+	}
+	if (Type == TEXT("defect"))
+	{
+		FString Title;
+		C->TryGetStringField(TEXT("title"), Title);
+		Title.ReplaceInline(TEXT("_"), TEXT(" "));
+		return FString::Printf(TEXT("The envoy changes sides (%s, %d gold)"), *Title, (int32)C->GetNumberField(TEXT("gold")));
+	}
 	return Type;
 }
 
@@ -256,7 +274,32 @@ void APA250DiplomacyGameMode::HandleProposal(const TSharedPtr<FJsonObject>& Msg)
 		FJsonSerializer::Serialize(P, TJsonWriterFactory<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>::Create(&Json));
 		// The sim validates again before anything is shown; only validated clauses reach the terms panel.
 		const TArray<FString> Errors = Sub->ValidateProposalJson(Json);
+		bool bOffense = false;
 		if (Errors.Num() == 0)
+		{
+			if (const TSharedPtr<FJsonObject>* First = nullptr; (*Clauses)[0]->TryGetObject(First) && First)
+			{
+				FString T;
+				(*First)->TryGetStringField(TEXT("type"), T);
+				bOffense = T == TEXT("take_offense");
+			}
+		}
+		if (bOffense)
+		{
+			// Taking offense is the envoy's own act: it applies at once and shuts the talks for days.
+			FString ActErr;
+			if (Sub->ApplyEnvoyActJson(Json, ActErr))
+			{
+				const int32 Days = (int32)(*Clauses)[0]->AsObject()->GetNumberField(TEXT("days"));
+				StatusLine = FString::Printf(TEXT("%s takes offense and will not treat for %d days."), *EnvoyName, Days);
+				Transcript.Add(FString::Printf(TEXT("[%s takes offense. Talks are closed for %d days.]"), *EnvoyName, Days));
+			}
+			else
+			{
+				UE_LOG(LogTemp, Warning, TEXT("PA250 envoy act failed: %s"), *ActErr);
+			}
+		}
+		else if (Errors.Num() == 0)
 		{
 			PendingProposalJson = Json;
 			for (const TSharedPtr<FJsonValue>& V : *Clauses)
@@ -287,6 +330,7 @@ void APA250DiplomacyGameMode::Send(const FString& Text)
 		return;
 	}
 	Transcript.Add(TEXT("You: ") + Text);
+	bPlayerSpoke = true;
 	TermLines.Reset();
 	PendingProposalJson.Reset();
 	StatusLine.Reset();
@@ -329,6 +373,10 @@ void APA250DiplomacyGameMode::Leave()
 	FString Err;
 	if (Sub && Sub->GetFlow() == EPA250Flow::Diplomacy)
 	{
+		if (bPlayerSpoke && !bSelftest && !bScripted)
+		{
+			Sub->RegisterDiplomacyFailure(Err);  // talked, then left without agreement
+		}
 		Sub->LeaveDiplomacy(Err);
 	}
 	ReturnToCampaign();

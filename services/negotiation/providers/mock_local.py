@@ -9,7 +9,7 @@ from typing import Any
 import structlog
 
 from diplomacy.models import DiplomacyContext
-from diplomacy.scripted import scripted_reply
+from diplomacy.scripted import fallback_reply, scripted_reply
 from schemas.models import (
     ConcessionModel,
     CounterOfferModel,
@@ -143,6 +143,8 @@ class MockLocalProvider(Provider):
         # Generate AI conversational response first
         if scripted:
             ai_response = scripted["spoken_line"]
+        elif dctx:
+            ai_response = fallback_reply(text, dctx)
         else:
             ai_response = await self._generate_ai_response(text, last_turn, world_context)
 

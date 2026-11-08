@@ -64,6 +64,10 @@
 		{
 			"Name": "MediaCompositing",
 			"Enabled": true
+		},
+		{
+			"Name": "ProceduralMeshComponent",
+			"Enabled": true
 		}
 	]
 }

@@ -7,6 +7,24 @@
 
 class USphereComponent;
 class UStaticMeshComponent;
+class UProceduralMeshComponent;
+
+USTRUCT(BlueprintType)
+struct PLAYAMERICA250_API FPA250PostSlot
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadOnly, Category = "Slot")
+	FVector Location = FVector::ZeroVector;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Slot")
+	int32 Sector = 0;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Slot")
+	bool bClaimed = false;
+
+	TWeakObjectPtr<AActor> Claimant;
+};
 
 UCLASS()
 class PLAYAMERICA250_API APA250ControlPoint : public AActor
@@ -19,22 +37,21 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objective")
 	FName PostId = TEXT("green");
 
-	/** Faction that owns the post at BeginPlay, or NAME_None for neutral. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objective")
 	FName InitialOwner = NAME_None;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objective")
-	float Radius = 1200.f;
+	float Radius = 1000.f;
 
-	/** Seconds of sole presence (one attacker) to complete one ownership step. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objective")
 	float CaptureSeconds = 3.5f;
 
-	/** Extra rate per additional attacker: rate = 1 + (n-1)*scale. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objective")
 	float CapturePerAttackerScale = 0.35f;
 
-	/** Multiplier applied while any overlapping soldier is suppressed (volley). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objective")
+	float CapturePerDefenderScale = 0.35f;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objective")
 	float CaptureRateScale = 1.f;
 
@@ -44,7 +61,6 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Objective")
 	FName GetCapturer() const { return Capturer; }
 
-	/** 0..1 progress toward the next ownership step (to neutral or to capturer). */
 	UFUNCTION(BlueprintPure, Category = "Objective")
 	float GetCaptureProgress() const { return CaptureProgress; }
 
@@ -53,7 +69,6 @@ public:
 
 	int32 GetPresence(FName Faction) const { const int32* N = Presence.Find(Faction); return N ? *N : 0; }
 
-	/** True if this post flipped ownership since the last call (clears the flag). */
 	bool ConsumeFlipFlag()
 	{
 		const bool B = bFlippedSinceLastCheck;
@@ -62,6 +77,38 @@ public:
 	}
 
 	void ApplyTuning(float InRadius, float InCaptureSeconds, float InPerAttackerScale);
+	void BuildSlotRing(int32 SlotCount, float MinRadiusCm, float MaxRadiusCm);
+	const TArray<FPA250PostSlot>& GetSlots() const { return Slots; }
+	bool ClaimSlot(int32 Index, AActor* Claimant);
+	void ReleaseSlot(AActor* Claimant);
+	int32 FindFreeSlot(int32 PreferredSector) const;
+	/** Angular octants around the post; squads prefer one sector each. */
+	static constexpr int32 NumSectors = 8;
+	/** Wrap-around distance between two sectors (0..4). */
+	static int32 SectorDistance(int32 A, int32 B);
+	FVector GetSlotLocation(int32 Index) const;
+
+	/** Pure: which flag flies and how high (0 = foot of the pole, 1 = top). A held post's flag lowers
+	 *  while the enemy neutralises it; on a neutral post the capturer's flag rises. Bare pole = NAME_None. */
+	static void FlagTarget(FName InHolder, FName InCapturer, float Progress, FName& OutFaction, float& OutHeight01);
+	/** Displayed (animated) flag: follows FlagTarget, lowering fully before it changes colour. */
+	FName GetFlagFaction() const { return FlagFaction; }
+	float GetFlagHeight() const { return FlagHeight; }
+	/** Advance the flag animation (called from Tick; public for tests). */
+	void UpdateFlag(float DeltaSeconds);
+	/** Player-facing name for a post id ("green" -> "Lexington Green"). */
+	static FString DisplayName(FName PostId);
+	/** HUD marker anchor: just above the flagpole. */
+	FVector GetMarkerLocation() const;
+	static constexpr float PoleHeight = 900.f;
+	/** Preview/test only: hand the post to a faction immediately (the flag then animates up). */
+	void DebugSetHolder(FName NewHolder) { Capturer = NAME_None; CaptureProgress = 0.f; SetHolder(NewHolder); }
+	FVector2D GetPoleOffset() const { return PoleOffset; }
+	/** Test hook: the cloth's current vertex count (0 before it is built). */
+	int32 GetClothVertexCount() const;
+
+	/** Pure capture-rate helper for tests: rate from attacker/defender counts. */
+	static float CaptureRate(int32 Attackers, int32 Defenders, float PerAttackerScale, float PerDefenderScale);
 
 protected:
 	virtual void Tick(float DeltaSeconds) override;
@@ -73,8 +120,23 @@ protected:
 	UPROPERTY(VisibleAnywhere)
 	TObjectPtr<UStaticMeshComponent> Disc;
 
+	UPROPERTY(VisibleAnywhere)
+	TObjectPtr<UStaticMeshComponent> FlagPole;
+
+	/** Waving cloth (procedural grid) carrying the faction's flag texture. */
+	UPROPERTY(VisibleAnywhere)
+	TObjectPtr<UProceduralMeshComponent> FlagCloth;
+
+	UPROPERTY(VisibleAnywhere)
+	TObjectPtr<UStaticMeshComponent> Finial;
+
 private:
 	void UpdateColor();
+	void TickCapture(float DeltaSeconds);
+	void PlaceFlag();
+	void UpdateCloth(bool bCreate);
+	/** Moves the pole (not the capture zone) to the nearest spot where pole + flag clear buildings. */
+	void FindClearPoleSpot();
 	void SetHolder(FName NewHolder);
 
 	FName Holder = NAME_None;
@@ -83,4 +145,16 @@ private:
 	bool bContested = false;
 	bool bFlippedSinceLastCheck = false;
 	TMap<FName, int32> Presence;
+	TArray<FPA250PostSlot> Slots;
+	float LogicAccum = 0.f;
+	float PoleBaseZ = -140.f;
+	FVector2D PoleOffset = FVector2D::ZeroVector;
+	FName FlagFaction = NAME_None;
+	float FlagHeight = 0.f;
+	FName FlagColorFaction = TEXT("unset");
+	float ClothTime = 0.f;
+	static constexpr int32 ClothSegX = 16;
+	static constexpr int32 ClothSegZ = 8;
+	static constexpr float ClothLength = 180.f;
+	static constexpr float ClothHeight = 90.f;
 };

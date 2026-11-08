@@ -1,0 +1,24 @@
+{
+ "name": "reject_defect_unknown_title",
+ "description": "titles come from the sim's table",
+ "proposal": {
+  "spoken_line": "...",
+  "clauses": [
+   {
+    "type": "defect",
+    "title": "king_of_america",
+    "gold": 300,
+    "provinces": [
+     "cambridge",
+     "roxbury"
+    ]
+   }
+  ]
+ },
+ "expect": {
+  "valid": false,
+  "error_codes": [
+   "unknown_title"
+  ]
+ }
+}

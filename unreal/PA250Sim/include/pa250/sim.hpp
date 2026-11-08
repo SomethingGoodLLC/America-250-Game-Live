@@ -42,6 +42,8 @@ DiplomacyContext build_diplomacy_context(const CampaignState& state, const std::
 std::vector<std::string> validate_proposal(const DiplomacyContext& context,
                                            const DiplomacyProposal& proposal);
 CampaignState apply_diplomacy(const CampaignState& state, const DiplomacyResult& result);
+// Talks ended without agreement: the envoy likes the player less and may snub them.
+CampaignState register_diplomacy_failure(const CampaignState& state, const std::string& faction);
 
 // ---- JSON bridges (strings in, strings out; nlohmann stays out of this header) ----
 std::string context_to_json(const DiplomacyContext& context);

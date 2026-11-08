@@ -1,0 +1,20 @@
+{
+ "name": "reject_take_offense_too_long",
+ "description": "a snub is at most 7 days",
+ "proposal": {
+  "spoken_line": "...",
+  "clauses": [
+   {
+    "type": "take_offense",
+    "reason": "disrespect",
+    "days": 8
+   }
+  ]
+ },
+ "expect": {
+  "valid": false,
+  "error_codes": [
+   "offense_too_long"
+  ]
+ }
+}

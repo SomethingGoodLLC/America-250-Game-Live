@@ -3,6 +3,8 @@ CompileFlags:
   Add:
     - -std=c++20
     - -Wno-unused-command-line-argument
+    # UHT outputs (*.generated.h) — keep resolvable for new TUs before CDB regen.
+    - -I/Users/leone/PycharmProjects/Samson/unreal/PlayAmerica250/Intermediate/Build/Mac/UnrealEditor/Inc/PlayAmerica250/UHT
   Remove:
     - -Werror
     - -fno-temp-file

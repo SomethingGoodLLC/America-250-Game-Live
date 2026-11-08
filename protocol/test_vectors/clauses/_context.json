@@ -1,21 +1,67 @@
 {
+ "adjacency": {
+  "boston": [
+   "charlestown",
+   "roxbury"
+  ],
+  "cambridge": [
+   "charlestown",
+   "lexington",
+   "roxbury"
+  ],
+  "charlestown": [
+   "boston",
+   "cambridge"
+  ],
+  "concord": [
+   "lexington"
+  ],
+  "lexington": [
+   "cambridge",
+   "concord"
+  ],
+  "roxbury": [
+   "boston",
+   "cambridge"
+  ]
+ },
  "allowed_clause_types": [
   "ceasefire",
   "prisoner_exchange",
   "safe_passage",
-  "cede_province"
+  "cede_province",
+  "defect",
+  "surrender",
+  "vassalage",
+  "take_offense"
  ],
  "armies": {
   "british_regulars": "british",
   "continental_militia": "continental"
  },
+ "army_provinces": {
+  "british_regulars": "boston",
+  "continental_militia": "roxbury"
+ },
+ "army_strengths": {
+  "british_regulars": 30,
+  "continental_militia": 20
+ },
  "counterpart": "continental",
+ "defect_price": 74,
+ "envoy_defected": false,
+ "envoy_loyalty": 70,
  "faction": "british",
+ "grievance": 0,
+ "hour_index": 0,
  "limits": {
   "max_ceasefire_days": 365,
   "max_safe_passage_days": 90
  },
  "memory": [],
+ "mood": "calm",
+ "player_gold": 500,
+ "player_vassal": false,
  "prisoners_held": {
   "british": 3,
   "continental": 2
@@ -32,6 +78,12 @@
   "roxbury": "continental"
  },
  "relation": -20,
- "treaties": [],
- "hour_index": 0
+ "snubbed_hours_left": 0,
+ "titles": {
+  "baron": 35,
+  "colonel": 20,
+  "governor_of_massachusetts": 60,
+  "mayor_of_boston": 45
+ },
+ "treaties": []
 }

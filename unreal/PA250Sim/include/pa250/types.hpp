@@ -92,6 +92,12 @@ struct FactionInfo {
     int max_ceasefire_days = 365;
     int max_safe_passage_days = 90;
     bool controls_harbor = false;
+    // Persuasion ("turn the envoy"): sim-owned so it is deterministic and saved.
+    int envoy_loyalty = 0;                 // 0..100; higher = costlier to turn
+    bool envoy_defected = false;
+    std::string envoy_title_granted;
+    int grievance = 0;               // 0..100; insults and failed talks raise it, time lowers it
+    int64_t snub_until_hour = 0;     // refuses to treat until this hour_index
 };
 
 // ---- Commands -----------------------------------------------------------
@@ -133,6 +139,10 @@ struct CampaignState {
     std::map<std::string, int> supplies;         // faction -> supplies
     std::map<std::string, int> relations;        // AI faction -> attitude toward player, -100..100
     std::map<std::string, int> prisoners_held;   // holding faction -> enemy prisoners held
+    bool player_vassal = false;                  // pledged to the Crown (rogue army under its protection)
+    std::string player_title;                    // title the Crown granted the player
+    int player_gold = 500;                       // treasury the player can offer
+    std::map<std::string, std::string> fiefs;    // province -> envoy name it was granted to
     std::vector<Treaty> treaties;
     std::vector<MemoryEntry> memory;
     PendingBattle pending_battle;
@@ -202,6 +212,11 @@ struct Clause {
     bool has_counts = false;
     std::string army_id;
     std::string province_id;
+    // defect: what the player pays. Gold and lands come out of the player's own holdings.
+    std::string title;
+    int gold = -1;
+    std::vector<std::string> provinces;
+    std::string reason;  // take_offense: disrespect | insolence | threat | deceit
 };
 struct DiplomacyProposal {
     std::string spoken_line;  // display-only; never read by the sim
@@ -221,6 +236,21 @@ struct DiplomacyContext {
     std::map<std::string, int> prisoners_held;
     std::vector<Treaty> treaties;
     std::vector<std::string> memory;  // most recent entries, text only
+    // Persuasion inputs (read-only for the model; the sim re-checks every number).
+    int envoy_loyalty = 0;
+    bool envoy_defected = false;
+    int player_gold = 0;
+    int defect_price = 0;                  // offer value needed to turn the envoy
+    std::map<std::string, int> titles;     // grantable title -> offer value
+    // Battlefield picture for surrender ("honors of war").
+    std::map<std::string, std::string> army_provinces;
+    std::map<std::string, int64_t> army_strengths;
+    std::map<std::string, std::vector<std::string>> adjacency;
+    // Mood: failed or rude diplomacy makes the envoy refuse to treat for a while.
+    int grievance = 0;
+    int snubbed_hours_left = 0;   // > 0: he will not negotiate
+    std::string mood = "calm";   // calm | irritated | insulted | angry
+    bool player_vassal = false;
 };
 struct DiplomacyResult {
     std::string faction;  // envoy faction

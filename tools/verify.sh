@@ -61,6 +61,7 @@ cmd_ue_test() {
     PA250.Map.Picking) cmdlet=PA250MapPicking ;;
     PA250.Map.SingleLayer) cmdlet=PA250MapSingleLayer ;;
     PA250.Map.Framing) cmdlet=PA250MapFraming ;;
+    PA250.Battle|PA250.Battle.*) cmdlet=PA250Battle ;; # all PA250.Battle.* cases (PA250BattleCases.cpp)
     PA250.Sim.Core) cmdlet="" ;; # automation / existing
   esac
   if [[ -n "$cmdlet" ]]; then

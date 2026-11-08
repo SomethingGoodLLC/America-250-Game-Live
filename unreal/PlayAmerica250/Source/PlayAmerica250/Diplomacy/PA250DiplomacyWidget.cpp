@@ -1,5 +1,6 @@
 #include "PA250DiplomacyWidget.h"
 #include "PA250DiplomacyGameMode.h"
+#include "Campaign/PA250Subsystem.h"
 #include "Styling/AppStyle.h"
 #include "Styling/CoreStyle.h"
 #include "Widgets/Input/SButton.h"
@@ -41,7 +42,23 @@ TSharedRef<SWidget> UPA250DiplomacyWidget::RebuildWidget()
 
 	auto Header = [GM]() {
 		const APA250DiplomacyGameMode* G = GM();
-		return G ? FText::FromString(G->EnvoyName + (G->EnvoyTitle.IsEmpty() ? TEXT("") : TEXT(" - ") + G->EnvoyTitle)) : FText::GetEmpty();
+		if (!G) return FText::GetEmpty();
+		FString Out = G->EnvoyName + (G->EnvoyTitle.IsEmpty() ? TEXT("") : TEXT(" - ") + G->EnvoyTitle);
+		if (const UPA250Subsystem* Sub = UPA250Subsystem::Get(G))
+		{
+			const auto& St = Sub->GetState();
+			auto Fit = St.factions.find("british");
+			const bool bTurned = Fit != St.factions.end() && Fit->second.envoy_defected;
+			Out += FString::Printf(TEXT("    |    Your treasury: %d gold%s"), St.player_gold, bTurned ? TEXT("    |    HE HAS CHANGED SIDES") : TEXT(""));
+			const pa250::DiplomacyContext Ctx = pa250::build_diplomacy_context(St, "british");
+			if (Ctx.mood != "calm")
+			{
+				Out += FString::Printf(TEXT("    |    Mood: %s"), UTF8_TO_TCHAR(Ctx.mood.c_str()));
+				if (Ctx.snubbed_hours_left > 0) Out += FString::Printf(TEXT(" (refuses to treat for %dh)"), Ctx.snubbed_hours_left);
+			}
+			if (St.player_vassal) Out += TEXT("    |    Vassal of the Crown");
+		}
+		return FText::FromString(Out);
 	};
 	auto Status = [GM]() {
 		const APA250DiplomacyGameMode* G = GM();

@@ -45,6 +45,10 @@ public:
     bool begin_diplomacy(const std::string& faction, std::string& error);
     const DiplomacyContext& diplomacy_context() const { return context_; }
     bool finish_diplomacy(const DiplomacyResult* result, std::string& error);
+    // Apply an envoy act (e.g. taking offense) without leaving the room.
+    bool apply_envoy_act(const DiplomacyResult& result, std::string& error);
+    // The player talked and left without agreement.
+    bool register_failure(std::string& error);
 
     bool save(const std::string& path, std::string& error);
     bool load(const std::string& path, std::string& error);

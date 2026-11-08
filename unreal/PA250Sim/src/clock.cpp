@@ -210,7 +210,16 @@ void monthly_supply(CampaignState& s) {
         if (pk.second.owner.empty()) continue;
         s.supplies[pk.second.owner] += pk.second.supply_value;
     }
+    // Treasury income: uncapped, grows with the provinces the player holds.
+    for (const auto& pk : s.provinces)
+        if (pk.second.owner == s.player_faction) s.player_gold += 15 * pk.second.supply_value;
     detail::add_log(s, "monthly supply accrual");
+}
+
+void decay_grievance(CampaignState& s) {
+    if (to_ymdh(s.now).h != 0) return;
+    for (auto& fk : s.factions)
+        if (fk.second.grievance > 0) fk.second.grievance = std::max(0, fk.second.grievance - 2);
 }
 
 void tick_treaties(CampaignState& s) {
@@ -314,6 +323,7 @@ TickOutput advance_hour(const CampaignState& in) {
     s.pending_commands = std::move(rest);
 
     emit_daily_ai(s);
+    decay_grievance(s);
     monthly_supply(s);
 
     // Snapshot provinces before movement for opposite-edge contact.

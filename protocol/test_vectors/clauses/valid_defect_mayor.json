@@ -1,0 +1,22 @@
+{
+ "name": "valid_defect_mayor",
+ "description": "Mayor of Boston + gold + two fiefs meets the price",
+ "proposal": {
+  "spoken_line": "...",
+  "clauses": [
+   {
+    "type": "defect",
+    "title": "mayor_of_boston",
+    "gold": 300,
+    "provinces": [
+     "cambridge",
+     "roxbury"
+    ]
+   }
+  ]
+ },
+ "expect": {
+  "valid": true,
+  "error_codes": []
+ }
+}

@@ -2,6 +2,16 @@
 
 **Vertical slice M0–M8 complete. Battle Feel B1–B4 complete.** Nothing committed or stashed; all changes are uncommitted in the working tree.
 
+## 2026-11-08 — Line volleys: two-rank lane safety + cancel-safe stagger
+- Kept existing two-rank Line `FormationOffsets` (N≥4). No single-rank collapse.
+- Coordinated mode remains `FPA250TacticalRole::bIndividualFire == false` (editable by role, not faction).
+- `HasClearFiringLane`: world blocks + living same-faction pawns sit that shooter out of the volley (rear rank through the front).
+- Ready threshold uses **safe** ready (loaded + in position + clear lane); `VolleyMaxWaitSeconds` still fires with whoever is safe (never with zero).
+- `VolleyFireJitterSeconds` (bot tuning, default 0.1 s) schedules pending shots; `VolleyEpoch` cancels delayed fire on lost contact / morale / charge / size&lt;2.
+- `pa250.BotSpacingReport` now logs loaded / formedReady / safeReady / pending / wait / reason; near-camera HUD can show a short wait reason after 2 s.
+- Player reload unchanged.
+- Verified: `BUILD` Succeeded. `-run=PA250Battle` checks=224 fails=0 (two-rank front/rear, ready/max-wait, epoch cancel, friendly + world lane). `-run=PA250Combat` passes. Not verified in PIE yet — stand near a Line squad and watch Make ready → Present → FIRE!; `pa250.BotSpacingReport` for safeReady/reason.
+
 ## Toolchain facts
 - Xcode 27.2 (27B52), Apple clang 21.0.0; cmake 3.30.0; Python 3.13.7 (service venv: `services/negotiation/.venv`).
 - Engine: `/Users/Shared/Epic Games/UE_5.8` (prebuilt editor).
@@ -116,6 +126,17 @@ The generator tries exact paths first, then a path-sorted keyword search under `
 | Meadow textures | — | grass / dirt, mud, soil (base-colour maps only: `_D`, `_BC`, `BaseColor`, `Albedo`) | tileable meadow grass + dirt path PBR textures |
 | Soldiers | `Characters/SKM_British_Regular`, `Characters/SKM_Continental_Militia`, generic `Characters/SKM_Soldier_1775` | — | 18th-century redcoat / colonial militia, **on the UE5 Mannequin skeleton** (otherwise skipped with a log warning, since `ABP_Unarmed` must still drive it) |
 | Muzzle smoke | `FX/NS_MuzzleSmoke`, `FX/NS_MusketSmoke` (Niagara) | — | black-powder muzzle smoke / lingering cannon smoke Niagara |
+
+## Envoy persuasion (added after M8)
+- Envoy replies: offline fallback is now context-aware (`fallback_reply`, deterministic, no `hash()`); the Claude system prompt tells it to bargain and not simply agree.
+- New `defect` clause (British only): the model proposes, the sim disposes. Value = title (colonel 20, baron 35, mayor_of_boston 45, governor 60) + gold/10 + 15 per granted province, must reach `defect_price` = max(10, loyalty - relation/5) (loyalty 70). Must be the only clause. Effects: gold leaves `player_gold` (starts 500), lands recorded in `fiefs`, his army joins the player, `mayor_of_boston` hands over Boston. Afterwards he accepts no more clauses.
+- New state (`player_gold`, `fiefs`, envoy loyalty/defected/title) changes the state hash, so `clock_golden_1775.json` was regenerated with `--write-golden`. Save schema stays 2; new fields default on load.
+- Evidence: ctest passes (new `defect` case + 6 shared vectors); `tests/diplomacy` 70 passed incl. live Claude (real offer accepted, flattery-only refused); `run_slice_autoplay.sh` PASSED. CLAUDE.md gained one line sanctioning `defect` as the only way Boston can change hands.
+- Follow-up done: the campaign status bar shows `Gold N`; the diplomacy header shows your treasury and "HE HAS CHANGED SIDES". A betrayal drops British attitude to -100 and lands a 40-man `british_reprisal` column at Boston, which the daily AI then marches. Golden hash regenerated again.
+- **Surrender with honors of war** (after Fort Necessity, 1754): new `surrender{army_id,days}` clause. One of the envoy's armies that is cornered (enemy strength in/beside its province >= 1.5x its own) marches out unharmed with its arms, falls back to an envoy-owned neighbour, yields the ground it held, and a parole ceasefire of 1-30 days starts. Refused in protected provinces (Boston) or with no retreat. Evidence: ctest 8,899 checks incl. `surrender_honors_of_war` + 6 vectors; tests/diplomacy 81 passed incl. live Claude (accepts when cornered, refuses when not); autoplay PASSED. The Claude tool schema is now one `anyOf` variant per clause type with required fields (the flat schema made the model drop `days`). Context gained `army_provinces`, `army_strengths`, `adjacency`.
+- **Mood, snubs, vassalage** (after the Washington 1776 letter incident): `take_offense{reason,days<=7}` (envoy's own act; applied at once; refuses all clauses until it ends; attitude -10, grievance +30/40/50), `register_diplomacy_failure` (talked then left without agreement: attitude -2, grievance +8, snub at grievance >= 30; skipped in selftest/autoplay), grievance decays 2/day. `vassalage{title,gold,provinces}`: the Crown tempts the player; applies only when the player accepts; permanent peace treaty, gold/title/lands, attitude >= 60. Gold is uncapped everywhere (linear 1 point per 10 gold) and treasury income is 15 gold per supply point per month. UI header shows Mood / snub hours / Vassal. Evidence: ctest 8,944 checks, tests/diplomacy 103 passed incl. live Claude (insult -> take_offense, wavering -> vassalage, polite -> ceasefire), autoplay PASSED. Golden hash regenerated.
+- Limits: as a vassal there is no hostile "patriot" force (only two factions exist), so the "rogue army" is just the player's army under the Crown's peace. The offense path (UI, `ApplyEnvoyActJson`) is built but not seen in the editor.
+- Not done: a reprisal landing in a city you now hold is untested in the editor; 
 
 ## Open issues
 1. MuseTalk 1.5 still not exercised on Apple Silicon (audio-only fallback in practice).
@@ -495,3 +516,625 @@ None (per instructions).
 
 ### Correction (2026-11-08, later)
 - The "Zoom - / Zoom +" buttons above were claimed but the Slate insertion had silently not applied (anchor mismatch) — the user's PIE screenshot showed only Pause/Resume, Speed+, Parley, Save, Load. Army tokens *were* updated in that screenshot. Buttons now inserted in `PA250MapWidget.cpp` (verified: strings present in `libUnrealEditor-PlayAmerica250.dylib`, ue-build PASS). Restart the Editor (or Live Coding) to load the new dylib; an already-open Editor keeps the old code.
+
+## 2026-11-08 — Battlefront Conquest M0 audit
+
+### Commands / paths
+```
+UE="/Users/Shared/Epic Games/UE_5.8"
+PROJ="$HOME/PycharmProjects/Samson/unreal/PlayAmerica250/PlayAmerica250.uproject"
+BUILD() { "$UE/Engine/Build/BatchFiles/Mac/Build.sh" PlayAmerica250Editor Mac Development -Project="$PROJ" -WaitMutex; }
+TEST() { "$UE/Engine/Binaries/Mac/UnrealEditor.app/Contents/MacOS/UnrealEditor" "$PROJ" \
+  -ExecCmds="Automation RunTests $1; Quit" -unattended -nullrhi -nosplash -NoSound -log \
+  -TestExit="Automation Test Queue Empty" 2>&1 | grep -E "Test Completed|Result=|Error" ; }
+```
+
+### Battle audit
+| Topic | Finding |
+|-------|---------|
+| Player character | `ARFCharacter` (`Source/PlayAmerica250/RF/RFCharacter.h`) — shared player/bot pawn |
+| Camera | `USpringArmComponent` length 350, socket (0,60,65), lag; `APA250BattleGameMode::FrameHumanCamera` re-applies same on spawn/respawn |
+| Weapon / fire | `AMusketWeapon` + `AMusketProjectile` (projectile damage). Player `FireMusket` does a camera visibility trace for aim point, then `FireMusketAt` |
+| Active reload | `FActiveReloadSequencer` (plain C++) owned by `AMusketWeapon`; `IA_Reload` commit / hold-clear jam |
+| Bot pawn | Same `ARFCharacter`; `AIControllerClass = APA250BotController` |
+| Bot controller | `APA250BotController::Tick` brain — **no Behavior Tree / StateTree / EQS** on the battle path |
+| Bot move targets | `PickGoal` → nearest defend-or-attack post; destination = post actor location |
+| Command post | `APA250ControlPoint` — overlap capture, ownership colors; **no ring slots** |
+| Ticket HUD | Top strip `BRITISH N / CONTINENTAL N` via `TicketsRemaining` = **remaining reinforcement pool**, not kills. Spend-on-spawn today (B1); M6 will switch to −1/death |
+| Enhanced Input | Runtime-built in `ARFCharacter::BuildDefaultInput` (`IA_RF_*`, `IMC_RF_Default`); optional Content refs empty — **no Content IA_*/IMC_* assets** |
+
+### Bot clumping — root cause
+Every bot independently picks the same nearest enemy/neutral post (`PA250BotController.cpp` L97–101), navigates to the **post centroid** (L139), halts inside `0.7 × Radius` (~840 uu for default 1200) (L141, L169–173), and only jitters ±400 uu while advancing (L176). No `UCrowdFollowingComponent` / RVO. Volley squad clustering (1600 uu) amplifies piles after they gather.
+
+### Verification
+- `BUILD` → Succeeded (Target is up to date, unchanged tree)
+- Audit section present (this block)
+
+## 2026-11-08 — Battlefront Conquest M1–M6
+
+### Decisions (overrides)
+- **Projectile stays** for damage; M1 dual-trace (`UPA250AimComponent`) resolves camera aim + muzzle blocked flag, then `AMusketWeapon` fires a projectile along the corrected direction.
+- **Tickets −1 on death** (+ bleed), not spawn (overrides B1). HUD `BRITISH N` = remaining tickets. `BattleResult.losses` from death counts / `SoldiersPerUnit`.
+- **Bleed interval 5 s**. Capture radius **10 m** (1000 uu). Conquest + volley still on `DA_MusketTuning`; weapon/melee/bot/faction on new DataAssets (runtime defaults if Content missing).
+
+### M1 — Shoulder camera, reticle, true aim
+- Hip 220 / (0,±60,70) / FOV 80; ADS 120 / Y45 / FOV 55 / 0.15 s blend; shoulder swap `V`; face control yaw while ADS or 1 s after fire.
+- `UPA250AimComponent::ResolveAim`; UMG reticle (spread / hostile red / blocked X); hitmarker hook.
+- Files: `PA250AimComponent.*`, `RFCharacter.*`, `PA250BattleHUD.*`, `PA250BattleTests.cpp`, `FrameHumanCamera`.
+
+### M2 — Weapon feel + reload presets
+- `UPA250WeaponTuning`: hip 4° / ADS 0.6° / +1.5° moving; falloff 100@40m→60@100m; head ×1.5; max 200 m; Arcade (4/2.5/6) + Authentic (15/12/20).
+- Recoil kick, Niagara muzzle smoke (existing path), jam blocks `CanFire` until clear.
+- Files: `PA250WeaponTuning.*`, `MusketWeapon.*`, `MusketProjectile.*`.
+
+### M3 — Bots spread and fight
+- Root cause (audit): `PA250BotController.cpp` shared nearest post + centroid + 0.7×R halt.
+- Fix: CP ring slots 6–25 m, squads 6–8, weighted CP assignment, `UCrowdFollowingComponent` separation, engage 40–80 m, volley window, bayonet charge, cover below 50% strength.
+- `pa250.BotSpacingReport`; `APA250BotSpacingTest` + `Scripts/build_levels.py` target `ftest_bot_spacing` → `/Game/Tests/FTEST_BotSpacing`.
+- Files: `PA250BotController.*`, `PA250ControlPoint.*`, `PA250VolleyCoordinator.*`, `PA250BotTuning.*`, `PA250BotSpacingTest.*`.
+
+### M4 — Faction visuals
+- `UPA250FactionVisuals` (British madder/blue/tricorn; Continental dark blue/buff/tricorn; Militia brown/round). MID coat + hat mesh; nameplate widget component. TODO for period meshes on Manny.
+- Files: `PA250FactionVisuals.*`, `RFCharacter` ApplyFactionVisuals / UpdateNameplate.
+
+### M5 — Bayonet / melee
+- `UPA250MeleeComponent` + `UPA250MeleeTuning`: thrust / butt-stroke (preserves reload) / charge. Authority-only damage. Input E/Q separate from actions. Bots use charge rules from M3.
+- Files: `PA250MeleeComponent.*`, `PA250MeleeTuning.*`.
+
+### M6 — Conquest loop
+- Death tickets, 5 s bleed, 10 m capture with attacker/defender rate, CP pips + capture ring text, kill feed, 3 s death cam → spawn screen, single `BattleResult` emit counter.
+- Files: `PA250BattleGameMode.*`, `PA250BattleHUD.*`, `PA250BattleCommandlet.cpp`.
+
+### Verification
+- `BUILD` → **Succeeded**
+- `-run=PA250Battle` → **fails=0** (Aim/Weapon/Faction/Melee/Conquest/spacing mirrors; bleed@5s; one BattleResult)
+- Automation `PA250.Battle` via GUI binary could not run concurrently with the commandlet (editor instance lock); commandlet is the reliable Mac path per prior PROGRESS.
+- `unreal/PA250Sim` `ctest` → **100% passed** (sim untouched)
+- Generate FTEST map: `PA250_LEVELS=ftest_bot_spacing UnrealEditor-Cmd … -run=pythonscript -script=Scripts/build_levels.py`
+
+### Playtest checklist (PIE on L_Lexington)
+1. **M0** — Confirm bots no longer all freeze on the Green disc centroid; `pa250.BotSpacingReport` prints median NN / crowded / clusters.
+2. **M1** — Hip OTS at ~220 cm; hold RMB for ADS blend; press V to swap shoulder; reticle grows with hip spread and turns red on enemies.
+3. **M1** — Fire past a fence corner: blocked mark when the muzzle is occluded; clear shot hits near the reticle aim.
+4. **M2** — Fire then tap R through Arcade reload; force a jam and hold R to clear; feel kick + muzzle smoke.
+5. **M2** — Switch game-mode reload preset to Authentic and confirm much longer reload.
+6. **M3** — Watch squads claim different CP sectors and hold a line at 40–80 m before volleying; bayonet when closing.
+7. **M4** — British red / Continental blue coats + hats; enemy nameplates red within 50 m LOS.
+8. **M5** — E thrust, Q butt-stroke during reload without losing progress, sprint+E charge.
+9. **M6** — HUD tickets drop on death and every 5 s when holding fewer CPs; capture ring % inside 10 m; kill feed lines.
+10. **M6** — Die → 3 s death cam → spawn screen on a held CP; fight to tickets 0 or time limit and confirm one BattleResult returns to campaign.
+
+## 2026-11-08 — Battlefront review fixes
+
+### Checked, left as specified
+- Death spend (`SpendDeathTicket`), spawn allowed only while `TicketPool > 0`, bleed forced to 5 s, capture radius 1000 uu. `BattleResult.losses` = round(deaths / `SoldiersPerUnit`), clamped to the class pool (bleed is not a loss). `EndBattle` emits one result. Jam blocks `CanFire`. Butt-stroke does not touch the reload sequencer. Thrust/charge damage runs only in `SweepAttack` after `HasAuthority`. Arcade 4/2.5/6 and Authentic 15/12/20. Projectile falloff stays on `AMusketProjectile`. Crowd component uses the stock `SetDefaultSubobjectClass` path; `SetCrowd*` no-ops until a crowd manager exists.
+
+### Fixed
+- Aim block test used the spread cone, so the reticle X flickered and a clear shot could be treated as blocked. Block trace is now the unspread muzzle ray; spread stays on `FireDirection` only.
+- Squad rebuild every 2.5 s (`static` timer) called `FindFreeSlot` past a bot's own claim, then `AssignSlot` dropped it. Bots also re-claimed whatever `PickGoal` liked, and file-index offsets stacked unique slots on top of each other. Claims now stick until the squad's post changes; destination is the slot point; a full ring gets one stable offset instead of a new random centroid every think.
+- Tickets at 0 still opened the deploy screen in UI-only mode (`RequestSpawn` then no-ops). That now spectates. Death-cam corpse outlives the 3 s timer. A watched soldier's death retargets the camera; your own corpse stays the death cam.
+- Projectile hits pushed a second kill-feed line and flashed the player's hitmarker for bot shots. Marker is the local shooter only; one feed line from `OnCharacterDied`.
+- Spawn screen built its post list before `GameMode` was set, so held CPs never appeared. It rebuilds on open.
+- Nameplates had no slate widget and `UpdateNameplate` was never called. Each soldier refreshes from the current view target (enemy red ≤50 m with LOS, friendly blue ≤30 m, squadmates always).
+
+### Verification
+- `BUILD` → Succeeded
+- `-run=PA250Battle` → fails=0
+
+### Still a PIE check on `L_Lexington`
+- `pa250.BotSpacingReport` and whether squads sit on the ring rather than the Green centroid. Crowd separation is compiled in but not exercised headlessly.
+- Reticle X only when the muzzle is actually in cover; a clear shot lands near the crosshair. If the X is stuck on, the new 8 cm muzzle overlap is the suspect.
+- Die with tickets left (deploy lists held posts) and with tickets at 0 (spectate, no locked deploy screen).
+- Nameplates, jam, butt-stroke during reload, and one `BattleResult` back to the campaign.
+
+## Envoy review fixes (2026-11-08)
+
+- Battle results now apply morale, retreat and destruction only to the two armies included in the battle setup. A regression covers the original Continental army sharing Boston with the defected army and the reprisal column.
+- Offline defect offers preserve signed gold amounts and reject any negative amount, including spaced and Unicode minus signs, before summing the offer.
+- Surrender context strength totals, JSON parsing and ratio arithmetic now use int64. Three shared vectors cover large strengths and summed enemy strengths; a sim regression covers totals above int32 and context JSON round-trip.
+- Verification: rebuilt PA250Sim; 8,914 checks passed, including the existing clock golden without regeneration. Python shared vectors and offline defect tests: 57 passed, 3 live-provider tests deselected. Ruff and mypy passed for the touched Python implementation. UE build/editor and UE automation were not rerun for these fixes.
+
+## 2026-11-08 — Battlefront review fixes (2)
+
+### Fixed
+- **Reload presets did not match the brief.** An un-pressed phase counted as a miss and restarted, so a reload never finished without input, and a sweet press at mid-phase beat "perfect". `AMusketWeapon::PresetToSequencer` now maps a preset so untouched = Base, a commit at the window centre on every phase = Perfect (+15%), and an early miss on every phase = Failed. Measured: Arcade 4.01 / 2.51 / 6.03 s, Authentic 15.01 / 12.01 / 20.03 s. Opt-in sequencer fields (`WindowCenter`, `bTimeoutCompletesPhase`); the legacy `DA_MusketTuning` path and the `PA250.Combat` tests are unchanged. Bots commit at the window centre instead of a fixed 45%.
+- **Recoil drifted.** Pitch recovery pushed the same way as the kick (camera climbed to twice the kick and stayed there). Yaw recovery used a different random sample from the kick. Both now return to the original aim.
+- **Bots only fired under 40 m.** Inside the 40–80 m band they kept advancing to the band's midpoint. Now: halt and fire anywhere inside 80 m with line of sight; reload on the move until the 40 m edge. Melee ranges were inverted (charge under 2.5 m, thrust at 3.5 m, beyond 2.2 m reach); they now come from `UPA250MeleeTuning` (thrust ≤ reach + radius, charge ≤ 4 m when off cooldown). Bots face their focus target while engaging.
+- **"Squad strength < 50%" read corpses that last 3 s.** Squads now persist across the 2.5 s rebuild with stable ids, so sectors and slot claims also stay put. Strength = live / peak members. New and respawned bots join a nearby squad with room. A shattered squad (cut below half the minimum size) disbands so survivors regroup instead of hiding all battle. Stale `SquadId`s are cleared. The player rides with the nearest friendly squad for squadmate nameplates.
+- **CP ring sectors were interleaved.** `Sector = i % 8` spread one "sector" around the whole ring, and sector distance did not wrap. Sectors are now angular octants with wrap-around distance; rings sit at 6 / 15.5 / 25 m (the 6 m ring was never used before); 48 slots (6 per octant); off-navmesh points are dropped (raw ring kept if no navmesh). Same-side squads on one post use sectors three octants apart. Post assignment spreads squads per side, so one side no longer pushes the other off a post.
+- **Squad volleys ignored LOS** and fired out to 60 m outside the engage band. Now LOS and ≤ 80 m only.
+- **Match end.** Conquest ended only when a side had 0 tickets *and* nobody alive. Now 0 tickets loses at once; sides that started with no tickets (debug setups) still need to be wiped out. Ticket rules moved to `FPA250TicketLedger` (plain C++) so the tests run the shipped code.
+- **FTEST_BotSpacing could not fail** on kills (floored to `MinKills`) or engagement range (shot counter never incremented, defaulted to 0.8). It now uses real deaths and the bot engagement histogram. `pa250.BotSpacingReport` prints the histogram (<20 / 20–40 / 40–80 / 80–120 / >120 m) and the squad count.
+- **Reticle size** was `6 + spread×4` px. It now projects the actual next-shot spread (stance, movement, line bonus, suppression) through the live FOV.
+- Kill feed: "You / Regular / Provincial [militia]" instead of raw faction ids.
+- **Tests were tautological.** The Conquest test checked its own lambdas; the Aim block case and the Melee butt-stroke case re-derived the rule inline; the preset test only read constants. All `PA250.Battle.*` cases now live in `PA250BattleCases.cpp` and drive shipped code: aim traces in a real test world (wall + post), preset timings through the sequencer, jam on a spawned musket, butt-stroke on a spawned soldier mid-reload, ledger bleed/death/losses, slot-ring geometry and claims. The automation tests and the `PA250Battle` commandlet run the same cases; added `PA250.Battle.Spacing`. `tools/verify.sh ue-test PA250.Battle*` routes to the commandlet.
+
+### Files
+`RF/ActiveReloadSequencer.*`, `RF/MusketWeapon.*`, `RF/RFCharacter.cpp`, `Battle/PA250BotController.cpp`, `Battle/PA250VolleyCoordinator.*`, `Battle/PA250ControlPoint.*`, `Battle/PA250BotTuning.h`, `Battle/PA250MeleeComponent.*`, `Battle/PA250BattleGameMode.*`, `Battle/PA250TicketLedger.h` (new), `Battle/PA250BotSpacingTest.cpp`, `Battle/PA250BattleHUD.cpp`, `PA250BattleCases.*` (new), `PA250BattleTests.cpp`, `PA250BattleCommandlet.cpp`, `tools/verify.sh`.
+
+### Verification
+- `BUILD` → Succeeded
+- `-run=PA250Battle` → checks=82 fails=0 (two consecutive runs)
+- `Automation RunTests PA250.Battle+PA250.Combat` → 10/10 Success, EXIT CODE 0 (Automation ran on this Mac this time)
+- `-run=PA250Combat` → fails=0
+- `unreal/PA250Sim` ctest → 100% passed (sim untouched)
+- **Not run:** `Project.Functional Tests./Game/Tests/FTEST_BotSpacing`. `Automation List` shows no functional tests in this editor-cmd environment. The map also has no `NavMeshBoundsVolume`, so bots there fall back to direct movement and crowd avoidance is not exercised. Squad spacing and the fight loop still need a PIE check on `L_Lexington` (`pa250.BotSpacingReport`).
+
+## 2026-11-08 — Battle feel pass: aim, planted firing, bayonet clarity
+
+### Why shots went high (fixed)
+- The ball flew at 30 m/s (`ProjectileSpeed 3000` cm/s), so every shot was a visible lob.
+- Drop compensation used the camera-trace distance. When nothing was under the reticle (thin target, horizon), that distance was the 200 m max range, so the ball was lofted for 200 m (about 65 m of lift) even at an enemy 60 m away.
+- Compensation was an approximation with a hard-coded 0.3 gravity scale, duplicated from the projectile.
+- Fix: ball at 300 m/s (`UPA250WeaponTuning::ProjectileSpeed = 30000`, lifespan 2 s). `AMusketWeapon::SolveLaunchDirection` gives an exact low arc from world gravity × the projectile's own gravity scale. No compensation when the camera ray hit nothing (`FPA250AimResult::bCameraHit`). Spread is applied once, in `AMusketWeapon::Fire`. Hip 1.5° (was 4°), ADS 0.25° (was 0.6°).
+- Measured (PA250.Battle.Weapon): lands 0.0–0.1 cm from the aim point at 20 / 60 / 150 m; at most 9.2 cm above the sight line at 150 m.
+
+### Firing plants your feet
+- `ARFCharacter::LockMovement`: every shot (player and bots, including squad volleys) stops the shooter dead and blocks walking for `FireStillSeconds` (0.6 s); you can still turn and aim. No firing in mid-air. Spread still uses the speed at the trigger pull, so running shots are inaccurate. The butt-stroke stagger uses the same lock. HUD shows "feet planted" under the reticle.
+
+### Reload and bayonet made legible
+- Reload steps are numbered: "1/3 Prime the pan", "2/3 Ram the ball", "3/3 Shoulder arms". HUD reload bar: fill, gold press zone, bright perfect zone, white marker. Hint line explains tapping R (or just waiting). Press result flashes: PERFECT / Good / Fumbled. Jam reads "hold R to clear".
+- Bayonet charge (Shift+E) is now a real 4 m dash over 0.45 s (constant-force root motion). The first enemy met takes 100 (×2 from behind or vs a reloading man) and is knocked back. A charge that hits no one leaves you off balance for 0.6 s. Musket is levelled for the dash. Thrust (E) visibly jabs out over its 0.35 s wind-up; butt-stroke (Q) jabs short. Melee hits now show the hitmarker. HUD line: "CHARGE!", "Charge hit!", "Charge missed - off balance", or the cooldown / "ready (hold Shift + E)". Bots charge only when facing the target.
+- Controls legend bottom-left.
+- Placeholder animation only (musket slides along facing); real montages still TODO.
+
+### Verification
+- `BUILD` → Succeeded
+- `-run=PA250Battle` → checks=101 fails=0 (new: ballistic landing / sight-line, soldier stops on fire and walks again, no mid-air fire, charge dash / cooldown / gating, numbered steps)
+- Automation `PA250.Battle+PA250.Combat` → 10/10 Success; `-run=PA250Combat` → fails=0
+- Not checked headless: how the HUD panel and musket jab look, and the charge dash distance on real terrain. PIE on `L_Lexington`.
+
+## Fab asset import (2026-11-08)
+
+### M0 — preflight inventory
+- Read CLAUDE.md and all of PROGRESS.md; no applicable AGENTS.md found in the repository. Existing unrelated working-tree changes preserved.
+- UE_ROOT=`/Users/Shared/Epic Games/UE_5.8`; EDITOR_BIN=`$UE_ROOT/Engine/Binaries/Mac/UnrealEditor.app/Contents/MacOS/UnrealEditor`; executable exists. VAULT=`/Users/Shared/UnrealEngine/Launcher/VaultCache`; search of Epic application support and /Users/Shared found no other VaultCache.
+
+| Asset | Vault path (relative to VAULT) | Kind | Original top folder | Size (bytes) | Status | Skeleton filenames |
+|---|---|---|---|---:|---|---|
+| Weapon Pack 01 | HorizonW052be976533aV1/data/Content/HS_WeaponPack_01 | UE content | HS_WeaponPack_01 | 939869881 | ready; already complete | SK_HS_WP01_MusketRifle_{Strap_X,Strap_Y,X,Y}_0_Skeleton; SK_HS_WP01_PowderHorn_{Strap_X,Strap_Y,X,Y}_0_Skeleton |
+| AMERICAN SOLDIER | americana7faf88f10c5V1/data/Content/american_soldier | UE content | american_soldier | 604582827 | ready; already complete | SK_AMERICAN_SOLDIER_Skeleton |
+| Open World Demo Collection | KiteDemo421/data/Content/KiteDemo | UE content | KiteDemo | 6804916227 | ready; already complete | none found |
+| CANNON - GAME READY | FabLibrary/CANNON_-_GAME_READY-3cfb1707/fbx/high-quality-1765-americ_extracted | raw RAR with Mesh.FBX + TGA; external PNG textures | n/a | 133125659 | ready | not yet inspected |
+| Smuggler’s Cove | not found in vault, Epic support, /Users/Shared or Downloads | unknown | unknown | 0 | missing; SKIPPED as permitted | unknown |
+| Grand Strategy Style Map | no vault .uplugin; no Engine/Plugins/Marketplace directory | C++ plugin; GitHub fallback required | pending | pending | source pending | n/a |
+
+- SHA-256 plus size comparison: musket 129 present / 0 missing / 0 differing; soldier 103 / 0 / 0; KiteDemo 274 / 0 / 0. Thus the requested Open World delta is empty. No differing files to report.
+- Content top folders: Characters, Collections, Developers, HS_WeaponPack_01, Input, KiteDemo, LevelPrototyping, Map, PA250, Tests, ThirdPerson, Variant_Combat, __ExternalActors__, __ExternalObjects__, american_soldier.
+- Enabled .uproject plugins: ModelingToolsEditorMode (Editor only), StateTree, GameplayStateTree, EnhancedInput, PythonScriptPlugin, EditorScriptingUtilities, WmfMedia, AvfMedia, MediaCompositing. Both Python requirements are already enabled.
+- .gitattributes covers *.uasset and *.umap with LFS. Missing: *.fbx, *.glb, *.png, *.exr, *.wav (also raw *.tga). No git configuration changed.
+- Cannon archive listing verified with `tar -tf <source>/Cannon.rar`: Cannon/Mesh.FBX and five Cannon_*.tga textures. No vault Config fragments or .uproject/.uplugin files found for the three content packs.
+- Initial Content disk usage: 8,330,100 KiB; exact byte baseline will be captured before import. No project Plugins directory existed.
+- Verify: `test -x "$EDITOR_BIN" && ls "$VAULT" && grep -n "Fab asset import" PROGRESS.md` (variables above): pending below.
+
+## 2026-11-08 — Look sensitivity
+- Look input was applied 1:1 with no scale (too fast, especially on a Mac trackpad). Now ×`pa250.LookSensitivity` (default 0.35) and ×0.6 more while aiming down sights (`ARFCharacter::AdsLookScale`).
+- `[` / `]` change it in game by 15% steps (0.05–2), show the value on screen, and save it to GameUserSettings so it persists. Console: `pa250.LookSensitivity 0.25`. Legend updated.
+- Files: `RF/RFCharacter.*`, `Battle/PA250BattleHUD.cpp`. Verify: BUILD Succeeded; `-run=PA250Battle` checks=101 fails=0. Feel needs a PIE check.
+
+- M0 verify result: PASS; editor executable, vault listing and heading verified. Deviation: all three UE packs are already byte-identical and complete, rather than KiteDemo being partial.
+
+### M1 — editor Python
+- PythonScriptPlugin and EditorScriptingUtilities already enabled; no .uproject edit required. Existing tools/ue/ preserved. Baseline logs snapshotted to Saved/FabImport/BaselineLogs before editor invocation.
+
+- M1 verification: supplied editor command outside sandbox exited 0, printed engine version (see Saved/FabImport/M1.log). Sandboxed launch exited 134 before logging; no commandlet syntax change needed.
+
+### M2 — UE content packs
+- Executed requested `rsync -a --ignore-existing` for HS_WeaponPack_01, american_soldier, KiteDemo. No missing files to copy; original top folders retained, no assets renamed or resaved. No differing vault files.
+- Added tools/ue/verify_assets.py: AssetRegistry class counts; load every StaticMesh, SkeletalMesh, Skeleton, AnimSequence, Material and MaterialInstanceConstant; FAILED diagnostics and Saved/AssetImportReport.json. Records skeleton references; mannequin identification uses read-only skeleton package bone-name evidence.
+- Smuggler’s Cove SKIPPED (not on disk). Grand Strategy Map SKIPPED by explicit follow-up user instruction; no plugin copied, patched or enabled. Git fallback inspected only in /private/tmp; v1.0 SHA 92d2ea86a51ce6358a7c116f011ece73f52d3417 and latest tag/main SHA e4748118030a74edec083122d0f7cb6668bbc816 contain documentation only; plugin archives are release attachments. No build attempted.
+- Verify command: editor invocation from M1 with `-script="$PWD/tools/ue/verify_assets.py"`; result pending.
+
+## 2026-11-08 — Easier reload, visible shots, ranks and volleys
+
+### Reload too hard (fixed)
+- Arcade press zone is now half of each step (perfect zone a fifth), was 35% / 12%.
+- A fumble pauses the step for ~0.7 s and then **continues** from where it was (was: restart the step).
+- After one fumble in a step, further early presses in that step are ignored, so mashing R costs nothing more.
+- Arcade never jams; Authentic keeps its 10% jam on a miss. Timings are unchanged: Arcade 4 / 2.5 / 6 s.
+- Sequencer opt-ins (`bMissResumesProgress`, `bIgnoreRepeatMiss`) are set only by the presets. Legacy `PA250.Combat` tests are unchanged.
+- **Latent bug found:** `Scripts/build_levels.py` creates `DA_WeaponTuning` / `DA_FactionVisuals` from the class defaults, but the brief values lived only in `MakeRuntimeDefaults()`, which the game never uses once the asset exists. So in game, Authentic was a copy of Arcade, and faction looks were probably the default white coats (inferred from the generator, not seen in PIE). The values now live in the class constructors. New checks load the shipped assets and verify them.
+
+### Musket balls invisible (fixed)
+- At 300 m/s a 10 cm ball is on screen for about a frame. `AMusketProjectile` now carries a glowing tracer streak: a thin cylinder using the engine `EmissiveMeshMaterial` (`Color` = warm HDR), 4 cm thick and up to 4.5 m long behind the ball, aligned with its flight. It grows from the muzzle, so there is never a streak in the shooter's face. Tunable: `TracerLengthCm`, `TracerThicknessCm`, `TracerColor`.
+
+### Bots too close together → ranks, then volleys
+- Squads of 2+ now fight in formation (`UPA250VolleyCoordinator::TickFormation`). The squad has an anchor and a facing; its men take numbered spots in two staggered ranks (`FormationOffsets`: 2 m files, 2 m ranks, ≤ 6 per rank, one rank under 4 men), re-sorted when the line turns so men don't cross.
+- **March:** the anchor walks to the squad's objective (squads sent to the same post line up side by side 15 m apart) and waits for stragglers. Friendly anchors repel to stay ≥ 15 m apart.
+- **Contact** (enemy ≤ 80 m with LOS): the line halts and faces the enemy. Once 70% are loaded and in position (or after 6 s): "Make ready!" → "Present!" (men face the target) → "FIRE!", with the whole squad firing together. Between volleys the line steps forward until the enemy is 50 m away, then stands.
+- Formed men never fire singly. They break ranks only for the bayonet rule (< 10 m, or < 20 m vs a reloading enemy).
+- Reinforcements join the nearest squad with room, wherever it is (no more loners). Bots far from the Green are pulled in to 55 m (was 28 m), so the sides start about 110 m apart. Callouts show only for squads within 60 m of the camera.
+- Autoplay battles log `pa250.BotSpacingReport` every 15 s, including a per-squad line (live / formed / engaged / stage / lag / nearest enemy squad).
+
+### Measured (slice autoplay, real L_Lexington battle, 10× dilation)
+| | before | after |
+|---|---|---|
+| shots in the 40–80 m band | 1–12% | **100%** (562 shots) |
+| men with > 4 others within 3 m (after the first sample) | 30–60% | **0–11%** (0% in 5 of 9 samples) |
+| median nearest neighbour | ~1.8 m | 1.4–2.0 m |
+| lone bots fighting outside a squad | yes | none |
+| volleys | timer-driven, any range | 343 squad volleys |
+
+### Verification
+- `BUILD` → Succeeded. `-run=PA250Battle` → checks=123 fails=0 (new: shipped DataAssets carry the brief values, forgiving fumble, tracer grows/caps, formation layout). `-run=PA250Combat` → fails=0. Automation `PA250.Battle+PA250.Combat` → 10/10. `scripts/run_slice_autoplay.sh` → PASSED.
+
+### Known gap
+- In the sampled autoplay battle **no post changed hands** (`post_flips=0`). The lines trade volleys at 50 m and the match is decided by attrition and bleed. Lines need a rule to push onto the post (e.g. when the enemy squad in front is broken or outnumbered) for Conquest to play like Conquest.
+
+- M2 verify: first script run exposed a UE 5.8 API difference (`AssetData.get_soft_object_path` absent); changed path formatting to package_name + asset_name. Retry exited 0; FAB_VERIFY failures=0. No content load errors. Soldier mesh tangent generation emitted a zero-length-normal Display message, not an error. Full counts and skeleton references are in Saved/AssetImportReport.json; final table below.
+
+### M3 — cannon raw import
+- Extracted RAR to /private/tmp/pa250-cannon (vault left unchanged). FBX 7400 contains no LimbNode or Skeleton markers, so import as static mesh. Added tools/ue/import_raw.py with AssetImportTask automated=True, replace_existing=False, save=True; FbxImportUI build_nanite=False; imports materials/textures and any remaining TGA textures. Existing destination assets cause a safe skip on reruns.
+- Verify: run import_raw.py using M1 invocation, then verify_assets.py with PA250_ASSET_ROOTS including /Game/ThirdParty/PTM_Cannon; pending.
+
+- M3 first legacy FbxFactory attempt failed with `Assertion failed: CurrentApplication.IsValid() [File:Runtime/Slate/Public/Framework/Application/SlateApplication.h] [Line: 321]` after an FBX smoothing warning. Removed explicit legacy factory; default Interchange converts FbxImportUI (confirmed in engine source, read-only), including bBuildNanite=False. Retry exited 0 and created 1 mesh, 1 material, 5 textures. The FBX lacks smoothing groups; importer reports a warning, no errors.
+
+### M4 — Grand Strategy Map
+- SKIPPED per user's explicit instruction. No project plugin source, patches, build, demo load or campaign integration performed; Plugins added size = 0.
+
+### M5 — level regression
+- Added tools/ue/verify_levels.py to load /Game/PA250/Maps/L_Campaign, L_Lexington, L_DiplomacyRoom without saving. Compares Error:/Failed to load lines against the pre-task Saved/Logs snapshot, writes Saved/LevelImportReport.json and fails on any new errors or unsuccessful level loads.
+- Verify command: M1 editor invocation with `-script="$PWD/tools/ue/verify_levels.py" -abslog="$PWD/unreal/PlayAmerica250/Saved/FabImport/M5.log"`; pending.
+
+- M3 final verify exited 0; all four roots have zero FAILED loads. Cannon StaticMesh Mesh loads with nanite_enabled=false.
+- M5 verify exited 0: all three levels loaded, new_error_lines=[], error_lines=[]. Commandlet reports Success - 0 error(s), 13 warning(s).
+- `rg "Error|Failed to load" Saved/FabImport/M5.log` found only three LoadErrors page headings, three MapCheck lines reporting 0 Error(s)/0 Warning(s), and the Warning/Error Summary heading; no actual errors or Failed to load messages.
+- Warnings: twelve existing KiteDemo meshes recompute legacy physics on load (SM_Buttercup_Patch_01, SM_FieldGrass_01, SM_Yarrow, SM_Boulder05a, SM_GroundRevealRock001, HillTree_Tall_02, HillTree_02, SM_LargePlainsBoulder002, Medium_Boulder_001, SM_River_Rock_01, Medium_Boulder_LowPoly, Tree_Stump_01); one missing RecastNavMesh warning. These warning strings were not present in the captured old logs. No resave was performed, per hard rule. They are warnings while reading existing assets, not new load errors.
+
+### Final report
+
+| Asset | Final path | Asset counts | Status |
+|---|---|---|---|
+| Weapon Pack 01 | `/Game/HS_WeaponPack_01` | 129 total; AnimSequence: 2; MapBuildDataRegistry: 2; Material: 1; MaterialFunction: 3; MaterialInstanceConstant: 35; PhysicsAsset: 8; SkeletalMesh: 8; Skeleton: 8; StaticMesh: 29; Texture2D: 30; TextureCube: 1; World: 2 | PASS, zero failed loads |
+| AMERICAN SOLDIER | `/Game/american_soldier` | 103 total; AnimSequence: 6; MapBuildDataRegistry: 1; Material: 10; PhysicsAsset: 1; SkeletalMesh: 18; Skeleton: 1; StaticMesh: 1; Texture2D: 64; World: 1 | PASS, zero failed loads |
+| Open World Demo Collection | `/Game/KiteDemo` | 274 total; Blueprint: 1; CurveFloat: 1; CurveLinearColor: 1; MapBuildDataRegistry: 2; Material: 32; MaterialFunction: 1; MaterialInstanceConstant: 45; MaterialParameterCollection: 2; StaticMesh: 47; Texture2D: 138; TextureCube: 2; World: 2 | PASS, zero failed loads |
+| CANNON - GAME READY | `/Game/ThirdParty/PTM_Cannon` | 7 total; MaterialInstanceConstant: 1; StaticMesh: 1; Texture2D: 5 | PASS, zero failed loads |
+| Smuggler’s Cove | — | 0 | SKIPPED: source not on disk |
+| Grand Strategy Style Map | — | 0 | SKIPPED: user requested |
+
+- Plugin source installed: none. Inspected temporary Git checkout only: v1.0 92d2ea86a51ce6358a7c116f011ece73f52d3417; latest tag Example-Project/main e4748118030a74edec083122d0f7cb6668bbc816. No plugin descriptor was available in checked Git trees or vault; EngineVersion/Modules/PlatformAllowList/Binaries/Mac therefore not applicable. Patches applied: none. No plugin enabled or build attempted after user skip.
+- Total added to Content/: **77,277,043 bytes (73.70 MiB)**, seven new cannon .uasset files. Total added to Plugins/: **0 bytes**. Musket/soldier/KiteDemo copies added zero bytes; all were already complete.
+- All newly added project Content files are .uasset and covered by current LFS patterns. Missing requested patterns: *.fbx, *.glb, *.png, *.exr, *.wav; raw *.tga also uncovered. Raw source stayed in /private/tmp; no git config or .gitattributes edits.
+- Soldier skeleton: `SK_AMERICAN_SOLDIER_Skeleton`. It is a custom pack skeleton with UE4-style bone-name evidence (spine_01/02/03, upperarm_twist_01_l, thigh_twist_01_l, ik_foot_root; no spine_04/05 or metacarpals), **not the UE5 Mannequin skeleton**. This identifies the supplied asset, not a retargeting compatibility guarantee.
+- Musket/powder horn skeletons (all custom mechanical rigs, **none is a UE5 Mannequin skeleton**; no pelvis/spine_04 names):
+  - `SK_HS_WP01_PowderHorn_Strap_Y_0_Skeleton`
+  - `SK_HS_WP01_PowderHorn_X_0_Skeleton`
+  - `SK_HS_WP01_PowderHorn_Strap_X_0_Skeleton`
+  - `SK_HS_WP01_PowderHorn_Y_0_Skeleton`
+  - `SK_HS_WP01_MusketRifle_Strap_Y_0_Skeleton`
+  - `SK_HS_WP01_MusketRifle_Strap_X_0_Skeleton`
+  - `SK_HS_WP01_MusketRifle_X_0_Skeleton`
+  - `SK_HS_WP01_MusketRifle_Y_0_Skeleton`
+- No retargeting, gameplay wiring, map edits, third-party asset resaves, ini merges, engine edits, git commits/staging/push/stash/reset, or changes to unreal/PA250Sim/ or services/ were performed.
+- Evidence: Saved/AssetImportReport.json, Saved/LevelImportReport.json, Saved/FabImport/{M1,M2_retry,M3_interchange,M3_verify,M5}.log, Saved/FabImport/PostImportIntegrity.json. Post-import SHA-256 checks: all 506 vault pack files present and identical; zero differing files.
+- Added scripts: tools/ue/verify_assets.py, tools/ue/import_raw.py, tools/ue/verify_levels.py. Engine verified: 5.8.4-58902052+++UE5+Release-5.8 (Apple M3).
+
+## Fab asset import (2026-11-08) — Lexington runtime visuals
+
+- Follow-up screenshot showed Quinn, cube hats, floating cones and the cylinder musket. Import/load verification alone did not connect the assets to gameplay.
+- Root cause: RF/PA250ThirdPartyAssets.h searched placeholder /Game/ThirdParty paths; RFCharacter rejected the soldier's non-Manny skeleton; MusketWeapon always constructed a cylinder.
+- Added original-path lookups for american_soldier and HS_WeaponPack_01. RFCharacter uses the soldier's own idle/walk/run animations without retargeting, clears mannequin material overrides, and hides primitive hats/markers. MusketWeapon selects the Horizon static musket with its supplied materials and derives grip/muzzle positions from its bounds.
+- Creating a project-owned tintable coat material to distinguish British red, Continental blue and militia brown while preserving native face/hair/kit materials. No original Fab asset is edited or resaved.
+- Added PA250Visuals commandlet to exercise spawned faction pawns, compatible animations, hidden placeholders, real attached muskets and distinct faction coat colors. Build/runtime/render verification pending.
+- Another external build was active in the same workspace; Build.sh -WaitMutex serialized builds. Unrelated source changes are being preserved.
+
+- Build: Build.sh PlayAmerica250Editor Mac Development -Project=<project> -WaitMutex -MaxParallelActions=2 succeeded. First PA250Visuals check stalled while SetSkeletalMesh initialized the old mannequin AnimBP (confirmed with macOS sample at RFCharacter.cpp -> SetSkeletalMesh -> InitAnim -> UpdateAnimation_WithRoot). Stopped only this task’s commandlet process and moved SetAnimInstanceClass(nullptr) before switching meshes. Rebuild/retry pending.
+- SHA-256 recheck after runtime material creation: 129 musket + 103 soldier files still identical to vault; zero differences. Evidence: Saved/FabImport/RuntimeVisualIntegrity.json.
+
+- Rebuild after animation-order fix succeeded. PA250Visuals now confirms both imported soldier meshes, compatible idle animations, hidden placeholders and distinct coat tints. Four weapon assertions exposed a test-harness issue: bare world has no GameMode to dispatch BeginPlay (weapon is spawned there). Added explicit DispatchBeginPlay when needed; final retry pending.
+
+- Final native verification: `UnrealEditor <project> -run=PA250Visuals -unattended -nosplash -nullrhi -stdout` exited 0, 12 PASS / failures=0. Both factions spawn imported soldier meshes, compatible idle animation, hidden primitive hats/cones, Horizon musket, hand_r attachment, and distinct red/blue coats. Build4 succeeded. Persistent logs: Saved/FabImport/RuntimeVisual{Build,Verify}.log.
+- Render command: `UnrealEditor <project> -ExecutePythonScript=<repo>/tools/ue/preview_soldier_visuals.py -unattended -nosplash -NoSound -windowed -ResX=1280 -ResY=900`; opens Lexington, spawns two comparison pawns in memory, captures PA250_FabSoldiers.png, exits without saving the map. Result pending.
+
+## 2026-11-08 — Training, discipline, morale, adaptable tactics (3 slices)
+
+### What existed (inspection)
+- Engine 5.8.4 (CL 58902052) at `/Users/Shared/Epic Games/UE_5.8`; editor target `BuildSettingsVersion.V7`, `Unreal5_8` include order, Mac Development.
+- Weapon: `AMusketWeapon` is a **smoothbore musket** (spread cone, round ball). Not renamed.
+- No ammunition count exists. Readiness is `Loaded / Reloading / Jammed`, gated by `CanFire()`. Nothing was added.
+- AI reload used `BotCommit`, which rolled hit quality regardless of timing, inside a 0.2–0.35 s think gate. Skill came from unit class.
+- No morale, no cover, no reload animations. The bot perception used for the bayonet rule ignored line of sight.
+
+### Design
+- New `DA_CombatProfiles` (`UPA250CombatProfiles`, values in the constructor). Training (`Veteran` / `Trained` / `Recruit`), tactical role (`Line` / `Light` / `Irregular`) and an assignment table (faction, class) → (training, role) are separate. Faction appears only in the assignment.
+- Defaults (user-chosen):
+  - british / line → Veteran / Line;
+  - continental / line → Trained / Line;
+  - continental / militia → Recruit / Irregular.
+- All values are labelled gameplay settings (provisional), not historical rates.
+
+### Slice 1 — AI reload by training (player untouched)
+- `FPA250AIReloadPlanner` (`Battle/PA250AIReload.h`) decides **when** a bot presses. It presses through the player's own `TryCommit`, so the windows, fumble pause, jams, damage bonus and all three steps are identical. Nothing is skipped and there is no instant reload.
+- The press point is never earlier than the window centre. That centre path is the "ideal drill" baseline: the Arcade perfect time, 2.5 s, kept as a balance placeholder.
+- Pace, jitter, stress and moving penalties are all ≥ 1×. A press that would land after the zone becomes "let the step run out", so stress, moving and disorder can only add time.
+- Stress uses existing signals: volley suppression, squad losses, and squad morale.
+- Bots tick the planner every frame. Each bot has a `FRandomStream` seeded from `BattleSetup.seed` and a spawn counter.
+- `ConfigureSoldier` assigns training and role. The player's R-press path never reads them, and `PresetToSequencer` is unchanged (golden test).
+- `battle_result.json` `trace.reload_by_training`: n / mean / p90 / min / fumbles per training.
+- Found by the tests and fixed: a planned press after the zone counted as a fumble, so slower (moving) Recruits came out faster than calm ones.
+
+### Slice 2 — Morale, discipline, withdrawal (through `UPA250VolleyCoordinator`)
+- `FPA250MoraleState` (`Battle/PA250Morale.h`):
+  - States: Steady → Shaken → Routing → Rallying → Steady, plus a separate deliberate Withdrawing.
+  - Pressure combines recent casualties (12 s half-life), the suppressed share, strength, close contact and a flank.
+  - Thresholds: enter 0.45 / leave 0.30, rout 0.85, 3 s minimum dwell. Pressure is divided by training resolve.
+  - Rally waits `RallySeconds` calm, then `ReformSeconds`.
+- `FPA250MoraleOrders` decides what each state may do:
+  - **Withdrawing:** keeps ranks, backs off facing the enemy, holds fire while moving, needs no rally. It can still break into a rout.
+  - **Routing:** abandons ranks, runs to the side's spawn rear (`GetRearPoint`), never fires or charges, must rally.
+  - **Shaken:** slower march, waits for more loaded muskets before volleying, won't charge.
+- Withdrawal triggers: outnumbered 2:1 below 60% strength (any role), or exposed (role setting). There is a cooldown.
+- Cohesion by training: arrive tolerance and straggler wait scale per training. Rallying re-forms where the men stand.
+- Squads only group the same faction + training + role. The player's soldier never joins a squad (`ShouldJoinSquad`).
+- Replaced the old "seek cover below 50% strength" rule for formed squads.
+
+### Slice 3 — Adaptable tactics (Light / Irregular roles)
+- `PA250Cover` (`Battle/PA250Cover.h`): trace-only, no EQS. A firing position is one where the enemy's ray to the chest (~0.9 m) is stopped by something within 1.5 m in front, while the shoulder ray (~1.45 m) is clear. The search checks a deterministic ring of 17 points (navmesh-projected when a navmesh exists), every 2 s per squad.
+- Light / Irregular:
+  - open order (one rank, wider files);
+  - each man takes the nearest covered firing position near his place;
+  - men fire individually, only once in position, after a reaction delay;
+  - they withdraw `RepositionCm` when exposed, with a cooldown.
+  - Costs: no shots while moving back, slower reload on the move, still targetable.
+- Line regulars can still withdraw and rout through morale.
+- Perception: `FindNearestEnemy` now needs line of sight (nearest first, at most 4 traces). Contact already did.
+
+### Files
+- New: `Battle/PA250CombatProfiles.*`, `Battle/PA250AIReload.h`, `Battle/PA250Morale.h`, `Battle/PA250Cover.h`, `Content/PA250/Data/DA_CombatProfiles.uasset`.
+- Edited: `RF/MusketWeapon.*`, `Battle/PA250BotController.*`, `Battle/PA250VolleyCoordinator.*`, `Battle/PA250BattleGameMode.*`, `PA250BattleCases.*`, `PA250BattleTests.cpp`, `PA250BattleCommandlet.cpp`, `Scripts/build_levels.py` (DA spec + `data` builder).
+- Not touched: `FActiveReloadSequencer` rules, `PresetToSequencer`, the player input path, `unreal/PA250Sim/`, `protocol/`.
+
+### Tests that ran (headless, this Mac)
+- `-run=PA250Battle` → checks=161 fails=0.
+- `Automation RunTests PA250.Battle+PA250.Combat` → 13/13 Success, including the new `PA250.Battle.Training`, `.Morale` and `.Tactics`.
+- `-run=PA250Combat` → fails=0.
+- Key measurements:
+  - Player Arcade settings: golden match.
+  - Every AI reload passed all 3 steps; fastest 2.52 s vs the 2.50 s ideal.
+  - Calm Veteran 2.65 ± 0.20 s (≤ 1.1 × ideal); Recruit 4.31 ± 0.57 s.
+  - Same training, British vs Continental: identical with the same seed; means 2.647 vs 2.649 s across different seeds.
+  - Stress 0 → 1 × still/moving: no single run got faster (1000 seeds × 5 levels × 2).
+  - Morale wobbling ±0.05 at the threshold for 120 s: 1 transition. The same pressure routs Recruits, not Veterans; Veterans still rout at 1.6.
+  - Rally: Veteran 8.1 s, Recruit 20.1 s.
+  - Withdrawal vs rout orders differ as above. The player's soldier never joins a squad.
+  - Fence test world: the cover search moves a man behind the fence; no cover in the open; an enemy behind a wall is not seen; moving reload 4.80 vs 4.30 s.
+- `scripts/run_slice_autoplay.sh` → PASSED (real `L_Lexington` battle, headless, 10× dilation):
+  - Reloads: Veteran 432 at mean 3.75 s (min 2.53); Trained 39 at 4.46 s; Recruit 197 at 5.08 s with 204 fumbles. Battle stress lifts all of these above the calm figures.
+  - Morale transitions — British: Shaken 6, Routing 3, Withdrawing 2, Rallying 2. Continental: Shaken 10, Routing 7, Withdrawing 3, Rallying 5.
+  - 87–88% of shots in the 40–80 m band; crowding 0–7%; one post flip.
+
+### Not verified / deferred
+- **No PIE or visual check** of withdrawals, routs, cover-taking or skirmish fire. The FTEST map has no navmesh, and `L_Lexington`'s fences were not inspected for chest-height cover.
+- Bot aim error is still set by unit class (militia 3°, line 2°) in `ConfigureSoldier`, not by training.
+- The unused `LineInfantryReloadSkill` / `MilitiaReloadSkill` (`DA_MusketTuning`) and `TickBotReload` / `BotCommit` are left for the legacy tests.
+- No reload animations exist to sync; the HUD and musket state come from the same sequencer.
+- There is no historically sourced reload time; the Arcade baseline stays a balance placeholder.
+
+- Rendered QA caught a Metal shader failure in the first generated coat material: `(Node Desaturation) Missing Desaturation input`. Fixed generation to connect the default source output to the actual reflected first input and assert all graph connections succeed. Created M_PA250_SoldierUniform at a fresh path and removed only this task’s failed generated coat material. Original Fab assets untouched. Final source selects M_PA250_SoldierUniform; build5 succeeded. Render retry pending.
+- Preview harness fixes: UE 5.8 exposes EditorPythonScripting (ScriptName, without Library suffix); screenshot preparation pumps Slate recursively, so preview now holds the screenshot task and waits for completion before quitting. Output is an absolute path under Saved/PA250.
+
+- Final rendered QA: preview4 exited 0. Visually inspected Saved/PA250/PA250_FabSoldiers.png: imported period models and textured Horizon muskets, distinct blue/red uniform trim, no Quinn/cube hats/floating cones. M_PA250_SoldierUniform has no Metal shader compilation failure in the rendered log. The image is a static editor comparison in Lexington, not a combat-animation playtest.
+- Remaining animation scope: supplied pack locomotion (idle/walk/run) is selected at runtime. Dedicated shoulder-aim, firing and body reload poses are not implemented by this visual hookup; the weapon pack’s mechanical animations were not retargeted to the human skeleton.
+- Existing rendered warnings recorded, left outside this fix: native soldier skeleton references obsolete /Engine/EngineMeshes/Humanoid retarget metadata; MI_PA250_Yarrow has an existing Metal sampler-type warning; KiteDemo legacy physics warnings; Mac idevice_id helper has a Bad CPU type warning. No original content was saved.
+- Final changed/new files: RF/PA250ThirdPartyAssets.h, RF/RFCharacter.{h,cpp}, RF/MusketWeapon.cpp, PA250VisualsCommandlet.{h,cpp}, tools/ue/{build_soldier_visuals,preview_soldier_visuals}.py, new Content/PA250/Materials/M_PA250_SoldierUniform.uasset. No simulation/services/engine edits or git mutations. Restart any previously open Editor to load the rebuilt C++ library.
+
+- Final cache fix: retry weak soldier-mesh lookups after PIE teardown/garbage collection instead of retaining a one-time bResolved flag. This prevents later battles falling back to Quinn after the cached mesh is collected. Build6 succeeded; final PA250Visuals run uses the rebuilt library.
+
+- Final verification completed: latest Build6 + PA250Visuals commandlet exited 0; 12 PASS, failures=0, no Error: lines. RuntimeVisualVerify.log updated at 2026-11-08 10:51 EST. Rendered comparison verified at Saved/PA250/PA250_FabSoldiers.png.
+
+## 2026-11-08 — Stricter checks + battle feel (push, morale callouts, aim by training)
+
+### Stricter tests (previously "never faster" / "no flicker" only)
+- Reload: full stress makes every training ≥ 15% slower; moving ≥ 10% slower. Measured (500 seeds):
+  - Veteran: 4.13 / 3.54 vs 2.65 s;
+  - Trained: 4.48 / 4.40 vs 3.17 s;
+  - Recruit: 5.21 / 4.82 vs 4.30 s.
+- Morale responsiveness: sustained heavy fire shakes a steady squad in 0.1 s; it steadies 3.1 s after the pressure lifts; overwhelming pressure routs a Trained squad in 0.1 s.
+
+### Feel / gameplay
+- **Callouts were never displayed.** `UPA250VolleyCoordinator::GetCallout` had no reader, so "Make ready! / Present! / FIRE!" never reached the screen. Now shown on the HUD, high centre, for squads within 60 m of the camera.
+- **Morale you can read:** shouted lines on morale changes near you. Ours: "Steady, lads!", "Fall back - in order!", "The line is breaking - run!", "Rally! Form on me!", "Line re-formed!". Theirs: "They're falling back!", "They're running!". Every rout also goes to the kill feed ("Enemy militia rout!" / "Our Regulars are routing!").
+- **Lines press for the objective:** a Steady squad in contact advances on its post between volleys (bayonets at < 10 m) when the enemy in front is routing, withdrawing or rallying, or when it outnumbers the visible enemy 1.5:1 at > 60% strength. Callout "Forward! Push them off the ground!".
+- **Bot aim error now comes from training** (Veteran 2°, Trained 2.5°, Recruit 3°) instead of unit class, and now applies to squad volleys too (previously volleys used only the weapon spread).
+
+### Measured (`RUNS=2 scripts/run_slice_autoplay.sh`, real L_Lexington battles)
+| | before | after |
+|---|---|---|
+| post flips per battle | 0–1 | 3 and 3 |
+| winner | Continental (attrition / bleed) | Continental in run 1, British in run 2 |
+| shots < 20 m (bayonet range closes) | 0 | 0 in run 1, 66 in run 2 |
+| shots in the 40–80 m band | 87–88% | 85% / 72% |
+| crowding at the end | 0–7% | 20% / 0% |
+
+### Verification
+- `BUILD` Succeeded. `-run=PA250Battle` checks=170 fails=0. Automation `PA250.Battle+PA250.Combat` 13/13. `RUNS=2` slice autoplay PASSED.
+- Not verified: how it plays in PIE (callout timing and readability, whether the pushes feel earned).
+
+## 2026-11-08 — Musket points forward + weapon-pack animations
+
+### Problem (measured, `-run=PA250Visuals` with the idle actually ticking)
+- The musket snapped to `hand_r` with zero rotation, so the barrel followed the hand bone's X axis. In the pack idle that axis points straight up (Z 0.98): barrel vertical, muzzle ~2.1 m off the ground and behind the soldier. Walk/run arm swing turned the barrel too.
+- The earlier rendered comparison showed the reference A-pose (editor worlds don't tick animation), so the bug wasn't visible there.
+- The weapon pack has only two animations, `AS_HS_WP01_MusketRifle_Firing` (0.4 s) and `_Reloading` (4.2 s). Both are **mechanical** (hammer, ramrod) on the musket's own **Y_0** skeleton. Neither pack has body aim/fire/reload animations; the soldier pack has only idle/walk/run/jump.
+
+### Fix (`RF/MusketWeapon.*`, `RF/PA250ThirdPartyAssets.h`; RFCharacter unchanged)
+- Barrel rotation follows the owner's `GetBaseAimRotation()` (camera for the player, AI focus for bots), with pitch clamped to ±45° and roll 0. The right hand only carries the position (grip at `b_gun_Trigger`).
+- The weapon uses skeletal `SK_HS_WP01_MusketRifle_Y_0`, laid out from its own bones (trigger → `b_gun_Fire` along +X, 150 cm long). `MuzzleLocation` = `b_gun_Fire`. The static mesh stays as a hidden fallback.
+- `Firing` plays once on each shot. `Reloading` is then **scrubbed by the reload sequencer** (three drill phases mapped evenly over 4.2 s). It holds during a fumble delay or jam and rests at the loaded pose, so it can't disagree with the HUD. Visual only; no gameplay timing changed.
+
+### Verification
+- `-run=PA250Visuals`: 25 PASS, failures=0. Measured barrel·facing = 1.000 (also for a soldier turned 90°). Muzzle 104 cm in front at 100 cm height (was behind, ~210 cm). Hammer above the barrel on the right. Firing/Reloading assets play.
+- `-run=PA250Battle` checks=170 fails=0; `-run=PA250Combat` fails=0. `scripts/run_slice_autoplay.sh` PASSED (real L_Lexington battle).
+- Automation `RunTests PA250.Battle+PA250.Combat` exited without output this time (the known Mac crash in that runner); commandlets cover it.
+- Builds use `-NoHotReload` while an editor is open; otherwise UBT links `-0001.dylib` and commandlets load the stale library.
+
+### Still open
+- **No PIE / rendered check of the new pose.** It looks like a low "hip/ready" carry: the arms still play unarmed idle/walk/run, so the left hand isn't on the stock and there is no shoulder/present pose. That needs body animations for a musket (aim, fire, reload) or IK, which neither pack contains.
+- Restart the Unreal Editor to load the rebuilt library.
+
+## 2026-11-08 — Battle audio: gunfire, ball whiz, impacts, reload, melee, shouted orders
+
+### Assets (all new; none existed before)
+- **SFX, synthesized and original** (`tools/audio/synth_sfx.py`, numpy + scipy from the negotiation venv, seeded so it's deterministic). 18 WAVs:
+  - `musket_fire_1-4`: flint snap → pan whoosh → boom + crack + rolling echo;
+  - `musket_distant_1-2`;
+  - `ball_whiz_1-3`: Doppler hiss;
+  - `impact_body_1-2`, `impact_ground_1-2`;
+  - `ramrod_1-3`;
+  - `flint_click`, `melee_swing`.
+- **Voices, ElevenLabs** (`tools/audio/gen_voice_lines.py`): the existing key from `services/negotiation/.env`, read and never printed. 28 lines, 14 per side, ~544 characters billed. Existing files are skipped unless `--force`.
+  - British: George (officer), Daniel (cries). Continental: Adam (officer), Harry (cries).
+  - Lines: make_ready, present, fire, forward, enemy_advancing, steady, fall_back, enemy_falling_back, breaking, enemy_running, rally, reformed, charge ("Huzzah!"), charge_b ("At them, boys! Charge!").
+- Source WAVs live in `unreal/PlayAmerica250/SourceAudio/`. `Scripts/import_audio.py` imports them to `/Game/PA250/Audio/{SFX,Voice/<side>}` (46 assets).
+
+### Playback (`Battle/PA250BattleAudio.*`)
+- Banks are found by name (`<bank>_N` variants), with random variant and pitch. Runtime attenuation by range:
+  - gunfire: falloff 400 m, low-pass muffled with distance;
+  - voices: 60 m;
+  - near sounds (ramrod, swing, impacts): 25 m;
+  - whiz: 12 m.
+- **Musket shots:** the distant variant is used when the listener is more than 60 m away. Each 80 ms window starts at most 5 shot sounds, so a volley reads as a volley instead of clipping.
+- **Hooks:**
+  - `AMusketWeapon::Fire`: shot (unless a `FireSound` asset is set).
+  - Each finished reload step, player and AI: ramrod. Jam: flint click.
+  - Projectile hit: body or ground impact. A ball passing within 5 m of the camera, not your own: whiz.
+  - Thrust / butt-stroke: swing. Melee hit: body thud. Charge: the side's charge cry.
+  - Squad callouts are voiced through `Shout`. Orders are spoken by that squad's officer at its line, so you hear the enemy's "Make ready!" from their line. News about the enemy ("They're running!", "They're falling back!", "Their line is advancing!") is shouted by your side near the camera.
+  - The same line from several squads within 1.5 s plays once.
+
+### Verification
+- `BUILD` Succeeded. `-run=PA250Battle` checks=186 fails=0. New `PA250.Battle.Audio` checks:
+  - every bank and its variants resolve;
+  - all 28 lines are present (shortest 0.43 s);
+  - a shot, three ramrod steps, a jam, a swing and a charge cry each trigger;
+  - an 8-shot volley → 5 sounds.
+- Slice autoplay PASSED with the audio hooks active.
+- **Not verified:** how it actually sounds. Headless runs have no audio device; listen in PIE, or preview the WAVs with `afplay unreal/PlayAmerica250/SourceAudio/sfx/musket_fire_1.wav`.
+
+## 2026-11-08 — Slower reloads (10 s / 15–45 s), squad bayonet charges for both sides, easier player charge
+
+### Reload timing (user-chosen gameplay settings, `UPA250WeaponTuning` constructor)
+- **Arcade (default):** 7 s perfect, 10 s untouched, 14 s fumbled every step (was 2.5 / 4 / 6). No jams.
+- **Authentic:** the user's 15–45 s range — 15 s drill-perfect, 30 s untouched, 45 s fumbled; 10% jam on a miss; 2.5 s to clear.
+- The rules are the same; only the step lengths changed. `DA_WeaponTuning` follows the constructor (verified by the asset checks).
+- AI stress now raises fumbles more: `(1 - skill) × (1 + 2 × stress)`, plus `0.6 × moving penalty`. With a 10 s reload, a calm Recruit already sits near the untouched time, so stress had little left to slow down. Calm behaviour is unchanged.
+- Measured (500 seeds, calm / full stress / moving):
+  - Veteran: 7.35 / 10.37 / 10.43 s;
+  - Trained: 8.66 / 11.44 / 11.44 s;
+  - Recruit: 10.92 / 13.61 / 12.55 s.
+
+### Squad bayonet charges — both sides, same rules (`PA250ShouldOrderCharge`, no faction input)
+- **Line squads** (British Veteran / Line and Continental Trained / Line) charge an enemy within 35 m when they outnumber him 1.25:1, or catch him mostly reloading while their own muskets are mostly empty.
+- **Cautious roles** (Light, Irregular = militia) charge a wavering enemy, or a reloading one only when they also outnumber him 1.2:1.
+- Any side charges a wavering enemy (routing, withdrawing or rallying). Only Steady squads charge.
+- A charge lasts up to 12 s; 10 s rest between charges. The squad's officer shouts "Charge! At them!" (voiced). Men sprint at the nearest enemy in sight, lunge within 6 m and thrust within reach.
+- Being charged adds +0.3 morale pressure, so charges break green lines.
+
+### Player charge made easier
+- New **G** key (no sprint needed); Shift+E still works.
+- Dash 6 m over 0.6 s (was 4 m / 0.45 s), bayonet sweep radius 70 cm (was 50), reach 1.7 m.
+- Charge assist: snaps the dash (and the camera yaw) onto the nearest visible enemy within 9 m and 40° of facing.
+- Whiff recovery 0.5 s.
+- HUD: a red ">> Enemy in reach - press G to CHARGE! <<" when the assist has a target; legend updated.
+
+### Verification
+- `BUILD` Succeeded. `-run=PA250Battle` checks=198 fails=0. Automation `PA250.Battle+PA250.Combat` 14/14.
+- New checks:
+  - preset timings 7.01 / 10.01 / 14.02 and 15.01 / 30.01 / 45.01;
+  - assist picks the enemy in front, not one at 90°, and not a friend; the charge turns him onto the target (26.6°);
+  - charge-order rules for line vs cautious roles, Shaken and range;
+  - being-charged pressure;
+  - British and Continental line use the same charge rules.
+- Slice autoplay:
+  - 1 run PASSED (British win, 3 post flips; trace `british.Charge` 2, `continental.Charge` 1);
+  - a separate `RUNS=2`: run 2 PASSED. Run 1 exited before writing a trace while another session's UnrealBuildTool was compiling (module unavailable). An earlier `RUNS=2` also failed while that session was editing the game mode; its failing lines were not captured.
+- Not verified in PIE: whether G-charges feel good, charge-assist snapping, and the pacing of 10 s reloads.
+
+## 2026-11-08 — Capture posts: flags that lower/raise + objective markers
+
+- Camera pitch report: it came back after an editor restart; no code cause found (`GetBaseAimRotation` is read-only). The PIE log showed a normal possessed soldier.
+- **Flagpole at every post** (`APA250ControlPoint`): 9 m pole, stood on the ground by a trace (the actor floats 1.4 m up; the old ring disc sits a full radius below the actor, inside the terrain). The flag follows the existing two-stage capture:
+  - held → holder's flag at the top;
+  - enemy neutralising → it lowers with progress;
+  - neutral → the capturer's flag rises;
+  - the flag always lowers fully before it changes colour;
+  - a defender stepping back in sends it up again.
+  - Pure `FlagTarget()`. Capture logic still steps at 0.1 s (an accumulator replaces `TickInterval`) so the flag can animate every frame.
+- **HUD** (`UPA250BattleHUD::NativePaint`):
+  - letter boxes A/B/C (sorted post ids: Buckman, Green, Meetinghouse) under the score bar, in the holder's colour, with a capture fill;
+  - a world marker over each flagpole (letter, capture bar, distance or IN ZONE), pinned to the screen edge when off-screen;
+  - an order per post via pure `PostOrder()`: ATTACK (enemy or neutral), DEFEND (ours under capture), CAPTURING, CONTESTED (pulses), or nothing when ours is secure.
+  - Faction colours (British red / Continental blue) match the uniforms, not friend/foe.
+  - In-zone text now names the post and the action: "Lowering the enemy flag at B  Lexington Green 40%".
+- Verified: `-run=PA250Battle` checks=208 fails=0 (10 new flag/marker checks); slice autoplay PASSED with post_flips=5.
+- **Not verified visually:** no PIE or render of the flags or markers yet. Restart the editor to load it.
+
+## 2026-11-08 — Authentic reload is the permanent default
+- `APA250BattleGameMode::ReloadPreset = 1` (Authentic), `UPA250WeaponTuning::Values.DefaultPreset = Authentic`, `AMusketWeapon::ActivePreset = Authentic`. No map or config overrode them. Arcade (~10 s) is still available by setting `ReloadPreset = 0`.
+- Player: 15 s drill-perfect, 30 s untouched, 45 s fumbling every step; misses can jam (hold R 2.5 s to clear).
+- `BUILD` Succeeded. `-run=PA250Battle` checks=209 fails=0, including the new "Authentic reload is the default (game mode, musket, tuning)". Slice autoplay PASSED.
+- Real battle (L_Lexington, headless, 208 s):
+  - AI reloads: Veteran mean 19.8 s (15.3 – p90 24.8); Trained 29.3 s; Recruit 33.1 s (22.4 – p90 40.0).
+  - Charges: British 6, Continental 1. Continentals routed 9 times. 3 post flips, British win.
+- Note: this battle's Continentals are mostly militia (Recruit / Irregular, cautious chargers: 18 militia vs 4 line in `boston1775.json`), so they charge far less than the British regulars.
+
+## 2026-11-08 — Volley harden review fixes (coordinator only)
+- Aligned ready and discharge on one target: `ResolveVolleyTarget` returns only the squad `Contact` (in engage range, seen by that man). `SafeReady` counting and `ScheduleVolley` now use the same formed+loaded+clear-lane shooter list; the old per-man nearest-enemy search in `ScheduleVolley` is gone, so a man counted ready cannot discharge at a different enemy.
+- `HasClearFiringLane`: a different living enemy in the lane is explicitly a hit, not a block (the intended target is trace-ignored); living friendly or world geometry still blocks.
+- Pending shots now also require a living target (`ShouldDischargePending` gained `bTargetAlive`); a new schedule bumps `VolleyEpoch` before replacing pending shots; the lone-soldier (`Live < 2`) cancel no longer bumps the epoch every tick.
+- Verified: `BUILD` Succeeded; `-run=PA250Combat` fails=0; `-run=PA250Battle` checks=242 fails=1 — all volley/lane checks pass (incl. new dead-target and different-enemy cases); the one fail is the unrelated level check "battle road: walls flank the British approach", not touched by this change.
+- `DA_BotTuning` note: no serialized `VolleyFireJitterSeconds` in the asset strings; the field loads from the struct default (0.1 s) until the asset is next saved in the editor. Tuning for volleys: `VolleyReadyFraction` 0.7, `VolleyMaxWaitSeconds` 6 s, `VolleyFireJitterSeconds` 0.1 s.
+- Not verified in PIE: two opposing Line squads volleying, charge/rout mid-jitter with `pa250.BotSpacingReport` capture.
+
+## 2026-11-08 — Real flags that wave
+
+- **Artwork** (`Battle/PA250FlagArt.*`), drawn at runtime into transient textures (2×2 supersampled), so nothing is imported:
+  - British: the 1707 Union flag. St Patrick's saltire only arrives in 1801.
+  - Continental: the New England Pine Tree flag of 1775.
+  - Pure `Pixel()`; HUD colours stay faction red/blue.
+- **Cloth:** a `UProceduralMeshComponent` grid (16×8 segments, 180×90 cm) driven by pure `ClothOffset()`. The ripple travels away from the pole, grows toward the fly and droops. It is re-shaped only while recently rendered. The pole is wood-coloured with a gilt ball on top.
+- **New:**
+  - engine plugin `ProceduralMeshComponent` enabled (uproject + Build.cs);
+  - `M_PA250_Flag` (two-sided, texture parameter `Flag`), made by `tools/ue/build_flag_material.py`;
+  - plain faction colours as fallback if the material is missing.
+- **Preview:** `-PA250Preview=<label>` adds `flag_green` (the Green set to British for the shot) and `flag_meetinghouse` stills, with the HUD. Rendered and inspected (`docs/preview/lexington_flags_flag_*.png`): both flags wave, letter boxes and world markers show.
+- **Tests:** `-run=PA250Battle` — all flag, flag-art, cloth and marker checks pass. The only failure is `battle road: walls flank the British approach`, from another session's concurrent level work (it was editing `build_levels.py` / `L_Lexington` and adding those tests during this change), not from the flags.
+- **Follow-ups:**
+  - The Meetinghouse post stands against the building, so its flag flies at eave height close to the wall. Move the post a few metres off the building in `build_levels.py`.
+  - Edge-pinned markers now start lower (MinY 215) to clear the callout line; this last tweak wasn't re-rendered.
+
+## 2026-11-08 — Battle Road: walls as cover + militia muster (user picked options 1 + 2)
+
+Context: Lexington Green was a British win (77 militia vs ~240 light infantry). 19 April 1775 as a whole was an American success: militia companies converged all day and fired from walls along the Battle Road. British losses ~273 vs ~93.
+
+### Map (`Scripts/build_levels.py`, builder `lexington_battle_road`, idempotent; also called by `build_lexington`)
+- Six new dry-stone walls (`BattleRoad_*`):
+  - two parallel to the Boston road, ~17 m north and south;
+  - four cross walls facing the British approach, between x 1800 and 6500.
+- All stone-wall collision (1.1 m: chest covered, shoulder clear) is tagged `PA250Cover`: 152 segments, 76 between the Green and the British start.
+- Three `continental_muster` PlayerStarts: north, south, west.
+- The navmesh is runtime-dynamic, so it routes around the new walls. Applied to `L_Lexington.umap`; everything else in the level is untouched.
+
+### Skirmishers use the walls (`UPA250VolleyCoordinator::PickCoverLine`)
+- Roles that prefer cover (Light, Irregular) take a line 1.5 m behind the nearest tagged wall within 50 m of their post. The wall must lie toward the enemy, or no more than 15 m behind the post; each squad takes a different wall, ≥ 15 m apart.
+- The per-man cover query then finds firing positions along it.
+- Skirmish roles answer an incoming bayonet charge with an ordered withdrawal (and no charge-shock morale pressure), then return to their wall after the cooldown. Line troops still feel the full shock.
+
+### Militia muster (`DA_BotTuning`, faction-neutral: applies to any side's militia; GAME INVENTION)
+- 50% of a side's militia places start on the field.
+- A company of 4 arrives every 15 s at a random muster point. The kill feed shows "Militia company arrives from the north! (+4)".
+- Militia grow up to 2× their share. Men in the field never exceed the side's remaining tickets.
+- Tickets are untouched (spent on death), so `BattleResult` losses still never exceed the pools.
+- Lexington 1775 setup (4 line + 18 militia units, 16 places): Americans start with 3 line + 7 militia vs 16 British, and militia grow to 26. `trace.muster_arrivals` added.
+
+### Verification
+- `BUILD` Succeeded. `-run=PA250Battle` checks=242 fails=0. New `PA250.Battle.BattleRoad`:
+  - the map has ≥ 12 tagged wall segments on the approach (76 found) and 3 muster points;
+  - cover-line picks (forward wall, own side, distinct per squad, none out of reach);
+  - muster plan and wave caps (cap, ticket limit, no tickets → no arrivals).
+- `RUNS=2` slice autoplay PASSED.
+- **Balance result: the British still win.**
+  - First tuning (35% start / 20 s waves / 1.6×): British wins with 56 tickets left vs 0.
+  - After skirmishers fall back from charges and the heavier muster: British wins with 42 left vs 0. 24 militia arrived; militia withdrew 23 times and routed 6; British routed 2 and charged 8 times.
+  - The Americans run out of tickets first. Militia are Recruits (slower reload, worse aim), which cancels much of their numbers. The British take posts early and bleed them.
+- Not verified in PIE: militia actually hugging the walls, and how the walls look on the Battle Road.

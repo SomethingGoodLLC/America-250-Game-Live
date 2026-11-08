@@ -1,8 +1,12 @@
 #include "RFCharacter.h"
+#include "AIController.h"
+#include "Animation/AnimSequence.h"
+#include "Animation/AnimSingleNodeInstance.h"
 #include "Camera/CameraComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Components/WidgetComponent.h"
 #include "Engine/SkeletalMesh.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
@@ -14,13 +18,22 @@
 #include "InputMappingContext.h"
 #include "InputModifiers.h"
 #include "Materials/MaterialInstanceDynamic.h"
-#include "MusketWeapon.h" // IWYU pragma: keep
-#include "PA250ThirdPartyAssets.h"
+#include "MusketWeapon.h"
+#include "PA250AimComponent.h"
 #include "PA250BattleGameMode.h"
+#include "PA250FactionVisuals.h"
+#include "PA250MeleeComponent.h"
+#include "PA250ThirdPartyAssets.h"
 #include "PA250VolleyCoordinator.h"
+#include "PA250WeaponTuning.h"
 #include "RFGameMode.h"
 #include "RFHealthComponent.h"
+#include "HAL/IConsoleManager.h"
+#include "Misc/ConfigCacheIni.h"
+#include "Blueprint/UserWidget.h"
+#include "Styling/CoreStyle.h"
 #include "UObject/ConstructorHelpers.h"
+#include "Widgets/Text/STextBlock.h"
 
 ARFCharacter::ARFCharacter()
 {
@@ -30,10 +43,10 @@ ARFCharacter::ARFCharacter()
 
 	SpringArm = CreateDefaultSubobject<USpringArmComponent>(TEXT("SpringArm"));
 	SpringArm->SetupAttachment(RootComponent);
-	SpringArm->TargetArmLength = 350.f;
+	SpringArm->TargetArmLength = HipArmLength;
 	SpringArm->bUsePawnControlRotation = true;
 	SpringArm->bDoCollisionTest = false;
-	SpringArm->SocketOffset = FVector(0.f, 60.f, 65.f);
+	SpringArm->SocketOffset = HipSocketOffset;
 	SpringArm->bEnableCameraLag = true;
 	SpringArm->CameraLagSpeed = 10.f;
 	SpringArm->bEnableCameraRotationLag = true;
@@ -42,8 +55,11 @@ ARFCharacter::ARFCharacter()
 	Camera = CreateDefaultSubobject<UCameraComponent>(TEXT("Camera"));
 	Camera->SetupAttachment(SpringArm);
 	Camera->bUsePawnControlRotation = false;
+	Camera->FieldOfView = DefaultFOV;
 
 	HealthComponent = CreateDefaultSubobject<URFHealthComponent>(TEXT("HealthComponent"));
+	AimComponent = CreateDefaultSubobject<UPA250AimComponent>(TEXT("AimComponent"));
+	MeleeComponent = CreateDefaultSubobject<UPA250MeleeComponent>(TEXT("MeleeComponent"));
 
 	TeamMarker = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("TeamMarker"));
 	TeamMarker->SetupAttachment(RootComponent);
@@ -57,12 +73,35 @@ ARFCharacter::ARFCharacter()
 		TeamMarker->SetStaticMesh(ConeMesh.Object);
 	}
 
+	HatMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("HatMesh"));
+	HatMesh->SetupAttachment(GetMesh(), TEXT("head"));
+	HatMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	HatMesh->SetCastShadow(true);
+	HatMesh->SetRelativeLocation(FVector(0.f, 0.f, 12.f));
+	HatMesh->SetRelativeScale3D(FVector(0.35f, 0.45f, 0.2f));
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeMesh(TEXT("/Engine/BasicShapes/Cube.Cube"));
+	if (CubeMesh.Succeeded())
+	{
+		HatMesh->SetStaticMesh(CubeMesh.Object);
+	}
+
+	Nameplate = CreateDefaultSubobject<UWidgetComponent>(TEXT("Nameplate"));
+	Nameplate->SetupAttachment(RootComponent);
+	Nameplate->SetRelativeLocation(FVector(0.f, 0.f, 110.f));
+	Nameplate->SetWidgetSpace(EWidgetSpace::Screen);
+	Nameplate->SetDrawSize(FVector2D(120.f, 24.f));
+	Nameplate->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	Nameplate->SetVisibility(false);
+
 	bUseControllerRotationYaw = true;
 	GetCharacterMovement()->bOrientRotationToMovement = false;
 	GetCharacterMovement()->MaxWalkSpeed = WalkSpeed;
 	GetCharacterMovement()->JumpZVelocity = 450.f;
+	// Ducking behind a 1.1 m wall: crouched capsule is 1.0 m tall (top below the wall).
+	GetCharacterMovement()->GetNavAgentPropertiesRef().bCanCrouch = true;
+	GetCharacterMovement()->SetCrouchedHalfHeight(CrouchedHalfHeightCm);
+	GetCharacterMovement()->MaxWalkSpeedCrouched = 150.f;
 
-	// Template mannequin (shipped with the project's Characters content pack). Optional.
 	static ConstructorHelpers::FObjectFinder<USkeletalMesh> Quinn(TEXT("/Game/Characters/Mannequins/Meshes/SKM_Quinn_Simple.SKM_Quinn_Simple"));
 	if (Quinn.Succeeded())
 	{
@@ -76,6 +115,9 @@ ARFCharacter::ARFCharacter()
 	}
 
 	MusketClass = AMusketWeapon::StaticClass();
+	CurrentArmLength = HipArmLength;
+	CurrentSocketOffset = HipSocketOffset;
+	CurrentFOV = TargetFOV = DefaultFOV;
 }
 
 void ARFCharacter::SetTeam(FName InFaction, FName InUnitClass)
@@ -83,20 +125,132 @@ void ARFCharacter::SetTeam(FName InFaction, FName InUnitClass)
 	FactionId = InFaction;
 	UnitClass = InUnitClass;
 	ApplyTeamMarker();
+	ApplyFactionVisuals();
+}
+
+void ARFCharacter::ApplyFactionVisuals()
+{
+	// Fab soldier uses its own skeleton and supplied animations; never run Manny AnimBP on it.
+	if (!FactionVisuals)
+	{
+		FactionVisuals = UPA250FactionVisuals::MakeRuntimeDefaults();
+	}
+	const FPA250FactionLook& Look = FactionVisuals->LookFor(FactionId, UnitClass);
+	if (USkeletalMeshComponent* MeshComp = GetMesh(); MeshComp && !bUsesPeriodSoldier)
+	{
+		if (UMaterialInstanceDynamic* MID = MeshComp->CreateAndSetMaterialInstanceDynamic(0))
+		{
+			MID->SetVectorParameterValue(TEXT("Color"), Look.CoatColor);
+			MID->SetVectorParameterValue(TEXT("BaseColor"), Look.CoatColor);
+			MID->SetVectorParameterValue(TEXT("Tint"), Look.CoatColor);
+		}
+		if (MeshComp->GetNumMaterials() > 1)
+		{
+			if (UMaterialInstanceDynamic* Facing = MeshComp->CreateAndSetMaterialInstanceDynamic(1))
+			{
+				Facing->SetVectorParameterValue(TEXT("Color"), Look.FacingColor);
+				Facing->SetVectorParameterValue(TEXT("BaseColor"), Look.FacingColor);
+			}
+		}
+	}
+	if (bUsesPeriodSoldier)
+	{
+		UMaterialInterface* Coat = LoadObject<UMaterialInterface>(nullptr, TEXT("/Game/PA250/Materials/M_PA250_SoldierUniform.M_PA250_SoldierUniform"));
+		if (Coat)
+		{
+			// Slot 1 is the pack's outer clothing; leave skin, eyes, hair and kit untouched.
+			UMaterialInstanceDynamic* MID = UMaterialInstanceDynamic::Create(Coat, this);
+			MID->SetVectorParameterValue(TEXT("CoatColor"), Look.CoatColor * 2.f);
+			GetMesh()->SetMaterial(1, MID);
+		}
+	}
+	if (HatMesh && !bUsesPeriodSoldier)
+	{
+		const bool bRound = Look.HatStyle == TEXT("round");
+		HatMesh->SetRelativeScale3D(bRound ? FVector(0.4f, 0.4f, 0.15f) : FVector(0.35f, 0.5f, 0.18f));
+		if (UMaterialInstanceDynamic* HatMid = HatMesh->CreateAndSetMaterialInstanceDynamic(0))
+		{
+			HatMid->SetVectorParameterValue(TEXT("Color"), FLinearColor(0.05f, 0.05f, 0.05f));
+		}
+		HatMesh->SetVisibility(true);
+	}
+}
+
+void ARFCharacter::UpdateNameplate(FName ViewerFaction, bool bSquadmate, float DistanceCm, bool bHasLOS)
+{
+	if (!Nameplate) return;
+	const bool bEnemy = !ViewerFaction.IsNone() && ViewerFaction != FactionId;
+	bool bShow = false;
+	FLinearColor Color = FLinearColor::White;
+	if (bSquadmate)
+	{
+		bShow = true;
+		Color = FLinearColor(0.25f, 0.55f, 1.f);
+	}
+	else if (bEnemy && DistanceCm <= 5000.f && bHasLOS)
+	{
+		bShow = true;
+		Color = FLinearColor(0.9f, 0.15f, 0.15f);
+	}
+	else if (!bEnemy && DistanceCm <= 3000.f)
+	{
+		bShow = true;
+		Color = FLinearColor(0.25f, 0.55f, 1.f);
+	}
+	Nameplate->SetVisibility(bShow);
+	Nameplate->SetTintColorAndOpacity(Color);
+}
+
+void ARFCharacter::RefreshNameplate()
+{
+	if (!Nameplate) return;
+	UWorld* World = GetWorld();
+	if (!World || bIsDead || FactionId.IsNone())
+	{
+		Nameplate->SetVisibility(false);
+		return;
+	}
+	if (!Nameplate->GetSlateWidget().IsValid())
+	{
+		Nameplate->SetSlateWidget(
+			SNew(STextBlock)
+			.Font(FCoreStyle::GetDefaultFontStyle("Bold", 11))
+			.Justification(ETextJustify::Center)
+			.ColorAndOpacity(FLinearColor::White)
+			.Text(FText::FromName(FactionId)));
+	}
+	const APlayerController* PC = World->GetFirstPlayerController();
+	const AActor* View = PC ? PC->GetViewTarget() : nullptr;
+	const ARFCharacter* Viewer = Cast<ARFCharacter>(View);
+	if (!Viewer || Viewer == this || Viewer->IsDead())
+	{
+		Nameplate->SetVisibility(false);
+		return;
+	}
+	if (TSharedPtr<SWidget> Plate = Nameplate->GetSlateWidget())
+	{
+		StaticCastSharedPtr<STextBlock>(Plate)->SetText(FText::FromName(FactionId));
+	}
+	const float Dist = FVector::Dist(GetActorLocation(), Viewer->GetActorLocation());
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(PA250Nameplate), false, Viewer);
+	Params.AddIgnoredActor(this);
+	if (Viewer->Musket) Params.AddIgnoredActor(Viewer->Musket);
+	FHitResult Hit;
+	const FVector From = Viewer->GetActorLocation() + FVector(0.f, 0.f, 70.f);
+	const FVector To = GetActorLocation() + FVector(0.f, 0.f, 70.f);
+	const bool bLOS = !World->LineTraceSingleByChannel(Hit, From, To, ECC_Visibility, Params);
+	const bool bSquad = SquadId >= 0 && SquadId == Viewer->SquadId && FactionId == Viewer->FactionId;
+	UpdateNameplate(Viewer->FactionId, bSquad, Dist, bLOS);
 }
 
 void ARFCharacter::ApplyThirdPartySoldierMesh()
 {
-	// Visual only: a period-uniform mesh from Content/ThirdParty replaces the mannequin
-	// when it shares the mannequin skeleton (so ABP_Unarmed still drives it).
 	static TWeakObjectPtr<USkeletalMesh> British, Continental;
-	static bool bResolved = false;
-	if (!bResolved)
-	{
-		bResolved = true;
+	// PIE teardown / collection may release the weak cache between battles.
+	if (!British.IsValid())
 		British = PA250ThirdParty::LoadFirstOf<USkeletalMesh>(PA250ThirdParty::SoldierBritish);
+	if (!Continental.IsValid())
 		Continental = PA250ThirdParty::LoadFirstOf<USkeletalMesh>(PA250ThirdParty::SoldierContinental);
-	}
 	USkeletalMesh* Wanted = FactionId == TEXT("british") ? British.Get()
 	                      : FactionId == TEXT("continental") ? Continental.Get()
 	                                                         : nullptr;
@@ -105,13 +259,42 @@ void ARFCharacter::ApplyThirdPartySoldierMesh()
 	{
 		return;
 	}
+	const bool bPackSoldier = Wanted->GetPathName().StartsWith(TEXT("/Game/american_soldier/"));
 	const USkeletalMesh* Current = MeshComp->GetSkeletalMeshAsset();
-	if (Current && Current->GetSkeleton() != Wanted->GetSkeleton())
+	if (!bPackSoldier && Current && Current->GetSkeleton() != Wanted->GetSkeleton())
 	{
 		UE_LOG(LogTemp, Warning, TEXT("PA250: %s skipped (not on the UE5 mannequin skeleton)"), *Wanted->GetPathName());
 		return;
 	}
+	// Remove the incompatible AnimBP before SetSkeletalMesh triggers InitAnim.
+	if (bPackSoldier) MeshComp->SetAnimInstanceClass(nullptr);
 	MeshComp->SetSkeletalMeshAsset(Wanted);
+	MeshComp->EmptyOverrideMaterials();
+	bUsesPeriodSoldier = bPackSoldier;
+	if (bPackSoldier)
+	{
+		SoldierIdle = LoadObject<UAnimSequence>(nullptr, TEXT("/Game/american_soldier/demo/ThirdPersonIdle.ThirdPersonIdle"));
+		SoldierWalk = LoadObject<UAnimSequence>(nullptr, TEXT("/Game/american_soldier/demo/ThirdPersonWalk.ThirdPersonWalk"));
+		SoldierRun = LoadObject<UAnimSequence>(nullptr, TEXT("/Game/american_soldier/demo/ThirdPersonRun.ThirdPersonRun"));
+		MeshComp->SetAnimInstanceClass(nullptr);
+		MeshComp->SetAnimationMode(EAnimationMode::AnimationSingleNode);
+		UpdateSoldierAnimation();
+		HatMesh->SetVisibility(false);
+		TeamMarker->SetVisibility(false);
+		UE_LOG(LogTemp, Display, TEXT("PA250 visuals: %s uses %s with pack animations"), *GetName(), *Wanted->GetPathName());
+	}
+}
+
+void ARFCharacter::UpdateSoldierAnimation()
+{
+	if (!bUsesPeriodSoldier || bIsDead) return;
+	const float Speed = GetVelocity().Size2D();
+	UAnimSequence* Animation = Speed > 300.f ? SoldierRun.Get() : Speed > 5.f ? SoldierWalk.Get() : SoldierIdle.Get();
+	UAnimSingleNodeInstance* Instance = GetMesh()->GetSingleNodeInstance();
+	if (Animation && (!Instance || Instance->GetCurrentAsset() != Animation))
+	{
+		GetMesh()->PlayAnimation(Animation, true);
+	}
 }
 
 void ARFCharacter::ApplyTeamMarker()
@@ -121,7 +304,6 @@ void ARFCharacter::ApplyTeamMarker()
 	{
 		return;
 	}
-	// British redcoats vs Continental blue.
 	const FLinearColor Color = FactionId == TEXT("british") ? FLinearColor(0.8f, 0.05f, 0.05f)
 	                         : FactionId == TEXT("continental") ? FLinearColor(0.1f, 0.2f, 0.85f)
 	                                                            : FLinearColor(0.5f, 0.5f, 0.5f);
@@ -134,12 +316,26 @@ void ARFCharacter::ApplyTeamMarker()
 void ARFCharacter::BeginPlay()
 {
 	Super::BeginPlay();
+	LoadLookSensitivity();
 
 	CurrentFOV = TargetFOV = DefaultFOV;
+	CurrentArmLength = HipArmLength;
+	CurrentSocketOffset = HipSocketOffset;
 	Camera->SetFieldOfView(DefaultFOV);
+	if (SpringArm)
+	{
+		SpringArm->TargetArmLength = HipArmLength;
+		SpringArm->SocketOffset = HipSocketOffset;
+	}
 	ApplyTeamMarker();
+	ApplyFactionVisuals();
 
 	HealthComponent->OnDied.AddDynamic(this, &ARFCharacter::OnDeath);
+
+	if (!WeaponTuning)
+	{
+		WeaponTuning = UPA250WeaponTuning::MakeRuntimeDefaults();
+	}
 
 	if (HasAuthority())
 	{
@@ -176,6 +372,11 @@ void ARFCharacter::SpawnMusket()
 	{
 		return;
 	}
+	if (WeaponTuning)
+	{
+		Musket->WeaponTuning = WeaponTuning;
+		Musket->ApplyWeaponTuning();
+	}
 	const FName HandSocket(TEXT("hand_r"));
 	if (GetMesh() && GetMesh()->DoesSocketExist(HandSocket))
 	{
@@ -189,22 +390,92 @@ void ARFCharacter::SpawnMusket()
 	}
 }
 
+void ARFCharacter::ApplyCameraPose(float DeltaTime)
+{
+	if (!SpringArm || !Camera) return;
+	const float Y = ShoulderSign * (bAiming ? AdsSocketOffset.Y : HipSocketOffset.Y);
+	const FVector TargetSocket(0.f, Y, bAiming ? AdsSocketOffset.Z : HipSocketOffset.Z);
+	const float TargetArm = bAiming ? AdsArmLength : HipArmLength;
+	const float Alpha = CameraBlendSeconds > KINDA_SMALL_NUMBER
+		? FMath::Clamp(DeltaTime / CameraBlendSeconds, 0.f, 1.f)
+		: 1.f;
+	CurrentArmLength = FMath::Lerp(CurrentArmLength, TargetArm, Alpha);
+	CurrentSocketOffset = FMath::Lerp(CurrentSocketOffset, TargetSocket, Alpha);
+	CurrentFOV = FMath::Lerp(CurrentFOV, TargetFOV, Alpha);
+	SpringArm->TargetArmLength = CurrentArmLength;
+	SpringArm->SocketOffset = CurrentSocketOffset;
+	Camera->SetFieldOfView(CurrentFOV);
+}
+
+void ARFCharacter::UpdateFacingMode()
+{
+	// Bots face their focus (enemy) while engaging; otherwise they turn into their movement.
+	const AAIController* AI = Cast<AAIController>(Controller);
+	const bool bBotFocused = AI && (AI->GetFocusActor() != nullptr || FAISystem::IsValidLocation(AI->GetFocalPoint()));
+	const bool bFaceYaw = bAiming || FaceControlYawTimer > 0.f || bBotFocused;
+	bUseControllerRotationYaw = bFaceYaw;
+	GetCharacterMovement()->bOrientRotationToMovement = !bFaceYaw;
+}
+
 void ARFCharacter::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
+	UpdateSoldierAnimation();
 	if (SuppressionTimer > 0.f)
 	{
 		SuppressionTimer = FMath::Max(0.f, SuppressionTimer - DeltaTime);
 		if (SuppressionTimer <= 0.f) SuppressionSwayDegrees = 0.f;
 	}
-	if (!FMath::IsNearlyEqual(CurrentFOV, TargetFOV, 0.1f))
+	if (FaceControlYawTimer > 0.f)
 	{
-		CurrentFOV = FMath::FInterpTo(CurrentFOV, TargetFOV, DeltaTime, FOVInterpSpeed);
-		Camera->SetFieldOfView(CurrentFOV);
+		FaceControlYawTimer = FMath::Max(0.f, FaceControlYawTimer - DeltaTime);
+	}
+	TickMovementLock(DeltaTime);
+	SensitivityToastTimer = FMath::Max(0.f, SensitivityToastTimer - DeltaTime);
+	ReloadFeedbackTimer = FMath::Max(0.f, ReloadFeedbackTimer - DeltaTime);
+	ApplyCameraPose(DeltaTime);
+	UpdateFacingMode();
+
+	if (RecoilPitch != 0.f || RecoilYaw != 0.f)
+	{
+		const float Recover = RecoilRecovery > KINDA_SMALL_NUMBER ? DeltaTime / RecoilRecovery : 1.f;
+		const float PitchStep = FMath::Lerp(RecoilPitch, 0.f, Recover);
+		const float YawStep = FMath::Lerp(RecoilYaw, 0.f, Recover);
+		// Undo the kick: opposite sign to ApplyCameraKick.
+		AddControllerPitchInput(RecoilPitch - PitchStep);
+		AddControllerYawInput(-(RecoilYaw - YawStep));
+		RecoilPitch = PitchStep;
+		RecoilYaw = YawStep;
+	}
+
+	if (IsPlayerControlled() && AimComponent && WeaponTuning)
+	{
+		float Spread = WeaponTuning->Values.CurrentSpreadDegrees(bAiming, GetVelocity().Size2D()) * FormationAccuracyScale;
+		if (SuppressionTimer > 0.f) Spread += SuppressionSwayDegrees; // FireMusketAt adds this cone too
+		AimComponent->ResolveFromOwner(Spread, WeaponTuning->Values.MaxRangeMeters * 100.f);
+	}
+	RefreshNameplate();
+}
+
+void ARFCharacter::NotifyFired()
+{
+	FaceControlYawTimer = FaceControlYawHoldSeconds;
+	if (WeaponTuning)
+	{
+		ApplyCameraKick(WeaponTuning->Values.RecoilPitchDegrees, WeaponTuning->Values.RecoilYawDegrees);
+		RecoilRecovery = WeaponTuning->Values.RecoilRecoverySeconds;
 	}
 }
 
-// ---------------------------------------------------------------- input
+void ARFCharacter::ApplyCameraKick(float PitchDeg, float YawDeg)
+{
+	// Kick and recovery must use the same yaw sample, or each shot leaves a random net drift.
+	const float Yaw = FMath::FRandRange(-YawDeg, YawDeg);
+	RecoilPitch += PitchDeg;
+	RecoilYaw += Yaw;
+	AddControllerPitchInput(-PitchDeg);
+	AddControllerYawInput(Yaw);
+}
 
 void ARFCharacter::BuildDefaultInput()
 {
@@ -215,11 +486,14 @@ void ARFCharacter::BuildDefaultInput()
 	};
 	if (IMC_ThirdPerson && IA_Move && IA_Look && IA_Fire)
 	{
-		if (!IA_Reload)
-		{
-			IA_Reload = MakeAction(TEXT("IA_RF_Reload"), EInputActionValueType::Boolean);
-			IMC_ThirdPerson->MapKey(IA_Reload, EKeys::R);
-		}
+		if (!IA_Reload) { IA_Reload = MakeAction(TEXT("IA_RF_Reload"), EInputActionValueType::Boolean); IMC_ThirdPerson->MapKey(IA_Reload, EKeys::R); }
+		if (!IA_ShoulderSwap) { IA_ShoulderSwap = MakeAction(TEXT("IA_RF_Shoulder"), EInputActionValueType::Boolean); IMC_ThirdPerson->MapKey(IA_ShoulderSwap, EKeys::V); }
+		if (!IA_Melee) { IA_Melee = MakeAction(TEXT("IA_RF_Melee"), EInputActionValueType::Boolean); IMC_ThirdPerson->MapKey(IA_Melee, EKeys::E); }
+		if (!IA_ButtStroke) { IA_ButtStroke = MakeAction(TEXT("IA_RF_Butt"), EInputActionValueType::Boolean); IMC_ThirdPerson->MapKey(IA_ButtStroke, EKeys::Q); }
+		if (!IA_Crouch) { IA_Crouch = MakeAction(TEXT("IA_RF_Crouch"), EInputActionValueType::Boolean); IMC_ThirdPerson->MapKey(IA_Crouch, EKeys::LeftControl); }
+		if (!IA_Charge) { IA_Charge = MakeAction(TEXT("IA_RF_Charge"), EInputActionValueType::Boolean); IMC_ThirdPerson->MapKey(IA_Charge, EKeys::G); }
+		if (!IA_SensUp) { IA_SensUp = MakeAction(TEXT("IA_RF_SensUp"), EInputActionValueType::Boolean); IMC_ThirdPerson->MapKey(IA_SensUp, EKeys::RightBracket); }
+		if (!IA_SensDown) { IA_SensDown = MakeAction(TEXT("IA_RF_SensDown"), EInputActionValueType::Boolean); IMC_ThirdPerson->MapKey(IA_SensDown, EKeys::LeftBracket); }
 		return;
 	}
 	IA_Move = MakeAction(TEXT("IA_RF_Move"), EInputActionValueType::Axis2D);
@@ -229,6 +503,13 @@ void ARFCharacter::BuildDefaultInput()
 	IA_Aim = MakeAction(TEXT("IA_RF_Aim"), EInputActionValueType::Boolean);
 	IA_Fire = MakeAction(TEXT("IA_RF_Fire"), EInputActionValueType::Boolean);
 	IA_Reload = MakeAction(TEXT("IA_RF_Reload"), EInputActionValueType::Boolean);
+	IA_ShoulderSwap = MakeAction(TEXT("IA_RF_Shoulder"), EInputActionValueType::Boolean);
+	IA_Melee = MakeAction(TEXT("IA_RF_Melee"), EInputActionValueType::Boolean);
+	IA_ButtStroke = MakeAction(TEXT("IA_RF_Butt"), EInputActionValueType::Boolean);
+	IA_SensUp = MakeAction(TEXT("IA_RF_SensUp"), EInputActionValueType::Boolean);
+	IA_Charge = MakeAction(TEXT("IA_RF_Charge"), EInputActionValueType::Boolean);
+	IA_Crouch = MakeAction(TEXT("IA_RF_Crouch"), EInputActionValueType::Boolean);
+	IA_SensDown = MakeAction(TEXT("IA_RF_SensDown"), EInputActionValueType::Boolean);
 
 	IMC_ThirdPerson = NewObject<UInputMappingContext>(this, TEXT("IMC_RF_Default"));
 	auto Swizzle = [this]() {
@@ -238,9 +519,7 @@ void ARFCharacter::BuildDefaultInput()
 	};
 	auto Negate = [this](bool bX, bool bY) {
 		UInputModifierNegate* N = NewObject<UInputModifierNegate>(this);
-		N->bX = bX;
-		N->bY = bY;
-		N->bZ = false;
+		N->bX = bX; N->bY = bY; N->bZ = false;
 		return N;
 	};
 	auto Map = [this](UInputAction* A, const FKey& Key) -> FEnhancedActionKeyMapping& { return IMC_ThirdPerson->MapKey(A, Key); };
@@ -257,11 +536,18 @@ void ARFCharacter::BuildDefaultInput()
 	Map(IA_Jump, EKeys::SpaceBar);
 	Map(IA_Sprint, EKeys::LeftShift);
 	Map(IA_Aim, EKeys::RightMouseButton);
-	Map(IA_Aim, EKeys::C);              // trackpad: hold C, the pad has no comfortable right-click
+	Map(IA_Aim, EKeys::C);
 	Map(IA_Aim, EKeys::LeftAlt);
 	Map(IA_Fire, EKeys::LeftMouseButton);
-	Map(IA_Fire, EKeys::F);             // trackpad: tap-to-look would otherwise fire
+	Map(IA_Fire, EKeys::F);
 	Map(IA_Reload, EKeys::R);
+	Map(IA_ShoulderSwap, EKeys::V);
+	Map(IA_Melee, EKeys::E);
+	Map(IA_ButtStroke, EKeys::Q);
+	Map(IA_SensUp, EKeys::RightBracket);
+	Map(IA_Charge, EKeys::G);
+	Map(IA_Crouch, EKeys::LeftControl);
+	Map(IA_SensDown, EKeys::LeftBracket);
 }
 
 void ARFCharacter::PawnClientRestart()
@@ -295,6 +581,14 @@ void ARFCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompone
 		EIC->BindAction(IA_Fire, ETriggerEvent::Started, this, &ARFCharacter::OnFirePressed);
 		EIC->BindAction(IA_Reload, ETriggerEvent::Started, this, &ARFCharacter::OnReloadStarted);
 		EIC->BindAction(IA_Reload, ETriggerEvent::Completed, this, &ARFCharacter::OnReloadCompleted);
+		EIC->BindAction(IA_ShoulderSwap, ETriggerEvent::Started, this, &ARFCharacter::OnShoulderSwap);
+		EIC->BindAction(IA_Melee, ETriggerEvent::Started, this, &ARFCharacter::OnMeleePressed);
+		EIC->BindAction(IA_ButtStroke, ETriggerEvent::Started, this, &ARFCharacter::OnButtStrokePressed);
+		EIC->BindAction(IA_SensUp, ETriggerEvent::Started, this, &ARFCharacter::OnSensitivityUp);
+		EIC->BindAction(IA_Charge, ETriggerEvent::Started, this, &ARFCharacter::OnChargePressed);
+		EIC->BindAction(IA_Crouch, ETriggerEvent::Started, this, &ARFCharacter::OnDuckPressed);
+		EIC->BindAction(IA_Crouch, ETriggerEvent::Completed, this, &ARFCharacter::OnDuckReleased);
+		EIC->BindAction(IA_SensDown, ETriggerEvent::Started, this, &ARFCharacter::OnSensitivityDown);
 	}
 }
 
@@ -303,9 +597,47 @@ void ARFCharacter::Move(const FInputActionValue& Value)
 	const FVector2D V = Value.Get<FVector2D>();
 	if (Controller && !bIsDead)
 	{
-		AddMovementInput(GetActorForwardVector(), V.Y);
-		AddMovementInput(GetActorRightVector(), V.X);
+		const FRotator Yaw(0.f, Controller->GetControlRotation().Yaw, 0.f);
+		AddMovementInput(FRotationMatrix(Yaw).GetUnitAxis(EAxis::X), V.Y);
+		AddMovementInput(FRotationMatrix(Yaw).GetUnitAxis(EAxis::Y), V.X);
 	}
+}
+
+namespace
+{
+// Look sensitivity: multiplier on raw mouse / trackpad deltas (1.0 = the old 1:1 feel, which was too fast).
+TAutoConsoleVariable<float> CVarLookSensitivity(
+	TEXT("pa250.LookSensitivity"), 0.35f,
+	TEXT("Mouse/trackpad look sensitivity (0.05-2). [ and ] adjust it in game; saved to GameUserSettings."),
+	ECVF_Default);
+const TCHAR* SensSection = TEXT("/Script/PlayAmerica250.PA250Input");
+const TCHAR* SensKey = TEXT("LookSensitivity");
+}
+
+float ARFCharacter::GetLookSensitivity()
+{
+	return FMath::Clamp(CVarLookSensitivity.GetValueOnGameThread(), 0.05f, 2.f);
+}
+
+void ARFCharacter::LoadLookSensitivity()
+{
+	float Saved = 0.f;
+	if (GConfig && GConfig->GetFloat(SensSection, SensKey, Saved, GGameUserSettingsIni) && Saved > 0.f)
+	{
+		CVarLookSensitivity->Set(FMath::Clamp(Saved, 0.05f, 2.f), ECVF_SetByGameSetting);
+	}
+}
+
+void ARFCharacter::AdjustLookSensitivity(float Factor)
+{
+	const float NewValue = FMath::Clamp(GetLookSensitivity() * Factor, 0.05f, 2.f);
+	CVarLookSensitivity->Set(NewValue, ECVF_SetByGameSetting);
+	if (GConfig)
+	{
+		GConfig->SetFloat(SensSection, SensKey, NewValue, GGameUserSettingsIni);
+		GConfig->Flush(false, GGameUserSettingsIni);
+	}
+	SensitivityToastTimer = 1.5f;
 }
 
 void ARFCharacter::Look(const FInputActionValue& Value)
@@ -313,34 +645,60 @@ void ARFCharacter::Look(const FInputActionValue& Value)
 	const FVector2D V = Value.Get<FVector2D>();
 	if (Controller)
 	{
-		AddControllerYawInput(V.X);
-		AddControllerPitchInput(V.Y);
+		// Slower while aiming down sights: the narrower FOV magnifies every degree.
+		const float Scale = GetLookSensitivity() * (bAiming ? AdsLookScale : 1.f);
+		AddControllerYawInput(V.X * Scale);
+		AddControllerPitchInput(V.Y * Scale);
 	}
 }
 
-void ARFCharacter::StartSprint() { GetCharacterMovement()->MaxWalkSpeed = SprintSpeed; }
-void ARFCharacter::StopSprint() { GetCharacterMovement()->MaxWalkSpeed = WalkSpeed; }
+void ARFCharacter::OnSensitivityUp() { AdjustLookSensitivity(1.15f); }
+void ARFCharacter::OnSensitivityDown() { AdjustLookSensitivity(1.f / 1.15f); }
+
+void ARFCharacter::StartSprint() { bSprinting = true; GetCharacterMovement()->MaxWalkSpeed = SprintSpeed; }
+void ARFCharacter::StopSprint() { bSprinting = false; GetCharacterMovement()->MaxWalkSpeed = WalkSpeed; }
 
 void ARFCharacter::StartAim()
 {
 	bAiming = true;
 	TargetFOV = AimedFOV;
-	SpringArm->SocketOffset = FVector(0.f, 85.f, 65.f);
+	UpdateFacingMode();
 }
 
 void ARFCharacter::StopAim()
 {
 	bAiming = false;
 	TargetFOV = DefaultFOV;
-	SpringArm->SocketOffset = FVector(0.f, 60.f, 65.f);
+	UpdateFacingMode();
 }
 
+void ARFCharacter::OnShoulderSwap() { ShoulderSign *= -1.f; }
 void ARFCharacter::OnFirePressed() { FireMusket(); }
-void ARFCharacter::OnReloadStarted()
+void ARFCharacter::OnMeleePressed()
 {
-	if (!Musket || bIsDead) return;
-	Musket->SetReloadHeld(true);
-	Musket->CommitReload();
+	if (bIsDead || !MeleeComponent) return;
+	if (bSprinting) MeleeComponent->DoCharge();
+	else MeleeComponent->DoThrust();
+}
+void ARFCharacter::OnDuckPressed() { SetDucking(true); }
+void ARFCharacter::OnDuckReleased() { SetDucking(false); }
+
+void ARFCharacter::SetDucking(bool bDuck)
+{
+	if (bIsDead) return;
+	if (bDuck && !bIsCrouched) Crouch();
+	else if (!bDuck && bIsCrouched) UnCrouch();
+}
+
+void ARFCharacter::OnChargePressed()
+{
+	if (bIsDead || !MeleeComponent) return;
+	MeleeComponent->DoCharge();
+}
+void ARFCharacter::OnButtStrokePressed()
+{
+	if (bIsDead || !MeleeComponent) return;
+	MeleeComponent->DoButtStroke();
 }
 void ARFCharacter::OnReloadCompleted()
 {
@@ -353,57 +711,114 @@ void ARFCharacter::ApplySuppression(float Seconds, float SwayDegrees)
 	SuppressionSwayDegrees = FMath::Max(SuppressionSwayDegrees, SwayDegrees);
 }
 
-// ---------------------------------------------------------------- combat
-
 bool ARFCharacter::FireMusket()
 {
 	if (bIsDead || !Musket || !Musket->CanFire() || !Controller)
 	{
 		return false;
 	}
+	const float MaxRange = WeaponTuning ? WeaponTuning->Values.MaxRangeMeters * 100.f : 20000.f;
+
 	FVector ViewLoc;
 	FRotator ViewRot;
 	Controller->GetPlayerViewPoint(ViewLoc, ViewRot);
-	FVector Dir = ViewRot.Vector();
-	if (SuppressionTimer > 0.f && SuppressionSwayDegrees > 0.f)
+	const FVector Muzzle = Musket->GetMuzzleLocation()->GetComponentLocation();
+	// Spread is applied once, by AMusketWeapon::Fire; the trace only finds the point under the reticle.
+	const FPA250AimResult Aim = UPA250AimComponent::ResolveAim(
+		GetWorld(), ViewLoc, ViewRot.Vector(), Muzzle, 0.f, MaxRange, this, Musket, FactionId);
+	if (AimComponent)
 	{
-		Dir = FMath::VRandCone(Dir, FMath::DegreesToRadians(SuppressionSwayDegrees));
+		const float Spread = AimComponent->LastResult.SpreadDegrees;
+		AimComponent->LastResult = Aim;
+		AimComponent->LastResult.SpreadDegrees = Spread;
 	}
-	const FVector TraceEnd = ViewLoc + Dir * 20000.f;
-	FHitResult Hit;
-	FCollisionQueryParams Params(SCENE_QUERY_STAT(MusketAim), true, this);
-	Params.AddIgnoredActor(Musket);
-	const FVector AimPoint = GetWorld()->LineTraceSingleByChannel(Hit, ViewLoc, TraceEnd, ECC_Visibility, Params) ? Hit.ImpactPoint : TraceEnd;
-	return FireMusketAt(AimPoint);
+
+	// Blocked: the ball goes where the muzzle actually points (into the cover).
+	// Nothing under the reticle (sky/horizon): fire flat along the line, no drop correction for a
+	// made-up max-range distance - that is what sent shots metres over the reticle.
+	if (Aim.bBlocked) return FireMusketAt(Aim.MuzzleHitPoint, true);
+	return FireMusketAt(Aim.CameraAimPoint, Aim.bCameraHit);
 }
 
-bool ARFCharacter::FireMusketAt(FVector TargetLocation)
+bool ARFCharacter::FireMusketAt(FVector TargetLocation, bool bCompensateDrop)
 {
 	if (bIsDead || !Musket || !Musket->CanFire())
 	{
 		return false;
 	}
+	// Muskets are fired standing: no shots in mid-air; a ducked man rises to fire.
+	if (GetCharacterMovement() && GetCharacterMovement()->IsFalling())
+	{
+		return false;
+	}
+	if (bIsCrouched)
+	{
+		UnCrouch();
+		GetCharacterMovement()->UnCrouch(false);
+	}
 	const FVector Muzzle = Musket->GetMuzzleLocation()->GetComponentLocation();
-	const float Dist = FVector::Dist(Muzzle, TargetLocation);
-	const float Speed = FMath::Max(Musket->GetTuning().ProjectileSpeed, 1.f);
-	const float T = Dist / Speed;
-	const float GravityScale = 0.3f;
-	TargetLocation.Z += 0.5f * 980.f * GravityScale * T * T;
 	FVector Dir = (TargetLocation - Muzzle).GetSafeNormal();
+	if (bCompensateDrop)
+	{
+		AMusketWeapon::SolveLaunchDirection(Muzzle, TargetLocation, Musket->GetProjectileSpeed(), Musket->GetProjectileGravityZ(), Dir);
+	}
 	if (SuppressionTimer > 0.f && SuppressionSwayDegrees > 0.f)
 	{
 		Dir = FMath::VRandCone(Dir, FMath::DegreesToRadians(SuppressionSwayDegrees));
 	}
+	// Spread uses the speed at the trigger pull, so firing on the run is still inaccurate.
 	const float OwnerSpeed = GetVelocity().Size2D();
 	const bool bShot = Musket->Fire(Dir, bAiming, OwnerSpeed, FormationAccuracyScale);
 	if (bShot)
 	{
+		LockMovement(WeaponTuning ? WeaponTuning->Values.FireStillSeconds : 0.6f);
+		NotifyFired();
 		if (APA250BattleGameMode* GM = GetWorld() ? GetWorld()->GetAuthGameMode<APA250BattleGameMode>() : nullptr)
 		{
 			GM->NotifyShot(this, Dir, true);
 		}
 	}
 	return bShot;
+}
+
+void ARFCharacter::LockMovement(float Seconds)
+{
+	if (bIsDead || Seconds <= 0.f) return;
+	UCharacterMovementComponent* Move = GetCharacterMovement();
+	if (!Move) return;
+	MovementLockTimer = FMath::Max(MovementLockTimer, Seconds);
+	if (!bMovementLocked && Move->IsMovingOnGround())
+	{
+		Move->StopMovementImmediately();
+		Move->DisableMovement();
+		bMovementLocked = true;
+	}
+}
+
+void ARFCharacter::TickMovementLock(float DeltaTime)
+{
+	if (MovementLockTimer <= 0.f) return;
+	MovementLockTimer = FMath::Max(0.f, MovementLockTimer - DeltaTime);
+	if (MovementLockTimer <= 0.f && bMovementLocked)
+	{
+		bMovementLocked = false;
+		if (!bIsDead && GetCharacterMovement())
+		{
+			GetCharacterMovement()->SetMovementMode(MOVE_Walking);
+		}
+	}
+}
+
+void ARFCharacter::OnReloadStarted()
+{
+	if (!Musket || bIsDead) return;
+	Musket->SetReloadHeld(true);
+	const EActiveReloadHit Hit = Musket->CommitReload();
+	if (Hit != EActiveReloadHit::None)
+	{
+		LastReloadHit = Hit;
+		ReloadFeedbackTimer = 0.9f;
+	}
 }
 
 void ARFCharacter::OnDeath(AActor* Victim)

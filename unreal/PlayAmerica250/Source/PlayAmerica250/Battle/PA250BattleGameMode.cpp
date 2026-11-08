@@ -4,6 +4,7 @@
 #include "GameFramework/SpringArmComponent.h"
 #include "Campaign/PA250Autoplay.h"
 #include "Campaign/PA250Subsystem.h"
+#include "Engine/Engine.h"
 #include "EngineUtils.h"
 #include "UnrealClient.h"
 #include "GameFramework/CharacterMovementComponent.h"
@@ -22,14 +23,22 @@
 #include "Misc/Paths.h"
 #include "MusketTuning.h"
 #include "MusketWeapon.h"
+#include "PA250AimComponent.h"
 #include "PA250BattleHUD.h"
 #include "PA250BotController.h"
+#include "PA250BotTuning.h"
+#include "PA250CombatProfiles.h"
 #include "PA250ControlPoint.h"
+#include "PA250FactionVisuals.h"
+#include "PA250MeleeComponent.h"
+#include "PA250MeleeTuning.h"
 #include "PA250SpawnScreen.h"
 #include "PA250VolleyCoordinator.h"
+#include "PA250WeaponTuning.h"
 #include "RFCharacter.h"
 #include "RFHealthComponent.h"
 #include "TimerManager.h"
+#include "Navigation/CrowdFollowingComponent.h"
 
 namespace
 {
@@ -78,6 +87,9 @@ static const FPreviewCam GPreviewCams[] = {
 	{TEXT("Shot_Spawn"), TEXT("spawn"), FVector(-6900.f, 900.f, 215.f), FRotator(-8.f, -15.f, 0.f), 60.f},
 	{TEXT("Shot_Green"), TEXT("green"), FVector(1600.f, 1400.f, 259.f), FRotator(-6.f, -135.f, 0.f), 65.f},
 	{TEXT("Shot_Wide"), TEXT("wide"), FVector(3600.f, -7600.f, 43.f), FRotator(-3.f, 135.f, 0.f), 75.f},
+	// Flag shots are placed relative to their post at runtime (Loc/Rot unused) and keep the HUD.
+	{TEXT("Shot_FlagGreen"), TEXT("flag_green"), FVector::ZeroVector, FRotator::ZeroRotator, 45.f},
+	{TEXT("Shot_FlagMeetinghouse"), TEXT("flag_meetinghouse"), FVector::ZeroVector, FRotator::ZeroRotator, 45.f},
 };
 }
 
@@ -98,6 +110,67 @@ void APA250BattleGameMode::NotifyShot(ARFCharacter* Shooter, const FVector& Dir,
 	{
 		Volleys->NotifyShot(Shooter, Dir, bHit);
 	}
+}
+
+void APA250BattleGameMode::NotifyProjectileHit(ARFCharacter* Shooter, ARFCharacter* Victim, float Damage)
+{
+	if (!Victim) return;
+	// OnDied has already run inside ApplyPointDamage, so IsDead is the kill signal.
+	// Kill-feed text is owned by OnCharacterDied (melee and musket). This is the shooter's marker only.
+	const bool bKill = Victim->IsDead() || (Victim->HealthComponent && Victim->HealthComponent->CurrentHealth <= 0.f);
+	const APlayerController* PC = GetWorld() ? GetWorld()->GetFirstPlayerController() : nullptr;
+	if (Hud && PC && Shooter && Shooter == PC->GetPawn())
+	{
+		Hud->ShowHitmarker(bKill);
+	}
+	(void)Damage;
+}
+
+FVector APA250BattleGameMode::GetRearPoint(FName Faction, const FVector& Fallback) const
+{
+	const TArray<TWeakObjectPtr<AActor>>* List = Starts.Find(Faction);
+	FVector Sum = FVector::ZeroVector;
+	int32 N = 0;
+	if (List)
+	{
+		for (const TWeakObjectPtr<AActor>& A : *List)
+		{
+			if (A.IsValid()) { Sum += A->GetActorLocation(); ++N; }
+		}
+	}
+	return N > 0 ? Sum / N : Fallback;
+}
+
+void APA250BattleGameMode::RecordAIReload(FName Training, float Seconds, int32 Fumbles)
+{
+	AIReloadSeconds.FindOrAdd(Training).Add(Seconds);
+	AIReloadFumbles.FindOrAdd(Training) += Fumbles;
+}
+
+FString APA250BattleGameMode::ReloadByTrainingJson() const
+{
+	FString J = TEXT("{");
+	TArray<FName> Keys;
+	AIReloadSeconds.GetKeys(Keys);
+	Keys.Sort(FNameLexicalLess());
+	for (int32 i = 0; i < Keys.Num(); ++i)
+	{
+		TArray<float> V = AIReloadSeconds.FindRef(Keys[i]);
+		V.Sort();
+		float Sum = 0.f;
+		for (float X : V) Sum += X;
+		const float Mean = V.Num() ? Sum / V.Num() : 0.f;
+		const float P90 = V.Num() ? V[FMath::Clamp(FMath::FloorToInt(0.9f * V.Num()), 0, V.Num() - 1)] : 0.f;
+		J += FString::Printf(TEXT("%s\"%s\":{\"n\":%d,\"mean_s\":%.2f,\"p90_s\":%.2f,\"min_s\":%.2f,\"fumbles\":%d}"),
+			i ? TEXT(",") : TEXT(""), *Keys[i].ToString(), V.Num(), Mean, P90, V.Num() ? V[0] : 0.f, AIReloadFumbles.FindRef(Keys[i]));
+	}
+	return J + TEXT("}");
+}
+
+void APA250BattleGameMode::PushKillFeed(const FString& Line)
+{
+	KillFeed.Insert(Line, 0);
+	while (KillFeed.Num() > 6) KillFeed.RemoveAt(KillFeed.Num() - 1);
 }
 
 const TArray<TWeakObjectPtr<APA250ControlPoint>>& APA250BattleGameMode::GetPosts() const
@@ -159,6 +232,17 @@ void APA250BattleGameMode::EnsureInitialized()
 	}
 
 	Tuning = LoadObject<UMusketTuning>(nullptr, TEXT("/Game/PA250/Data/DA_MusketTuning.DA_MusketTuning"));
+	WeaponTuningAsset = LoadObject<UPA250WeaponTuning>(nullptr, TEXT("/Game/PA250/Data/DA_WeaponTuning.DA_WeaponTuning"));
+	if (!WeaponTuningAsset) WeaponTuningAsset = UPA250WeaponTuning::MakeRuntimeDefaults();
+	BotTuningAsset = LoadObject<UPA250BotTuning>(nullptr, TEXT("/Game/PA250/Data/DA_BotTuning.DA_BotTuning"));
+	if (!BotTuningAsset) BotTuningAsset = UPA250BotTuning::MakeRuntimeDefaults();
+	MeleeTuningAsset = LoadObject<UPA250MeleeTuning>(nullptr, TEXT("/Game/PA250/Data/DA_MeleeTuning.DA_MeleeTuning"));
+	if (!MeleeTuningAsset) MeleeTuningAsset = UPA250MeleeTuning::MakeRuntimeDefaults();
+	CombatProfilesAsset = LoadObject<UPA250CombatProfiles>(nullptr, TEXT("/Game/PA250/Data/DA_CombatProfiles.DA_CombatProfiles"));
+	if (!CombatProfilesAsset) CombatProfilesAsset = UPA250CombatProfiles::MakeRuntimeDefaults();
+	FactionVisualsAsset = LoadObject<UPA250FactionVisuals>(nullptr, TEXT("/Game/PA250/Data/DA_FactionVisuals.DA_FactionVisuals"));
+	if (!FactionVisualsAsset) FactionVisualsAsset = UPA250FactionVisuals::MakeRuntimeDefaults();
+
 	if (Tuning)
 	{
 		BotsPerSide = Tuning->Values.Conquest.BotsPerSide;
@@ -166,6 +250,7 @@ void APA250BattleGameMode::EnsureInitialized()
 		BleedIntervalSeconds = Tuning->Values.Conquest.BleedIntervalSeconds;
 		SoldiersPerUnit = Tuning->Values.Conquest.SoldiersPerUnit;
 	}
+	BleedIntervalSeconds = 5.f; // M6 BF2 bleed cadence
 
 	int32 Cli = 0;
 	if (FParse::Value(FCommandLine::Get(), TEXT("PA250Bots="), Cli) && Cli >= 0) BotsPerSide = Cli;
@@ -183,11 +268,12 @@ void APA250BattleGameMode::EnsureInitialized()
 			InitialPool.FindOrAdd(Faction).Add(ToName(T.first), T.second);
 		}
 	}
-	// InitialPool stays in campaign units; the live pool is in soldiers (respawns).
-	Pool = InitialPool;
-	for (auto& FK : Pool)
+	// Tickets = reinforcement pool in soldiers. Spent on death + bleed (M6), not spawn.
+	for (const auto& FK : InitialPool)
 	{
-		for (auto& CK : FK.Value) CK.Value *= SoldiersPerUnit;
+		int32 Total = 0;
+		for (const auto& CK : FK.Value) Total += CK.Value * SoldiersPerUnit;
+		Ledger.Pool.Add(FK.Key, Total);
 	}
 
 	for (TActorIterator<APlayerStart> It(GetWorld()); It; ++It)
@@ -198,20 +284,33 @@ void APA250BattleGameMode::EnsureInitialized()
 			{
 				Starts.FindOrAdd(Tag).Add(*It);
 			}
+			else if (Tag.ToString().EndsWith(TEXT("_muster")))
+			{
+				MusterPoints.FindOrAdd(FName(*Tag.ToString().LeftChop(7))).Add(*It);
+			}
 		}
 	}
 	GatherPosts();
-	if (Tuning)
 	{
-		const FConquestTuning& C = Tuning->Values.Conquest;
+		const float PostR = Tuning ? Tuning->Values.Conquest.PostRadius : 1000.f;
+		const float CapS = Tuning ? Tuning->Values.Conquest.CaptureSeconds : 3.5f;
+		const float CapScale = Tuning ? Tuning->Values.Conquest.CapturePerAttackerScale : 0.35f;
+		const float UseRadius = 1000.f; // M6: 10 m capture radius
+		(void)PostR;
 		for (const TWeakObjectPtr<APA250ControlPoint>& WP : Posts)
 		{
 			if (APA250ControlPoint* P = WP.Get())
 			{
-				P->ApplyTuning(C.PostRadius, C.CaptureSeconds, C.CapturePerAttackerScale);
+				P->ApplyTuning(UseRadius, CapS, CapScale);
+				if (BotTuningAsset)
+				{
+					P->BuildSlotRing(BotTuningAsset->Values.SlotsPerPost,
+						BotTuningAsset->Values.SlotRingMinCm, BotTuningAsset->Values.SlotRingMaxCm);
+				}
 			}
 		}
 	}
+	RegisterConsoleCommands();
 }
 
 void APA250BattleGameMode::BeginPlay()
@@ -227,7 +326,7 @@ void APA250BattleGameMode::BeginPlay()
 	}
 	for (const auto& KV : InitialPool)
 	{
-		SpawnBots(KV.Key, BotsPerSide);
+		SpawnInitialForces(KV.Key, BotsPerSide);
 	}
 	if (APlayerController* PC = GetWorld()->GetFirstPlayerController())
 	{
@@ -295,13 +394,21 @@ void APA250BattleGameMode::ApplyLowCinematicSpectator(APlayerController* PC, ARF
 
 void APA250BattleGameMode::SpectateNextSoldier(APlayerController* PC, const AActor* Exclude)
 {
+	if (!PC) return;
+	ARFCharacter* Any = nullptr;
 	for (TActorIterator<ARFCharacter> It(GetWorld()); It; ++It)
 	{
-		if (*It != Exclude && !It->IsDead() && It->FactionId == PlayerFaction)
+		if (*It == Exclude || It->IsDead()) continue;
+		if (!Any) Any = *It;
+		if (It->FactionId == PlayerFaction)
 		{
 			ApplyLowCinematicSpectator(PC, *It);
 			return;
 		}
+	}
+	if (Any)
+	{
+		ApplyLowCinematicSpectator(PC, Any);
 	}
 }
 
@@ -311,12 +418,24 @@ void APA250BattleGameMode::FrameHumanCamera(APlayerController* PC, APawn* P)
 	{
 		return;
 	}
-	// Over-the-shoulder: 350 cm arm, right-shoulder offset, lag on, -15 deg pitch toward the Green.
-	if (USpringArmComponent* Arm = P->FindComponentByClass<USpringArmComponent>())
+	// M1 shoulder camera: hip 220 / (0,±60,70) / FOV 80 — ADS handled by ARFCharacter.
+	if (ARFCharacter* C = Cast<ARFCharacter>(P))
+	{
+		if (USpringArmComponent* Arm = C->SpringArm)
+		{
+			Arm->bUsePawnControlRotation = true;
+			Arm->TargetArmLength = C->HipArmLength;
+			Arm->SocketOffset = FVector(0.f, C->GetShoulderSign() * C->HipSocketOffset.Y, C->HipSocketOffset.Z);
+			Arm->bEnableCameraLag = true;
+			Arm->CameraLagSpeed = 10.f;
+		}
+		if (C->Camera) C->Camera->SetFieldOfView(C->DefaultFOV);
+	}
+	else if (USpringArmComponent* Arm = P->FindComponentByClass<USpringArmComponent>())
 	{
 		Arm->bUsePawnControlRotation = true;
-		Arm->TargetArmLength = 350.f;
-		Arm->SocketOffset = FVector(0.f, 60.f, 65.f);
+		Arm->TargetArmLength = 220.f;
+		Arm->SocketOffset = FVector(0.f, 60.f, 70.f);
 		Arm->bEnableCameraLag = true;
 		Arm->CameraLagSpeed = 10.f;
 	}
@@ -395,6 +514,25 @@ void APA250BattleGameMode::CapturePreviewShot(const FString& Tag, const FString&
 	{
 		return;
 	}
+	const FString TagStr(Spec.Tag);
+	const bool bFlagShot = TagStr.StartsWith(TEXT("Shot_Flag"));
+	if (bFlagShot)
+	{
+		const FName Want = TagStr.EndsWith(TEXT("Green")) ? FName(TEXT("green")) : FName(TEXT("meetinghouse"));
+		for (const TWeakObjectPtr<APA250ControlPoint>& WP : Posts)
+		{
+			if (APA250ControlPoint* P = WP.Get(); P && P->PostId == Want)
+			{
+				// Preview only: fly British colours on the Green so both flags can be inspected.
+				if (Want == TEXT("green")) P->DebugSetHolder(TEXT("british"));
+				const FVector Look = P->GetMarkerLocation() - FVector(0.f, 0.f, 350.f);
+				// From the open middle of the map toward the post, so buildings stay behind the pole.
+				const FVector Toward = (-P->GetActorLocation() * FVector(1.f, 1.f, 0.f)).GetSafeNormal();
+				const FVector From = P->GetActorLocation() + Toward * 1600.f + FVector(0.f, 0.f, 250.f);
+				Cam->SetActorLocationAndRotation(From, (Look - From).Rotation());
+			}
+		}
+	}
 	if (UCameraComponent* Comp = Cam->GetCameraComponent(); Comp && !Cam->ActorHasTag(TEXT("PA250LevelShot")))
 	{
 		Comp->SetFieldOfView(Spec.FOV);
@@ -410,8 +548,8 @@ void APA250BattleGameMode::CapturePreviewShot(const FString& Tag, const FString&
 	// Clean, HUD-free still: delete any old file, let Lumen settle after the cut, then poll.
 	IFileManager::Get().Delete(*SavedPath, false, true, true);
 	FTimerHandle Snap;
-	GetWorldTimerManager().SetTimer(Snap, FTimerDelegate::CreateWeakLambda(this, [this, SavedPath, PreviewDir, FinalName, Index, Total]() {
-		FScreenshotRequest::RequestScreenshot(SavedPath, /*bShowUI=*/false, /*bAddFilenameSuffix=*/false);
+	GetWorldTimerManager().SetTimer(Snap, FTimerDelegate::CreateWeakLambda(this, [this, SavedPath, PreviewDir, FinalName, Index, Total, bFlagShot]() {
+		FScreenshotRequest::RequestScreenshot(SavedPath, /*bShowUI=*/bFlagShot, /*bAddFilenameSuffix=*/false);
 		PollPreviewFile(SavedPath, FPaths::Combine(PreviewDir, FinalName), Index, Total, 0);
 	}), 1.5f, false);
 }
@@ -517,35 +655,55 @@ FTransform APA250BattleGameMode::PickSpawnTransform(FName Faction, APA250Control
 
 FName APA250BattleGameMode::ChooseClassFor(FName Faction, FName Preferred) const
 {
-	const TMap<FName, int32>* P = Pool.Find(Faction);
+	const TMap<FName, int32>* P = InitialPool.Find(Faction);
 	if (!P)
 	{
 		return Preferred;
 	}
-	if (const int32* N = P->Find(Preferred))
+	if (P->Contains(Preferred))
 	{
-		if (*N > 0) return Preferred;
+		return Preferred;
 	}
 	TArray<FName> Names;
 	P->GetKeys(Names);
 	Names.Sort(FNameLexicalLess());
-	for (const FName& C : Names)
-	{
-		if (P->FindChecked(C) > 0) return C;
-	}
-	return Preferred;
+	return Names.Num() > 0 ? Names[0] : Preferred;
 }
 
-bool APA250BattleGameMode::TrySpendTicket(FName Faction, FName UnitClass)
+bool APA250BattleGameMode::CanSpawn(FName Faction) const
 {
-	TMap<FName, int32>& P = Pool.FindOrAdd(Faction);
-	int32* N = P.Find(UnitClass);
-	if (!N || *N <= 0)
-	{
-		return false;
-	}
-	--(*N);
-	return true;
+	return Ledger.Remaining(Faction) > 0;
+}
+
+void APA250BattleGameMode::SpendDeathTicket(FName Faction, FName UnitClass)
+{
+	Ledger.SpendDeath(Faction, UnitClass);
+}
+
+void APA250BattleGameMode::RegisterConsoleCommands()
+{
+	static bool bRegistered = false;
+	if (bRegistered) return;
+	bRegistered = true;
+	IConsoleManager::Get().RegisterConsoleCommand(
+		TEXT("pa250.BotSpacingReport"),
+		TEXT("Print bot spacing stats for the live battle."),
+		FConsoleCommandDelegate::CreateLambda([]() {
+			if (GEngine)
+			{
+				for (const FWorldContext& Ctx : GEngine->GetWorldContexts())
+				{
+					if (UWorld* W = Ctx.World())
+					{
+						if (APA250BattleGameMode* GM = W->GetAuthGameMode<APA250BattleGameMode>())
+						{
+							if (GM->GetVolleys()) GM->GetVolleys()->PrintSpacingReport();
+						}
+					}
+				}
+			}
+		}),
+		ECVF_Default);
 }
 
 void APA250BattleGameMode::ConfigureSoldier(ARFCharacter* Soldier, FName Faction, FName UnitClass)
@@ -563,9 +721,11 @@ void APA250BattleGameMode::ConfigureSoldier(ARFCharacter* Soldier, FName Faction
 	{
 		FVector FromGreen = Soldier->GetActorLocation() - Anchor;
 		FromGreen.Z = 0.f;
-		if (!Soldier->IsPlayerControlled() && FromGreen.Size() > 6000.f)
+		// Far spawns are pulled in to 55 m from the Green, so the two sides start ~110 m apart:
+		// room to form ranks and march into the 40-80 m musket band (28 m put lines face to face).
+		if (!Soldier->IsPlayerControlled() && FromGreen.Size() > 7000.f)
 		{
-			Soldier->SetActorLocation(Anchor + FromGreen.GetSafeNormal() * 2800.f + FVector(0.f, 0.f, 40.f), false, nullptr, ETeleportType::TeleportPhysics);
+			Soldier->SetActorLocation(Anchor + FromGreen.GetSafeNormal() * 5500.f + FVector(0.f, 0.f, 40.f), false, nullptr, ETeleportType::TeleportPhysics);
 		}
 		if (Soldier->GetActorUpVector().Z < 0.5f)
 		{
@@ -579,20 +739,34 @@ void APA250BattleGameMode::ConfigureSoldier(ARFCharacter* Soldier, FName Faction
 		Soldier->HealthComponent->MaxHealth = UnitClass == TEXT("militia") ? 80.f : 100.f;
 		Soldier->HealthComponent->CurrentHealth = Soldier->HealthComponent->MaxHealth;
 	}
-	if (Soldier->Musket && Tuning)
+	Soldier->WeaponTuning = WeaponTuningAsset;
+	Soldier->FactionVisuals = FactionVisualsAsset;
+	Soldier->ApplyFactionVisuals();
+	if (Soldier->MeleeComponent)
 	{
-		Soldier->Musket->Tuning = Tuning;
+		Soldier->MeleeComponent->Tuning = MeleeTuningAsset;
+	}
+	if (Soldier->Musket)
+	{
+		if (Tuning) Soldier->Musket->Tuning = Tuning;
+		Soldier->Musket->WeaponTuning = WeaponTuningAsset;
+		Soldier->Musket->SetReloadPreset(ReloadPreset == 1 ? EPA250ReloadPreset::Authentic : EPA250ReloadPreset::Arcade);
+		Soldier->Musket->ApplyWeaponTuning();
 	}
 	if (APA250BotController* Bot = Cast<APA250BotController>(Soldier->GetController()))
 	{
-		Bot->AimErrorDegrees = UnitClass == TEXT("militia") ? 3.f : 2.f;
 		Bot->SetPosts(Posts);
-		if (Tuning)
+		Bot->BotTuning = BotTuningAsset;
+		// Training + tactical role come from DA_CombatProfiles via (faction, class). The reload RNG is
+		// seeded from the battle seed and a spawn counter (never the wall clock).
+		if (CombatProfilesAsset)
 		{
-			Bot->ReloadSkill = UnitClass == TEXT("militia")
-				? Tuning->Values.ActiveReload.MilitiaReloadSkill
-				: Tuning->Values.ActiveReload.LineInfantryReloadSkill;
+			const uint32 Seed = HashCombine(GetTypeHash(static_cast<uint64>(Setup.seed)), static_cast<uint32>(++BotProfileSerial));
+			Bot->ApplyCombatProfile(CombatProfilesAsset->TrainingFor(Faction, UnitClass),
+				CombatProfilesAsset->RoleFor(Faction, UnitClass), static_cast<int32>(Seed));
+			Bot->AimErrorDegrees = CombatProfilesAsset->TrainingFor(Faction, UnitClass).AimErrorDegrees; // training, not class or side
 		}
+		Bot->ConfigureCrowd(BotTuningAsset);
 	}
 	Soldier->GetCharacterMovement()->MaxWalkSpeed = 380.f;
 	if (Soldier->IsPlayerControlled())
@@ -604,16 +778,23 @@ void APA250BattleGameMode::ConfigureSoldier(ARFCharacter* Soldier, FName Faction
 ARFCharacter* APA250BattleGameMode::SpawnBot(FName Faction, FName UnitClass, APA250ControlPoint* PreferredPost)
 {
 	const FName Charged = ChooseClassFor(Faction, UnitClass);
-	if (!TrySpendTicket(Faction, Charged))
+	if (!CanSpawn(Faction))
 	{
 		return nullptr;
 	}
-	FTransform T = PickSpawnTransform(Faction, PreferredPost);
+	return SpawnBotAt(Faction, Charged, PickSpawnTransform(Faction, PreferredPost));
+}
+
+ARFCharacter* APA250BattleGameMode::SpawnBotAt(FName Faction, FName Charged, const FTransform& T)
+{
+	if (!CanSpawn(Faction))
+	{
+		return nullptr;
+	}
 	ARFCharacter* C = GetWorld()->SpawnActorDeferred<ARFCharacter>(
 		ARFCharacter::StaticClass(), T, nullptr, nullptr, ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn);
 	if (!C)
 	{
-		Pool.FindOrAdd(Faction).FindOrAdd(Charged)++;
 		return nullptr;
 	}
 	C->AIControllerClass = APA250BotController::StaticClass();
@@ -626,6 +807,96 @@ ARFCharacter* APA250BattleGameMode::SpawnBot(FName Faction, FName UnitClass, APA
 		ControllerClass.Add(Ctl, Charged);
 	}
 	return C;
+}
+
+void APA250BattleGameMode::SpawnInitialForces(FName Faction, int32 Count)
+{
+	// Militia muster (GAME INVENTION): only part of a side's militia is on the field at the start;
+	// the rest arrive in companies (TickMuster). Everyone else deploys as before. Tickets are not
+	// touched (they are spent on death), so BattleResult losses still never exceed the pools.
+	const TMap<FName, int32>* P = InitialPool.Find(Faction);
+	const UPA250BotTuning* BT = BotTuningAsset;
+	const int32 MilitiaUnits = P ? P->FindRef(TEXT("militia")) : 0;
+	if (!P || !BT || !BT->Values.bMilitiaMuster || MilitiaUnits <= 0)
+	{
+		SpawnBots(Faction, Count);
+		return;
+	}
+	int32 Total = 0;
+	for (const auto& KV : *P) Total += KV.Value;
+	int32 Others = 0, Initial = 0, Cap = 0;
+	MusterPlan(Count, MilitiaUnits, Total, BT->Values.MusterInitialFraction, BT->Values.MusterMaxAliveScale, Others, Initial, Cap);
+	const int32 MilitiaPlaces = Count - Others;
+	// Non-militia classes, in proportion.
+	TArray<FName> Names;
+	P->GetKeys(Names);
+	Names.Sort(FNameLexicalLess());
+	const int32 OtherUnits = Total - MilitiaUnits;
+	int32 Spawned = 0;
+	for (const FName& N : Names)
+	{
+		if (N == TEXT("militia") || OtherUnits <= 0) continue;
+		const int32 K = FMath::Min(Others - Spawned, FMath::Max(1, FMath::RoundToInt(float(Others) * P->FindRef(N) / OtherUnits)));
+		for (int32 i = 0; i < K; ++i) Spawned += SpawnBot(Faction, N, nullptr) ? 1 : 0;
+	}
+	for (int32 i = 0; i < Initial; ++i) SpawnBot(Faction, TEXT("militia"), nullptr);
+	MusterCap.Add(Faction, Cap);
+	MusterTimer.Add(Faction, 0.f);
+	UE_LOG(LogTemp, Display, TEXT("PA250 muster: %s fields %d others + %d of %d militia; up to %d militia as companies arrive"),
+		*Faction.ToString(), Spawned, Initial, MilitiaPlaces, MusterCap.FindRef(Faction));
+}
+
+void APA250BattleGameMode::MusterPlan(int32 Count, int32 MilitiaUnits, int32 TotalUnits, float InitialFraction, float MaxAliveScale,
+	int32& OutOthers, int32& OutInitialMilitia, int32& OutMilitiaCap)
+{
+	const int32 MilitiaPlaces = FMath::Clamp(FMath::RoundToInt(float(Count) * MilitiaUnits / FMath::Max(1, TotalUnits)), 0, Count);
+	OutOthers = Count - MilitiaPlaces;
+	OutInitialMilitia = MilitiaPlaces > 0 ? FMath::Clamp(FMath::RoundToInt(MilitiaPlaces * InitialFraction), 1, MilitiaPlaces) : 0;
+	OutMilitiaCap = FMath::Max(OutInitialMilitia, FMath::RoundToInt(MilitiaPlaces * FMath::Max(1.f, MaxAliveScale)));
+}
+
+int32 APA250BattleGameMode::MusterWave(int32 MilitiaCap, int32 MilitiaAlive, int32 TicketsLeft, int32 SideAlive, int32 WaveSize)
+{
+	return FMath::Max(0, FMath::Min3(WaveSize, MilitiaCap - MilitiaAlive, TicketsLeft - SideAlive));
+}
+
+void APA250BattleGameMode::TickMuster(float DeltaSeconds)
+{
+	const UPA250BotTuning* BT = BotTuningAsset;
+	if (!BT) return;
+	for (TPair<FName, int32>& KV : MusterCap)
+	{
+		const FName F = KV.Key;
+		float& Timer = MusterTimer.FindOrAdd(F);
+		Timer += DeltaSeconds;
+		if (Timer < BT->Values.MusterWaveSeconds) continue;
+		Timer = 0.f;
+		int32 AliveSide = 0;
+		for (TActorIterator<ARFCharacter> It(GetWorld()); It; ++It) AliveSide += (!It->IsDead() && It->FactionId == F) ? 1 : 0;
+		const int32 N = MusterWave(KV.Value, CountAlive(F, TEXT("militia")), PoolTotal(F), AliveSide, BT->Values.MusterWaveSize);
+		if (N <= 0) continue;
+		// A company arrives together from one of the side's muster points (else its normal start).
+		const TArray<TWeakObjectPtr<AActor>>* Points = MusterPoints.Find(F);
+		AActor* From = nullptr;
+		if (Points && Points->Num() > 0) From = (*Points)[FMath::RandHelper(Points->Num())].Get();
+		if (!From) From = PickStart(F);
+		if (!From) continue;
+		int32 Arrived = 0;
+		for (int32 i = 0; i < N; ++i)
+		{
+			FVector Loc = From->GetActorLocation() + FVector(FMath::FRandRange(-500.f, 500.f), FMath::FRandRange(-500.f, 500.f), 0.f);
+			Loc = ClearSpawnLocation(GetWorld(), Loc);
+			Arrived += SpawnBotAt(F, TEXT("militia"), FTransform(From->GetActorRotation(), Loc)) ? 1 : 0;
+		}
+		MusterArrivals.FindOrAdd(F) += Arrived;
+		if (Arrived > 0)
+		{
+			const FVector Dir = (From->GetActorLocation() - (Posts.Num() && Posts[0].IsValid() ? Posts[0]->GetActorLocation() : FVector::ZeroVector)).GetSafeNormal2D();
+			const TCHAR* From4 = FMath::Abs(Dir.X) > FMath::Abs(Dir.Y) ? (Dir.X > 0 ? TEXT("east") : TEXT("west")) : (Dir.Y > 0 ? TEXT("south") : TEXT("north"));
+			PushKillFeed(F == PlayerFaction ? FString::Printf(TEXT("Militia company arrives from the %s! (+%d)"), From4, Arrived)
+				: FString::Printf(TEXT("Enemy militia arriving from the %s! (+%d)"), From4, Arrived));
+		}
+	}
 }
 
 void APA250BattleGameMode::SpawnBots(FName Faction, int32 Count)
@@ -669,7 +940,7 @@ bool APA250BattleGameMode::RequestSpawn(AController* Controller, FName UnitClass
 		return false;
 	}
 	const FName Cls = ChooseClassFor(Faction, UnitClass);
-	if (!TrySpendTicket(Faction, Cls))
+	if (!CanSpawn(Faction))
 	{
 		return false;
 	}
@@ -681,7 +952,6 @@ bool APA250BattleGameMode::RequestSpawn(AController* Controller, FName UnitClass
 	APawn* NewPawn = GetWorld()->SpawnActor<APawn>(PawnClass, T.GetLocation(), T.Rotator());
 	if (!NewPawn)
 	{
-		Pool.FindOrAdd(Faction).FindOrAdd(Cls)++;
 		return false;
 	}
 	Controller->Possess(NewPawn);
@@ -699,6 +969,11 @@ void APA250BattleGameMode::ShowSpawnScreen(APlayerController* PC)
 	{
 		return;
 	}
+	if (!CanSpawn(PlayerFaction))
+	{
+		CloseSpawnScreenToSpectate(PC);
+		return;
+	}
 	if (!SpawnScreen)
 	{
 		SpawnScreen = CreateWidget<UPA250SpawnScreen>(PC, UPA250SpawnScreen::StaticClass());
@@ -709,6 +984,18 @@ void APA250BattleGameMode::ShowSpawnScreen(APlayerController* PC)
 	}
 }
 
+void APA250BattleGameMode::CloseSpawnScreenToSpectate(APlayerController* PC)
+{
+	if (SpawnScreen)
+	{
+		SpawnScreen->RemoveFromParent();
+	}
+	if (!PC) return;
+	PC->SetInputMode(FInputModeGameOnly());
+	PC->bShowMouseCursor = false;
+	SpectateNextSoldier(PC, PC->GetPawn());
+}
+
 APawn* APA250BattleGameMode::SpawnDefaultPawnAtTransform_Implementation(AController* NewPlayer, const FTransform& SpawnTransform)
 {
 	UClass* PawnClass = GetDefaultPawnClassForController(NewPlayer);
@@ -716,9 +1003,8 @@ APawn* APA250BattleGameMode::SpawnDefaultPawnAtTransform_Implementation(AControl
 	{
 		return nullptr;
 	}
-	// Initial player spawn spends a ticket.
 	const FName Cls = ChooseClassFor(PlayerFaction, TEXT("line_infantry"));
-	if (!TrySpendTicket(PlayerFaction, Cls))
+	if (!CanSpawn(PlayerFaction))
 	{
 		return nullptr;
 	}
@@ -790,8 +1076,7 @@ void APA250BattleGameMode::OnControllerRespawned(AController* Controller, APawn*
 	}
 	const FName* Prev = ControllerClass.Find(Controller);
 	const FName Cls = ChooseClassFor(*F, Prev ? *Prev : FName(TEXT("line_infantry")));
-	// Respawn via RFGameMode path: spend ticket here (player spawn screen uses RequestSpawn instead).
-	if (!TrySpendTicket(*F, Cls))
+	if (!CanSpawn(*F))
 	{
 		C->Destroy();
 		return;
@@ -803,23 +1088,15 @@ void APA250BattleGameMode::OnControllerRespawned(AController* Controller, APawn*
 
 int32 APA250BattleGameMode::PoolTotal(FName Faction) const
 {
-	int32 N = 0;
-	if (const TMap<FName, int32>* P = Pool.Find(Faction))
-	{
-		for (const auto& KV : *P) N += FMath::Max(0, KV.Value);
-	}
-	return N;
+	return Ledger.Remaining(Faction);
 }
 
 int32 APA250BattleGameMode::TicketsRemaining(FName Faction) const { return PoolTotal(Faction); }
 
 int32 APA250BattleGameMode::TicketsRemaining(FName Faction, FName UnitClass) const
 {
-	if (const TMap<FName, int32>* P = Pool.Find(Faction))
-	{
-		return P->FindRef(UnitClass);
-	}
-	return 0;
+	(void)UnitClass;
+	return TicketsRemaining(Faction);
 }
 
 int32 APA250BattleGameMode::CountAlive(FName Faction, FName UnitClass) const
@@ -858,62 +1135,60 @@ FName APA250BattleGameMode::GetObjectiveHolder() const { return PluralityHolder(
 
 void APA250BattleGameMode::BleedTickets(float DeltaSeconds)
 {
-	const int32 B = PostsOwned(TEXT("british"));
-	const int32 C = PostsOwned(TEXT("continental"));
-	if (B == C)
-	{
-		BleedAccum = 0.f;
-		return;
-	}
-	BleedAccum += DeltaSeconds;
-	const float Interval = FMath::Max(1.f, BleedIntervalSeconds);
-	while (BleedAccum >= Interval)
-	{
-		BleedAccum -= Interval;
-		const FName Loser = B < C ? FName(TEXT("british")) : FName(TEXT("continental"));
-		TMap<FName, int32>& P = Pool.FindOrAdd(Loser);
-		TArray<FName> Names;
-		P.GetKeys(Names);
-		Names.Sort(FNameLexicalLess());
-		bool Spent = false;
-		for (const FName& Cls : Names)
-		{
-			if (P.FindRef(Cls) > 0)
-			{
-				P.FindOrAdd(Cls)--;
-				Spent = true;
-				break;
-			}
-		}
-		if (Spent)
-		{
-			++BleedTicks;
-		}
-	}
+	Ledger.Bleed(DeltaSeconds, BleedIntervalSeconds,
+		TEXT("british"), PostsOwned(TEXT("british")), TEXT("continental"), PostsOwned(TEXT("continental")));
 }
 
 void APA250BattleGameMode::CheckTicketExhaustion()
 {
-	auto SideDead = [this](FName F) {
-		return PoolTotal(F) <= 0 && CountAlive(F, TEXT("line_infantry")) + CountAlive(F, TEXT("militia")) <= 0;
+	// Conquest: a side at 0 tickets loses at once, even with soldiers still standing.
+	// A side that started with no reinforcements (debug setups) only loses once it is wiped out.
+	auto Out = [this](FName F) {
+		if (PoolTotal(F) > 0) return false;
+		int32 Initial = 0;
+		for (const auto& CK : InitialPool.FindRef(F)) Initial += CK.Value;
+		return Initial > 0 || CountAlive(F, TEXT("line_infantry")) + CountAlive(F, TEXT("militia")) <= 0;
 	};
-	const bool BritDead = SideDead(TEXT("british"));
-	const bool ContDead = SideDead(TEXT("continental"));
-	if (BritDead && ContDead)
+	const bool BritOut = Out(TEXT("british"));
+	const bool ContOut = Out(TEXT("continental"));
+	if (BritOut && ContOut)
 	{
 		FName Winner = PluralityHolder();
 		if (Winner.IsNone()) Winner = ToName(Setup.defender_faction);
 		EndBattle(Winner, TEXT("tickets_exhausted"));
 		return;
 	}
-	if (BritDead)
+	if (BritOut)
 	{
 		EndBattle(TEXT("continental"), TEXT("tickets_exhausted"));
 	}
-	else if (ContDead)
+	else if (ContOut)
 	{
 		EndBattle(TEXT("british"), TEXT("tickets_exhausted"));
 	}
+}
+
+void APA250BattleGameMode::BeginDeathCamThenSpawn(APlayerController* PC)
+{
+	if (!PC) return;
+	// OnDeath sets a 3 s lifespan, the same instant this cam ends, so the view target
+	// can be destroyed before the spawn screen opens. Keep the corpse through the cam.
+	if (APawn* Pawn = PC->GetPawn())
+	{
+		Pawn->SetLifeSpan(DeathCamSeconds + 2.f);
+	}
+	TWeakObjectPtr<APlayerController> WeakPC = PC;
+	FTimerHandle H;
+	GetWorldTimerManager().SetTimer(H, FTimerDelegate::CreateWeakLambda(this, [this, WeakPC]() {
+		APlayerController* C = WeakPC.Get();
+		if (!C || bBattleOver) return;
+		if (!CanSpawn(PlayerFaction))
+		{
+			CloseSpawnScreenToSpectate(C);
+			return;
+		}
+		ShowSpawnScreen(C);
+	}), DeathCamSeconds, false);
 }
 
 void APA250BattleGameMode::OnCharacterDied(ARFCharacter* Victim, AController* VictimController, AController* Killer)
@@ -922,11 +1197,32 @@ void APA250BattleGameMode::OnCharacterDied(ARFCharacter* Victim, AController* Vi
 	{
 		return;
 	}
-	// Tickets are spent on spawn, not death.
+	// M6: tickets spent on death (and bleed), not spawn.
+	if (HasAuthority())
+	{
+		SpendDeathTicket(Victim->FactionId, Victim->UnitClass);
+		if (Killer)
+		{
+			if (const ARFCharacter* KillerChar = Cast<ARFCharacter>(Killer->GetPawn()))
+			{
+				auto Label = [](const ARFCharacter* C, bool bYou) {
+					if (bYou) return FString(TEXT("You"));
+					const FString Side = C->FactionId == TEXT("british") ? TEXT("Regular") : TEXT("Provincial");
+					return C->UnitClass == TEXT("militia") ? FString::Printf(TEXT("%s militia"), *Side) : Side;
+				};
+				PushKillFeed(FString::Printf(TEXT("%s  x  %s"),
+					*Label(KillerChar, Killer->IsLocalPlayerController()),
+					*Label(Victim, VictimController && VictimController->IsLocalPlayerController())));
+			}
+		}
+	}
 	CheckTicketExhaustion();
 	if (APlayerController* PC = GetWorld()->GetFirstPlayerController())
 	{
-		if (bAutoplayBots && PC->GetViewTarget() == Victim)
+		const ARFCharacter* PlayerPawn = Cast<ARFCharacter>(PC->GetPawn());
+		const bool bPlayerDown = bAutoplayBots || !PlayerPawn || PlayerPawn->IsDead();
+		// Own corpse stays the death-cam target. Retarget only when a watched soldier dies.
+		if (bPlayerDown && PC->GetViewTarget() == Victim && PC->GetPawn() != Victim)
 		{
 			SpectateNextSoldier(PC, Victim);
 		}
@@ -942,7 +1238,7 @@ void APA250BattleGameMode::OnCharacterDied(ARFCharacter* Victim, AController* Vi
 		{
 			return;
 		}
-		ShowSpawnScreen(Cast<APlayerController>(VictimController));
+		BeginDeathCamThenSpawn(Cast<APlayerController>(VictimController));
 		return;
 	}
 	TWeakObjectPtr<AController> OldCtl = VictimController;
@@ -1021,6 +1317,16 @@ void APA250BattleGameMode::Tick(float DeltaSeconds)
 	if (Volleys)
 	{
 		Volleys->Tick(DeltaSeconds);
+		if (bAutoplayBots)
+		{
+			// Headless runs: log squad spacing / engagement ranges so formation regressions show in the trace.
+			SpacingReportTimer -= DeltaSeconds;
+			if (SpacingReportTimer <= 0.f)
+			{
+				SpacingReportTimer = 15.f;
+				Volleys->PrintSpacingReport();
+			}
+		}
 	}
 	for (const TWeakObjectPtr<APA250ControlPoint>& WP : Posts)
 	{
@@ -1030,7 +1336,12 @@ void APA250BattleGameMode::Tick(float DeltaSeconds)
 		}
 	}
 	BleedTickets(DeltaSeconds);
+	TickMuster(DeltaSeconds);
 	CheckTicketExhaustion();
+	if (SpawnScreen && SpawnScreen->IsInViewport() && !CanSpawn(PlayerFaction))
+	{
+		CloseSpawnScreenToSpectate(SpawnScreen->GetOwningPlayer());
+	}
 	if (bBattleOver)
 	{
 		return;
@@ -1072,20 +1383,19 @@ void APA250BattleGameMode::EndBattle(FName Winner, const FString& Reason)
 		if (!WP.IsValid() || WP->GetHolder().IsNone()) continue;
 		Result.objectives_held[ToStd(WP->PostId)] = ToStd(WP->GetHolder());
 	}
-	for (const auto& FK : InitialPool)
+	for (const auto& FK : Ledger.Deaths)
 	{
 		for (const auto& CK : FK.Value)
 		{
-			const int32 Left = Pool.FindChecked(FK.Key).FindRef(CK.Key);
-			const int32 Alive = CountAlive(FK.Key, CK.Key);
-			const int32 LostSoldiers = FMath::Max(0, CK.Value * SoldiersPerUnit - Left - Alive);
-			const int32 Lost = FMath::Clamp(FMath::RoundToInt((float)LostSoldiers / (float)SoldiersPerUnit), 0, CK.Value);
+			const int32 Lost = FPA250TicketLedger::LossesInUnits(CK.Value, SoldiersPerUnit,
+				InitialPool.FindRef(FK.Key).FindRef(CK.Key));
 			if (Lost > 0)
 			{
 				Result.losses[ToStd(FK.Key)][ToStd(CK.Key)] = Lost;
 			}
 		}
 	}
+	++BattleResultEmitCount;
 	const std::string Loser = Winner == TEXT("british") ? "continental" : "british";
 	auto It = Setup.sides.find(Loser);
 	if (It != Setup.sides.end())
@@ -1093,7 +1403,7 @@ void APA250BattleGameMode::EndBattle(FName Winner, const FString& Reason)
 		Result.retreat_province = It->second.retreat_province;
 	}
 	Banner = FString::Printf(TEXT("%s victory (%s)"), *Winner.ToString().ToUpper(), *Reason);
-	UE_LOG(LogTemp, Display, TEXT("PA250 battle over: %s flips=%d bleed=%d"), *Banner, PostFlips, BleedTicks);
+	UE_LOG(LogTemp, Display, TEXT("PA250 battle over: %s flips=%d bleed=%d"), *Banner, PostFlips, Ledger.BleedTicks);
 	WriteBattleFile(Reason);
 
 	FTimerHandle H;
@@ -1133,8 +1443,14 @@ void APA250BattleGameMode::WriteBattleFile(const FString& Reason) const
 	FString Json = TEXT("{\"reason\":\"");
 	Json += Reason;
 	Json += FString::Printf(TEXT("\",\"elapsed_game_seconds\":%.1f,\"bots_per_side\":%d,\"soldiers_per_unit\":%d,\"trace\":{\"post_flips\":%d,\"bleed_ticks\":%d,\"posts\":"),
-		GetWorld()->GetTimeSeconds() - StartTime, BotsPerSide, SoldiersPerUnit, PostFlips, BleedTicks);
+		GetWorld()->GetTimeSeconds() - StartTime, BotsPerSide, SoldiersPerUnit, PostFlips, Ledger.BleedTicks);
 	Json += PostTrace;
+	Json += TEXT(",\"reload_by_training\":");
+	Json += ReloadByTrainingJson();
+	Json += FString::Printf(TEXT(",\"muster_arrivals\":{\"british\":%d,\"continental\":%d}"),
+		MusterArrivals.FindRef(TEXT("british")), MusterArrivals.FindRef(TEXT("continental")));
+	Json += TEXT(",\"morale\":");
+	Json += Volleys ? Volleys->MoraleTraceJson() : FString(TEXT("{}"));
 	Json += FString::Printf(TEXT(",\"tickets\":{\"british\":%d,\"continental\":%d},\"reload\":{\"perfect\":%d,\"sweet\":%d,\"miss\":%d,\"jam\":%d},\"volleys\":{\"count\":%d,\"avg_hits\":%.2f},\"lines\":{\"engagements\":%d,\"in_line\":%d}},\"setup\":"),
 		PoolTotal(TEXT("british")), PoolTotal(TEXT("continental")),
 		Perfect, Sweet, Miss, Jam, VolleyN, VolleyHits, Eng, LineEng);

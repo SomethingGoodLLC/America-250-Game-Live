@@ -1,0 +1,30 @@
+{
+ "name": "reject_surrender_foreign_army",
+ "description": "only the envoy's own army can surrender",
+ "proposal": {
+  "spoken_line": "...",
+  "clauses": [
+   {
+    "type": "surrender",
+    "army_id": "continental_militia",
+    "days": 14
+   }
+  ]
+ },
+ "expect": {
+  "valid": false,
+  "error_codes": [
+   "army_not_envoys"
+  ]
+ },
+ "context_patch": {
+  "army_provinces": {
+   "british_regulars": "charlestown",
+   "continental_militia": "charlestown"
+  },
+  "army_strengths": {
+   "british_regulars": 30,
+   "continental_militia": 50
+  }
+ }
+}

@@ -46,8 +46,8 @@ FText UPA250MapWidget::HeaderText() const
 	const int32 Sp = S->GetSpeedIndex() + 1;
 	const TCHAR* Pause = S->IsPaused() ? TEXT("PAUSED") : TEXT("RUNNING");
 	return FText::FromString(FString::Printf(
-		TEXT("%s   |   %s  speed %d×   |   Supplies Cont %d  Brit %d   |   Attitude %d   |   Treaties: %s"), *Date, Pause, Sp,
-		Get(St.supplies, "continental"), Get(St.supplies, "british"), Get(St.relations, "british"),
+		TEXT("%s   |   %s  speed %d×   |   Gold %d   |   Supplies Cont %d  Brit %d   |   Attitude %d   |   Treaties: %s"), *Date, Pause, Sp,
+		St.player_gold, Get(St.supplies, "continental"), Get(St.supplies, "british"), Get(St.relations, "british"),
 		Treaties.IsEmpty() ? TEXT("none") : *Treaties));
 }
 

@@ -1,0 +1,23 @@
+{
+ "name": "reject_vassalage_boston_fief",
+ "description": "the Crown will not hand out Boston",
+ "proposal": {
+  "spoken_line": "...",
+  "clauses": [
+   {
+    "type": "vassalage",
+    "title": "baron",
+    "gold": 5000,
+    "provinces": [
+     "boston"
+    ]
+   }
+  ]
+ },
+ "expect": {
+  "valid": false,
+  "error_codes": [
+   "red_line_protected_province"
+  ]
+ }
+}

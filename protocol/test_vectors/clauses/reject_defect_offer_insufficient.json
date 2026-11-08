@@ -1,0 +1,21 @@
+{
+ "name": "reject_defect_offer_insufficient",
+ "description": "a colonel's commission and 100 gold is not enough",
+ "proposal": {
+  "spoken_line": "...",
+  "clauses": [
+   {
+    "type": "defect",
+    "title": "colonel",
+    "gold": 100,
+    "provinces": []
+   }
+  ]
+ },
+ "expect": {
+  "valid": false,
+  "error_codes": [
+   "offer_insufficient"
+  ]
+ }
+}

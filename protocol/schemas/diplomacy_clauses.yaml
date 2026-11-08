@@ -24,6 +24,10 @@ properties:
         - $ref: "#/definitions/prisoner_exchange"
         - $ref: "#/definitions/safe_passage"
         - $ref: "#/definitions/cede_province"
+        - $ref: "#/definitions/defect"
+        - $ref: "#/definitions/surrender"
+        - $ref: "#/definitions/vassalage"
+        - $ref: "#/definitions/take_offense"
 definitions:
   ceasefire:
     type: object
@@ -60,6 +64,59 @@ definitions:
     properties:
       type: {const: cede_province}
       province_id: {type: string, description: "A province owned by the envoy's faction and not in protected_provinces (Boston is protected for the British)."}
+  defect:
+    type: object
+    additionalProperties: false
+    required: [type, title, gold, provinces]
+    description: >-
+      GAME INVENTION. The envoy changes sides ("Benedict Arnold"), only when the player's real offer
+      meets the sim's price (context.defect_price): title value (context.titles) + gold/10 + 15 per
+      player-owned province granted. Must be the only clause. Effects: gold leaves the treasury, the
+      lands become fiefs, his army joins the player, and as mayor_of_boston he opens Boston.
+    properties:
+      type: {const: defect}
+      title: {type: string, description: "A key of context.titles, or empty."}
+      gold: {type: integer, minimum: 0, description: "At most context.player_gold."}
+      provinces: {type: array, items: {type: string}, description: "Provinces owned by the player."}
+  surrender:
+    type: object
+    additionalProperties: false
+    required: [type, army_id, days]
+    description: >-
+      GAME INVENTION (after Fort Necessity, 1754). One of the envoy's armies, cornered (enemy strength in
+      or beside its province >= 1.5x its own), marches out unharmed with the honors of war: it keeps its men
+      and arms, falls back to an envoy-owned neighbour, the ground it held passes to the player, and a
+      parole ceasefire of `days` (1-30) starts. Refused inside protected provinces (Boston).
+    properties:
+      type: {const: surrender}
+      army_id: {type: string, description: "An army owned by the envoy's faction."}
+      days: {type: integer, minimum: 1, maximum: 30}
+  vassalage:
+    type: object
+    additionalProperties: false
+    required: [type, title, gold, provinces]
+    description: >-
+      GAME INVENTION. The envoy tempts the PLAYER to turn coat and become the Crown's vassal. Gold is
+      uncapped. Provinces must be the envoy's own and not protected (never Boston). Applied only when the
+      player accepts in the terms panel: the player keeps their army under a permanent "vassalage" peace
+      with the Crown, gains the gold, title and lands, and British attitude rises to at least 60.
+    properties:
+      type: {const: vassalage}
+      title: {type: string}
+      gold: {type: integer, minimum: 0}
+      provinces: {type: array, items: {type: string}}
+  take_offense:
+    type: object
+    additionalProperties: false
+    required: [type, reason, days]
+    description: >-
+      GAME INVENTION (Washington refusing a mis-addressed letter, 1776). The envoy is slighted: grievance
+      rises (disrespect/insolence 30, threat 40, deceit 50), attitude drops 10, and he refuses every clause
+      for `days` (1-7). Applies at once, alone. Failed talks also add grievance (see register_diplomacy_failure).
+    properties:
+      type: {const: take_offense}
+      reason: {enum: [disrespect, insolence, threat, deceit]}
+      days: {type: integer, minimum: 1, maximum: 7}
 # Validation rules beyond JSON Schema (single source of truth: protocol/test_vectors/clauses/*.json,
 # consumed by the C++ tests and by pytest): unknown clause types, types outside allowed_clause_types,
 # unknown ids, red lines, duplicates, and malformed fields are rejected; the sim re-validates before applying.

@@ -37,9 +37,15 @@ inline void add_log(CampaignState& s, const std::string& line) {
     if (s.log.size() > kMaxLog) s.log.erase(s.log.begin(), s.log.begin() + (s.log.size() - kMaxLog));
 }
 
+template <typename V>
+inline V map_get(const std::map<std::string, V>& m, const std::string& k) {
+    auto it = m.find(k);
+    return it == m.end() ? V{} : it->second;
+}
+
 inline bool has_ceasefire(const CampaignState& s) {
     for (const auto& t : s.treaties)
-        if (t.type == "ceasefire" && t.hours_remaining > 0) return true;
+        if ((t.type == "ceasefire" || t.type == "vassalage") && t.hours_remaining > 0) return true;
     return false;
 }
 

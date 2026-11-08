@@ -25,10 +25,14 @@ void UPA250SpawnScreen::OpenFor(APlayerController* PC, APA250BattleGameMode* GM)
 			}
 		}
 	}
-	if (!IsInViewport())
+	// CreateWidget builds the slate before GameMode is assigned, so the held-CP list
+	// was empty for the rest of the match. Drop it and rebuild now that posts are known.
+	if (IsInViewport())
 	{
-		AddToViewport(100);
+		RemoveFromParent();
 	}
+	ReleaseSlateResources(true);
+	AddToViewport(100);
 	if (PC)
 	{
 		PC->SetInputMode(FInputModeUIOnly());
@@ -125,7 +129,11 @@ TSharedRef<SWidget> UPA250SpawnScreen::RebuildWidget()
 		[
 			SNew(SVerticalBox)
 			+ SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 12)
-			[SNew(STextBlock).Font(Font).ColorAndOpacity(FLinearColor::White).Text(FText::FromString(TEXT("RESPAWN")))]
+			[SNew(STextBlock).Font(Font).ColorAndOpacity(FLinearColor::White).Text_Lambda([WeakThis]() {
+				const APA250BattleGameMode* GM = WeakThis.IsValid() ? WeakThis->GameMode.Get() : nullptr;
+				const int32 Tickets = GM ? GM->TicketsRemaining(GM->GetPlayerFaction()) : 0;
+				return FText::FromString(FString::Printf(TEXT("RESPAWN    tickets %d"), Tickets));
+			})]
 			+ SVerticalBox::Slot().AutoHeight().Padding(0, 4)
 			[SNew(STextBlock).Font(Small).ColorAndOpacity(FLinearColor(0.9f, 0.9f, 0.7f)).Text(FText::FromString(TEXT("Class")))]
 			+ SVerticalBox::Slot().AutoHeight()
