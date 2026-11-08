@@ -1,0 +1,525 @@
+--- original/InteractiveMap.uplugin
++++ ported/InteractiveMap.uplugin
+@@ -1,99 +1,110 @@
+ {
+-	"FileVersion": 3,
+-	"Version": 2,
+-	"VersionName": "2.0",
+-	"FriendlyName": "InteractiveGrandStrategyMap",
+-	"Description": "Framework to help developing grand strategy style maps in unreal",
+-	"Category": "Other",
+-	"CreatedBy": "AnastacioDev",
+-	"CreatedByURL": "https://miguel-anastacio.github.io/",
+-	"DocsURL": "https://github.com/Miguel-Anastacio/GrandStrategyMapUnreal/blob/main/PLUGIN_DOCUMENTATION.md",
+-	"MarketplaceURL": "",
+-	"SupportURL": "",
+-	"EngineVersion": "5.7.0",
+-	"CanContainContent": true,
+-	"Installed": true,
+-	"Modules": [
+-		{
+-			"Name": "UtilityModule",
+-			"Type": "Runtime",
+-			"LoadingPhase": "PreDefault",
+-			"PlatformAllowList": [
+-				"Win64"
+-			],
+-			"AdditionalDependencies": [
+-				"Engine",
+-				"UMG"
+-			]
+-		},
+-		{
+-			"Name": "UtilityModuleEditor",
+-			"Type": "Editor",
+-			"LoadingPhase": "PostEngineInit",
+-			"PlatformAllowList": [
+-				"Win64"
+-			],
+-			"AdditionalDependencies": [
+-				"Engine"
+-			]
+-		},
+-		{
+-			"Name": "DataBasedWidget",
+-			"Type": "Runtime",
+-			"LoadingPhase": "Default",
+-			"PlatformAllowList": [
+-				"Win64"
+-			]
+-		},
+-		{
+-			"Name": "DataBasedWidgetEditor",
+-			"Type": "Editor",
+-			"LoadingPhase": "Default",
+-			"PlatformAllowList": [
+-				"Win64"
+-			]
+-		},
+-		{
+-			"Name": "SharedModule",
+-			"Type": "Runtime",
+-			"LoadingPhase": "Default"
+-		},
+-		{
+-			"Name": "InteractiveMap",
+-			"Type": "Runtime",
+-			"LoadingPhase": "Default",
+-			"PlatformAllowList": [
+-				"Win64"
+-			],
+-			"AdditionalDependencies": [
+-				"Engine",
+-				"UMG"
+-			]
+-		},
+-		{
+-			"Name": "MapEditor",
+-			"Type": "Editor",
+-			"LoadingPhase": "PostEngineInit",
+-			"PlatformAllowList": [
+-				"Win64"
+-			],
+-			"AdditionalDependencies": [
+-				"Engine"
+-			]
+-		},
+-		{
+-			"Name": "ShadersModule",
+-			"Type": "Runtime",
+-			"LoadingPhase": "PostConfigInit",
+-			"PlatformAllowList": [
+-				"Win64"
+-			]
+-		}
+-	],
+-	"Plugins": [
+-		{
+-			"Name": "EnhancedInput",
+-			"Enabled": true
+-		}
+-	]
+-}+  "FileVersion": 3,
++  "Version": 2,
++  "VersionName": "2.0",
++  "FriendlyName": "InteractiveGrandStrategyMap",
++  "Description": "Framework to help developing grand strategy style maps in unreal",
++  "Category": "Other",
++  "CreatedBy": "AnastacioDev",
++  "CreatedByURL": "https://miguel-anastacio.github.io/",
++  "DocsURL": "https://github.com/Miguel-Anastacio/GrandStrategyMapUnreal/blob/main/PLUGIN_DOCUMENTATION.md",
++  "MarketplaceURL": "",
++  "SupportURL": "",
++  "EngineVersion": "5.8.0",
++  "CanContainContent": true,
++  "Installed": true,
++  "Modules": [
++    {
++      "Name": "UtilityModule",
++      "Type": "Runtime",
++      "LoadingPhase": "PreDefault",
++      "PlatformAllowList": [
++        "Win64",
++        "Mac"
++      ],
++      "AdditionalDependencies": [
++        "Engine",
++        "UMG"
++      ]
++    },
++    {
++      "Name": "UtilityModuleEditor",
++      "Type": "Editor",
++      "LoadingPhase": "PostEngineInit",
++      "PlatformAllowList": [
++        "Win64",
++        "Mac"
++      ],
++      "AdditionalDependencies": [
++        "Engine"
++      ]
++    },
++    {
++      "Name": "DataBasedWidget",
++      "Type": "Runtime",
++      "LoadingPhase": "Default",
++      "PlatformAllowList": [
++        "Win64",
++        "Mac"
++      ]
++    },
++    {
++      "Name": "DataBasedWidgetEditor",
++      "Type": "Editor",
++      "LoadingPhase": "Default",
++      "PlatformAllowList": [
++        "Win64",
++        "Mac"
++      ]
++    },
++    {
++      "Name": "SharedModule",
++      "Type": "Runtime",
++      "LoadingPhase": "Default"
++    },
++    {
++      "Name": "InteractiveMap",
++      "Type": "Runtime",
++      "LoadingPhase": "Default",
++      "PlatformAllowList": [
++        "Win64",
++        "Mac"
++      ],
++      "AdditionalDependencies": [
++        "Engine",
++        "UMG"
++      ]
++    },
++    {
++      "Name": "MapEditor",
++      "Type": "Editor",
++      "LoadingPhase": "PostEngineInit",
++      "PlatformAllowList": [
++        "Win64",
++        "Mac"
++      ],
++      "AdditionalDependencies": [
++        "Engine"
++      ]
++    },
++    {
++      "Name": "ShadersModule",
++      "Type": "Runtime",
++      "LoadingPhase": "PostConfigInit",
++      "PlatformAllowList": [
++        "Win64",
++        "Mac"
++      ]
++    }
++  ],
++  "Plugins": [
++    {
++      "Name": "EnhancedInput",
++      "Enabled": true
++    },
++    {
++      "Name": "StructUtils",
++      "Enabled": true
++    }
++  ]
++}
+--- original/Source/DataBasedWidgetEditor/Private/CreateWidgetAssetAction.cpp
++++ ported/Source/DataBasedWidgetEditor/Private/CreateWidgetAssetAction.cpp
+@@ -1,5 +1,4 @@
+ // Copyright 2024 An@stacioDev All rights reserved.
+-#pragma once
+ #include "CreateWidgetAssetAction.h"
+ #include "DataBasedWidgetEditor.h"
+ #include "GenericWidget/GenericStructWidget.h"
+@@ -8,7 +7,7 @@
+ #include "GenericWidget/GenericWidgetDataMap.h"
+ #include "Framework/MultiBox/MultiBoxBuilder.h"
+ #include "BlueprintLibrary/AssetCreatorFunctionLibrary.h"
+-#include "Engine/UserDefinedStruct.h"
++#include "StructUtils/UserDefinedStruct.h"
+ #include "Kismet2/BlueprintEditorUtils.h"
+ #include "Misc/EngineVersionComparison.h"
+ #if UE_VERSION_NEWER_THAN(5, 4, 4)
+--- original/Source/DataBasedWidgetEditor/Private/CreateWidgetListAssetAction.cpp
++++ ported/Source/DataBasedWidgetEditor/Private/CreateWidgetListAssetAction.cpp
+@@ -1,5 +1,4 @@
+ // Copyright 2024 An@stacioDev All rights reserved.
+-#pragma once
+ #include "CreateWidgetListAssetAction.h"
+ 
+ #include "DataBasedWidgetEditor.h"
+@@ -10,7 +9,7 @@
+ #include "Framework/MultiBox/MultiBoxBuilder.h"
+ #include "BlueprintLibrary/AssetCreatorFunctionLibrary.h"
+ #include "CollectionViewWidgets/ListViewWidgetsDataTable.h"
+-#include "Engine/UserDefinedStruct.h"
++#include "StructUtils/UserDefinedStruct.h"
+ #include "Kismet2/BlueprintEditorUtils.h"
+ #include "Misc/EngineVersionComparison.h"
+ #if UE_VERSION_NEWER_THAN(5, 4, 4)
+--- original/Source/MapEditor/Private/Editor/InstancedStructWrapper.h
++++ ported/Source/MapEditor/Private/Editor/InstancedStructWrapper.h
+@@ -5,7 +5,7 @@
+ #if UE_VERSION_NEWER_THAN(5, 4, 4)
+ #include "StructUtils/InstancedStruct.h"
+ #else
+-#include "InstancedStruct.h"
++#include "StructUtils/InstancedStruct.h"
+ #endif
+ #include "InstancedStructWrapper.generated.h"
+ UCLASS()
+--- original/Source/MapEditor/Private/Editor/MapDataMode/MapEditorDataAppMode.cpp
++++ ported/Source/MapEditor/Private/Editor/MapDataMode/MapEditorDataAppMode.cpp
+@@ -92,7 +92,7 @@
+ 	
+ 	app->PushTabFactories(TabSet);
+ 	Init();
+-	FApplicationMode::RegisterTabFactories(InTabManager);
++	RegisterTabFactoriesWithAppAndManager(App.Pin().Get(), InTabManager.ToSharedRef());
+ }
+ 
+ void FMapEditorDataAppMode::PreDeactivateMode()
+--- original/Source/MapEditor/Private/Editor/MapEditorMode/MapEditorGenAppMode.cpp
++++ ported/Source/MapEditor/Private/Editor/MapEditorMode/MapEditorGenAppMode.cpp
+@@ -54,7 +54,7 @@
+ 	TSharedPtr<FMapEditorApp> app = App.Pin();
+ 	app->PushTabFactories(TabSet);
+ 	
+-	FApplicationMode::RegisterTabFactories(InTabManager);
++	RegisterTabFactoriesWithAppAndManager(App.Pin().Get(), InTabManager.ToSharedRef());
+ }
+ 
+ void FMapEditorGenAppMode::PreDeactivateMode()
+--- original/Source/MapEditor/Private/Editor/MapEditorMode/MapEditorGenAppMode.h
++++ ported/Source/MapEditor/Private/Editor/MapEditorMode/MapEditorGenAppMode.h
+@@ -1,7 +1,7 @@
+ // Copyright 2025 An@stacioDev All rights reserved.
+ #pragma once
+ #include "CoreMinimal.h"
+-#include "InstancedStruct.h"
++#include "StructUtils/InstancedStruct.h"
+ #include "WorkflowOrientedApp/ApplicationMode.h"
+ #include "WorkflowOrientedApp/WorkflowTabManager.h"
+ // One mode for each set of tabs that are associated with your application
+--- original/Source/MapEditor/Public/Asset/SCustomInstancedStructList.h
++++ ported/Source/MapEditor/Public/Asset/SCustomInstancedStructList.h
+@@ -17,7 +17,7 @@
+ #if UE_VERSION_NEWER_THAN(5, 4, 4)
+ #include "StructUtils/InstancedStruct.h"
+ #else
+-#include "InstancedStruct.h"
++#include "StructUtils/InstancedStruct.h"
+ #endif
+ #include "BlueprintLibrary/ADStructUtilsFunctionLibrary.h"
+ #include "SlateWidgets/DropDownSelectorWidget.h"
+--- original/Source/ShadersModule/Private/ReplaceColorComputeShader/ReplaceColorComputeShader.cpp
++++ ported/Source/ShadersModule/Private/ReplaceColorComputeShader/ReplaceColorComputeShader.cpp
+@@ -161,7 +161,7 @@
+ 					TArray<uint32> CPUBuffer;
+ 					// CPUBuffer.SetNum(NumElements);
+ 					CPUBuffer.Init(0, NumElements);
+-					uint32* Buffer = (uint32*)GPUBufferReadback->Lock(NumElements);  // Lock it for 1 element
++					uint32* Buffer = (uint32*)GPUBufferReadback->Lock(sizeof(uint32) * NumElements);  // Lock it for 1 element
+ 					if (Buffer)  // Check if the lock was successful
+ 					{
+ 						FMemory::Memcpy(CPUBuffer.GetData(), Buffer, sizeof(uint32) * NumElements);
+--- original/Source/SharedModule/Private/VisualProperties.cpp
++++ ported/Source/SharedModule/Private/VisualProperties.cpp
+@@ -1,6 +1,5 @@
+ // Copyright 2024 An@stacioDev All rights reserved.
+ 
+-#pragma once
+ #include "VisualProperties.h"
+ 
+ 
+--- original/Source/ThirdParty/MapGeneratorLibrary/MapGenerator/CMakeLists.txt
++++ ported/Source/ThirdParty/MapGeneratorLibrary/MapGenerator/CMakeLists.txt
+@@ -39,8 +39,8 @@
+     )
+ endif()
+ 
+-add_subdirectory(thirdparty/)
+-target_include_directories(MapGenerator PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/")
++add_subdirectory(thirdParty/)
++target_include_directories(MapGenerator PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/thirdParty/")
+ # Add Libraries
+ 
+ 
+--- original/Source/ThirdParty/MapGeneratorLibrary/MapGenerator/source/graphics/Rasterizer.cpp
++++ ported/Source/ThirdParty/MapGeneratorLibrary/MapGenerator/source/graphics/Rasterizer.cpp
+@@ -1,4 +1,3 @@
+-#pragma once
+ #include "Rasterizer.h"
+ namespace MapGenerator
+ {
+--- original/Source/ThirdParty/MapGeneratorLibrary/MapGenerator/source/graphics/Rasterizer.h
++++ ported/Source/ThirdParty/MapGeneratorLibrary/MapGenerator/source/graphics/Rasterizer.h
+@@ -1,6 +1,6 @@
+ #pragma once
+ #include <vector>
+-#include "../../ThirdParty/MyGAL/Diagram.h"
++#include "../../thirdParty/MyGAL/Diagram.h"
+ #include "../utils/ComputeGeometry.h"
+ #include "../data/Color.h"
+ #include "../map/TileMap.h"
+--- original/Source/ThirdParty/MapGeneratorLibrary/MapGenerator/source/map/MapComponent.cpp
++++ ported/Source/ThirdParty/MapGeneratorLibrary/MapGenerator/source/map/MapComponent.cpp
+@@ -1,4 +1,3 @@
+-#pragma once
+ #include "MapComponent.h"
+ namespace MapGenerator
+ {
+--- original/Source/ThirdParty/MapGeneratorLibrary/MapGenerator/source/map/MapSpecs.h
++++ ported/Source/ThirdParty/MapGeneratorLibrary/MapGenerator/source/map/MapSpecs.h
+@@ -1,5 +1,5 @@
+ #pragma once
+-#include "../../ThirdParty/fastNoiseLite/FastNoiseLite.h"
++#include "../../thirdParty/fastNoiseLite/FastNoiseLite.h"
+ namespace MapGenerator
+ {
+ 	struct LookupFeatures
+--- original/Source/ThirdParty/MapGeneratorLibrary/MapGenerator/source/map/TileMap.cpp
++++ ported/Source/ThirdParty/MapGeneratorLibrary/MapGenerator/source/map/TileMap.cpp
+@@ -333,6 +333,7 @@
+             {
+                 return tile.color != m_tiles[centroidIndex].color;
+             }
++            return false; // No valid centroid to compare, matching the point-query method.
+         }, different, same);
+     }
+ 
+--- original/Source/ThirdParty/MapGeneratorLibrary/MapGenerator/source/map/TileMap.h
++++ ported/Source/ThirdParty/MapGeneratorLibrary/MapGenerator/source/map/TileMap.h
+@@ -1,7 +1,7 @@
+ #pragma once
+ #include "../data/Utils.h"
+ #include "../data/Color.h"
+-#include "../../ThirdParty/MyGAL/Vector2.h"
++#include "../../thirdParty/MyGAL/Vector2.h"
+ #include <vector>
+ #include <unordered_set>
+ #include "../utils/VectorWrapper.h"
+--- original/Source/ThirdParty/MapGeneratorLibrary/MapGenerator/source/map/components/HeightMap.cpp
++++ ported/Source/ThirdParty/MapGeneratorLibrary/MapGenerator/source/map/components/HeightMap.cpp
+@@ -1,4 +1,3 @@
+-#pragma once
+ #include "HeightMap.h"
+ #include <algorithm>
+ #include "../../../thirdParty/fastNoiseLite/FastNoiseLite.h"
+--- original/Source/ThirdParty/MapGeneratorLibrary/MapGenerator/source/map/components/LookupMap.cpp
++++ ported/Source/ThirdParty/MapGeneratorLibrary/MapGenerator/source/map/components/LookupMap.cpp
+@@ -1,4 +1,3 @@
+-#pragma once
+ #include "LookupMap.h" 
+ #include <algorithm>
+ #include "../../../thirdParty/MyGAL/Vector2.h"
+--- original/Source/ThirdParty/MapGeneratorLibrary/MapGenerator/source/map/components/MapMask.cpp
++++ ported/Source/ThirdParty/MapGeneratorLibrary/MapGenerator/source/map/components/MapMask.cpp
+@@ -1,4 +1,3 @@
+-#pragma once
+ #include "MapMask.h"
+ #include <algorithm>
+ #include "../../../thirdParty/MyGAL/Vector2.h"
+--- original/Source/ThirdParty/MapGeneratorLibrary/MapGenerator/source/map/components/TerrainMap.cpp
++++ ported/Source/ThirdParty/MapGeneratorLibrary/MapGenerator/source/map/components/TerrainMap.cpp
+@@ -1,4 +1,3 @@
+-#pragma once
+ #include "TerrainMap.h"
+ #include <algorithm>
+ #include "../../../thirdParty/MyGAL/Vector2.h"
+--- original/Source/ThirdParty/MapGeneratorLibrary/MapGenerator/source/utils/ComputeGeometry.h
++++ ported/Source/ThirdParty/MapGeneratorLibrary/MapGenerator/source/utils/ComputeGeometry.h
+@@ -2,14 +2,14 @@
+ #include <vector>
+ #include <random>
+ #include <chrono>
+-#include "../../ThirdParty/MyGAL/Diagram.h"
+-#include "../../ThirdParty/MyGAL//FortuneAlgorithm.h"
++#include "../../thirdParty/MyGAL/Diagram.h"
++#include "../../thirdParty/MyGAL/FortuneAlgorithm.h"
+ #include "../data/Mask.h"
+ #include <cmath>
+ #include <stack>
+ #include <set>
+ #include <iostream>
+-#include "../../ThirdParty/fastNoiseLite/FastNoiseLite.h"
++#include "../../thirdParty/fastNoiseLite/FastNoiseLite.h"
+ #include "VectorWrapper.h"
+ #include "Logger/FileLogger.h"
+ 
+--- original/Source/ThirdParty/MapGeneratorLibrary/MapGenerator/source/utils/Logger/FileLogger.cpp
++++ ported/Source/ThirdParty/MapGeneratorLibrary/MapGenerator/source/utils/Logger/FileLogger.cpp
+@@ -1,4 +1,3 @@
+-#pragma once
+ #include "FileLogger.h"
+ 
+ namespace ALogger
+--- original/Source/ThirdParty/MapGeneratorLibrary/MapGenerator/source/utils/VectorWrapper.h
++++ ported/Source/ThirdParty/MapGeneratorLibrary/MapGenerator/source/utils/VectorWrapper.h
+@@ -1,5 +1,5 @@
+ #pragma once
+-#include "../../ThirdParty/MyGAL/Vector2.h"
++#include "../../thirdParty/MyGAL/Vector2.h"
+ #include <functional>
+ #include <iostream>
+ 
+--- original/Source/ThirdParty/MapGeneratorLibrary/MapGeneratorLibrary.Build.cs
++++ ported/Source/ThirdParty/MapGeneratorLibrary/MapGeneratorLibrary.Build.cs
+@@ -1,18 +1,24 @@
+-using System;
+ using System.IO;
+ using UnrealBuildTool;
+- 
+ public class MapGeneratorLibrary : ModuleRules
+ {
+-	public MapGeneratorLibrary(ReadOnlyTargetRules Target) : base(Target)
+-	{
+-		Type = ModuleType.External;
+-		PublicIncludePaths.Add(ModuleDirectory);  // This points to the MapGeneratorLibrary folder
+-		// Add any include paths for the plugin
+-		PublicIncludePaths.Add(Path.Combine(ModuleDirectory, "MapGenerator"));
+-		PublicIncludePaths.Add(Path.Combine(ModuleDirectory, "MapGenerator/source"));
+- 
+-		// Add any import libraries or static libraries
+-		PublicAdditionalLibraries.Add(Path.Combine(ModuleDirectory, "MapGenerator", "MapGenerator.lib"));
+-	}
+-}+    public MapGeneratorLibrary(ReadOnlyTargetRules Target) : base(Target)
++    {
++        Type = ModuleType.External;
++        PublicIncludePaths.Add(ModuleDirectory);
++        PublicIncludePaths.Add(Path.Combine(ModuleDirectory, "MapGenerator"));
++        PublicIncludePaths.Add(Path.Combine(ModuleDirectory, "MapGenerator", "source"));
++        if (Target.Platform == UnrealTargetPlatform.Win64)
++            PublicAdditionalLibraries.Add(Path.Combine(ModuleDirectory, "MapGenerator", "MapGenerator.lib"));
++        else if (Target.Platform == UnrealTargetPlatform.Mac)
++        {
++            if (Target.Architecture != UnrealArch.Arm64)
++                throw new BuildException("MapGenerator Mac library supports arm64 only; rebuild for the requested architecture.");
++            string Library = Path.Combine(ModuleDirectory, "MapGenerator", "lib", "Mac", "arm64", "libMapGenerator.a");
++            if (!File.Exists(Library))
++                throw new BuildException("Run MapGenerator/build-mac.sh before building the plugin.");
++            PublicAdditionalLibraries.Add(Library);
++        }
++        else throw new BuildException("MapGenerator supports Win64 and Mac arm64.");
++    }
++}
+--- original/Source/UtilityModule/Private/BlueprintLibrary/ADStructUtilsFunctionLibrary.cpp
++++ ported/Source/UtilityModule/Private/BlueprintLibrary/ADStructUtilsFunctionLibrary.cpp
+@@ -1,5 +1,4 @@
+ // Copyright 2024 An@stacioDev All rights reserved.
+-#pragma once
+ #include "BlueprintLibrary/ADStructUtilsFunctionLibrary.h"
+ #include "UtilityModule.h"
+ #include "UObject/Field.h"
+--- original/Source/UtilityModule/Private/BlueprintLibrary/DataManagerFunctionLibrary.cpp
++++ ported/Source/UtilityModule/Private/BlueprintLibrary/DataManagerFunctionLibrary.cpp
+@@ -37,7 +37,7 @@
+ 	TSet<FString> JsonFields;
+ 	for (const auto& Pair : JsonObject->Values)
+ 	{
+-		JsonFields.Add(Pair.Key);
++		JsonFields.Add(FString(*Pair.Key));
+ 	}
+ 
+ 	// Fields in struct but missing from JSON
+--- original/Source/UtilityModule/Private/BlueprintLibrary/MiscFunctionLibrary.cpp
++++ ported/Source/UtilityModule/Private/BlueprintLibrary/MiscFunctionLibrary.cpp
+@@ -1,5 +1,4 @@
+ // Copyright 2024 An@stacioDev All rights reserved.
+-#pragma once
+ #include "BlueprintLibrary/MiscFunctionLibrary.h"
+ #include <string_view>
+ #include "UtilityModule.h"
+--- original/Source/UtilityModule/Private/BlueprintLibrary/TextureUtilsFunctionLibrary.cpp
++++ ported/Source/UtilityModule/Private/BlueprintLibrary/TextureUtilsFunctionLibrary.cpp
+@@ -1,5 +1,4 @@
+ // Copyright 2024 An@stacioDev All rights reserved.
+-#pragma once
+ #include "BlueprintLibrary/TextureUtilsFunctionLibrary.h"
+ #include "Engine/Texture2D.h"
+ #include "Engine/Texture.h"

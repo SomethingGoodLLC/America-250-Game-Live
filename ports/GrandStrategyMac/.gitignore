@@ -1,0 +1,19 @@
+# Purchased plugin: licensed, 1.1 GB. The pristine original is kept outside the repo;
+# port-changes.patch records the Mac port's changes to it.
+/TestHost/Plugins/
+# Unreal-generated
+/TestHost/Binaries/
+/TestHost/Intermediate/
+/TestHost/Saved/
+/TestHost/DerivedDataCache/
+/TestHost/Build/
+/TestHost/Content/Developers/
+/TestHost/Content/Collections/
+# Run output
+/logs/
+/tests/generator_smoke
+/tests/*.log
+# Superseded by M_ColoniesProvinces
+/TestHost/Content/Colonies1775/M_ColoniesPolitical.uasset
+# The repo root ignores *.json; these are map inputs and outputs.
+!*.json

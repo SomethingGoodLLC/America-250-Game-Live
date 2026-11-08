@@ -1,0 +1,17 @@
+{
+  "FileVersion": 3,
+  "EngineAssociation": "5.8",
+  "Plugins": [
+    {
+      "Name": "InteractiveMap",
+      "Enabled": true
+    }
+  ],
+  "Modules": [
+    {
+      "Name": "PortHost",
+      "Type": "Runtime",
+      "LoadingPhase": "Default"
+    }
+  ]
+}

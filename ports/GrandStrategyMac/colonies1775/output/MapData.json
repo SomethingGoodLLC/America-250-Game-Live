@@ -1,0 +1,107 @@
+[
+  {
+    "ID": 0,
+    "Name": "Atlantic and inland waters",
+    "Area": "East Coast",
+    "Region": "Context",
+    "StructType": "BaseMapStruct"
+  },
+  {
+    "ID": 1,
+    "Name": "New Hampshire",
+    "Area": "East Coast",
+    "Region": "Thirteen Colonies",
+    "StructType": "BaseMapStruct"
+  },
+  {
+    "ID": 2,
+    "Name": "Massachusetts Bay",
+    "Area": "East Coast",
+    "Region": "Thirteen Colonies",
+    "StructType": "BaseMapStruct"
+  },
+  {
+    "ID": 3,
+    "Name": "Rhode Island",
+    "Area": "East Coast",
+    "Region": "Thirteen Colonies",
+    "StructType": "BaseMapStruct"
+  },
+  {
+    "ID": 4,
+    "Name": "Connecticut",
+    "Area": "East Coast",
+    "Region": "Thirteen Colonies",
+    "StructType": "BaseMapStruct"
+  },
+  {
+    "ID": 5,
+    "Name": "New York",
+    "Area": "East Coast",
+    "Region": "Thirteen Colonies",
+    "StructType": "BaseMapStruct"
+  },
+  {
+    "ID": 6,
+    "Name": "New Jersey",
+    "Area": "East Coast",
+    "Region": "Thirteen Colonies",
+    "StructType": "BaseMapStruct"
+  },
+  {
+    "ID": 7,
+    "Name": "Pennsylvania",
+    "Area": "East Coast",
+    "Region": "Thirteen Colonies",
+    "StructType": "BaseMapStruct"
+  },
+  {
+    "ID": 8,
+    "Name": "Delaware",
+    "Area": "East Coast",
+    "Region": "Thirteen Colonies",
+    "StructType": "BaseMapStruct"
+  },
+  {
+    "ID": 9,
+    "Name": "Maryland",
+    "Area": "East Coast",
+    "Region": "Thirteen Colonies",
+    "StructType": "BaseMapStruct"
+  },
+  {
+    "ID": 10,
+    "Name": "Virginia",
+    "Area": "East Coast",
+    "Region": "Thirteen Colonies",
+    "StructType": "BaseMapStruct"
+  },
+  {
+    "ID": 11,
+    "Name": "North Carolina",
+    "Area": "East Coast",
+    "Region": "Thirteen Colonies",
+    "StructType": "BaseMapStruct"
+  },
+  {
+    "ID": 12,
+    "Name": "South Carolina",
+    "Area": "East Coast",
+    "Region": "Thirteen Colonies",
+    "StructType": "BaseMapStruct"
+  },
+  {
+    "ID": 13,
+    "Name": "Georgia",
+    "Area": "East Coast",
+    "Region": "Thirteen Colonies",
+    "StructType": "BaseMapStruct"
+  },
+  {
+    "ID": 14,
+    "Name": "Surrounding lands",
+    "Area": "East Coast",
+    "Region": "Context",
+    "StructType": "BaseMapStruct"
+  }
+]

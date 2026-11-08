@@ -1,0 +1,107 @@
+[
+	{
+		"iD": 0,
+		"name": "Atlantic and inland waters",
+		"area": "East Coast",
+		"region": "Context",
+		"StructType": "BaseMapStruct"
+	},
+	{
+		"iD": 1,
+		"name": "New Hampshire",
+		"area": "East Coast",
+		"region": "Thirteen Colonies",
+		"StructType": "BaseMapStruct"
+	},
+	{
+		"iD": 2,
+		"name": "Massachusetts Bay",
+		"area": "East Coast",
+		"region": "Thirteen Colonies",
+		"StructType": "BaseMapStruct"
+	},
+	{
+		"iD": 3,
+		"name": "Rhode Island",
+		"area": "East Coast",
+		"region": "Thirteen Colonies",
+		"StructType": "BaseMapStruct"
+	},
+	{
+		"iD": 4,
+		"name": "Connecticut",
+		"area": "East Coast",
+		"region": "Thirteen Colonies",
+		"StructType": "BaseMapStruct"
+	},
+	{
+		"iD": 5,
+		"name": "New York",
+		"area": "East Coast",
+		"region": "Thirteen Colonies",
+		"StructType": "BaseMapStruct"
+	},
+	{
+		"iD": 6,
+		"name": "New Jersey",
+		"area": "East Coast",
+		"region": "Thirteen Colonies",
+		"StructType": "BaseMapStruct"
+	},
+	{
+		"iD": 7,
+		"name": "Pennsylvania",
+		"area": "East Coast",
+		"region": "Thirteen Colonies",
+		"StructType": "BaseMapStruct"
+	},
+	{
+		"iD": 8,
+		"name": "Delaware",
+		"area": "East Coast",
+		"region": "Thirteen Colonies",
+		"StructType": "BaseMapStruct"
+	},
+	{
+		"iD": 9,
+		"name": "Maryland",
+		"area": "East Coast",
+		"region": "Thirteen Colonies",
+		"StructType": "BaseMapStruct"
+	},
+	{
+		"iD": 10,
+		"name": "Virginia",
+		"area": "East Coast",
+		"region": "Thirteen Colonies",
+		"StructType": "BaseMapStruct"
+	},
+	{
+		"iD": 11,
+		"name": "North Carolina",
+		"area": "East Coast",
+		"region": "Thirteen Colonies",
+		"StructType": "BaseMapStruct"
+	},
+	{
+		"iD": 12,
+		"name": "South Carolina",
+		"area": "East Coast",
+		"region": "Thirteen Colonies",
+		"StructType": "BaseMapStruct"
+	},
+	{
+		"iD": 13,
+		"name": "Georgia",
+		"area": "East Coast",
+		"region": "Thirteen Colonies",
+		"StructType": "BaseMapStruct"
+	},
+	{
+		"iD": 14,
+		"name": "Surrounding lands",
+		"area": "East Coast",
+		"region": "Context",
+		"StructType": "BaseMapStruct"
+	}
+]
