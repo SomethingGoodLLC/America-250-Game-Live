@@ -1045,7 +1045,7 @@ def place_split_rail(label, p0, p1, wood_mat):
     return None
 
 
-def place_stone_wall(label, p0, p1, stone_mat, rng):
+def place_stone_wall(label, p0, p1, stone_mat, rng, group="wall_"):
     """Dry-stone wall along p0->p1: short irregular courses following the ground."""
     mesh = resolve_asset(
         "stone_wall",
@@ -1063,23 +1063,44 @@ def place_stone_wall(label, p0, p1, stone_mat, rng):
         # Two courses of fieldstone, randomly turned, plus capstones. Collision comes from
         # an invisible box of the old wall's size, so cover and pathing match the graybox.
         ux, uy = (p1[0] - p0[0]) / length, (p1[1] - p0[1]) / length
-        steps = int(length / 65)
+        # Every stone is seated on the ground or on the stone below it, using its real scaled
+        # height (KiteDemo river rocks are flat, so a fixed lift left them floating), sunk a
+        # little and only slightly tilted. Courses stack until the wall reaches the 1.1 m cover
+        # height of its collision box; the cap course keeps a few gaps.
+        steps = max(1, int(length / 48))
         for i in range(steps):
             t = (i + 0.5) / steps
             bx, by = p0[0] + (p1[0] - p0[0]) * t, p0[1] + (p1[1] - p0[1]) * t
-            for course, (size_lo, size_hi, lift) in enumerate(((60, 85, 25), (45, 70, 70))):
-                if course == 1 and rng.random() < 0.25:
-                    continue  # gaps in the top course
+            top = 0.0  # height of the stack above the ground at this step
+            for course in range(5):
+                if top >= 105.0:
+                    break
+                if top >= 75.0 and rng.random() < 0.2:
+                    break  # gaps in the cap course
                 r = rng.choice(rocks)
-                big, _e = _mesh_extent(r)
-                size = rng.uniform(size_lo, size_hi)
-                off = rng.uniform(-12, 12)
-                x = bx - uy * off + ux * rng.uniform(-15, 15)
-                y = by + ux * off + uy * rng.uniform(-15, 15)
-                scatter("wall_" + r.rsplit("/", 1)[-1], r,
-                        (x, y, ground_z(x, y) + lift - 15),
-                        (rng.uniform(-15, 15), rng.uniform(0, 360), rng.uniform(-15, 15)),
-                        size / (2.0 * big), collide=False, cull=(0, 0), gi=False)
+                big, e = _mesh_extent(r)
+                size = rng.uniform(80, 105) if course == 0 else rng.uniform(60, 85)
+                s = size / (2.0 * big)
+                half_h = e.z * s
+                off = rng.uniform(-8, 8)
+                along = rng.uniform(-10, 10)
+                x = bx - uy * off + ux * along
+                y = by + ux * off + uy * along
+                sink = 14.0 if course == 0 else 9.0
+                # Seat on the downhill lip. A long Battle Road wall drops about 60 cm,
+                # only a couple of centimetres across one stone; the sink covers that,
+                # and using the lower sample keeps a flat rock from showing daylight.
+                span = max(e.x, e.y) * s
+                lip = min(
+                    ground_z(x, y),
+                    ground_z(x - ux * span, y - uy * span),
+                    ground_z(x + ux * span, y + uy * span),
+                )
+                z = lip + top + half_h - sink
+                scatter(group + r.rsplit("/", 1)[-1], r, (x, y, z),
+                        (rng.uniform(-4, 4), rng.uniform(0, 360), rng.uniform(-4, 4)),
+                        s, collide=False, cull=(0, 0), gi=False)
+                top += 2.0 * half_h - sink
         for i in range(n):
             t = (i + 0.5) / n
             x, y = p0[0] + (p1[0] - p0[0]) * t, p0[1] + (p1[1] - p0[1]) * t
@@ -1114,39 +1135,112 @@ BATTLE_ROAD_WALLS = (
     ("BattleRoad_FieldN2", (1800, -6400), (2000, -4000)),
     ("BattleRoad_FieldS2", (3100, 1900), (3300, 4400)),
 )
+# Patriot cover (GAME INVENTION): field walls on the Patriot side of the Green, 38-48 m from flag B
+# and turned to face it, so militia can fire on regulars holding the Green from behind stone.
+# Spots were chosen clear of roads, building pads, posts, fences, trees and the spawn cluster;
+# the gap between W1 and W2 lets men move through.
+PATRIOT_WALLS = (
+    ("PatriotCover_W1", (-4596, 535), (-4874, -1041)),
+    ("PatriotCover_W2", (-4814, -1719), (-4267, -3222)),
+    ("PatriotCover_SW", (-1707, 2691), (-3093, 1891)),
+)
+# More trees on the Patriot side, 30-64 m from the Green, kept out of the walls' lines of fire.
+PATRIOT_TREES = (
+    (-6500, -3250), (-6000, -1250), (-5250, -5000), (-4500, 4000), (-3750, -3250),
+    (-3500, -1250), (-3500, 2500), (-3000, 750), (-2250, 4250), (-1750, -5000),
+)
 MUSTER_POINTS = (  # label, xy; tagged "continental_muster"
     ("Muster_Continental_North", (300, -6800)),
     ("Muster_Continental_South", (1500, 5400)),
     ("Muster_Continental_West", (-6800, -2600)),
 )
+# Shared with the full Lexington build so the Patriot-cover check below stays honest
+# if a fence or a meadow tree moves.
+COMMON_FENCES = (
+    ("Fence_NE", (2100, -2900), (2400, 500)),
+    ("Fence_SE", (2000, 900), (-200, 3900)),
+    ("Fence_SW", (-2400, 3300), (-3000, 2600)),
+    ("Fence_NW", (-4300, -1500), (-3200, -3500)),
+)
+MEADOW_TREES = (
+    (-5600, -3000), (-6900, 3300), (-1500, 4800), (3200, -3800), (3900, 1500),
+    (-7400, -1200), (5500, -1800), (-1700, -6300), (1000, 4300), (-6200, 4200),
+    (4600, -4600), (-800, -6100), (-8500, 1500), (6500, 2800), (-2600, 5600),
+    (2300, 5600), (-9800, -3200), (7800, -4200), (-4600, 4900), (-12000, 500),
+)
+
+
+def audit_patriot_cover():
+    """Re-check the hand-picked Patriot walls and trees against roads, pads, posts,
+    fences and meadow trees. Raises if a later edit of those lists buries a wall."""
+    problems = []
+
+    def consider(name, x, y):
+        if not keep_clear(x, y, 40):
+            problems.append("%s sits on a road, pad or post (%.0f, %.0f)" % (name, x, y))
+        for _label, a, b in COMMON_FENCES:
+            if _seg_dist(x, y, a, b) < 150:
+                problems.append("%s is within 1.5 m of %s" % (name, _label))
+                break
+        for tx, ty in MEADOW_TREES:
+            if math.hypot(x - tx, y - ty) < 300:
+                problems.append("%s is within 3 m of a meadow tree" % name)
+                break
+
+    for label, p0, p1 in PATRIOT_WALLS:
+        for i in range(9):
+            t = i / 8.0
+            consider(label, p0[0] + (p1[0] - p0[0]) * t, p0[1] + (p1[1] - p0[1]) * t)
+    for i, (x, y) in enumerate(PATRIOT_TREES):
+        consider("PatriotCover_Tree_%d" % i, x, y)
+        for label, p0, p1 in PATRIOT_WALLS:
+            if _seg_dist(x, y, p0, p1) < 180:
+                problems.append("PatriotCover_Tree_%d stands in %s" % (i, label))
+    if problems:
+        raise RuntimeError("Patriot cover is not clear:\n  " + "\n  ".join(problems))
 
 
 def place_battle_road(stone, rng):
     for label, p0, p1 in BATTLE_ROAD_WALLS:
-        place_stone_wall(label, p0, p1, stone, rng)
+        place_stone_wall(label, p0, p1, stone, rng, group="brwall_")
     for label, (x, y) in MUSTER_POINTS:
         tag(spawn(unreal.PlayerStart, (x, y, ground_z(x, y) + 120), (0, 0, 0), label), "continental_muster")
 
 
+def place_patriot_cover(stone, wood, canopy, rng):
+    for label, p0, p1 in PATRIOT_WALLS:
+        place_stone_wall(label, p0, p1, stone, rng, group="ptwall_")
+    for i, xy in enumerate(PATRIOT_TREES):
+        place_tree("PatriotCover_Tree_%d" % i, xy, wood, canopy, rng)
+
+
 def build_lexington_battle_road():
-    """Add the Battle Road walls + muster points to the existing L_Lexington (idempotent; leaves
-    everything else in the level untouched) and tag the existing stone walls as cover."""
+    """Add the Battle Road walls, Patriot cover and muster points to the existing L_Lexington
+    (idempotent; leaves everything else in the level untouched) and tag the existing stone walls
+    as cover. Their stones live in their own scatter groups (brwall_ / ptwall_) so a rerun
+    replaces exactly them."""
     import random
 
+    audit_patriot_cover()
     les = unreal.get_editor_subsystem(unreal.LevelEditorSubsystem)
     les.load_level(MAPS + "/L_Lexington")
     actors = unreal.get_editor_subsystem(unreal.EditorActorSubsystem).get_all_level_actors()
     removed = tagged = 0
     for a in actors:
         label = a.get_actor_label()
-        if label.startswith("BattleRoad_") or label.startswith("Muster_"):
+        if label.startswith(("BattleRoad_", "Muster_", "PatriotCover_", "Scatter_brwall_", "Scatter_ptwall_")):
             a.destroy_actor()
             removed += 1
         elif label.startswith("Wall_") and isinstance(a, unreal.StaticMeshActor):
             tag(a, "PA250Cover")
             tagged += 1
     stone = make_material("MI_PA250_Stone", (0.42, 0.41, 0.38))
-    place_battle_road(stone, random.Random(17750419))
+    wood = make_material("MI_PA250_Wood", (0.36, 0.24, 0.14))
+    canopy = make_material("MI_PA250_Canopy", (0.16, 0.26, 0.09))
+    rng = random.Random(17750419)
+    place_battle_road(stone, rng)
+    place_patriot_cover(stone, wood, canopy, rng)
+    flush_scatter()  # without this the walls were invisible collision boxes
     save(les)
     LOG("PA250: Battle Road on L_Lexington (removed %d old, tagged %d existing walls)" % (removed, tagged))
 
@@ -1294,20 +1388,13 @@ def build_lexington():
     # Field walls along the Boston road east of the Common.
     place_stone_wall("Wall_E", (3200, -2000), (9000, -1000), stone, rng)
     place_battle_road(stone, rng)
+    place_patriot_cover(stone, wood, canopy, rng)
 
     # Split-rail fences around the Common, clear of the posts and buildings.
-    place_split_rail("Fence_NE", (2100, -2900), (2400, 500), wood)
-    place_split_rail("Fence_SE", (2000, 900), (-200, 3900), wood)
-    place_split_rail("Fence_SW", (-2400, 3300), (-3000, 2600), wood)
-    place_split_rail("Fence_NW", (-4300, -1500), (-3200, -3500), wood)
-
-    trees = (
-        (-5600, -3000), (-6900, 3300), (-1500, 4800), (3200, -3800), (3900, 1500),
-        (-7400, -1200), (5500, -1800), (-1700, -6300), (1000, 4300), (-6200, 4200),
-        (4600, -4600), (-800, -6100), (-8500, 1500), (6500, 2800), (-2600, 5600),
-        (2300, 5600), (-9800, -3200), (7800, -4200), (-4600, 4900), (-12000, 500),
-    )
-    for i, xy in enumerate(trees):
+    audit_patriot_cover()
+    for label, p0, p1 in COMMON_FENCES:
+        place_split_rail(label, p0, p1, wood)
+    for i, xy in enumerate(MEADOW_TREES):
         place_tree("Tree_%d" % i, xy, wood, canopy, rng)
 
     for i in range(14):

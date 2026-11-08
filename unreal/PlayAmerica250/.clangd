@@ -1,3 +1,4 @@
+# Refresh: python3 Scripts/regen_compile_commands.py
 CompileFlags:
   CompilationDatabase: .
   Add:

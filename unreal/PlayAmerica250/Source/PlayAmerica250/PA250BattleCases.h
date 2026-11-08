@@ -24,5 +24,6 @@ void RunTraining(FLog& Log);  // player loading untouched; AI reload by training
 void RunMorale(FLog& Log);    // hysteresis, resolve by training, rally delay, withdrawal vs rout, player never ordered
 void RunAudio(FLog& Log);     // every sound bank / voice line loads; shots, reload steps, jams, melee, charges make sound
 void RunBattleRoad(FLog& Log); // L_Lexington walls tagged as cover + muster points; cover-line picks; militia muster math
+void RunScenario(FLog& Log);  // Concord locks every post but the crossing; Battle Road wins by men preserved
 void RunTactics(FLog& Log);   // cover query vs a fence, line of sight, repositioning costs, role/training independence
 }

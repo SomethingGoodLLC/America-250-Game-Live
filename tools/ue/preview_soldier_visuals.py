@@ -10,7 +10,8 @@ levels.load_level('/Game/PA250/Maps/L_Lexington')
 actors = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
 character_class = unreal.load_class(None, '/Script/PlayAmerica250.RFCharacter')
 weapon_class = unreal.load_class(None, '/Script/PlayAmerica250.MusketWeapon')
-for team, y in [('british', -105), ('continental', 105)]:
+# One regular and four Patriots: each Patriot gets his own homespun (seeded by actor name).
+for team, y in [('british', -230), ('continental', -80), ('continental', 50), ('continental', 180), ('continental', 310)]:
     soldier = actors.spawn_actor_from_class(character_class, unreal.Vector(0, y, 90), unreal.Rotator())
     soldier.set_team(team, 'line_infantry')
     mesh = soldier.get_component_by_class(unreal.SkeletalMeshComponent)
@@ -20,9 +21,9 @@ for team, y in [('british', -105), ('continental', 105)]:
     weapon.attach_to_component(mesh, 'hand_r', unreal.AttachmentRule.SNAP_TO_TARGET,
                                unreal.AttachmentRule.SNAP_TO_TARGET, unreal.AttachmentRule.KEEP_WORLD, False)
     weapon.set_actor_relative_rotation(unreal.Rotator(), False, False)
-camera = actors.spawn_actor_from_class(unreal.CameraActor, unreal.Vector(460, -440, 225))
-camera.set_actor_rotation(unreal.MathLibrary.find_look_at_rotation(camera.get_actor_location(), unreal.Vector(0, 0, 110)), False)
-camera.get_component_by_class(unreal.CameraComponent).set_field_of_view(38)
+camera = actors.spawn_actor_from_class(unreal.CameraActor, unreal.Vector(620, -160, 200))
+camera.set_actor_rotation(unreal.MathLibrary.find_look_at_rotation(camera.get_actor_location(), unreal.Vector(0, 40, 100)), False)
+camera.get_component_by_class(unreal.CameraComponent).set_field_of_view(48)
 unreal.EditorLevelLibrary.pilot_level_actor(camera)
 frames = 0
 handle = None

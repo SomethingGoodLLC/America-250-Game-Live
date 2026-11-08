@@ -19,6 +19,30 @@ class UPA250MeleeTuning;
 class UPA250FactionVisuals;
 class UPA250CombatProfiles;
 
+/** Rules read from BattleSetup.scenario_preset and terrain_tags on the shared Lexington map. */
+struct FPA250ScenarioFight
+{
+	bool bContestSingleCrossing = false;
+	bool bRewardForcePreservation = false;
+	FName CrossingPostId = TEXT("green");
+};
+
+/** A plank span across a creek. The deck is longer than the water is wide, so it reaches both banks. */
+struct FPA250CreekBridge
+{
+	FVector CreekCenter = FVector::ZeroVector;
+	FVector DeckCenter = FVector::ZeroVector;
+	/** Full sizes in centimeters. X crosses the creek; Y runs along it. */
+	FVector CreekSizeCm = FVector(900.f, 3600.f, 50.f);
+	FVector DeckSizeCm = FVector(1200.f, 420.f, 28.f);
+
+	bool SpansCreek() const
+	{
+		return DeckSizeCm.X > CreekSizeCm.X && DeckSizeCm.Y < CreekSizeCm.Y &&
+			FVector::Dist2D(CreekCenter, DeckCenter) < 50.f;
+	}
+};
+
 UCLASS()
 class PLAYAMERICA250_API APA250BattleGameMode : public ARFGameMode
 {
@@ -61,6 +85,9 @@ public:
 	/** Plurality post owner, or NAME_None on tie / none. */
 	FName GetObjectiveHolder() const;
 	int32 PostsOwned(FName Faction) const;
+	int32 CountPosts() const;
+	/** Tickets this side is losing per bleed interval right now (0 if it isn't bleeding). For the HUD. */
+	int32 GetBleedPerInterval(FName Faction) const;
 	const TArray<TWeakObjectPtr<APA250ControlPoint>>& GetPosts() const;
 	bool IsBattleOver() const { return bBattleOver; }
 	FString GetBannerText() const { return Banner; }
@@ -87,6 +114,19 @@ public:
 	/** Pure: men in the next company - never past the cap, never more men in the field than tickets left. */
 	static int32 MusterWave(int32 MilitiaCap, int32 MilitiaAlive, int32 TicketsLeft, int32 SideAlive, int32 WaveSize);
 	UPA250CombatProfiles* GetCombatProfiles() const { return CombatProfilesAsset; }
+	/** Campaign Army.morale (0..100) → extra battlefield pressure bias. Distinct from squad Steady/Shaken/Rout. */
+	float GetCampaignConfidencePressure(FName Faction) const;
+	/** concord_bridge / bridge_crossing contests one post; battle_road / return_march rewards men kept. */
+	static FPA250ScenarioFight ResolveScenario(const FString& Preset, const TArray<FString>& TerrainTags);
+	static void ConfigurePostForScenario(APA250ControlPoint* Post, const FPA250ScenarioFight& Fight);
+	/** Higher share of the starting pool wins. Equal shares go to DefenderOnTie. */
+	static FName PreservationWinner(int32 RemainingA, int32 InitialA, int32 RemainingB, int32 InitialB, FName SideA,
+		FName SideB, FName DefenderOnTie);
+	static bool UsesPostBleed(const FPA250ScenarioFight& Fight) { return !Fight.bRewardForcePreservation; }
+	/** Creek and plank span centered on a ground point. The deck reaches both banks. */
+	static FPA250CreekBridge PlanCreekBridge(const FVector& GroundPoint);
+	/** Spawns the creek, the banks, and the deck. Returns how many pieces were placed. */
+	static int32 SpawnCreekBridge(UWorld* World, const FVector& GroundPoint);
 	const TArray<FString>& GetKillFeed() const { return KillFeed; }
 	int32 GetBattleResultEmitCount() const { return BattleResultEmitCount; }
 	/** Deaths so far, both sides (FTEST_BotSpacing kill criterion). */
@@ -123,6 +163,9 @@ private:
 	void MaybeStartPreviewCapture();
 	void MaybeStartFpsSample();
 	void GatherPosts();
+	/** Post ownership, which posts can be taken, and how the clock is won, from the BattleSetup. */
+	void ApplyScenarioPreset();
+	int32 InitialSoldiers(FName Faction) const;
 	void CapturePreviewShot(const FString& Tag, const FString& OutStem, int32 Index, int32 Total);
 
 	FString PreviewLabel;
@@ -134,7 +177,7 @@ private:
 	double FpsRenderMs = 0.0;
 	double FpsGpuMs = 0.0;
 	void SpawnBots(FName Faction, int32 Count);
-	ARFCharacter* SpawnBot(FName Faction, FName UnitClass, APA250ControlPoint* PreferredPost);
+	ARFCharacter* SpawnBot(FName Faction, FName UnitClass, APA250ControlPoint* PreferredPost, uint32 ClothingSeed = 0);
 	void ConfigureSoldier(ARFCharacter* Soldier, FName Faction, FName UnitClass);
 	FName ChooseClassFor(FName Faction, FName Preferred) const;
 	bool CanSpawn(FName Faction) const;
@@ -156,6 +199,7 @@ private:
 	void RegisterConsoleCommands();
 
 	bool bInitialized = false;
+	FPA250ScenarioFight ScenarioFight;
 	bool bBattleOver = false;
 	bool bAutoplayBots = false;
 	bool bSelftest = false;
@@ -195,13 +239,15 @@ private:
 	TObjectPtr<UPA250CombatProfiles> CombatProfilesAsset;
 
 	int32 BotProfileSerial = 0;
+	int32 ClothesSerial = 0;
+	uint32 PlayerClothingSeed = 0;
 	TMap<FName, int32> MusterCap;              // max militia alive for a side (0 = no muster)
 	TMap<FName, float> MusterTimer;
 	TMap<FName, int32> MusterArrivals;
 	TMap<FName, TArray<TWeakObjectPtr<AActor>>> MusterPoints;
 	void SpawnInitialForces(FName Faction, int32 Count);
 	void TickMuster(float DeltaSeconds);
-	ARFCharacter* SpawnBotAt(FName Faction, FName UnitClass, const FTransform& At);
+	ARFCharacter* SpawnBotAt(FName Faction, FName UnitClass, const FTransform& At, uint32 ClothingSeed = 0);
 	TMap<FName, TArray<float>> AIReloadSeconds;
 	TMap<FName, int32> AIReloadFumbles;
 	FString ReloadByTrainingJson() const;

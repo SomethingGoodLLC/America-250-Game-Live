@@ -102,6 +102,8 @@ json army_to_json(const Army& a) {
             {"previous_province", a.previous_province},
             {"units", a.units},
             {"morale", a.morale},
+            {"readiness", a.readiness},
+            {"fatigue", a.fatigue},
             {"path", a.path},
             {"hours_into_edge", a.hours_into_edge}};
 }
@@ -114,9 +116,144 @@ Army army_from_json(const json& j) {
     a.previous_province = j.value("previous_province", "");
     a.units = j.at("units").get<std::map<std::string, int>>();
     a.morale = j.value("morale", 70);
+    a.readiness = j.value("readiness", 100);
+    a.fatigue = j.value("fatigue", 0);
     a.path = j.value("path", std::vector<std::string>{});
     a.hours_into_edge = j.value("hours_into_edge", 0);
     return a;
+}
+json stores_to_json(const FactionStores& st) {
+    return {{"powder", st.powder}, {"arms", st.arms}, {"provisions", st.provisions}};
+}
+FactionStores stores_from_json(const json& j) {
+    FactionStores st;
+    st.powder = j.value("powder", 0);
+    st.arms = j.value("arms", 0);
+    st.provisions = j.value("provisions", 0);
+    return st;
+}
+json letter_to_json(const CorrespondenceItem& c) {
+    return {{"id", c.id},
+            {"created_hour", c.created_hour},
+            {"resolve_on_hour", c.resolve_on_hour},
+            {"recipient", c.recipient},
+            {"kind", c.kind},
+            {"status", c.status},
+            {"powder", c.powder},
+            {"arms", c.arms},
+            {"provisions", c.provisions},
+            {"gold_cost", c.gold_cost},
+            {"committed_powder", c.committed_powder},
+            {"committed_arms", c.committed_arms},
+            {"received_powder", c.received_powder},
+            {"received_arms", c.received_arms},
+            {"fictionalized", c.fictionalized},
+            {"subject", c.subject},
+            {"body", c.body},
+            {"reason", c.reason},
+            {"awaiting_choice", c.awaiting_choice}};
+}
+CorrespondenceItem letter_from_json(const json& j) {
+    CorrespondenceItem c;
+    c.id = j.value("id", "");
+    c.created_hour = j.value("created_hour", int64_t{0});
+    c.resolve_on_hour = j.value("resolve_on_hour", int64_t{0});
+    c.recipient = j.value("recipient", "");
+    c.kind = j.value("kind", "");
+    c.status = j.value("status", "");
+    c.powder = j.value("powder", 0);
+    c.arms = j.value("arms", 0);
+    c.provisions = j.value("provisions", 0);
+    c.gold_cost = j.value("gold_cost", 0);
+    c.committed_powder = j.value("committed_powder", 0);
+    c.committed_arms = j.value("committed_arms", 0);
+    c.received_powder = j.value("received_powder", 0);
+    c.received_arms = j.value("received_arms", 0);
+    c.fictionalized = j.value("fictionalized", true);
+    c.subject = j.value("subject", "");
+    c.body = j.value("body", "");
+    c.reason = j.value("reason", "");
+    c.awaiting_choice = j.value("awaiting_choice", false);
+    return c;
+}
+json staff_to_json(const StaffState& st) {
+    json q = json::array();
+    for (const auto& c : st.queue) q.push_back(letter_to_json(c));
+    return {{"clerk_name", st.clerk_name},
+            {"capacity_per_day", st.capacity_per_day},
+            {"letters_processed_today", st.letters_processed_today},
+            {"capacity_day_index", st.capacity_day_index},
+            {"queue", q}};
+}
+StaffState staff_from_json(const json& j) {
+    StaffState st;
+    st.clerk_name = j.value("clerk_name", "Clerk Hale");
+    st.capacity_per_day = j.value("capacity_per_day", 2);
+    st.letters_processed_today = j.value("letters_processed_today", 0);
+    st.capacity_day_index = j.value("capacity_day_index", int64_t{-1});
+    if (j.contains("queue"))
+        for (const auto& c : j.at("queue")) st.queue.push_back(letter_from_json(c));
+    return st;
+}
+json progress_to_json(const CampaignProgress& p) {
+    return {{"battles_fought", p.battles_fought},
+            {"lexington_fought", p.lexington_fought},
+            {"aftermath_pending", p.aftermath_pending},
+            {"concord_followup_seeded", p.concord_followup_seeded},
+            {"chapter_continental", p.chapter_continental},
+            {"chapter_washington", p.chapter_washington},
+            {"capacity_level", p.capacity_level},
+            {"capacity_ready_hour", p.capacity_ready_hour},
+            {"player_role", p.player_role},
+            {"knox",
+             {{"id", p.knox.id},
+              {"status", p.knox.status},
+              {"start_hour", p.knox.start_hour},
+              {"ready_hour", p.knox.ready_hour},
+              {"pieces", p.knox.pieces},
+              {"transport_committed", p.knox.transport_committed},
+              {"fictionalized_authorization", p.knox.fictionalized_authorization}}},
+            {"commander",
+             {{"id", p.commander.id},
+              {"name", p.commander.name},
+              {"army_id", p.commander.army_id},
+              {"objective", p.commander.objective},
+              {"risk", p.commander.risk},
+              {"pending_clarification", p.commander.pending_clarification},
+              {"last_request", p.commander.last_request}}}};
+}
+CampaignProgress progress_from_json(const json& j) {
+    CampaignProgress p;
+    p.battles_fought = j.value("battles_fought", 0);
+    p.lexington_fought = j.value("lexington_fought", false);
+    p.aftermath_pending = j.value("aftermath_pending", false);
+    p.concord_followup_seeded = j.value("concord_followup_seeded", false);
+    p.chapter_continental = j.value("chapter_continental", false);
+    p.chapter_washington = j.value("chapter_washington", false);
+    p.capacity_level = j.value("capacity_level", 0);
+    p.capacity_ready_hour = j.value("capacity_ready_hour", int64_t{0});
+    p.player_role = j.value("player_role", "massachusetts_field_commander");
+    if (j.contains("knox")) {
+        const json& k = j.at("knox");
+        p.knox.id = k.value("id", "knox_ticonderoga");
+        p.knox.status = k.value("status", "none");
+        p.knox.start_hour = k.value("start_hour", int64_t{0});
+        p.knox.ready_hour = k.value("ready_hour", int64_t{0});
+        p.knox.pieces = k.value("pieces", 0);
+        p.knox.transport_committed = k.value("transport_committed", 0);
+        p.knox.fictionalized_authorization = k.value("fictionalized_authorization", false);
+    }
+    if (j.contains("commander")) {
+        const json& c = j.at("commander");
+        p.commander.id = c.value("id", "parker");
+        p.commander.name = c.value("name", "Capt. Parker");
+        p.commander.army_id = c.value("army_id", "continental_militia");
+        p.commander.objective = c.value("objective", "preserve_force");
+        p.commander.risk = c.value("risk", "cautious");
+        p.commander.pending_clarification = c.value("pending_clarification", false);
+        p.commander.last_request = c.value("last_request", "");
+    }
+    return p;
 }
 json faction_to_json(const FactionInfo& f) {
     return {{"display_name", f.display_name},
@@ -261,6 +398,15 @@ CampaignState state_from_json(const json& j, bool is_save) {
     s.player_vassal = j.value("player_vassal", false);
     s.player_title = j.value("player_title", "");
     s.fiefs = j.value("fiefs", std::map<std::string, std::string>{});
+    s.local_support = j.value("local_support", 55);
+    s.pending_event_id = j.value("pending_event_id", "");
+    if (j.contains("stores")) {
+        for (auto it = j.at("stores").begin(); it != j.at("stores").end(); ++it)
+            s.stores[it.key()] = stores_from_json(it.value());
+    }
+    if (j.contains("staff")) s.staff = staff_from_json(j.at("staff"));
+    if (j.contains("progress")) s.progress = progress_from_json(j.at("progress"));
+    ensure_logistics_defaults(s);
     if (is_save) {
         for (const auto& t : j.at("treaties")) s.treaties.push_back(treaty_from_json(t));
         for (const auto& m : j.at("memory"))
@@ -329,6 +475,12 @@ std::string serialize(const CampaignState& s) {
     j["player_vassal"] = s.player_vassal;
     j["player_title"] = s.player_title;
     j["fiefs"] = s.fiefs;
+    j["local_support"] = s.local_support;
+    j["pending_event_id"] = s.pending_event_id;
+    j["stores"] = json::object();
+    for (const auto& kv : s.stores) j["stores"][kv.first] = stores_to_json(kv.second);
+    j["staff"] = staff_to_json(s.staff);
+    j["progress"] = progress_to_json(s.progress);
     j["treaties"] = json::array();
     for (const auto& t : s.treaties) j["treaties"].push_back(treaty_to_json(t));
     j["memory"] = json::array();
@@ -592,6 +744,7 @@ std::string setup_to_json(const BattleSetup& b) {
     j["province_id"] = b.province_id;
     j["province_name"] = b.province_name;
     j["objective"] = b.objective;
+    j["scenario_preset"] = b.scenario_preset;
     j["seed"] = b.seed;
     j["attacker_faction"] = b.attacker_faction;
     j["defender_faction"] = b.defender_faction;
@@ -603,6 +756,7 @@ std::string setup_to_json(const BattleSetup& b) {
                                 {"army_id", kv.second.army_id},
                                 {"tickets", kv.second.tickets},
                                 {"morale", kv.second.morale},
+                                {"readiness", kv.second.readiness},
                                 {"retreat_province", kv.second.retreat_province}};
     return j.dump();
 }
@@ -615,6 +769,7 @@ BattleSetup setup_from_json(const std::string& text) {
         b.province_id = j.at("province_id").get<std::string>();
         b.province_name = j.at("province_name").get<std::string>();
         b.objective = j.at("objective").get<std::string>();
+        b.scenario_preset = j.value("scenario_preset", scenario_preset_for_province(b.province_id));
         b.seed = j.at("seed").get<uint64_t>();
         b.attacker_faction = j.at("attacker_faction").get<std::string>();
         b.defender_faction = j.at("defender_faction").get<std::string>();
@@ -626,6 +781,7 @@ BattleSetup setup_from_json(const std::string& text) {
             s.army_id = it.value().at("army_id").get<std::string>();
             s.tickets = it.value().at("tickets").get<std::map<std::string, int>>();
             s.morale = it.value().at("morale").get<int>();
+            s.readiness = it.value().value("readiness", 100);
             s.retreat_province = it.value().at("retreat_province").get<std::string>();
             b.sides[it.key()] = s;
         }

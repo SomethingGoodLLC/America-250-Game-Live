@@ -36,6 +36,8 @@ public:
 	USphereComponent* GetCollisionComponent() const { return CollisionComponent; }
 	UProjectileMovementComponent* GetProjectileMovement() const { return ProjectileMovement; }
 	UStaticMeshComponent* GetTracer() const { return TracerMesh; }
+	/** Where the player's own ball landed: a glowing dot for 1.5 s (red on a man, white otherwise). */
+	static AActor* SpawnImpactMarker(UWorld* World, const FVector& At, bool bHitMan);
 	/** Stretch the tracer from the ball back toward the muzzle (capped at TracerLengthCm). */
 	void UpdateTracer();
 

@@ -33,8 +33,21 @@ std::vector<std::string> validate_order(const CampaignState& state, const Order&
 // ---- Battle ------------------------------------------------------------
 std::string choose_retreat(const CampaignState& state, const std::string& province,
                            const std::string& loser_faction);
+std::string scenario_preset_for_province(const std::string& province_id);
 BattleSetup build_battle_setup(const CampaignState& state, const std::string& province);
 CampaignState apply_battle_result(const CampaignState& state, const BattleResult& result);
+
+// ---- Logistics / correspondence / staff (pure) -------------------------
+// Ensure default stores/staff exist (called from load_scenario path).
+void ensure_logistics_defaults(CampaignState& s);
+// Player chooses among purchase | request_assistance | requisition | capacity_investment | knox_support | dismiss.
+// letter_id empty → use the pending aftermath choice letter.
+CampaignState choose_logistics(const CampaignState& state, const std::string& letter_id,
+                               const std::string& choice);
+// Clarify / counterorder / escalate a detached commander's request.
+CampaignState resolve_commander_request(const CampaignState& state, const std::string& action);
+// Tick correspondence deliveries and dated chapter/project gates; may add EventPopup.
+void tick_logistics(CampaignState& s, std::vector<Interrupt>& interrupts);
 
 // ---- Diplomacy ---------------------------------------------------------
 DiplomacyContext build_diplomacy_context(const CampaignState& state, const std::string& faction);

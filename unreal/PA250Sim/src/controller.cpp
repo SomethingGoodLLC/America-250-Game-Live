@@ -41,6 +41,7 @@ std::string CampaignController::trace_json() const {
 
 void CampaignController::new_campaign(const std::string& scenario_json) {
     state_ = load_scenario(scenario_json);
+    ensure_logistics_defaults(state_);
     started_ = true;
     flow_ = Flow::Campaign;
     setup_ = BattleSetup{};
@@ -139,6 +140,10 @@ bool CampaignController::finish_battle(const BattleResult& r, std::string& error
     // Apply at this hour boundary. advance_hour will not consume commands while a battle is
     // pending, so the result cannot wait for a later tick.
     state_ = apply_battle_result(state_, r);
+    {
+        std::vector<Interrupt> briefings;
+        tick_logistics(state_, briefings);  // aftermath letter / EventPopup without waiting an hour
+    }
     setup_ = BattleSetup{};
     flow_ = Flow::Campaign;
     record("finish_battle", "winner:" + r.winner);
@@ -231,6 +236,7 @@ bool CampaignController::load(const std::string& path, std::string& error) {
     try {
         CampaignState loaded = deserialize(read_text_file(path));
         state_ = loaded;
+        ensure_logistics_defaults(state_);
     } catch (const std::exception& e) {
         error = e.what();
         return false;
@@ -241,6 +247,29 @@ bool CampaignController::load(const std::string& path, std::string& error) {
     context_ = DiplomacyContext{};
     record("load", path);
     return true;
+}
+
+std::vector<std::string> CampaignController::choose_logistics_action(const std::string& letter_id,
+                                                                    const std::string& choice) {
+    if (!started_ || flow_ != Flow::Campaign) return {detail::err("not_in_campaign")};
+    if (state_.pending_battle.active) return {detail::err("battle_pending")};
+    state_ = choose_logistics(state_, letter_id, choice);
+    record("logistics", choice);
+    return {};
+}
+
+std::vector<std::string> CampaignController::resolve_commander_action(const std::string& action) {
+    if (!started_ || flow_ != Flow::Campaign) return {detail::err("not_in_campaign")};
+    state_ = resolve_commander_request(state_, action);
+    record("commander", action);
+    return {};
+}
+
+bool CampaignController::has_staff_event() const {
+    if (!state_.pending_event_id.empty()) return true;
+    for (const auto& c : state_.staff.queue)
+        if (c.awaiting_choice) return true;
+    return false;
 }
 
 }  // namespace pa250

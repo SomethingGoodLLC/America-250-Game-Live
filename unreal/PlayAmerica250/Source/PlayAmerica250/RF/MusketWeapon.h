@@ -104,6 +104,8 @@ public:
 	UAnimSequence* GetReloadAnim() const { return ReloadAnim; }
 	/** Visual only: aim the barrel along the owner's aim and pose the lock/ramrod. Called from Tick. */
 	void UpdateVisuals(float DeltaSeconds);
+	/** Visual only: publishes the left-hand-on-stock target; the body anim instance solves the arm. */
+	void PoseSupportHand();
 	/** Pure: 0..1 position in the pack's reload animation for a sequencer phase and its progress.
 	 *  Returns a negative value for phases that hold the current pose (miss delay, jam). */
 	static float ReloadAnimAlpha(EActiveReloadPhase Phase, float PhaseProgress);

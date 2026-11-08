@@ -1,4 +1,5 @@
 #include "PA250ClockCommandlet.h"
+#include "Campaign/PA250Subsystem.h"
 #include "HAL/PlatformFileManager.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
@@ -67,6 +68,35 @@ int32 UPA250ClockCommandlet::Main(const FString& Params)
 	{
 		UE_LOG(LogTemp, Error, TEXT("monthly boundary failed"));
 		return 4;
+	}
+
+	// Campaign clock: default is 1 h/s, and the ladder has steps slower than the old 6 h/s floor.
+	using Speed = FPA250CampaignSpeed;
+	if (Speed::Count < 3 || Speed::HoursAt(Speed::DefaultIndex) != 1.f)
+	{
+		UE_LOG(LogTemp, Error, TEXT("default campaign speed is not 1 h/s"));
+		return 5;
+	}
+	if (!(Speed::HoursAt(0) < Speed::HoursAt(Speed::DefaultIndex) && Speed::HoursAt(0) < 6.f))
+	{
+		UE_LOG(LogTemp, Error, TEXT("no campaign speed slower than the default"));
+		return 6;
+	}
+	if (Speed::Clamp(-3) != 0 || Speed::Clamp(99) != Speed::Count - 1)
+	{
+		UE_LOG(LogTemp, Error, TEXT("speed clamp failed"));
+		return 7;
+	}
+	if (Speed::HoursAt(Speed::Count - 1) <= Speed::HoursAt(Speed::DefaultIndex))
+	{
+		UE_LOG(LogTemp, Error, TEXT("no campaign speed faster than the default"));
+		return 8;
+	}
+	if (Speed::Format(0.25f) != TEXT("¼ h/s") || Speed::Format(0.5f) != TEXT("½ h/s") || Speed::Format(1.f) != TEXT("1 h/s") ||
+		Speed::Format(6.f) != TEXT("6 h/s"))
+	{
+		UE_LOG(LogTemp, Error, TEXT("speed label failed"));
+		return 9;
 	}
 
 	UE_LOG(LogTemp, Display, TEXT("PA250.Campaign.Clock passed"));

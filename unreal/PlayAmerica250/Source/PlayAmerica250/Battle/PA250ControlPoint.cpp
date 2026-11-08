@@ -1,12 +1,15 @@
 #include "PA250ControlPoint.h"
 #include "Components/SphereComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Engine/OverlapResult.h"
+#include "Engine/Texture2D.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "NavigationSystem.h"
+#include "ProceduralMeshComponent.h"
 #include "RFCharacter.h"
 #include "UObject/ConstructorHelpers.h"
-#include "ProceduralMeshComponent.h"
 #include "PA250FlagArt.h"
+#include "PA250Wind.h"
 
 APA250ControlPoint::APA250ControlPoint()
 {
@@ -97,7 +100,11 @@ void APA250ControlPoint::PlaceFlag()
 	if (Finial) Finial->SetRelativeLocation(FVector(PoleOffset.X, PoleOffset.Y, PoleBaseZ + PoleHeight + 8.f));
 	const float Bottom = PoleBaseZ + 80.f;
 	const float Top = PoleBaseZ + PoleHeight - ClothHeight - 15.f;
-	FlagCloth->SetRelativeLocation(FVector(PoleOffset.X + 7.f, PoleOffset.Y, FMath::Lerp(Bottom, Top, FlagHeight)));
+	// The flag flies downwind (the same breeze that drifts the smoke).
+	const FRotator Downwind(0.f, PA250Wind::Yaw() - GetActorRotation().Yaw, 0.f);
+	FlagCloth->SetRelativeRotation(Downwind);
+	FlagCloth->SetRelativeLocation(FVector(PoleOffset.X, PoleOffset.Y, 0.f) + Downwind.RotateVector(FVector(7.f, 0.f, 0.f))
+		+ FVector(0.f, 0.f, FMath::Lerp(Bottom, Top, FlagHeight)));
 	FlagCloth->SetVisibility(!FlagFaction.IsNone());
 	const UWorld* World = GetWorld();
 	if (FlagColorFaction != FlagFaction && !IsTemplate() && World && World->IsGameWorld())
@@ -187,16 +194,10 @@ void APA250ControlPoint::FindClearPoleSpot()
 	if (!World) return;
 	const FVector Origin = GetActorLocation();
 	FCollisionQueryParams Q(SCENE_QUERY_STAT(PA250PoleSpot), false, this);
-	const FCollisionObjectQueryParams Statics(ECC_WorldStatic);
+	// Explicit: ECC_WorldStatic is 0, so the int32 constructor would silently query no types at all.
+	FCollisionObjectQueryParams Statics;
+	Statics.AddObjectTypesToQuery(ECC_WorldStatic);
 	// Candidates nearest first: the post itself, then rings of 8 at 2.5 / 5 / 7.5 m (deterministic order).
-	{ // TEMP diagnostics
-		TArray<FOverlapResult> Hits;
-		FCollisionObjectQueryParams Any; Any.AddObjectTypesToQuery(ECC_WorldStatic); Any.AddObjectTypesToQuery(ECC_WorldDynamic);
-		World->OverlapMultiByObjectType(Hits, Origin, FQuat::Identity, Any, FCollisionShape::MakeSphere(800.f), Q);
-		for (const FOverlapResult& H : Hits)
-			if (const UPrimitiveComponent* C = H.GetComponent())
-				UE_LOG(LogTemp, Display, TEXT("PA250DIAG post %s near %s / %s type=%d dist=%.0f"), *PostId.ToString(), *GetNameSafe(C->GetOwner()), *C->GetName(), (int32)C->GetCollisionObjectType(), FVector::Dist2D(C->Bounds.Origin, Origin));
-	}
 	TArray<FVector2D> Candidates = {FVector2D::ZeroVector};
 	for (float R : {250.f, 500.f, 750.f})
 		for (int32 k = 0; k < 8; ++k)
@@ -212,21 +213,21 @@ void APA250ControlPoint::FindClearPoleSpot()
 		// Volume swept by pole + flag, from 2 m up (clear of the terrain) to the finial, plus 2.5 m of
 		// open air all round so the flag reads against the sky rather than a wall.
 		const float Lo = 200.f, Hi = PoleHeight + 30.f, Air = 250.f;
-		const FVector Center = Ground.ImpactPoint + FVector(0.5f * ClothLength - 10.f, 0.f, 0.5f * (Lo + Hi));
+		const FQuat Downwind(FRotator(0.f, PA250Wind::Yaw(), 0.f));
+		const FVector Center = Ground.ImpactPoint + Downwind.RotateVector(FVector(0.5f * ClothLength - 10.f, 0.f, 0.f)) + FVector(0.f, 0.f, 0.5f * (Lo + Hi));
 		const FVector Half(0.5f * ClothLength + Air, Air, 0.5f * (Hi - Lo));
-		if (World->OverlapAnyTestByObjectType(Center, FQuat::Identity, Statics, FCollisionShape::MakeBox(Half), Q))
+		if (World->OverlapAnyTestByObjectType(Center, Downwind, Statics, FCollisionShape::MakeBox(Half), Q))
 		{
 			continue;
 		}
 		PoleOffset = Off;
 		PoleBaseZ = Ground.ImpactPoint.Z - Origin.Z;
-		if (!Off.IsZero())
-		{
-			UE_LOG(LogTemp, Display, TEXT("PA250 post %s: flagpole moved %.0f cm to clear scenery"), *PostId.ToString(), Off.Size());
-		}
+		UE_LOG(LogTemp, Display, TEXT("PA250 post %s: flagpole %s"), *PostId.ToString(),
+			Off.IsZero() ? TEXT("on the post (clear)") : *FString::Printf(TEXT("moved %.0f cm to open ground"), Off.Size()));
 		return;
 	}
 	// Nothing clear: keep the pole on the post.
+	UE_LOG(LogTemp, Warning, TEXT("PA250 post %s: no clear spot within 7.5 m; flagpole stays on the post"), *PostId.ToString());
 	FHitResult Ground;
 	if (World->LineTraceSingleByChannel(Ground, Origin, Origin - FVector(0.f, 0.f, 5000.f), ECC_WorldStatic, Q))
 	{
@@ -368,7 +369,10 @@ void APA250ControlPoint::BeginPlay()
 {
 	Super::BeginPlay();
 	Zone->SetSphereRadius(Radius);
-	Holder = InitialOwner;
+	if (!bHoldersAssigned)
+	{
+		Holder = InitialOwner;
+	}
 	UpdateColor();
 	// Stand the pole on the ground, clear of buildings (the actor floats ~1.4 m above the ground).
 	FindClearPoleSpot();
@@ -473,17 +477,29 @@ void APA250ControlPoint::TickCapture(float DeltaSeconds)
 		}
 	}
 
-	if (Sole == NAME_None)
+	ApplyCapturePressure(Sole, Attackers, Defenders, DeltaSeconds);
+}
+
+bool APA250ControlPoint::ApplyCapturePressure(FName Sole, int32 Attackers, int32 Defenders, float DeltaSeconds)
+{
+	if (bContestLocked)
+	{
+		CaptureProgress = 0.f;
+		Capturer = NAME_None;
+		return false;
+	}
+
+	if (Sole.IsNone())
 	{
 		Capturer = NAME_None;
-		return;
+		return false;
 	}
 
 	if (Sole == Holder)
 	{
 		CaptureProgress = 0.f;
 		Capturer = NAME_None;
-		return;
+		return false;
 	}
 
 	if (Capturer != Sole)
@@ -497,7 +513,7 @@ void APA250ControlPoint::TickCapture(float DeltaSeconds)
 	CaptureProgress += (DeltaSeconds * Rate) / FMath::Max(0.1f, CaptureSeconds);
 	if (CaptureProgress < 1.f)
 	{
-		return;
+		return true;
 	}
 
 	CaptureProgress = 0.f;
@@ -505,8 +521,9 @@ void APA250ControlPoint::TickCapture(float DeltaSeconds)
 	{
 		SetHolder(NAME_None);
 		Capturer = Sole;
-		return;
+		return true;
 	}
 	SetHolder(Sole);
 	Capturer = NAME_None;
+	return true;
 }

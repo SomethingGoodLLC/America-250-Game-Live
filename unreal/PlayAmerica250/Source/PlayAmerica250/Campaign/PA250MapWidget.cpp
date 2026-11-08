@@ -5,12 +5,16 @@
 #include "Styling/CoreStyle.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Layout/SBorder.h"
+#include "Widgets/Layout/SBox.h"
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/SOverlay.h"
 #include "Widgets/Text/STextBlock.h"
 #include "Engine/Engine.h"
+#include "Engine/GameInstance.h"
 #include "Engine/GameViewportClient.h"
 #include "Layout/SlateRect.h"
+#include "pa250/sim.hpp"
+#include <cstring>
 
 namespace
 {
@@ -43,18 +47,35 @@ FText UPA250MapWidget::HeaderText() const
 		                            *UPA250Subsystem::FormatHoursRemaining(T.hours_remaining));
 	}
 	const FString Date = S->FormatDate();
-	const int32 Sp = S->GetSpeedIndex() + 1;
+	const FString Sp = FPA250CampaignSpeed::Format(S->GetHoursPerSecond());
 	const TCHAR* Pause = S->IsPaused() ? TEXT("PAUSED") : TEXT("RUNNING");
+	auto Store = [&](const char* Faction, const char* Field) -> int32 {
+		auto It = St.stores.find(Faction);
+		if (It == St.stores.end())
+		{
+			return 0;
+		}
+		if (std::strcmp(Field, "powder") == 0)
+		{
+			return It->second.powder;
+		}
+		if (std::strcmp(Field, "arms") == 0)
+		{
+			return It->second.arms;
+		}
+		return It->second.provisions;
+	};
 	return FText::FromString(FString::Printf(
-		TEXT("%s   |   %s  speed %d×   |   Gold %d   |   Supplies Cont %d  Brit %d   |   Attitude %d   |   Treaties: %s"), *Date, Pause, Sp,
-		St.player_gold, Get(St.supplies, "continental"), Get(St.supplies, "british"), Get(St.relations, "british"),
-		Treaties.IsEmpty() ? TEXT("none") : *Treaties));
+		TEXT("%s   |   %s  speed %s   |   Gold %d   |   Powder %d  Arms %d  Prov %d   |   Local support %d   |   Supplies Cont %d  Brit %d   |   Attitude %d   |   Treaties: %s"),
+		*Date, Pause, *Sp, St.player_gold, Store("continental", "powder"), Store("continental", "arms"),
+		Store("continental", "provisions"), St.local_support, Get(St.supplies, "continental"), Get(St.supplies, "british"),
+		Get(St.relations, "british"), Treaties.IsEmpty() ? TEXT("none") : *Treaties));
 }
 
 FText UPA250MapWidget::StatusText() const
 {
 	const FString Line = !LastMessage.IsEmpty() ? LastMessage : Message;
-	return FText::FromString(Line.IsEmpty() ? TEXT("Select an army, then any province. Space to pause.") : Line);
+	return FText::FromString(Line.IsEmpty() ? TEXT("Select an army, then any province. Space pauses. − / + change speed.") : Line);
 }
 
 FText UPA250MapWidget::BattleText() const
@@ -64,10 +85,39 @@ FText UPA250MapWidget::BattleText() const
 	{
 		const auto& St = S->GetState();
 		auto It = St.provinces.find(St.pending_battle.province);
-		return FText::FromString(FString::Printf(TEXT("Battle of %s"),
-		                                         It == St.provinces.end() ? TEXT("?") : UTF8_TO_TCHAR(It->second.name.c_str())));
+		const FString Preset = ToFStr(pa250::scenario_preset_for_province(St.pending_battle.province));
+		FString Rule = Preset;
+		if (Preset == TEXT("concord_bridge"))
+		{
+			Rule = TEXT("North Bridge — one crossing");
+		}
+		else if (Preset == TEXT("battle_road"))
+		{
+			Rule = TEXT("Battle Road — preserve the force");
+		}
+		else if (Preset == TEXT("lexington_common"))
+		{
+			Rule = TEXT("Lexington Green");
+		}
+		return FText::FromString(FString::Printf(TEXT("Battle of %s\n%s"),
+		                                         It == St.provinces.end() ? TEXT("?") : UTF8_TO_TCHAR(It->second.name.c_str()),
+		                                         *Rule));
 	}
 	return FText::GetEmpty();
+}
+
+FText UPA250MapWidget::StaffPanelText() const
+{
+	UPA250Subsystem* S = Sub();
+	if (!S || !S->HasStaffEvent())
+	{
+		return FText::GetEmpty();
+	}
+	const FString Subject = S->GetPendingLetterSubject();
+	const FString Body = S->GetPendingLetterBody();
+	const FString Clerk = ToFStr(S->GetState().staff.clerk_name);
+	return FText::FromString(FString::Printf(
+		TEXT("%s — correspondence\n\n%s\n\n%s"), *Clerk, *Subject, *Body));
 }
 
 void UPA250MapWidget::NotifyMapSelectionChanged()
@@ -174,30 +224,14 @@ FReply UPA250MapWidget::NativeOnKeyDown(const FGeometry& InGeometry, const FKeyE
 		S->SetPaused(!S->IsPaused());
 		return FReply::Handled();
 	}
-	if (Key == EKeys::One)
+	const FKey SpeedKeys[] = { EKeys::One, EKeys::Two, EKeys::Three, EKeys::Four, EKeys::Five, EKeys::Six, EKeys::Seven };
+	for (int32 i = 0; i < UE_ARRAY_COUNT(SpeedKeys) && i < FPA250CampaignSpeed::Count; ++i)
 	{
-		S->SetSpeedIndex(0);
-		return FReply::Handled();
-	}
-	if (Key == EKeys::Two)
-	{
-		S->SetSpeedIndex(1);
-		return FReply::Handled();
-	}
-	if (Key == EKeys::Three)
-	{
-		S->SetSpeedIndex(2);
-		return FReply::Handled();
-	}
-	if (Key == EKeys::Four)
-	{
-		S->SetSpeedIndex(3);
-		return FReply::Handled();
-	}
-	if (Key == EKeys::Five)
-	{
-		S->SetSpeedIndex(4);
-		return FReply::Handled();
+		if (Key == SpeedKeys[i])
+		{
+			S->SetSpeedIndex(i);
+			return FReply::Handled();
+		}
 	}
 	if (Key == EKeys::Equals || Key == EKeys::Add)
 	{
@@ -267,6 +301,60 @@ TSharedRef<SWidget> UPA250MapWidget::RebuildWidget()
 		UPA250Subsystem* S2 = Sub();
 		return (S2 && S2->IsBattlePending()) ? EVisibility::Collapsed : EVisibility::Visible;
 	});
+	TAttribute<EVisibility> StaffVis = TAttribute<EVisibility>::CreateLambda([this]() {
+		UPA250Subsystem* S2 = Sub();
+		return (S2 && S2->HasStaffEvent() && !S2->IsBattlePending()) ? EVisibility::Visible : EVisibility::Collapsed;
+	});
+	TAttribute<EVisibility> AftermathChoicesVis = TAttribute<EVisibility>::CreateLambda([this]() {
+		UPA250Subsystem* S2 = Sub();
+		if (!S2 || !S2->HasStaffEvent() || S2->IsBattlePending() || !S2->IsPendingLetterAwaitingChoice())
+		{
+			return EVisibility::Collapsed;
+		}
+		const FString Kind = S2->GetPendingLetterKind();
+		return (Kind == TEXT("request_assistance") || Kind == TEXT("purchase") || Kind.IsEmpty())
+				   ? EVisibility::Visible
+				   : EVisibility::Collapsed;
+	});
+	// Commander orders belong only to the detached commander's own letter; a chapter
+	// briefing shares the commander_report kind but is only ever acknowledged.
+	auto IsDetachedCommanderLetter = [](UPA250Subsystem* S2) {
+		return S2->GetPendingLetterKind() == TEXT("commander_report") &&
+			   S2->GetPendingLetterSubject().Contains(TEXT("Detached"));
+	};
+	TAttribute<EVisibility> CommanderChoicesVis = TAttribute<EVisibility>::CreateLambda([this, IsDetachedCommanderLetter]() {
+		UPA250Subsystem* S2 = Sub();
+		if (!S2 || !S2->HasStaffEvent() || !S2->IsPendingLetterAwaitingChoice())
+		{
+			return EVisibility::Collapsed;
+		}
+		return IsDetachedCommanderLetter(S2) ? EVisibility::Visible : EVisibility::Collapsed;
+	});
+	TAttribute<EVisibility> ChapterChoicesVis = TAttribute<EVisibility>::CreateLambda([this, IsDetachedCommanderLetter]() {
+		UPA250Subsystem* S2 = Sub();
+		if (!S2 || !S2->HasStaffEvent() || !S2->IsPendingLetterAwaitingChoice())
+		{
+			return EVisibility::Collapsed;
+		}
+		return (S2->GetPendingLetterKind() == TEXT("commander_report") && !IsDetachedCommanderLetter(S2))
+				   ? EVisibility::Visible
+				   : EVisibility::Collapsed;
+	});
+	TAttribute<EVisibility> KnoxChoicesVis = TAttribute<EVisibility>::CreateLambda([this]() {
+		UPA250Subsystem* S2 = Sub();
+		if (!S2 || !S2->HasStaffEvent() || !S2->IsPendingLetterAwaitingChoice())
+		{
+			return EVisibility::Collapsed;
+		}
+		return S2->GetPendingLetterKind() == TEXT("knox_support") ? EVisibility::Visible : EVisibility::Collapsed;
+	});
+	// Delivered / refused letters are notices: one button that clears the popup.
+	TAttribute<EVisibility> NoticeVis = TAttribute<EVisibility>::CreateLambda([this]() {
+		UPA250Subsystem* S2 = Sub();
+		return (S2 && S2->HasStaffEvent() && !S2->IsBattlePending() && !S2->IsPendingLetterAwaitingChoice())
+				   ? EVisibility::Visible
+				   : EVisibility::Collapsed;
+	});
 
 	// Transparent center — the 3D province map is the only map layer.
 	return SNew(SOverlay)
@@ -278,6 +366,7 @@ TSharedRef<SWidget> UPA250MapWidget::RebuildWidget()
 					   [SNew(STextBlock)
 							.Font(HeaderFont)
 							.ColorAndOpacity(FLinearColor(0.15f, 0.1f, 0.05f))
+							.AutoWrapText(true)
 							.Text_Lambda([this]() { return HeaderText(); })]]
 		+ SOverlay::Slot()
 			  .VAlign(VAlign_Center)
@@ -296,6 +385,65 @@ TSharedRef<SWidget> UPA250MapWidget::RebuildWidget()
 									 .Text_Lambda([this]() { return BattleText(); })] +
 							SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center).Padding(0, 12, 0, 0)
 								[MakeButton(TEXT("To arms!"), [this]() { PressFight(); })]]]
+		+ SOverlay::Slot()
+			  .VAlign(VAlign_Center)
+			  .HAlign(HAlign_Left)
+			  .Padding(FMargin(36.f, 0.f, 0.f, 0.f))
+				  [SNew(SBox).WidthOverride(420.f)
+					   [SNew(SBorder)
+							.Visibility(StaffVis)
+							.BorderImage(FAppStyle::GetBrush("WhiteBrush"))
+							.BorderBackgroundColor(FLinearColor(0.95f, 0.91f, 0.82f, 0.97f))
+							.Padding(FMargin(18.f, 14.f))
+								[SNew(SVerticalBox) +
+								 SVerticalBox::Slot().AutoHeight()
+									 [SNew(STextBlock)
+										  .Font(BodyFont)
+										  .ColorAndOpacity(FLinearColor(0.12f, 0.08f, 0.04f))
+										  .AutoWrapText(true)
+										  .Text_Lambda([this]() { return StaffPanelText(); })] +
+								 SVerticalBox::Slot().AutoHeight().Padding(0, 10, 0, 0)
+									 [SNew(SHorizontalBox).Visibility(AftermathChoicesVis) +
+									  SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 6, 0)
+										  [MakeButton(TEXT("Purchase"), [this]() { PressLogistics(TEXT("purchase")); })] +
+									  SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 6, 0)
+										  [MakeButton(TEXT("Request aid"),
+													  [this]() { PressLogistics(TEXT("request_assistance")); })] +
+									  SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 6, 0)
+										  [MakeButton(TEXT("Requisition"),
+													  [this]() { PressLogistics(TEXT("requisition")); })] +
+									  SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 6, 0)
+										  [MakeButton(TEXT("Invest capacity"),
+													  [this]() { PressLogistics(TEXT("capacity_investment")); })] +
+									  SHorizontalBox::Slot().AutoWidth()
+										  [MakeButton(TEXT("Dismiss"), [this]() { PressLogistics(TEXT("dismiss")); })]] +
+								 SVerticalBox::Slot().AutoHeight().Padding(0, 10, 0, 0)
+									 [SNew(SHorizontalBox).Visibility(CommanderChoicesVis) +
+									  SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 6, 0)
+										  [MakeButton(TEXT("Clarify: preserve"),
+													  [this]() { PressCommander(TEXT("preserve_force")); })] +
+									  SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 6, 0)
+										  [MakeButton(TEXT("Counterorder: contest"),
+													  [this]() { PressCommander(TEXT("contest_crossing")); })] +
+									  SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 6, 0)
+										  [MakeButton(TEXT("Escalate"), [this]() { PressCommander(TEXT("escalate")); })] +
+									  SHorizontalBox::Slot().AutoWidth()
+										  [MakeButton(TEXT("Dismiss"), [this]() { PressLogistics(TEXT("dismiss")); })]] +
+								 SVerticalBox::Slot().AutoHeight().Padding(0, 10, 0, 0)
+									 [SNew(SHorizontalBox).Visibility(KnoxChoicesVis) +
+									  SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 6, 0)
+										  [MakeButton(TEXT("Support Knox"),
+													  [this]() { PressLogistics(TEXT("knox_support")); })] +
+									  SHorizontalBox::Slot().AutoWidth()
+										  [MakeButton(TEXT("Decline"), [this]() { PressLogistics(TEXT("dismiss")); })]] +
+								 SVerticalBox::Slot().AutoHeight().Padding(0, 10, 0, 0)
+									 [SNew(SHorizontalBox).Visibility(ChapterChoicesVis) +
+									  SHorizontalBox::Slot().AutoWidth()
+										  [MakeButton(TEXT("Acknowledge"), [this]() { PressLogistics(TEXT("dismiss")); })]] +
+								 SVerticalBox::Slot().AutoHeight().Padding(0, 10, 0, 0)
+									 [SNew(SHorizontalBox).Visibility(NoticeVis) +
+									  SHorizontalBox::Slot().AutoWidth()
+										  [MakeButton(TEXT("Acknowledge"), [this]() { PressLogistics(TEXT("dismiss")); })]]]]]
 		+ SOverlay::Slot().VAlign(VAlign_Bottom).HAlign(HAlign_Fill)
 			  [SNew(SBorder)
 				   .BorderImage(FAppStyle::GetBrush("WhiteBrush"))
@@ -334,6 +482,16 @@ TSharedRef<SWidget> UPA250MapWidget::RebuildWidget()
 									if (UPA250Subsystem* S2 = Sub())
 									{
 										S2->SetPaused(!S2->IsPaused());
+									}
+								},
+								NoBattleVis)] +
+						SHorizontalBox::Slot().AutoWidth().Padding(4, 0)
+							[MakeButton(
+								TEXT("Speed−"),
+								[this]() {
+									if (UPA250Subsystem* S2 = Sub())
+									{
+										S2->SetSpeedIndex(S2->GetSpeedIndex() - 1);
 									}
 								},
 								NoBattleVis)] +
@@ -413,4 +571,48 @@ void UPA250MapWidget::PressLoad()
 	ClearSelection();
 	SetStatusMessage(bOk ? TEXT("Campaign loaded.") : TEXT("Load failed: ") + Err);
 	NotifyMapSelectionChanged();
+}
+
+void UPA250MapWidget::PressLogistics(const FString& Choice)
+{
+	UPA250Subsystem* S = Sub();
+	if (!S)
+	{
+		return;
+	}
+	FString Err;
+	const FString LetterId = S->GetPendingLetterId();
+	if (S->ChooseLogistics(LetterId, Choice, Err))
+	{
+		SetStatusMessage(FString::Printf(TEXT("Staff action: %s. Advance time for replies and deliveries."), *Choice));
+	}
+	else
+	{
+		SetStatusMessage(TEXT("Staff action failed: ") + Err);
+	}
+}
+
+void UPA250MapWidget::PressCommander(const FString& Action)
+{
+	UPA250Subsystem* S = Sub();
+	if (!S)
+	{
+		return;
+	}
+	FString Err;
+	if (S->ResolveCommander(Action, Err))
+	{
+		if (Action == TEXT("escalate"))
+		{
+			SetStatusMessage(TEXT("Escalated. If this company loses the field, the town is forfeit even without the post."));
+		}
+		else
+		{
+			SetStatusMessage(FString::Printf(TEXT("Orders to detached command: %s."), *Action));
+		}
+	}
+	else
+	{
+		SetStatusMessage(TEXT("Commander order failed: ") + Err);
+	}
 }

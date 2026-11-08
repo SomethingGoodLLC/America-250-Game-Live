@@ -43,4 +43,7 @@ public:
 
 	const FPA250FactionLook& LookFor(FName Faction, FName UnitClass) const;
 	static UPA250FactionVisuals* MakeRuntimeDefaults();
+	/** Pure: 1775 Patriot militia wore their own clothes, not uniforms. Picks a homespun coat and a
+	 *  waistcoat/breeches colour for one man from Seed (same seed, same clothes). Visual only. */
+	static void HomespunFor(uint32 Seed, FLinearColor& OutCoat, FLinearColor& OutUnder);
 };

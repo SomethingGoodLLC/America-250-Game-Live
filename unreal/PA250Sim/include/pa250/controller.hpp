@@ -53,6 +53,11 @@ public:
     bool save(const std::string& path, std::string& error);
     bool load(const std::string& path, std::string& error);
 
+    // Logistics / staff: purchase | request_assistance | requisition | capacity_investment | knox_support | dismiss
+    std::vector<std::string> choose_logistics_action(const std::string& letter_id, const std::string& choice);
+    std::vector<std::string> resolve_commander_action(const std::string& action);
+    bool has_staff_event() const;
+
     const std::vector<TraceEntry>& trace() const { return trace_; }
     std::string trace_json() const;
     void record(const std::string& event, const std::string& detail = std::string());

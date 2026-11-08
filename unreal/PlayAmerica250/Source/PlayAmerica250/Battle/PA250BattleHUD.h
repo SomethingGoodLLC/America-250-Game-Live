@@ -15,7 +15,8 @@ class PLAYAMERICA250_API UPA250BattleHUD : public UUserWidget
 public:
 	TWeakObjectPtr<APA250BattleGameMode> GameMode;
 
-	void ShowHitmarker(bool bKill);
+	/** Local player's hit: X on the crosshair (white hit / red kill) + "HIT -78" / "KILL  68 m". */
+	void ShowHitmarker(bool bKill, float Damage = 0.f, float DistanceM = 0.f);
 	bool IsReticleHostile() const;
 	bool IsReticleBlocked() const;
 	float GetReticleSpreadPx() const;
@@ -37,5 +38,11 @@ public:
 
 private:
 	float HitmarkerTimer = 0.f;
+	float HitTextTimer = 0.f;
 	bool bHitmarkerKill = false;
+	FString HitText;
+public:
+	static constexpr float HitmarkerSeconds = 0.45f;
+	FString GetHitText() const { return HitTextTimer > 0.f ? HitText : FString(); }
+	float GetHitTextTimer() const { return HitTextTimer; }
 };

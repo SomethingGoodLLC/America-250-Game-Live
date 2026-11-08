@@ -1,7 +1,9 @@
 #include "RFCharacter.h"
 #include "AIController.h"
 #include "Animation/AnimSequence.h"
-#include "Animation/AnimSingleNodeInstance.h"
+#include "PA250SoldierAnimInstance.h"
+#include "Engine/GameViewportClient.h"
+#include "UnrealClient.h"
 #include "Camera/CameraComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/SkeletalMeshComponent.h"
@@ -128,6 +130,12 @@ void ARFCharacter::SetTeam(FName InFaction, FName InUnitClass)
 	ApplyFactionVisuals();
 }
 
+void ARFCharacter::SetClothingSeed(uint32 Seed)
+{
+	ClothingSeed = Seed;
+	bClothingSeedSet = true;
+}
+
 void ARFCharacter::ApplyFactionVisuals()
 {
 	// Fab soldier uses its own skeleton and supplied animations; never run Manny AnimBP on it.
@@ -156,12 +164,36 @@ void ARFCharacter::ApplyFactionVisuals()
 	if (bUsesPeriodSoldier)
 	{
 		UMaterialInterface* Coat = LoadObject<UMaterialInterface>(nullptr, TEXT("/Game/PA250/Materials/M_PA250_SoldierUniform.M_PA250_SoldierUniform"));
+		// 1775 Patriots (militia, minutemen and the new army alike) wore their own clothes:
+		// every man gets his own homespun coat and waistcoat/breeches. Regulars keep red.
+		const bool bHomespun = FactionId == TEXT("continental");
+		FLinearColor CoatColor = Look.CoatColor, UnderColor = FLinearColor::White;
+		if (bHomespun)
+		{
+			// Actor names change when a man is spawned again. The seed does not.
+			const uint32 Seed = bClothingSeedSet ? ClothingSeed : GetTypeHash(GetFName());
+			UPA250FactionVisuals::HomespunFor(Seed, CoatColor, UnderColor);
+		}
 		if (Coat)
 		{
 			// Slot 1 is the pack's outer clothing; leave skin, eyes, hair and kit untouched.
 			UMaterialInstanceDynamic* MID = UMaterialInstanceDynamic::Create(Coat, this);
-			MID->SetVectorParameterValue(TEXT("CoatColor"), Look.CoatColor * 2.f);
+			// The pack's coat albedo is dark once desaturated, so the tint needs a strong boost
+			// for wool colours to read (homespun more than the regulars' red).
+			MID->SetVectorParameterValue(TEXT("CoatColor"), CoatColor * (bHomespun ? 3.5f : 3.f));
 			GetMesh()->SetMaterial(1, MID);
+		}
+		// Slot 0 is the pack's pants, waistcoat and boots material (M_american_s_armor2skin).
+		// Skin, face and hair are separate materials (body, head, eyes) and stay untinted.
+		// Only militia change slot 0; regulars keep the pack's white/buff.
+		static TWeakObjectPtr<UMaterialInterface> UnderMat;
+		if (bHomespun && !UnderMat.IsValid())
+			UnderMat = LoadObject<UMaterialInterface>(nullptr, TEXT("/Game/PA250/Materials/M_PA250_SoldierUnder.M_PA250_SoldierUnder"), nullptr, LOAD_NoWarn | LOAD_Quiet);
+		if (bHomespun && UnderMat.IsValid())
+		{
+			UMaterialInstanceDynamic* Under = UMaterialInstanceDynamic::Create(UnderMat.Get(), this);
+			Under->SetVectorParameterValue(TEXT("CoatColor"), UnderColor * 2.f);
+			GetMesh()->SetMaterial(0, Under);
 		}
 	}
 	if (HatMesh && !bUsesPeriodSoldier)
@@ -276,8 +308,10 @@ void ARFCharacter::ApplyThirdPartySoldierMesh()
 		SoldierIdle = LoadObject<UAnimSequence>(nullptr, TEXT("/Game/american_soldier/demo/ThirdPersonIdle.ThirdPersonIdle"));
 		SoldierWalk = LoadObject<UAnimSequence>(nullptr, TEXT("/Game/american_soldier/demo/ThirdPersonWalk.ThirdPersonWalk"));
 		SoldierRun = LoadObject<UAnimSequence>(nullptr, TEXT("/Game/american_soldier/demo/ThirdPersonRun.ThirdPersonRun"));
-		MeshComp->SetAnimInstanceClass(nullptr);
-		MeshComp->SetAnimationMode(EAnimationMode::AnimationSingleNode);
+		// Native body anim: plays the pack clip and solves the left hand onto the musket during
+		// pose evaluation (UPA250SoldierAnimInstance), never from an actor tick.
+		MeshComp->SetAnimationMode(EAnimationMode::AnimationBlueprint);
+		MeshComp->SetAnimInstanceClass(UPA250SoldierAnimInstance::StaticClass());
 		UpdateSoldierAnimation();
 		HatMesh->SetVisibility(false);
 		TeamMarker->SetVisibility(false);
@@ -290,10 +324,9 @@ void ARFCharacter::UpdateSoldierAnimation()
 	if (!bUsesPeriodSoldier || bIsDead) return;
 	const float Speed = GetVelocity().Size2D();
 	UAnimSequence* Animation = Speed > 300.f ? SoldierRun.Get() : Speed > 5.f ? SoldierWalk.Get() : SoldierIdle.Get();
-	UAnimSingleNodeInstance* Instance = GetMesh()->GetSingleNodeInstance();
-	if (Animation && (!Instance || Instance->GetCurrentAsset() != Animation))
+	if (UPA250SoldierAnimInstance* Instance = Cast<UPA250SoldierAnimInstance>(GetMesh()->GetAnimInstance()))
 	{
-		GetMesh()->PlayAnimation(Animation, true);
+		if (Animation && Instance->GetLocomotion() != Animation) Instance->SetLocomotion(Animation);
 	}
 }
 
@@ -562,6 +595,23 @@ void ARFCharacter::PawnClientRestart()
 			Subsystem->AddMappingContext(IMC_ThirdPerson, 0);
 		}
 	}
+	EnsureGameMouseCapture();
+}
+
+void ARFCharacter::EnsureGameMouseCapture()
+{
+	// Mouse/trackpad look only gets deltas while the game viewport holds mouse capture
+	// (FSceneViewport::OnMouseMove). PIE starts without it (GameGetsMouseControl=False) and loses
+	// it on focus changes; until now only a click in the viewport took it back, so a trackpad
+	// player moving with WASD and firing with F could not look at all. The keyboard reaching the
+	// pawn means the viewport has focus, so taking the mouse here never steals it from the editor.
+	APlayerController* PC = Cast<APlayerController>(Controller);
+	if (!PC || !PC->IsLocalController() || PC->bShowMouseCursor || bIsDead) return;
+	UGameViewportClient* GVC = GetWorld() ? GetWorld()->GetGameViewport() : nullptr;
+	FViewport* VP = GVC ? GVC->Viewport : nullptr;
+	if (!VP || VP->HasMouseCapture() || !VP->HasFocus()) return;
+	PC->SetInputMode(FInputModeGameOnly());
+	UE_LOG(LogTemp, Display, TEXT("PA250 input: game viewport had no mouse capture; took it for mouse/trackpad look"));
 }
 
 void ARFCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
@@ -594,6 +644,7 @@ void ARFCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompone
 
 void ARFCharacter::Move(const FInputActionValue& Value)
 {
+	EnsureGameMouseCapture();
 	const FVector2D V = Value.Get<FVector2D>();
 	if (Controller && !bIsDead)
 	{
@@ -647,7 +698,7 @@ void ARFCharacter::Look(const FInputActionValue& Value)
 	{
 		// Slower while aiming down sights: the narrower FOV magnifies every degree.
 		const float Scale = GetLookSensitivity() * (bAiming ? AdsLookScale : 1.f);
-		AddControllerYawInput(V.X * Scale);
+		AddControllerYawInput(V.X * Scale * YawLookScale);
 		AddControllerPitchInput(V.Y * Scale);
 	}
 }

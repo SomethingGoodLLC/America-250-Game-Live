@@ -24,6 +24,8 @@ public:
 	void PressSave();
 	UFUNCTION(BlueprintCallable, Category = "PA250")
 	void PressLoad();
+	void PressLogistics(const FString& Choice);
+	void PressCommander(const FString& Action);
 
 	/** Select / order by province id (used by autoplay and map-actor clicks). */
 	UFUNCTION(BlueprintCallable, Category = "PA250")
@@ -57,6 +59,7 @@ private:
 	FText HeaderText() const;
 	FText StatusText() const;
 	FText BattleText() const;
+	FText StaffPanelText() const;
 	void NotifyMapSelectionChanged();
 
 	FString Message;

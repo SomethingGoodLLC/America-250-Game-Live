@@ -403,6 +403,166 @@ static void test_ceasefire_lasts_full_day() {
     CHECK(fight.battles.size() == 1);
 }
 
+static void test_ceasefire_halts_march_in_progress() {
+    // The boat is already two hours into a three-hour crossing when the truce is agreed.
+    CampaignState s = fresh();
+    s.ai_objective.clear();
+    s.now = from_ymdh({1775, 4, 19, 2});
+    Army& brit = s.armies.at("british_regulars");
+    brit.path = {"boston-cambridge"};
+    brit.hours_into_edge = 2;
+    CampaignState open = s;
+    open = advance_hour(open).state;
+    CHECK(open.armies.at("british_regulars").province == "cambridge");
+
+    auto p = proposal_from(R"({"spoken_line":"truce","clauses":[{"type":"ceasefire","days":2}]})");
+    s = apply_diplomacy(s, accepted(p));
+    s = advance_hour(s).state;
+    CHECK(s.armies.at("british_regulars").province == "boston");
+    CHECK(s.armies.at("british_regulars").path.empty());
+
+    // Friendly ground is still marchable under the same truce.
+    CampaignState friendly = fresh();
+    friendly.ai_objective.clear();
+    friendly.now = from_ymdh({1775, 4, 19, 2});
+    friendly = apply_diplomacy(friendly, accepted(p));
+    Army& mil = friendly.armies.at("continental_militia");
+    mil.path = {"lexington-menotomy"};
+    mil.hours_into_edge = 1;
+    friendly = advance_hour(friendly).state;
+    CHECK(friendly.armies.at("continental_militia").province == "menotomy");
+
+    // Safe passage still completes a crossing that was already underway.
+    CampaignState passage = fresh();
+    passage.ai_objective.clear();
+    passage.now = from_ymdh({1775, 4, 19, 2});
+    passage = apply_diplomacy(passage, accepted(p));
+    passage.treaties.push_back({"safe_passage", 48, "british_regulars", "cambridge"});
+    Army& crossing = passage.armies.at("british_regulars");
+    crossing.path = {"boston-cambridge"};
+    crossing.hours_into_edge = 2;
+    passage = advance_hour(passage).state;
+    CHECK(passage.armies.at("british_regulars").province == "cambridge");
+}
+
+static void test_letter_survives_contact() {
+    // A staff letter raised in the same hour as contact must stay on the state after the
+    // battle interrupt replaces EventPopup, so the panel can be answered once the fight ends.
+    CampaignState s = fresh();
+    s.ai_objective.clear();
+    s.now = from_ymdh({1775, 4, 19, 3});
+    s.progress.lexington_fought = true;
+    s.progress.battles_fought = 1;
+    s.progress.aftermath_pending = true;
+    s.armies.at("continental_militia").province = "cambridge";
+    Army& brit = s.armies.at("british_regulars");
+    brit.path = {"boston-cambridge"};
+    brit.hours_into_edge = 2;
+    TickOutput t = advance_hour(s);
+    CHECK(t.battles.size() == 1);
+    CHECK(t.interrupts.size() == 1);
+    CHECK(t.interrupts[0] == Interrupt::ArmiesInContact);
+    CHECK(!t.state.pending_event_id.empty());
+    CHECK(t.state.staff.queue.back().awaiting_choice);
+    BattleResult r;
+    r.province_id = t.state.pending_battle.province;
+    r.winner = "british";
+    r.objective_holder = "british";
+    CampaignState after = apply_battle_result(t.state, r);
+    CHECK(!after.pending_battle.active);
+    CHECK(after.pending_event_id == t.state.pending_event_id);
+    CHECK(after.staff.queue.back().awaiting_choice);
+}
+
+static void test_escalate_risks_the_ground() {
+    auto arm = [](CampaignState& s, const std::string& province) {
+        s.pending_battle = {true, province, "british_regulars", "continental_militia"};
+        s.armies.at("british_regulars").province = province;
+        s.armies.at("continental_militia").province = province;
+    };
+    CampaignState s = fresh();
+    ensure_logistics_defaults(s);
+    s.progress.lexington_fought = true;
+    s.progress.battles_fought = 1;
+    s.staff.queue.clear();
+    s.pending_event_id.clear();
+    std::vector<Interrupt> ints;
+    tick_logistics(s, ints);
+    s = resolve_commander_request(s, "escalate");
+    CHECK(s.progress.commander.objective == "hold_stores");
+    CHECK(s.provinces.at("concord").owner == "continental");
+    arm(s, "concord");
+    BattleResult lost;
+    lost.province_id = "concord";
+    lost.winner = "british";
+    lost.objective_holder = "";
+    lost.losses["continental"] = {{"militia", 1}};
+    CampaignState forfeited = apply_battle_result(s, lost);
+    CHECK(forfeited.provinces.at("concord").owner == "british");
+
+    // The same lost field, after "preserve", leaves the town with its owners.
+    CampaignState held = fresh();
+    ensure_logistics_defaults(held);
+    held.progress.lexington_fought = true;
+    held.progress.battles_fought = 1;
+    held.staff.queue.clear();
+    held.pending_event_id.clear();
+    ints.clear();
+    tick_logistics(held, ints);
+    held = resolve_commander_request(held, "preserve_force");
+    arm(held, "concord");
+    CampaignState kept = apply_battle_result(held, lost);
+    CHECK(kept.provinces.at("concord").owner == "continental");
+
+    // Boston is protected: escalation cannot forfeit it.
+    CampaignState boston = s;
+    boston.provinces.at("boston").owner = "continental";
+    arm(boston, "boston");
+    BattleResult boston_lost = lost;
+    boston_lost.province_id = "boston";
+    CampaignState boston_after = apply_battle_result(boston, boston_lost);
+    CHECK(boston_after.provinces.at("boston").owner == "continental");
+
+    BattleSetup concord = build_battle_setup(s, "concord");
+    bool bridge = false;
+    for (const auto& tag : concord.terrain_tags)
+        if (tag == "bridge_crossing") bridge = true;
+    CHECK(concord.scenario_preset == "concord_bridge");
+    CHECK(bridge);
+}
+
+static void test_concord_bridge_company() {
+    // The fight just played: seventeen British companies against five provincials.
+    CampaignState late = fresh();
+    late.ai_objective.clear();
+    late.pending_battle = {true, "concord", "british_regulars", "continental_militia"};
+    late.armies.at("british_regulars").province = "concord";
+    late.armies.at("continental_militia").province = "concord";
+    late.armies.at("british_regulars").units["line_infantry"] = 17;
+    late.armies.at("british_regulars").units["militia"] = 0;
+    late.armies.at("continental_militia").units["line_infantry"] = 1;
+    late.armies.at("continental_militia").units["militia"] = 4;
+    BattleSetup worn = build_battle_setup(late, "concord");
+    const int brit = worn.sides.at("british").tickets.at("line_infantry");
+    int prov = 0;
+    for (const auto& kv : worn.sides.at("continental").tickets) prov += std::max(0, kv.second);
+    CHECK(brit == 5);
+    CHECK(prov == 5);
+    CHECK(brit <= 6);
+
+    // A fresh column still sends only one company onto the bridge.
+    CampaignState early = fresh();
+    early.ai_objective.clear();
+    early.pending_battle = {true, "concord", "british_regulars", "continental_militia"};
+    early.armies.at("british_regulars").province = "concord";
+    early.armies.at("continental_militia").province = "concord";
+    BattleSetup open = build_battle_setup(early, "concord");
+    CHECK(open.sides.at("british").tickets.at("line_infantry") == 6);
+    int full = 0;
+    for (const auto& kv : open.sides.at("continental").tickets) full += std::max(0, kv.second);
+    CHECK(full > 6);
+}
+
 static void test_ceasefire_blocks_march() {
     CampaignState s = fresh();
     s.ai_objective.clear();
@@ -622,6 +782,317 @@ static void test_offense_vassalage_failure() {
     CHECK(m.player_gold > g0);
 }
 
+static void test_logistics_loop() {
+    CampaignState s = fresh();
+    ensure_logistics_defaults(s);
+    CHECK(s.stores.at("continental").powder == 8);
+    CHECK(s.stores.at("continental").arms == 10);
+    // First battle depletes stores and opens aftermath.
+    s.pending_battle = {true, "lexington", "british_regulars", "continental_militia"};
+    s.armies.at("british_regulars").province = "lexington";
+    s.armies.at("continental_militia").province = "lexington";
+    BattleResult r;
+    r.province_id = "lexington";
+    r.winner = "continental";
+    r.objective_holder = "continental";
+    r.losses["continental"] = {{"militia", 2}};
+    r.losses["british"] = {{"line_infantry", 1}};
+    const int powder_before = s.stores.at("continental").powder;
+    s = apply_battle_result(s, r);
+    CHECK(s.progress.lexington_fought);
+    CHECK(s.progress.aftermath_pending);
+    CHECK(s.stores.at("continental").powder <= powder_before);
+    std::vector<Interrupt> ints;
+    tick_logistics(s, ints);
+    CHECK(!ints.empty());
+    CHECK(std::find(ints.begin(), ints.end(), Interrupt::EventPopup) != ints.end());
+    CHECK(!s.staff.queue.empty());
+    CHECK(s.staff.queue.back().awaiting_choice);
+    const std::string letter_id = s.staff.queue.back().id;
+    // Purchase path: gold down, delivery later, no double-count on save/load.
+    const int gold0 = s.player_gold;
+    s = choose_logistics(s, letter_id, "purchase");
+    CHECK(s.player_gold == gold0 - 40);
+    CHECK(!s.staff.queue.back().awaiting_choice);
+    const int powder_mid = s.stores.at("continental").powder;
+    // Advance to delivery hour.
+    for (int i = 0; i < 6; ++i) {
+        auto out = advance_hour(s);
+        s = out.state;
+        if (s.pending_battle.active) s.pending_battle = {};
+    }
+    CHECK(s.stores.at("continental").powder == powder_mid + 10);
+    CHECK(s.stores.at("continental").arms >= 10 + 4 - 2);  // delivery arms, minus battle losses floor
+    // Save/load must not re-deliver.
+    const int powder_del = s.stores.at("continental").powder;
+    CampaignState loaded = deserialize(serialize(s));
+    for (int i = 0; i < 10; ++i) {
+        loaded = advance_hour(loaded).state;
+        if (loaded.pending_battle.active) loaded.pending_battle = {};
+    }
+    CHECK(loaded.stores.at("continental").powder == powder_del);
+    // Ticket gating: empty powder stands down militia.
+    CampaignState gated = fresh();
+    ensure_logistics_defaults(gated);
+    gated.stores["continental"].powder = 0;
+    gated.stores["continental"].arms = 100;
+    gated.pending_battle = {true, "lexington", "british_regulars", "continental_militia"};
+    gated.armies.at("british_regulars").province = "lexington";
+    gated.armies.at("continental_militia").province = "lexington";
+    auto setup = build_battle_setup(gated, "lexington");
+    CHECK(setup.valid);
+    CHECK(setup.scenario_preset == "lexington_common");
+    CHECK(setup.sides.at("continental").tickets.at("militia") == 0);
+    // Requisition is immediate and lowers local support.
+    CampaignState req = fresh();
+    ensure_logistics_defaults(req);
+    req.progress.aftermath_pending = true;
+    std::vector<Interrupt> i2;
+    tick_logistics(req, i2);
+    const int support0 = req.local_support;
+    const int powder0 = req.stores.at("continental").powder;
+    req = choose_logistics(req, req.staff.queue.back().id, "requisition");
+    CHECK(req.stores.at("continental").powder > powder0);
+    CHECK(req.local_support < support0);
+    // Capacity investment vs immediate resupply: takes time, no mid-fight bonus.
+    CampaignState cap = fresh();
+    ensure_logistics_defaults(cap);
+    cap.player_gold = 200;
+    cap.progress.aftermath_pending = true;
+    std::vector<Interrupt> i3;
+    tick_logistics(cap, i3);
+    cap = choose_logistics(cap, cap.staff.queue.back().id, "capacity_investment");
+    CHECK(cap.progress.capacity_level == 0);
+    CHECK(cap.player_gold == 140);
+    for (int i = 0; i < 50; ++i) {
+        cap = advance_hour(cap).state;
+        if (cap.pending_battle.active) cap.pending_battle = {};
+    }
+    CHECK(cap.progress.capacity_level == 1);
+    CHECK(scenario_preset_for_province("concord") == "concord_bridge");
+    CHECK(scenario_preset_for_province("lincoln") == "battle_road");
+}
+
+static void test_logistics_edges() {
+    // A delivered notification can be cleared; clearing never re-delivers or re-charges.
+    {
+        CampaignState s = fresh();
+        ensure_logistics_defaults(s);
+        s.progress.aftermath_pending = true;
+        std::vector<Interrupt> ints;
+        tick_logistics(s, ints);
+        const std::string lid = s.staff.queue.back().id;
+        s = choose_logistics(s, lid, "purchase");
+        for (int i = 0; i < 6; ++i) {
+            s = advance_hour(s).state;
+            if (s.pending_battle.active) s.pending_battle = {};
+        }
+        CHECK(s.staff.queue.front().status == "delivered");
+        CHECK(s.pending_event_id == lid);
+        const int powder = s.stores.at("continental").powder;
+        const int gold = s.player_gold;
+        s = choose_logistics(s, lid, "dismiss");
+        CHECK(s.pending_event_id.empty());
+        CHECK(s.stores.at("continental").powder == powder);
+        CHECK(s.player_gold == gold);
+    }
+    // Dismissing the detached commander's letter clears the clarification flag.
+    {
+        CampaignState s = fresh();
+        ensure_logistics_defaults(s);
+        s.progress.lexington_fought = true;
+        s.progress.battles_fought = 1;
+        std::vector<Interrupt> ints;
+        tick_logistics(s, ints);
+        CHECK(s.progress.commander.pending_clarification);
+        s = choose_logistics(s, s.staff.queue.back().id, "dismiss");
+        CHECK(!s.progress.commander.pending_clarification);
+        CHECK(s.staff.queue.back().status == "dismissed");
+    }
+    // Commander orders only ever consume the commander's own letter, and they move army state.
+    {
+        CampaignState s = fresh();
+        ensure_logistics_defaults(s);
+        s.now = from_ymdh(YMDH{1775, 6, 14, 1});  // chapter letter, not a commander letter
+        std::vector<Interrupt> ints;
+        tick_logistics(s, ints);
+        CHECK(s.staff.queue.back().kind == "commander_report");
+        CampaignState t = resolve_commander_request(s, "contest_crossing");
+        CHECK(t.progress.commander.objective == "preserve_force");
+        CHECK(t.staff.queue.back().awaiting_choice);
+        CampaignState u = resolve_commander_request(s, "bogus_action");
+        CHECK(u.staff.queue.back().awaiting_choice);
+    }
+    {
+        CampaignState s = fresh();
+        ensure_logistics_defaults(s);
+        s.progress.lexington_fought = true;
+        s.progress.battles_fought = 1;
+        std::vector<Interrupt> ints;
+        tick_logistics(s, ints);
+        s.armies.at("continental_militia").readiness = 50;
+        s = resolve_commander_request(s, "preserve_force");
+        CHECK(s.progress.commander.objective == "preserve_force");
+        CHECK(s.armies.at("continental_militia").readiness == 60);  // screened force rests
+        CHECK(!s.progress.commander.pending_clarification);
+    }
+    // Declining Knox marks the project declined, not perpetually offered.
+    {
+        CampaignState s = fresh();
+        ensure_logistics_defaults(s);
+        s.progress.chapter_continental = true;
+        s.progress.chapter_washington = true;
+        s.now = from_ymdh(YMDH{1775, 12, 17, 2});
+        std::vector<Interrupt> ints;
+        tick_logistics(s, ints);
+        CHECK(s.progress.knox.status == "offered");
+        const int gold = s.player_gold;
+        s = choose_logistics(s, s.staff.queue.back().id, "dismiss");
+        CHECK(s.progress.knox.status == "declined");
+        CHECK(s.player_gold == gold);
+        CHECK(s.pending_event_id.empty());
+    }
+    // Zero is a real value: exhausted support / readiness must not reset to defaults.
+    {
+        CampaignState s = fresh();
+        ensure_logistics_defaults(s);
+        s.local_support = 0;
+        s.armies.at("continental_militia").readiness = 0;
+        ensure_logistics_defaults(s);
+        CHECK(s.local_support == 0);
+        CHECK(s.armies.at("continental_militia").readiness == 0);
+        CampaignState loaded = deserialize(serialize(s));
+        ensure_logistics_defaults(loaded);
+        CHECK(loaded.local_support == 0);
+        CHECK(loaded.armies.at("continental_militia").readiness == 0);
+    }
+    // Battle expenditure tracks the gated force actually fielded, not the paper roster.
+    {
+        CampaignState s = fresh();
+        ensure_logistics_defaults(s);
+        s.stores["continental"].powder = 20;
+        s.stores["continental"].arms = 5;  // gates 22 roster units down to a handful
+        s.pending_battle = {true, "lexington", "british_regulars", "continental_militia"};
+        s.armies.at("british_regulars").province = "lexington";
+        auto setup = build_battle_setup(s, "lexington");
+        int fielded = 0;
+        for (const auto& kv : setup.sides.at("continental").tickets) fielded += kv.second;
+        CHECK(fielded > 0 && fielded < 10);
+        BattleResult r;
+        r.province_id = "lexington";
+        r.winner = "british";
+        r.objective_holder = "british";
+        r.losses["continental"] = {{"militia", 1}};
+        CampaignState after = apply_battle_result(s, r);
+        CHECK(after.stores.at("continental").powder == 20 - fielded / 2);
+    }
+    // A second capacity investment cannot be charged while the first is still underway,
+    // and a ready repair contact adds serviceable arms to later purchases.
+    {
+        CampaignState s = fresh();
+        ensure_logistics_defaults(s);
+        s.player_gold = 300;
+        s.progress.aftermath_pending = true;
+        std::vector<Interrupt> ints;
+        tick_logistics(s, ints);
+        s = choose_logistics(s, s.staff.queue.back().id, "capacity_investment");
+        CHECK(s.player_gold == 240);
+        CorrespondenceItem second;
+        second.id = "aftermath_manual";
+        second.kind = "request_assistance";
+        second.status = "needs_approval";
+        second.awaiting_choice = true;
+        s.staff.queue.push_back(second);
+        s = choose_logistics(s, "aftermath_manual", "capacity_investment");
+        CHECK(s.player_gold == 240);  // refused: one already underway, no second charge
+        for (int i = 0; i < 50; ++i) {
+            s = advance_hour(s).state;
+            if (s.pending_battle.active) s.pending_battle = {};
+        }
+        CHECK(s.progress.capacity_level == 1);
+        CorrespondenceItem third = second;
+        third.id = "aftermath_manual2";
+        s.staff.queue.push_back(third);
+        s = choose_logistics(s, "aftermath_manual2", "purchase");
+        CHECK(s.staff.queue.back().committed_arms == 6);  // 4 merchant + 2 bench-serviceable
+    }
+    // A full clerk desk slips a purchase by a day instead of processing it instantly.
+    {
+        CampaignState s = fresh();
+        ensure_logistics_defaults(s);
+        s.progress.aftermath_pending = true;
+        std::vector<Interrupt> ints;
+        tick_logistics(s, ints);
+        s.staff.capacity_day_index = s.now.hour_index / 24;
+        s.staff.letters_processed_today = s.staff.capacity_per_day;
+        const int64_t now = s.now.hour_index;
+        s = choose_logistics(s, s.staff.queue.back().id, "purchase");
+        CHECK(s.staff.queue.back().resolve_on_hour == now + 4 + 24);
+    }
+    // The Concord follow-up orders the militia from wherever it ended up, not only Lexington.
+    {
+        CampaignState s = fresh();
+        ensure_logistics_defaults(s);
+        s.progress.aftermath_pending = true;
+        s.progress.lexington_fought = true;
+        s.armies.at("continental_militia").province = "cambridge";
+        std::vector<Interrupt> ints;
+        tick_logistics(s, ints);
+        s = choose_logistics(s, s.staff.queue.back().id, "dismiss");
+        CHECK(s.progress.concord_followup_seeded);
+        bool ordered = !s.armies.at("continental_militia").path.empty();
+        for (const auto& c : s.pending_commands)
+            if (c.payload.army_id == "continental_militia") ordered = true;
+        CHECK(ordered);
+    }
+}
+
+static void test_commander_and_knox_gates() {
+    CampaignState s = fresh();
+    ensure_logistics_defaults(s);
+    s.progress.lexington_fought = true;
+    s.progress.battles_fought = 1;
+    s.progress.aftermath_pending = false;
+    // Clear any leftover awaiting letters.
+    s.staff.queue.clear();
+    s.pending_event_id.clear();
+    std::vector<Interrupt> ints;
+    tick_logistics(s, ints);
+    CHECK(s.progress.commander.pending_clarification);
+    CHECK(!s.staff.queue.empty());
+    s = resolve_commander_request(s, "contest_crossing");
+    CHECK(s.progress.commander.objective == "contest_crossing");
+    CHECK(!s.progress.commander.pending_clarification);
+    // Chapter gate: jump to 14 June 1775.
+    s.now = from_ymdh(YMDH{1775, 6, 14, 1});
+    s.staff.queue.clear();
+    s.pending_event_id.clear();
+    ints.clear();
+    tick_logistics(s, ints);
+    CHECK(s.progress.chapter_continental);
+    CHECK(s.progress.player_role == "continental_field_commander");
+    // Washington perspective after 3 July.
+    s.now = from_ymdh(YMDH{1775, 7, 3, 1});
+    s.staff.queue.clear();
+    ints.clear();
+    tick_logistics(s, ints);
+    CHECK(s.progress.chapter_washington);
+    // Knox offer on/after 17 Dec 1775.
+    s.now = from_ymdh(YMDH{1775, 12, 17, 2});
+    s.staff.queue.clear();
+    s.pending_event_id.clear();
+    ints.clear();
+    tick_logistics(s, ints);
+    CHECK(s.progress.knox.status == "offered");
+    const std::string kid = s.staff.queue.back().id;
+    const int g0 = s.player_gold;
+    s = choose_logistics(s, kid, "knox_support");
+    CHECK(s.progress.knox.status == "underway");
+    CHECK(s.player_gold == g0 - 80);
+    // Not delivered instantly.
+    CHECK(s.progress.knox.pieces == 0);
+}
+
 inline int run_all(Reporter& rep, const std::string& data_dir, const std::string& vector_dir,
                    bool write_golden = false) {
     g_reporter() = &rep;
@@ -642,6 +1113,10 @@ inline int run_all(Reporter& rep, const std::string& data_dir, const std::string
         {"arrival_matches_clock", test_arrival_matches_clock},
         {"ceasefire_lasts_full_day", test_ceasefire_lasts_full_day},
         {"ceasefire_blocks_march", test_ceasefire_blocks_march},
+        {"ceasefire_halts_march_in_progress", test_ceasefire_halts_march_in_progress},
+        {"letter_survives_contact", test_letter_survives_contact},
+        {"escalate_risks_the_ground", test_escalate_risks_the_ground},
+        {"concord_bridge_company", test_concord_bridge_company},
         {"halt_cancels_move", test_halt_cancels_move},
         {"broken_path_does_not_teleport", test_broken_path_does_not_teleport},
         {"monthly_supply_once", test_monthly_supply_once},
@@ -658,6 +1133,9 @@ inline int run_all(Reporter& rep, const std::string& data_dir, const std::string
         {"offense_vassalage_failure", test_offense_vassalage_failure},
         {"defect_battle_participants", test_defect_battle_participants},
         {"surrender_honors_of_war", test_surrender_honors_of_war},
+        {"logistics_loop", test_logistics_loop},
+        {"logistics_edges", test_logistics_edges},
+        {"commander_and_knox_gates", test_commander_and_knox_gates},
     };
     for (auto& c : cases) {
         int before = g_failed();

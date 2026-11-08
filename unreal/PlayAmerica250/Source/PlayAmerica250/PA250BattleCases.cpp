@@ -5,6 +5,7 @@
 #include "ActiveReloadSequencer.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/Engine.h"
+#include "EngineUtils.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/StaticMeshActor.h"
 #include "Engine/World.h"
@@ -468,6 +469,22 @@ void RunConquest(FLog& Log)
 	Log.Check(L.Remaining(B) == 14, TEXT("conquest: equal posts reset the bleed clock"));
 	for (int32 s = 0; s < 10; ++s) L.Bleed(1.f, 5.f, B, 2, C, 1);
 	Log.Check(L.Remaining(C) == 18 && L.Remaining(B) == 14, TEXT("conquest: bleed follows the side holding fewer posts"));
+
+	// Scaled bleed (Battlefront-style): 1 per post of difference, +1 when one side holds every post.
+	Log.Check(FPA250TicketLedger::BleedAmount(1, 2, 3) == 1 && FPA250TicketLedger::BleedAmount(0, 2, 3) == 2
+		&& FPA250TicketLedger::BleedAmount(0, 3, 3) == 4 && FPA250TicketLedger::BleedAmount(3, 0, 3) == 4
+		&& FPA250TicketLedger::BleedAmount(2, 2, 3) == 0 && FPA250TicketLedger::BleedAmount(0, 2, 0) == 1,
+		TEXT("conquest: bleed per 5 s = posts of difference, +1 for holding them all (1 / 2 / 4)"));
+	{
+		FPA250TicketLedger All;
+		All.Pool.Add(B, 96);
+		for (int32 s2 = 0; s2 < 60; ++s2) All.Bleed(1.f, 5.f, B, 0, C, 3, 3);
+		Log.Check(All.Remaining(B) == 96 - 48, FString::Printf(TEXT("conquest: holding all 3 posts drains 48 enemy tickets a minute (%d left of 96)"), All.Remaining(B)));
+		FPA250TicketLedger Low;
+		Low.Pool.Add(B, 3);
+		for (int32 s2 = 0; s2 < 5; ++s2) Low.Bleed(1.f, 5.f, B, 0, C, 3, 3);
+		Log.Check(Low.Remaining(B) == 0 && Low.BleedTicks == 3, TEXT("conquest: bleed never goes below zero"));
+	}
 
 	FPA250TicketLedger Empty;
 	Empty.Pool.Add(B, 1);
@@ -1146,6 +1163,15 @@ void RunAudio(FLog& Log)
 			TEXT("audio: a bayonet charge comes with a cry"));
 	}
 
+	// Hit feedback: a tick for a hit and a thump for a kill (2D, for the shooter), and a marker where his ball landed.
+	Log.Check(FPA250BattleAudio::Pick(TEXT("hit_confirm")) && FPA250BattleAudio::Pick(TEXT("kill_confirm")), TEXT("audio: hit / kill confirmation sounds exist"));
+	{
+		AActor* Miss = AMusketProjectile::SpawnImpactMarker(W.World, FVector(1000.f, 0.f, 50.f), false);
+		AActor* HitM = AMusketProjectile::SpawnImpactMarker(W.World, FVector(1200.f, 0.f, 50.f), true);
+		Log.Check(Miss && HitM && FMath::IsNearlyEqual(Miss->GetLifeSpan(), 1.5f, 0.05f) && HitM->GetActorScale3D().X > Miss->GetActorScale3D().X,
+			TEXT("audio: the player's shots leave a 1.5 s impact marker (bigger + red on a man)"));
+	}
+
 	// A volley is thinned so it doesn't clip: at most 5 shots start in one 80 ms window.
 	FPA250BattleAudio::ResetPlayCounts();
 	int32 Started = 0;
@@ -1243,5 +1269,76 @@ void RunBattleRoad(FLog& Log)
 		Log.Check(APA250BattleGameMode::MusterWave(21, 5, 10, 8, 4) == 2, TEXT("battle road: never more men in the field than tickets left"));
 		Log.Check(APA250BattleGameMode::MusterWave(21, 5, 6, 8, 4) == 0, TEXT("battle road: no arrivals once tickets are spent"));
 	}
+}
+
+void RunScenario(FLog& Log)
+{
+	const FPA250ScenarioFight Lex = APA250BattleGameMode::ResolveScenario(TEXT("lexington_common"), {});
+	Log.Check(!Lex.bContestSingleCrossing && !Lex.bRewardForcePreservation && APA250BattleGameMode::UsesPostBleed(Lex),
+		TEXT("scenario: Lexington keeps three posts and post bleed"));
+
+	const FPA250ScenarioFight Concord = APA250BattleGameMode::ResolveScenario(TEXT("concord_bridge"), {TEXT("woods"), TEXT("bridge_crossing")});
+	Log.Check(Concord.bContestSingleCrossing && !Concord.bRewardForcePreservation,
+		TEXT("scenario: Concord contests one crossing"));
+	const FPA250ScenarioFight BridgeTag = APA250BattleGameMode::ResolveScenario(TEXT(""), {TEXT("bridge_crossing")});
+	Log.Check(BridgeTag.bContestSingleCrossing && !BridgeTag.bRewardForcePreservation,
+		TEXT("scenario: bridge_crossing tag is read without the preset label"));
+
+	const FPA250ScenarioFight Road = APA250BattleGameMode::ResolveScenario(TEXT("battle_road"), {TEXT("return_march")});
+	Log.Check(!Road.bContestSingleCrossing && Road.bRewardForcePreservation && !APA250BattleGameMode::UsesPostBleed(Road),
+		TEXT("scenario: Battle Road rewards force preservation and does not bleed for ground"));
+	const FPA250ScenarioFight RoadTag = APA250BattleGameMode::ResolveScenario(TEXT("lexington_common"), {TEXT("return_march")});
+	Log.Check(RoadTag.bRewardForcePreservation, TEXT("scenario: return_march tag is read even under a generic preset"));
+
+	const FName Kept = APA250BattleGameMode::PreservationWinner(8, 10, 30, 40, TEXT("continental"), TEXT("british"), TEXT("british"));
+	Log.Check(Kept == TEXT("continental"), TEXT("scenario: 8/10 kept beats 30/40 kept"));
+	const FName Tied = APA250BattleGameMode::PreservationWinner(10, 20, 5, 10, TEXT("british"), TEXT("continental"), TEXT("continental"));
+	Log.Check(Tied == TEXT("continental"), TEXT("scenario: equal preservation goes to the defender"));
+
+	FScopedTestWorld W;
+	Log.Check(W.World != nullptr, TEXT("scenario: test world"));
+	if (!W.World)
+	{
+		return;
+	}
+	APA250ControlPoint* Green = W.World->SpawnActor<APA250ControlPoint>(FVector(0.f, 0.f, 0.f), FRotator::ZeroRotator);
+	APA250ControlPoint* House = W.World->SpawnActor<APA250ControlPoint>(FVector(3000.f, 0.f, 0.f), FRotator::ZeroRotator);
+	APA250ControlPoint* Buck = W.World->SpawnActor<APA250ControlPoint>(FVector(-3000.f, 0.f, 0.f), FRotator::ZeroRotator);
+	Log.Check(Green && House && Buck, TEXT("scenario: three posts spawn"));
+	if (!Green || !House || !Buck)
+	{
+		return;
+	}
+	Green->PostId = TEXT("green");
+	House->PostId = TEXT("meetinghouse");
+	Buck->PostId = TEXT("buckman");
+	APA250BattleGameMode::ConfigurePostForScenario(Green, Concord);
+	APA250BattleGameMode::ConfigurePostForScenario(House, Concord);
+	APA250BattleGameMode::ConfigurePostForScenario(Buck, Concord);
+	Log.Check(!Green->IsContestLocked() && Green->GetHolder().IsNone(), TEXT("scenario: the crossing starts neutral and can be taken"));
+	Log.Check(House->IsContestLocked() && House->GetHolder() == TEXT("continental"), TEXT("scenario: the magazine is locked for the provincials"));
+	Log.Check(Buck->IsContestLocked() && Buck->GetHolder() == TEXT("british"), TEXT("scenario: the foothold is locked for the regulars"));
+	const bool bHouseMoved = House->ApplyCapturePressure(TEXT("british"), 6, 0, 30.f);
+	Log.Check(!bHouseMoved && House->GetHolder() == TEXT("continental") && House->GetCaptureProgress() == 0.f,
+		TEXT("scenario: a locked post ignores a full capture push"));
+	const bool bGreenMoved = Green->ApplyCapturePressure(TEXT("continental"), 4, 0, 10.f);
+	Log.Check(bGreenMoved && Green->GetHolder() == TEXT("continental"), TEXT("scenario: the crossing changes hands"));
+	Log.Check(Green->GetObjectiveTitle() == TEXT("North Bridge"), TEXT("scenario: the crossing post is the North Bridge"));
+	const FPA250CreekBridge Span = APA250BattleGameMode::PlanCreekBridge(FVector(100.f, 200.f, 50.f));
+	Log.Check(Span.SpansCreek(), FString::Printf(TEXT("scenario: deck %.0f cm crosses a %.0f cm creek"), Span.DeckSizeCm.X, Span.CreekSizeCm.X));
+	const int32 Pieces = APA250BattleGameMode::SpawnCreekBridge(W.World, FVector(0.f, 0.f, 0.f));
+	int32 Creek = 0, Deck = 0;
+	for (TActorIterator<AStaticMeshActor> It(W.World); It; ++It)
+	{
+		Creek += It->Tags.Contains(TEXT("PA250Creek")) ? 1 : 0;
+		Deck += It->Tags.Contains(TEXT("PA250Bridge")) ? 1 : 0;
+	}
+	Log.Check(Pieces == 6 && Creek == 3 && Deck == 3, FString::Printf(TEXT("scenario: creek and bridge placed (%d pieces, %d water, %d span)"), Pieces, Creek, Deck));
+
+	APA250BattleGameMode::ConfigurePostForScenario(Green, Road);
+	APA250BattleGameMode::ConfigurePostForScenario(House, Road);
+	APA250BattleGameMode::ConfigurePostForScenario(Buck, Road);
+	Log.Check(!Green->IsContestLocked() && Green->GetHolder() == TEXT("british") && House->GetHolder().IsNone() && Buck->GetHolder().IsNone(),
+		TEXT("scenario: Battle Road holds the road and leaves the flanks open"));
 }
 } // namespace PA250BattleCases

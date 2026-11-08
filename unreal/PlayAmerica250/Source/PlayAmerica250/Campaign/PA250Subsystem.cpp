@@ -1,5 +1,7 @@
 #include "PA250Subsystem.h"
+#include "Engine/Engine.h"
 #include "Engine/GameInstance.h"
+#include "Engine/World.h"
 #include "HAL/FileManager.h"
 #include "HAL/PlatformFileManager.h"
 #include "Kismet/GameplayStatics.h"
@@ -31,7 +33,7 @@ void UPA250Subsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
 	Super::Initialize(Collection);
 	bPaused = true;
-	SpeedIndex = 0;
+	SpeedIndex = FPA250CampaignSpeed::DefaultIndex;
 	HourAccumulator = 0.f;
 }
 
@@ -62,7 +64,7 @@ void UPA250Subsystem::SetPaused(bool bInPaused)
 
 void UPA250Subsystem::SetSpeedIndex(int32 Idx)
 {
-	SpeedIndex = FMath::Clamp(Idx, 0, 4);
+	SpeedIndex = FPA250CampaignSpeed::Clamp(Idx);
 }
 
 bool UPA250Subsystem::IsTickable() const
@@ -81,7 +83,7 @@ void UPA250Subsystem::Tick(float DeltaTime)
 	{
 		return;
 	}
-	HourAccumulator += DeltaTime * HoursPerSecond[SpeedIndex];
+	HourAccumulator += DeltaTime * FPA250CampaignSpeed::HoursAt(SpeedIndex);
 	int32 Steps = 0;
 	while (HourAccumulator >= 1.f && Steps < MaxHoursPerFrame)
 	{
@@ -107,6 +109,11 @@ void UPA250Subsystem::RouteInterrupt(const pa250::TickOutput& Out)
 		if (I == pa250::Interrupt::ArmiesInContact)
 		{
 			// Existing battle-launch flow: UI shows Fight; autoplay presses it.
+			break;
+		}
+		if (I == pa250::Interrupt::EventPopup)
+		{
+			// Staff briefing / correspondence: UI shows the letter panel; clock stays paused.
 			break;
 		}
 	}
@@ -291,6 +298,104 @@ bool UPA250Subsystem::PrepareDebugBattle(FString& OutError)
 bool UPA250Subsystem::ApplyBattleResult(const pa250::BattleResult& Result, FString& OutError)
 {
 	PA250_FORWARD(Controller.finish_battle(Result, Err))
+}
+
+bool UPA250Subsystem::ChooseLogistics(const FString& LetterId, const FString& Choice, FString& OutError)
+{
+	const auto Errs = Controller.choose_logistics_action(ToStd(LetterId), ToStd(Choice));
+	if (!Errs.empty())
+	{
+		OutError = ToFStr(Errs.front());
+		return false;
+	}
+	return true;
+}
+
+bool UPA250Subsystem::ResolveCommander(const FString& Action, FString& OutError)
+{
+	const auto Errs = Controller.resolve_commander_action(ToStd(Action));
+	if (!Errs.empty())
+	{
+		OutError = ToFStr(Errs.front());
+		return false;
+	}
+	return true;
+}
+
+bool UPA250Subsystem::HasStaffEvent() const { return Controller.has_staff_event(); }
+
+FString UPA250Subsystem::GetPendingLetterId() const
+{
+	const pa250::CampaignState& St = Controller.state();
+	if (!St.pending_event_id.empty())
+	{
+		return ToFStr(St.pending_event_id);
+	}
+	for (const auto& C : St.staff.queue)
+	{
+		if (C.awaiting_choice)
+		{
+			return ToFStr(C.id);
+		}
+	}
+	return FString();
+}
+
+namespace
+{
+const pa250::CorrespondenceItem* FindAwaitingLetter(const pa250::CampaignState& St)
+{
+	const std::string Want = St.pending_event_id;
+	for (const auto& C : St.staff.queue)
+	{
+		if (!Want.empty() && C.id == Want)
+		{
+			return &C;
+		}
+	}
+	for (const auto& C : St.staff.queue)
+	{
+		if (C.awaiting_choice)
+		{
+			return &C;
+		}
+	}
+	return nullptr;
+}
+}
+
+bool UPA250Subsystem::IsPendingLetterAwaitingChoice() const
+{
+	const pa250::CorrespondenceItem* C = FindAwaitingLetter(Controller.state());
+	return C && C->awaiting_choice;
+}
+
+FString UPA250Subsystem::GetPendingLetterSubject() const
+{
+	const pa250::CorrespondenceItem* C = FindAwaitingLetter(Controller.state());
+	return C ? ToFStr(C->subject) : FString();
+}
+
+FString UPA250Subsystem::GetPendingLetterBody() const
+{
+	const pa250::CorrespondenceItem* C = FindAwaitingLetter(Controller.state());
+	if (!C)
+	{
+		return FString();
+	}
+	FString Text = ToFStr(C->body);
+	if (!C->reason.empty())
+	{
+		Text += TEXT("\n\n");
+		Text += ToFStr(C->reason);
+	}
+	return Text;
+}
+
+FString UPA250Subsystem::GetPendingLetterKind() const
+{
+	const pa250::CorrespondenceItem* C = FindAwaitingLetter(Controller.state());
+	return C ? ToFStr(C->kind) : FString();
 }
 bool UPA250Subsystem::BeginDiplomacy(const FString& Faction, FString& OutError)
 {

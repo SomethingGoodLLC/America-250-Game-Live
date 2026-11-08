@@ -97,6 +97,9 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "Team")
 	void ApplyFactionVisuals();
+	/** Stable for the life of one man, including the soldier who replaces him when he falls. */
+	void SetClothingSeed(uint32 Seed);
+	uint32 GetClothingSeed() const { return bClothingSeedSet ? ClothingSeed : 0; }
 	bool IsUsingPeriodSoldier() const { return bUsesPeriodSoldier; }
 
 	UFUNCTION(BlueprintCallable, Category = "Team")
@@ -143,6 +146,9 @@ public:
 	/** Look speed while aiming down sights, relative to hip. */
 	UPROPERTY(EditAnywhere, Category = "Input")
 	float AdsLookScale = 0.6f;
+	/** Horizontal look relative to vertical. Trackpads and mice travel further sideways, so 1:1 turned too fast. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera")
+	float YawLookScale = 0.6f;
 	/** HUD shows the new sensitivity briefly after [ or ]. */
 	bool ShowSensitivityToast() const { return SensitivityToastTimer > 0.f; }
 
@@ -235,7 +241,11 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<UAnimSequence> SoldierRun;
 	bool bUsesPeriodSoldier = false;
+	uint32 ClothingSeed = 0;
+	bool bClothingSeedSet = false;
 	void UpdateSoldierAnimation();
+	/** Local player only: re-take mouse capture so mouse/trackpad look works without a click. */
+	void EnsureGameMouseCapture();
 	bool bAiming = false;
 	bool bIsDead = false;
 	bool bSprinting = false;

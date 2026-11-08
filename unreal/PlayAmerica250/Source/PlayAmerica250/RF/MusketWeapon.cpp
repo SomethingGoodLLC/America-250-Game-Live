@@ -6,6 +6,7 @@
 #include "NiagaraFunctionLibrary.h"
 #include "NiagaraSystem.h"
 #include "PA250ThirdPartyAssets.h"
+#include "PA250Smoke.h"
 #include "PA250BattleAudio.h"
 #include "GameFramework/ProjectileMovementComponent.h"
 #include "UObject/ConstructorHelpers.h"
@@ -16,6 +17,9 @@
 #include "Animation/AnimSingleNodeInstance.h"
 #include "AnimationRuntime.h"
 #include "GameFramework/Pawn.h"
+#include "RFCharacter.h"
+#include "PA250SoldierAnimInstance.h"
+#include "Engine/SkeletalMeshSocket.h"
 
 AMusketWeapon::AMusketWeapon()
 {
@@ -405,6 +409,7 @@ void AMusketWeapon::Tick(float DeltaSeconds)
 		SyncStateFromSequencer();
 	}
 	UpdateVisuals(DeltaSeconds);
+	PoseSupportHand();
 }
 
 float AMusketWeapon::ReloadAnimAlpha(EActiveReloadPhase Phase, float PhaseProgress)
@@ -469,6 +474,65 @@ void AMusketWeapon::UpdateVisuals(float DeltaSeconds)
 	}
 }
 
+void AMusketWeapon::PoseSupportHand()
+{
+	// The soldier pack only has unarmed idle/walk/run, so the left arm is solved onto the musket's
+	// own left-hand spot. This only publishes the target: the solve runs inside the body's pose
+	// evaluation (UPA250SoldierAnimInstance). Writing the body's component-space bone buffer from
+	// here raced the parallel animation task and crashed skinning on freshly spawned soldiers.
+	ARFCharacter* Soldier = Cast<ARFCharacter>(GetOwner());
+	USkeletalMeshComponent* Body = Soldier ? Soldier->GetMesh() : nullptr;
+	UPA250SoldierAnimInstance* BodyAnim = Body ? Cast<UPA250SoldierAnimInstance>(Body->GetAnimInstance()) : nullptr;
+	if (!BodyAnim) return;
+	const USkinnedAsset* Skinned = Body->GetSkinnedAsset();
+	if (Soldier->IsDead() || !Soldier->IsUsingPeriodSoldier() || !AnimatedMesh || !Skinned
+		|| GetAttachParentActor() != Soldier || AnimatedMesh->GetBoneIndex(TEXT("b_gun_LeftHandSpot")) == INDEX_NONE)
+	{
+		BodyAnim->ClearSupportHandTarget();
+		return;
+	}
+	const FReferenceSkeleton& Ref = Skinned->GetRefSkeleton();
+	const int32 HandRef = Ref.FindBoneIndex(TEXT("hand_l"));
+	if (HandRef == INDEX_NONE)
+	{
+		BodyAnim->ClearSupportHandTarget();
+		return;
+	}
+
+	FPA250SupportHandTarget T;
+	T.bEnabled = true;
+	// The musket root is snapped to this socket/bone; a real socket adds its own offset.
+	const FName GripName = RootComponent->GetAttachSocketName();
+	T.GripBone = GripName;
+	if (const USkeletalMeshSocket* Socket = Body->GetSocketByName(GripName))
+	{
+		T.GripBone = Socket->BoneName;
+		T.GripSocketLocal = Socket->GetSocketLocalTransform();
+	}
+	const FTransform BodyToWorld = Body->GetComponentTransform();
+	const FVector SpotWorld = AnimatedMesh->GetBoneLocation(TEXT("b_gun_LeftHandSpot"), EBoneSpaces::WorldSpace);
+	T.SpotFromGripCS = BodyToWorld.InverseTransformVector(SpotWorld - GetActorLocation());
+	T.GunUpCS = BodyToWorld.InverseTransformVectorNoScale(GetActorUpVector());
+	T.PoleFromShoulderCS = BodyToWorld.InverseTransformVectorNoScale(-Soldier->GetActorRightVector()) * 40.f
+		+ BodyToWorld.InverseTransformVectorNoScale(FVector(0.f, 0.f, -30.f));
+
+	// Which bone axis faced up in the bind pose is the back of the hand. Keep that toward the barrel.
+	const FTransform RefHand = FAnimationRuntime::GetComponentSpaceTransformRefPose(Ref, HandRef);
+	float Best = -2.f;
+	for (const FVector Axis : {FVector::XAxisVector, FVector::YAxisVector, FVector::ZAxisVector,
+		-FVector::XAxisVector, -FVector::YAxisVector, -FVector::ZAxisVector})
+	{
+		const float D = FVector::DotProduct(RefHand.GetRotation().RotateVector(Axis), FVector::UpVector);
+		if (D > Best) { Best = D; T.HandBackAxis = Axis; }
+	}
+	if (T.SpotFromGripCS.ContainsNaN() || T.GunUpCS.ContainsNaN() || T.PoleFromShoulderCS.ContainsNaN())
+	{
+		BodyAnim->ClearSupportHandTarget();
+		return;
+	}
+	BodyAnim->SetSupportHandTarget(T);
+}
+
 float AMusketWeapon::GetReloadProgress() const
 {
 	if (State == EMusketState::Loaded)
@@ -490,5 +554,10 @@ void AMusketWeapon::SpawnMuzzleSmoke(const FVector& Location, const FRotator& Ro
 	if (UNiagaraSystem* System = Smoke.Get())
 	{
 		UNiagaraFunctionLibrary::SpawnSystemAtLocation(GetWorld(), System, Location, Rotation);
+	}
+	// Lingering black-powder smoke (visual only; absent without a renderer).
+	if (UPA250SmokeSubsystem* Bank = GetWorld() ? GetWorld()->GetSubsystem<UPA250SmokeSubsystem>() : nullptr)
+	{
+		Bank->AddShot(Location, Rotation.Vector());
 	}
 }

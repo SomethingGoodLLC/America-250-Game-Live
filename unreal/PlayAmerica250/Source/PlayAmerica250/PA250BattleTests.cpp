@@ -39,6 +39,7 @@ PA250_BATTLE_TEST(FPA250BattleMorale, "PA250.Battle.Morale", RunMorale)
 PA250_BATTLE_TEST(FPA250BattleTactics, "PA250.Battle.Tactics", RunTactics)
 PA250_BATTLE_TEST(FPA250BattleAudio, "PA250.Battle.Audio", RunAudio)
 PA250_BATTLE_TEST(FPA250BattleBattleRoad, "PA250.Battle.BattleRoad", RunBattleRoad)
+PA250_BATTLE_TEST(FPA250BattleScenario, "PA250.Battle.Scenario", RunScenario)
 
 #undef PA250_BATTLE_TEST
 

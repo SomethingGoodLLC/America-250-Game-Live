@@ -261,6 +261,18 @@ std::vector<MoveStep> advance_movement(CampaignState& s) {
             detail::add_log(s, "army " + a.id + " path broken");
             continue;
         }
+        // A ceasefire agreed after the order was given still bars the crossing.
+        // Friendly stretches of the path continue; the army halts on the edge that would enter.
+        if (a.hours_into_edge + 1 >= e.march_hours) {
+            std::string blocked;
+            if (ceasefire_blocks_path(s, a, {edge_id}, blocked)) {
+                a.path.clear();
+                a.hours_into_edge = 0;
+                detail::add_log(s, "army " + a.id + " halted at " + a.province +
+                                       " (ceasefire_blocks_entry: " + blocked + ")");
+                continue;
+            }
+        }
         MoveStep st;
         st.army_id = a.id;
         st.from = a.province;
@@ -325,6 +337,7 @@ TickOutput advance_hour(const CampaignState& in) {
     emit_daily_ai(s);
     decay_grievance(s);
     monthly_supply(s);
+    tick_logistics(s, out.interrupts);
 
     // Snapshot provinces before movement for opposite-edge contact.
     std::map<std::string, std::string> province_before;
@@ -425,9 +438,10 @@ TickOutput advance_hour(const CampaignState& in) {
     // Deterministic sort of interrupts and battles.
     std::sort(out.interrupts.begin(), out.interrupts.end(),
               [](Interrupt a, Interrupt b) { return static_cast<uint8_t>(a) < static_cast<uint8_t>(b); });
+    out.interrupts.erase(std::unique(out.interrupts.begin(), out.interrupts.end()), out.interrupts.end());
     std::sort(out.battles.begin(), out.battles.end(),
               [](const BattleSetup& a, const BattleSetup& b) { return a.province_id < b.province_id; });
-    // Deduplicate battles by province.
+    // Deduplicate battles by province. Contact takes priority over EventPopup for the same hour.
     {
         std::vector<BattleSetup> uniq;
         std::string last;

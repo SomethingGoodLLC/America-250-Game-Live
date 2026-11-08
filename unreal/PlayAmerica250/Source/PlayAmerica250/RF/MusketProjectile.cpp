@@ -1,6 +1,7 @@
 #include "MusketProjectile.h"
 #include "Components/SphereComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Engine/StaticMeshActor.h"
 #include "GameFramework/ProjectileMovementComponent.h"
 #include "Kismet/GameplayStatics.h"
 #include "GameFramework/PlayerController.h"
@@ -86,6 +87,17 @@ void AMusketProjectile::OnHit(UPrimitiveComponent* HitComp, AActor* OtherActor, 
 	{
 		Destroy();
 		return;
+	}
+	// The player sees where his own ball went - the feedback that teaches the ballistics.
+	if (const APlayerController* LocalPC = GetWorld() ? GetWorld()->GetFirstPlayerController() : nullptr)
+	{
+		if (GetInstigator() && GetInstigator() == LocalPC->GetPawn())
+		{
+			const ARFCharacter* VictimChar = Cast<ARFCharacter>(OtherActor);
+			const ARFCharacter* ShooterChar = Cast<ARFCharacter>(GetInstigator());
+			const bool bEnemy = VictimChar && ShooterChar && VictimChar->FactionId != ShooterChar->FactionId;
+			SpawnImpactMarker(GetWorld(), Hit.ImpactPoint, bEnemy);
+		}
 	}
 	// Impact sound: a dull thud on a man, a dirt burst on anything else.
 	FPA250BattleAudio::PlayAt(this, Cast<ARFCharacter>(OtherActor) ? TEXT("impact_body") : TEXT("impact_ground"),
@@ -177,4 +189,29 @@ void AMusketProjectile::UpdateTracer()
 	TracerMesh->SetRelativeLocation(FVector(-0.5f * Len, 0.f, 0.f));
 	TracerMesh->SetRelativeScale3D(FVector(TracerThicknessCm / 100.f, TracerThicknessCm / 100.f, Len / 100.f));
 	TracerMesh->SetVisibility(true);
+}
+
+AActor* AMusketProjectile::SpawnImpactMarker(UWorld* World, const FVector& At, bool bHitMan)
+{
+	if (!World) return nullptr;
+	FActorSpawnParameters P;
+	P.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	AStaticMeshActor* M = World->SpawnActor<AStaticMeshActor>(At, FRotator::ZeroRotator, P);
+	if (!M) return nullptr;
+	UStaticMeshComponent* C = M->GetStaticMeshComponent();
+	C->SetMobility(EComponentMobility::Movable);
+	C->SetStaticMesh(LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Sphere.Sphere")));
+	C->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	C->SetCastShadow(false);
+	C->SetWorldScale3D(FVector(bHitMan ? 0.3f : 0.2f));
+	if (UMaterialInterface* Glow = LoadObject<UMaterialInterface>(nullptr, TEXT("/Engine/EngineMaterials/EmissiveMeshMaterial.EmissiveMeshMaterial")))
+	{
+		if (UMaterialInstanceDynamic* MID = UMaterialInstanceDynamic::Create(Glow, M))
+		{
+			MID->SetVectorParameterValue(TEXT("Color"), bHitMan ? FLinearColor(12.f, 0.6f, 0.4f) : FLinearColor(6.f, 6.f, 5.f));
+			C->SetMaterial(0, MID);
+		}
+	}
+	M->SetLifeSpan(1.5f);
+	return M;
 }

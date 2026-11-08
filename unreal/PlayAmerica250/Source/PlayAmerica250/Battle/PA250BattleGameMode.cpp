@@ -5,7 +5,9 @@
 #include "Campaign/PA250Autoplay.h"
 #include "Campaign/PA250Subsystem.h"
 #include "Engine/Engine.h"
+#include "Engine/StaticMeshActor.h"
 #include "EngineUtils.h"
+#include "Materials/MaterialInstanceDynamic.h"
 #include "UnrealClient.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PlayerController.h"
@@ -27,6 +29,7 @@
 #include "PA250BattleHUD.h"
 #include "PA250BotController.h"
 #include "PA250BotTuning.h"
+#include "PA250BattleAudio.h"
 #include "PA250CombatProfiles.h"
 #include "PA250ControlPoint.h"
 #include "PA250FactionVisuals.h"
@@ -35,6 +38,7 @@
 #include "PA250SpawnScreen.h"
 #include "PA250VolleyCoordinator.h"
 #include "PA250WeaponTuning.h"
+#include "PA250Smoke.h"
 #include "RFCharacter.h"
 #include "RFHealthComponent.h"
 #include "TimerManager.h"
@@ -90,6 +94,13 @@ static const FPreviewCam GPreviewCams[] = {
 	// Flag shots are placed relative to their post at runtime (Loc/Rot unused) and keep the HUD.
 	{TEXT("Shot_FlagGreen"), TEXT("flag_green"), FVector::ZeroVector, FRotator::ZeroRotator, 45.f},
 	{TEXT("Shot_FlagMeetinghouse"), TEXT("flag_meetinghouse"), FVector::ZeroVector, FRotator::ZeroRotator, 45.f},
+	// Close-up of the cover wall nearest Loc (placed at runtime from the wall's collision box).
+	{TEXT("Shot_WallE"), TEXT("wall_east"), FVector(6100.f, -1500.f, 0.f), FRotator::ZeroRotator, 55.f},
+	// Behind Patriot wall W1, looking over it at flag B on the Green.
+	{TEXT("Shot_WallPatriot"), TEXT("wall_patriot"), FVector(-4735.f, -253.f, 0.f), FRotator::ZeroRotator, 60.f},
+	// -PA250Preview=smoke: scripted volleys west of the Green, then fresh smoke and the drifting bank.
+	{TEXT("Shot_SmokeFresh"), TEXT("smoke_fresh"), FVector::ZeroVector, FRotator::ZeroRotator, 60.f},
+	{TEXT("Shot_SmokeBank"), TEXT("smoke_bank"), FVector::ZeroVector, FRotator::ZeroRotator, 60.f},
 };
 }
 
@@ -121,9 +132,11 @@ void APA250BattleGameMode::NotifyProjectileHit(ARFCharacter* Shooter, ARFCharact
 	const APlayerController* PC = GetWorld() ? GetWorld()->GetFirstPlayerController() : nullptr;
 	if (Hud && PC && Shooter && Shooter == PC->GetPawn())
 	{
-		Hud->ShowHitmarker(bKill);
+		const float DistM = FVector::Dist(Shooter->GetActorLocation(), Victim->GetActorLocation()) / 100.f;
+		Hud->ShowHitmarker(bKill, Damage, DistM);
+		// Confirmation you hear even when the target is 80 m away: a tick for a hit, a thump for a kill.
+		FPA250BattleAudio::Play2D(this, bKill ? TEXT("kill_confirm") : TEXT("hit_confirm"));
 	}
-	(void)Damage;
 }
 
 FVector APA250BattleGameMode::GetRearPoint(FName Faction, const FVector& Fallback) const
@@ -199,6 +212,197 @@ void APA250BattleGameMode::GatherPosts()
 		const FName NB = B.IsValid() ? B->PostId : NAME_None;
 		return NA.LexicalLess(NB);
 	});
+}
+
+FPA250ScenarioFight APA250BattleGameMode::ResolveScenario(const FString& Preset, const TArray<FString>& TerrainTags)
+{
+	FPA250ScenarioFight Fight;
+	const bool bBridge = Preset == TEXT("concord_bridge") || TerrainTags.Contains(TEXT("bridge_crossing"));
+	const bool bRoad = Preset == TEXT("battle_road") || TerrainTags.Contains(TEXT("return_march"));
+	// The preset wins when a stray tag disagrees. A crossing fight is not also a preservation fight.
+	Fight.bContestSingleCrossing = bBridge && Preset != TEXT("battle_road");
+	Fight.bRewardForcePreservation = bRoad && !Fight.bContestSingleCrossing;
+	return Fight;
+}
+
+void APA250BattleGameMode::ConfigurePostForScenario(APA250ControlPoint* P, const FPA250ScenarioFight& Fight)
+{
+	if (!P)
+	{
+		return;
+	}
+	P->SetContestLocked(false);
+	P->SetObjectiveTitle(FString());
+	if (Fight.bContestSingleCrossing)
+	{
+		// One contested crossing. The magazine and the search foothold stay as they are.
+		P->MarkHoldersAssigned();
+		if (P->PostId == TEXT("green"))
+		{
+			P->DebugSetHolder(NAME_None);
+			P->SetObjectiveTitle(TEXT("North Bridge"));
+		}
+		else if (P->PostId == TEXT("meetinghouse"))
+		{
+			P->DebugSetHolder(TEXT("continental"));
+			P->SetObjectiveTitle(TEXT("Magazine"));
+		}
+		else if (P->PostId == TEXT("buckman"))
+		{
+			P->DebugSetHolder(TEXT("british"));
+			P->SetObjectiveTitle(TEXT("Foothold"));
+		}
+		if (P->PostId != Fight.CrossingPostId)
+		{
+			P->SetContestLocked(true);
+		}
+	}
+	else if (Fight.bRewardForcePreservation)
+	{
+		P->MarkHoldersAssigned();
+		// Return march: the column holds the road; the flanks start open. Posts do not decide the clock.
+		if (P->PostId == TEXT("green"))
+		{
+			P->DebugSetHolder(TEXT("british"));
+		}
+		else if (P->PostId == TEXT("meetinghouse") || P->PostId == TEXT("buckman"))
+		{
+			P->DebugSetHolder(NAME_None);
+		}
+	}
+}
+
+FName APA250BattleGameMode::PreservationWinner(int32 RemainingA, int32 InitialA, int32 RemainingB, int32 InitialB,
+	FName SideA, FName SideB, FName DefenderOnTie)
+{
+	auto Kept = [](int32 Remaining, int32 Initial) -> int64 {
+		if (Initial <= 0)
+		{
+			return 0;
+		}
+		return static_cast<int64>(FMath::Max(0, Remaining)) * 1000 / Initial;
+	};
+	const int64 A = Kept(RemainingA, InitialA);
+	const int64 B = Kept(RemainingB, InitialB);
+	if (A > B)
+	{
+		return SideA;
+	}
+	if (B > A)
+	{
+		return SideB;
+	}
+	return DefenderOnTie;
+}
+
+FPA250CreekBridge APA250BattleGameMode::PlanCreekBridge(const FVector& GroundPoint)
+{
+	FPA250CreekBridge Span;
+	Span.CreekCenter = GroundPoint + FVector(0.f, 0.f, -25.f);
+	Span.DeckCenter = GroundPoint + FVector(0.f, 0.f, 14.f);
+	return Span;
+}
+
+int32 APA250BattleGameMode::SpawnCreekBridge(UWorld* World, const FVector& GroundPoint)
+{
+	if (!World)
+	{
+		return 0;
+	}
+	UStaticMesh* Cube = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube"));
+	UMaterialInterface* Base = LoadObject<UMaterialInterface>(nullptr, TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
+	if (!Cube)
+	{
+		return 0;
+	}
+	const FPA250CreekBridge Span = PlanCreekBridge(GroundPoint);
+	auto Place = [&](const FVector& Center, const FVector& SizeCm, const FLinearColor& Color, bool bBlock, const TCHAR* Tag) -> bool {
+		FActorSpawnParameters Params;
+		Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+		AStaticMeshActor* A = World->SpawnActor<AStaticMeshActor>(Center, FRotator::ZeroRotator, Params);
+		if (!A)
+		{
+			return false;
+		}
+		A->Tags.Add(Tag);
+		UStaticMeshComponent* Mesh = A->GetStaticMeshComponent();
+		Mesh->SetMobility(EComponentMobility::Movable);
+		Mesh->SetStaticMesh(Cube);
+		Mesh->SetWorldScale3D(SizeCm / 100.f);
+		Mesh->SetCollisionEnabled(bBlock ? ECollisionEnabled::QueryAndPhysics : ECollisionEnabled::NoCollision);
+		if (bBlock)
+		{
+			Mesh->SetCollisionProfileName(TEXT("BlockAll"));
+		}
+		if (Base)
+		{
+			UMaterialInstanceDynamic* Mid = UMaterialInstanceDynamic::Create(Base, Mesh);
+			Mid->SetVectorParameterValue(TEXT("Color"), Color);
+			Mesh->SetMaterial(0, Mid);
+		}
+		return true;
+	};
+
+	const FVector Creek = Span.CreekSizeCm;
+	const FVector Deck = Span.DeckSizeCm;
+	const float BankLen = (Creek.Y - Deck.Y) * 0.5f;
+	const float BankOff = Deck.Y * 0.5f + BankLen * 0.5f;
+	const FLinearColor Water(0.15f, 0.32f, 0.38f);
+	const FLinearColor Plank(0.42f, 0.28f, 0.14f);
+	const FLinearColor Rail(0.28f, 0.18f, 0.09f);
+	int32 N = 0;
+	// Water showing under the planks, and two banks that close the creek on either side of the span.
+	N += Place(Span.CreekCenter, FVector(Creek.X, Deck.Y, 30.f), Water, false, TEXT("PA250Creek")) ? 1 : 0;
+	N += Place(Span.CreekCenter + FVector(0.f, BankOff, 10.f), FVector(Creek.X, BankLen, 90.f), Water, true, TEXT("PA250Creek")) ? 1 : 0;
+	N += Place(Span.CreekCenter + FVector(0.f, -BankOff, 10.f), FVector(Creek.X, BankLen, 90.f), Water, true, TEXT("PA250Creek")) ? 1 : 0;
+	N += Place(Span.DeckCenter, Deck, Plank, true, TEXT("PA250Bridge")) ? 1 : 0;
+	const float RailZ = Span.DeckCenter.Z + Deck.Z * 0.5f + 30.f;
+	N += Place(FVector(Span.DeckCenter.X, Span.DeckCenter.Y + Deck.Y * 0.5f, RailZ), FVector(Deck.X, 14.f, 70.f), Rail, false, TEXT("PA250Bridge")) ? 1 : 0;
+	N += Place(FVector(Span.DeckCenter.X, Span.DeckCenter.Y - Deck.Y * 0.5f, RailZ), FVector(Deck.X, 14.f, 70.f), Rail, false, TEXT("PA250Bridge")) ? 1 : 0;
+	UE_LOG(LogTemp, Display, TEXT("PA250 creek bridge: %d pieces, deck %.0f cm across a %.0f cm creek"),
+		N, Deck.X, Creek.X);
+	return N;
+}
+
+void APA250BattleGameMode::ApplyScenarioPreset()
+{
+	TArray<FString> Tags;
+	Tags.Reserve(static_cast<int32>(Setup.terrain_tags.size()));
+	for (const std::string& Tag : Setup.terrain_tags)
+	{
+		Tags.Add(UTF8_TO_TCHAR(Tag.c_str()));
+	}
+	const FString Preset = UTF8_TO_TCHAR(Setup.scenario_preset.c_str());
+	ScenarioFight = ResolveScenario(Preset, Tags);
+	for (const TWeakObjectPtr<APA250ControlPoint>& WP : Posts)
+	{
+		ConfigurePostForScenario(WP.Get(), ScenarioFight);
+	}
+	if (ScenarioFight.bContestSingleCrossing)
+	{
+		if (APA250ControlPoint* Green = FindGreenPost())
+		{
+			// The post actor sits above the ground. The creek and the planks are on the ground under it.
+			SpawnCreekBridge(GetWorld(), Green->GetActorLocation() + FVector(0.f, 0.f, -140.f));
+		}
+	}
+	UE_LOG(LogTemp, Display, TEXT("PA250 battle scenario_preset=%s province=%s crossing=%d preserve=%d tags=%d"),
+		*Preset, UTF8_TO_TCHAR(Setup.province_id.c_str()), ScenarioFight.bContestSingleCrossing ? 1 : 0,
+		ScenarioFight.bRewardForcePreservation ? 1 : 0, Tags.Num());
+}
+
+float APA250BattleGameMode::GetCampaignConfidencePressure(FName Faction) const
+{
+	const auto It = Setup.sides.find(TCHAR_TO_UTF8(*Faction.ToString()));
+	if (It == Setup.sides.end())
+	{
+		return 0.f;
+	}
+	// High campaign morale → less pressure; low morale / readiness → more. Caps keep battlefield
+	// Steady/Shaken/Rout as the primary system.
+	const float Morale01 = FMath::Clamp(It->second.morale / 100.f, 0.f, 1.f);
+	const float Ready01 = FMath::Clamp(It->second.readiness / 100.f, 0.f, 1.f);
+	return FMath::Clamp((1.f - Morale01) * 0.2f + (1.f - Ready01) * 0.1f, 0.f, 0.35f);
 }
 
 void APA250BattleGameMode::EnsureInitialized()
@@ -291,6 +495,7 @@ void APA250BattleGameMode::EnsureInitialized()
 		}
 	}
 	GatherPosts();
+	ApplyScenarioPreset();
 	{
 		const float PostR = Tuning ? Tuning->Values.Conquest.PostRadius : 1000.f;
 		const float CapS = Tuning ? Tuning->Values.Conquest.CaptureSeconds : 3.5f;
@@ -319,6 +524,14 @@ void APA250BattleGameMode::BeginPlay()
 	EnsureInitialized();
 	StartTime = GetWorld()->GetTimeSeconds();
 	Banner = FString::Printf(TEXT("Battle of %s"), UTF8_TO_TCHAR(Setup.province_name.c_str()));
+	if (ScenarioFight.bContestSingleCrossing)
+	{
+		Banner += TEXT(" — hold the crossing");
+	}
+	else if (ScenarioFight.bRewardForcePreservation)
+	{
+		Banner += TEXT(" — preserve your force");
+	}
 
 	if (bAutoplayBots)
 	{
@@ -475,6 +688,29 @@ void APA250BattleGameMode::MaybeStartPreviewCapture()
 		return;
 	}
 	PreviewLabel = PreviewLabel.TrimStartAndEnd().ToLower();
+	if (PreviewLabel == TEXT("smoke"))
+	{
+		// Three 15-man volleys, 3 s apart, from a line west of the Green firing east (visual only).
+		for (int32 V = 0; V < 3; ++V)
+		{
+			FTimerHandle Volley;
+			GetWorldTimerManager().SetTimer(Volley, FTimerDelegate::CreateWeakLambda(this, [this]() {
+				UPA250SmokeSubsystem* Bank = GetWorld()->GetSubsystem<UPA250SmokeSubsystem>();
+				const APA250ControlPoint* Green = nullptr;
+				for (const TWeakObjectPtr<APA250ControlPoint>& WP : Posts)
+					if (WP.IsValid() && WP->PostId == TEXT("green")) Green = WP.Get();
+				if (!Bank || !Green) return;
+				for (int32 i = 0; i < 15; ++i)
+				{
+					FVector M = Green->GetActorLocation() + FVector(-2000.f, -700.f + i * 100.f, 0.f);
+					FHitResult Hit;
+					if (GetWorld()->LineTraceSingleByChannel(Hit, M + FVector(0, 0, 500), M - FVector(0, 0, 2000), ECC_WorldStatic))
+						M.Z = Hit.ImpactPoint.Z + 140.f;
+					Bank->AddShot(M, FVector(1.f, 0.f, 0.03f));
+				}
+			}), 1.f + 3.f * V, false);
+		}
+	}
 	// Settle lighting / Lumen before the first still.
 	FTimerHandle Start;
 	GetWorldTimerManager().SetTimer(Start, FTimerDelegate::CreateWeakLambda(this, [this]() {
@@ -490,6 +726,19 @@ void APA250BattleGameMode::CapturePreviewShot(const FString& Tag, const FString&
 		return;
 	}
 	const FPreviewCam& Spec = GPreviewCams[Index];
+	{
+		// Special labels capture only their own group; any other label takes the general views.
+		const FString T(Spec.Tag);
+		const FString Group = T.StartsWith(TEXT("Shot_Flag")) ? TEXT("flags") : T.StartsWith(TEXT("Shot_Wall")) ? TEXT("walls")
+		                    : T.StartsWith(TEXT("Shot_Smoke")) ? TEXT("smoke") : TEXT("");
+		const bool bSpecialLabel = PreviewLabel == TEXT("flags") || PreviewLabel == TEXT("walls") || PreviewLabel == TEXT("smoke");
+		if (Group != (bSpecialLabel ? PreviewLabel : FString()))
+		{
+			if (Index + 1 < Total) CapturePreviewShot(GPreviewCams[Index + 1].Tag, GPreviewCams[Index + 1].Stem, Index + 1, Total);
+			else FPlatformMisc::RequestExit(false);
+			return;
+		}
+	}
 	ACameraActor* Cam = nullptr;
 	for (TActorIterator<ACameraActor> It(GetWorld()); It; ++It)
 	{
@@ -533,6 +782,45 @@ void APA250BattleGameMode::CapturePreviewShot(const FString& Tag, const FString&
 			}
 		}
 	}
+	if (TagStr.StartsWith(TEXT("Shot_Smoke")))
+	{
+		for (const TWeakObjectPtr<APA250ControlPoint>& WP : Posts)
+		{
+			if (WP.IsValid() && WP->PostId == TEXT("green"))
+			{
+				const FVector G = WP->GetActorLocation();
+				const FVector From = G + FVector(-600.f, 2300.f, 150.f);
+				const FVector Look = G + FVector(-1500.f, 0.f, 0.f);
+				Cam->SetActorLocationAndRotation(From, (Look - From).Rotation());
+			}
+		}
+	}
+	if (TagStr.StartsWith(TEXT("Shot_Wall")))
+	{
+		AActor* Best = nullptr;
+		for (TActorIterator<AActor> It(GetWorld()); It; ++It)
+		{
+			if (It->ActorHasTag(TEXT("PA250Cover")) && (!Best || FVector::Dist2D(It->GetActorLocation(), Spec.Loc) < FVector::Dist2D(Best->GetActorLocation(), Spec.Loc)))
+				Best = *It;
+		}
+		const APA250ControlPoint* GreenPost = nullptr;
+		for (const TWeakObjectPtr<APA250ControlPoint>& WP : Posts)
+			if (WP.IsValid() && WP->PostId == TEXT("green")) GreenPost = WP.Get();
+		if (Best && GreenPost && TagStr == TEXT("Shot_WallPatriot"))
+		{
+			const FVector Look = GreenPost->GetActorLocation() + FVector(0.f, 0.f, 200.f);
+			const FVector Away = (Best->GetActorLocation() - GreenPost->GetActorLocation()).GetSafeNormal2D();
+			const FVector From = Best->GetActorLocation() + Away * 450.f + FVector(0.f, 0.f, 110.f);
+			Cam->SetActorLocationAndRotation(From, (Look - From).Rotation());
+		}
+		else if (Best)
+		{
+			const FVector Side = Best->GetActorRightVector();
+			const FVector Look = Best->GetActorLocation();
+			const FVector From = Look + Side * 650.f + Best->GetActorForwardVector() * 250.f + FVector(0.f, 0.f, 90.f);
+			Cam->SetActorLocationAndRotation(From, (Look - From).Rotation());
+		}
+	}
 	if (UCameraComponent* Comp = Cam->GetCameraComponent(); Comp && !Cam->ActorHasTag(TEXT("PA250LevelShot")))
 	{
 		Comp->SetFieldOfView(Spec.FOV);
@@ -548,10 +836,11 @@ void APA250BattleGameMode::CapturePreviewShot(const FString& Tag, const FString&
 	// Clean, HUD-free still: delete any old file, let Lumen settle after the cut, then poll.
 	IFileManager::Get().Delete(*SavedPath, false, true, true);
 	FTimerHandle Snap;
+	const float Settle = TagStr == TEXT("Shot_SmokeBank") ? 14.f : 1.5f;
 	GetWorldTimerManager().SetTimer(Snap, FTimerDelegate::CreateWeakLambda(this, [this, SavedPath, PreviewDir, FinalName, Index, Total, bFlagShot]() {
 		FScreenshotRequest::RequestScreenshot(SavedPath, /*bShowUI=*/bFlagShot, /*bAddFilenameSuffix=*/false);
 		PollPreviewFile(SavedPath, FPaths::Combine(PreviewDir, FinalName), Index, Total, 0);
-	}), 1.5f, false);
+	}), Settle, false);
 }
 
 void APA250BattleGameMode::PollPreviewFile(const FString& SavedPath, const FString& Dest, int32 Index, int32 Total, int32 Attempt)
@@ -594,6 +883,8 @@ void APA250BattleGameMode::MaybeStartFpsSample()
 	{
 		return;
 	}
+	float SampleDelay = 5.f;
+	FParse::Value(FCommandLine::Get(), TEXT("PA250FpsDelay="), SampleDelay);
 	FTimerHandle Start;
 	GetWorldTimerManager().SetTimer(Start, FTimerDelegate::CreateWeakLambda(this, [this]() {
 		bFpsSampling = true;
@@ -602,7 +893,7 @@ void APA250BattleGameMode::MaybeStartFpsSample()
 		FpsSampleTime = 0.f;
 		FpsSampleFrames = 0;
 		UE_LOG(LogTemp, Display, TEXT("PA250 FPS sample started"));
-	}), 5.f, false);  // after shader warm-up and the first runtime navmesh build
+	}), FMath::Max(0.5f, SampleDelay), false);  // after shader warm-up and the first runtime navmesh build
 }
 
 AActor* APA250BattleGameMode::PickStart(FName Faction) const
@@ -775,17 +1066,17 @@ void APA250BattleGameMode::ConfigureSoldier(ARFCharacter* Soldier, FName Faction
 	}
 }
 
-ARFCharacter* APA250BattleGameMode::SpawnBot(FName Faction, FName UnitClass, APA250ControlPoint* PreferredPost)
+ARFCharacter* APA250BattleGameMode::SpawnBot(FName Faction, FName UnitClass, APA250ControlPoint* PreferredPost, uint32 ClothingSeed)
 {
 	const FName Charged = ChooseClassFor(Faction, UnitClass);
 	if (!CanSpawn(Faction))
 	{
 		return nullptr;
 	}
-	return SpawnBotAt(Faction, Charged, PickSpawnTransform(Faction, PreferredPost));
+	return SpawnBotAt(Faction, Charged, PickSpawnTransform(Faction, PreferredPost), ClothingSeed);
 }
 
-ARFCharacter* APA250BattleGameMode::SpawnBotAt(FName Faction, FName Charged, const FTransform& T)
+ARFCharacter* APA250BattleGameMode::SpawnBotAt(FName Faction, FName Charged, const FTransform& T, uint32 ClothingSeed)
 {
 	if (!CanSpawn(Faction))
 	{
@@ -797,6 +1088,11 @@ ARFCharacter* APA250BattleGameMode::SpawnBotAt(FName Faction, FName Charged, con
 	{
 		return nullptr;
 	}
+	if (ClothingSeed == 0)
+	{
+		ClothingSeed = HashCombine(GetTypeHash(static_cast<uint64>(Setup.seed)), static_cast<uint32>(++ClothesSerial));
+	}
+	C->SetClothingSeed(ClothingSeed);
 	C->AIControllerClass = APA250BotController::StaticClass();
 	C->FinishSpawning(T);
 	C->SpawnDefaultController();
@@ -1042,6 +1338,11 @@ void APA250BattleGameMode::RestartPlayer(AController* NewPlayer)
 	Super::RestartPlayer(NewPlayer);
 	if (ARFCharacter* C = NewPlayer ? Cast<ARFCharacter>(NewPlayer->GetPawn()) : nullptr)
 	{
+		if (PlayerClothingSeed == 0)
+		{
+			PlayerClothingSeed = HashCombine(GetTypeHash(static_cast<uint64>(Setup.seed)), 0xC107u);
+		}
+		C->SetClothingSeed(PlayerClothingSeed);
 		const FName Cls = PendingPlayerClass.IsNone() ? ChooseClassFor(PlayerFaction, TEXT("line_infantry")) : PendingPlayerClass;
 		ControllerFaction.Add(NewPlayer, PlayerFaction);
 		ControllerClass.Add(NewPlayer, Cls);
@@ -1091,6 +1392,16 @@ int32 APA250BattleGameMode::PoolTotal(FName Faction) const
 	return Ledger.Remaining(Faction);
 }
 
+int32 APA250BattleGameMode::InitialSoldiers(FName Faction) const
+{
+	int32 Units = 0;
+	for (const auto& CK : InitialPool.FindRef(Faction))
+	{
+		Units += CK.Value;
+	}
+	return Units * FMath::Max(1, SoldiersPerUnit);
+}
+
 int32 APA250BattleGameMode::TicketsRemaining(FName Faction) const { return PoolTotal(Faction); }
 
 int32 APA250BattleGameMode::TicketsRemaining(FName Faction, FName UnitClass) const
@@ -1117,7 +1428,7 @@ int32 APA250BattleGameMode::PostsOwned(FName Faction) const
 	int32 N = 0;
 	for (const TWeakObjectPtr<APA250ControlPoint>& WP : Posts)
 	{
-		if (WP.IsValid() && WP->GetHolder() == Faction) ++N;
+		if (WP.IsValid() && !WP->IsContestLocked() && WP->GetHolder() == Faction) ++N;
 	}
 	return N;
 }
@@ -1133,10 +1444,30 @@ FName APA250BattleGameMode::PluralityHolder() const
 
 FName APA250BattleGameMode::GetObjectiveHolder() const { return PluralityHolder(); }
 
+int32 APA250BattleGameMode::CountPosts() const
+{
+	int32 N = 0;
+	for (const TWeakObjectPtr<APA250ControlPoint>& WP : Posts) N += WP.IsValid() ? 1 : 0;
+	return N;
+}
+
+int32 APA250BattleGameMode::GetBleedPerInterval(FName Faction) const
+{
+	if (!UsesPostBleed(ScenarioFight)) return 0;
+	const int32 Mine = PostsOwned(Faction);
+	const int32 Theirs = PostsOwned(Faction == TEXT("british") ? FName(TEXT("continental")) : FName(TEXT("british")));
+	return Mine < Theirs ? FPA250TicketLedger::BleedAmount(Mine, Theirs, CountPosts()) : 0;
+}
+
 void APA250BattleGameMode::BleedTickets(float DeltaSeconds)
 {
+	if (!UsesPostBleed(ScenarioFight))
+	{
+		return;
+	}
+	// Battlefront-style: the bleed grows with the post advantage, fastest when one side holds them all.
 	Ledger.Bleed(DeltaSeconds, BleedIntervalSeconds,
-		TEXT("british"), PostsOwned(TEXT("british")), TEXT("continental"), PostsOwned(TEXT("continental")));
+		TEXT("british"), PostsOwned(TEXT("british")), TEXT("continental"), PostsOwned(TEXT("continental")), CountPosts());
 }
 
 void APA250BattleGameMode::CheckTicketExhaustion()
@@ -1243,8 +1574,9 @@ void APA250BattleGameMode::OnCharacterDied(ARFCharacter* Victim, AController* Vi
 	}
 	TWeakObjectPtr<AController> OldCtl = VictimController;
 	const FName Cls = Victim->UnitClass;
+	const uint32 Clothes = Victim->GetClothingSeed();
 	FTimerHandle H;
-	GetWorldTimerManager().SetTimer(H, FTimerDelegate::CreateWeakLambda(this, [this, OldCtl, F, Cls]() {
+	GetWorldTimerManager().SetTimer(H, FTimerDelegate::CreateWeakLambda(this, [this, OldCtl, F, Cls, Clothes]() {
 		if (bBattleOver) return;
 		if (AController* C = OldCtl.Get())
 		{
@@ -1252,7 +1584,7 @@ void APA250BattleGameMode::OnCharacterDied(ARFCharacter* Victim, AController* Vi
 			ControllerClass.Remove(C);
 			C->Destroy();
 		}
-		SpawnBot(F, ChooseClassFor(F, Cls), nullptr);
+		SpawnBot(F, ChooseClassFor(F, Cls), nullptr, Clothes);
 		CheckTicketExhaustion();
 	}), RespawnDelay, false);
 }
@@ -1294,10 +1626,11 @@ void APA250BattleGameMode::Tick(float DeltaSeconds)
 			}
 			const IConsoleVariable* GI = IConsoleManager::Get().FindConsoleVariable(TEXT("r.DynamicGlobalIlluminationMethod"));
 			const IConsoleVariable* Refl = IConsoleManager::Get().FindConsoleVariable(TEXT("r.ReflectionMethod"));
+			const UPA250SmokeSubsystem* Smoke = GetWorld() ? GetWorld()->GetSubsystem<UPA250SmokeSubsystem>() : nullptr;
 			const FString Json = FString::Printf(
-				TEXT("{\"avg_fps\":%.2f,\"frames\":%d,\"seconds\":%.3f,\"pass\":%s,\"bots_per_side\":%d,\"soldiers_alive\":%d,\"gi_method\":%d,\"reflection_method\":%d,\"time_dilation\":%.1f,\"game_ms\":%.2f,\"render_ms\":%.2f,\"gpu_ms\":%.2f,\"res\":\"%dx%d\"}\n"),
+				TEXT("{\"avg_fps\":%.2f,\"frames\":%d,\"seconds\":%.3f,\"pass\":%s,\"bots_per_side\":%d,\"soldiers_alive\":%d,\"puffs\":%d,\"gi_method\":%d,\"reflection_method\":%d,\"time_dilation\":%.1f,\"game_ms\":%.2f,\"render_ms\":%.2f,\"gpu_ms\":%.2f,\"res\":\"%dx%d\"}\n"),
 				AvgFps, FpsSampleFrames, FpsSampleAccum, AvgFps >= 30.f ? TEXT("true") : TEXT("false"),
-				BotsPerSide, Soldiers, GI ? GI->GetInt() : -1, Refl ? Refl->GetInt() : -1,
+				BotsPerSide, Soldiers, Smoke ? Smoke->NumPuffs() : 0, GI ? GI->GetInt() : -1, Refl ? Refl->GetInt() : -1,
 				UGameplayStatics::GetGlobalTimeDilation(this),
 				FpsGameMs / FMath::Max(1, FpsSampleFrames), FpsRenderMs / FMath::Max(1, FpsSampleFrames),
 				FpsGpuMs / FMath::Max(1, FpsSampleFrames), ViewSize.X, ViewSize.Y);
@@ -1351,16 +1684,25 @@ void APA250BattleGameMode::Tick(float DeltaSeconds)
 		const int32 TB = PoolTotal(TEXT("british"));
 		const int32 TC = PoolTotal(TEXT("continental"));
 		FName Winner;
-		if (TB != TC)
+		if (ScenarioFight.bRewardForcePreservation)
 		{
-			Winner = TB > TC ? FName(TEXT("british")) : FName(TEXT("continental"));
+			Winner = PreservationWinner(TB, InitialSoldiers(TEXT("british")), TC, InitialSoldiers(TEXT("continental")),
+				TEXT("british"), TEXT("continental"), ToName(Setup.defender_faction));
+			EndBattle(Winner, TEXT("force_preserved"));
 		}
 		else
 		{
-			Winner = PluralityHolder();
-			if (Winner.IsNone()) Winner = ToName(Setup.defender_faction);
+			if (TB != TC)
+			{
+				Winner = TB > TC ? FName(TEXT("british")) : FName(TEXT("continental"));
+			}
+			else
+			{
+				Winner = PluralityHolder();
+				if (Winner.IsNone()) Winner = ToName(Setup.defender_faction);
+			}
+			EndBattle(Winner, TEXT("time_limit"));
 		}
-		EndBattle(Winner, TEXT("time_limit"));
 	}
 }
 

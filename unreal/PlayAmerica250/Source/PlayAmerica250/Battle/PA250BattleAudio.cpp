@@ -146,6 +146,15 @@ bool FPA250BattleAudio::PlayVoice(const UObject* Ctx, FName Faction, const FStri
 	return true;
 }
 
+bool FPA250BattleAudio::Play2D(const UObject* Ctx, const FString& Bank, float Volume)
+{
+	Counts().FindOrAdd(Bank)++;
+	USoundBase* Sound = Pick(Bank);
+	if (!Sound || !Ctx || !Ctx->GetWorld()) return false;
+	UGameplayStatics::PlaySound2D(Ctx, Sound, Volume, FMath::FRandRange(0.97f, 1.03f));
+	return true;
+}
+
 int32 FPA250BattleAudio::GetPlayCount(const FString& BankOrKey)
 {
 	return Counts().FindRef(BankOrKey);

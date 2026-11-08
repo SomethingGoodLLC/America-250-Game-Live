@@ -32,6 +32,9 @@ struct PLAYAMERICA250_API FPA250BattleAudio
 	/** A shouted line (rate-limited per key so a squad doesn't stutter the same order). */
 	static bool PlayVoice(const UObject* Ctx, FName Faction, const FString& Key, const FVector& Location);
 
+	/** Non-positional UI sound for the local player (hit / kill confirmation). */
+	static bool Play2D(const UObject* Ctx, const FString& Bank, float Volume = 1.f);
+
 	/** Where the local player hears from (camera), if any. */
 	static bool GetListener(const UObject* Ctx, FVector& Out);
 

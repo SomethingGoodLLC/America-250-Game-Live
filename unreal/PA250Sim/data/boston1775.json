@@ -639,6 +639,11 @@
   "british": 10,
   "continental": 10
  },
+ "stores": {
+  "british": { "powder": 40, "arms": 30, "provisions": 40 },
+  "continental": { "powder": 8, "arms": 10, "provisions": 20 }
+ },
+ "local_support": 55,
  "relations": {
   "british": -20
  },

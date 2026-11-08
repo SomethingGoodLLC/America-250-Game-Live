@@ -23,10 +23,12 @@
 #include "Kismet/GameplayStatics.h"
 #include "Camera/PlayerCameraManager.h"
 
-void UPA250BattleHUD::ShowHitmarker(bool bKill)
+void UPA250BattleHUD::ShowHitmarker(bool bKill, float Damage, float DistanceM)
 {
-	HitmarkerTimer = 0.35f;
+	HitmarkerTimer = HitmarkerSeconds * (bKill ? 1.6f : 1.f);
 	bHitmarkerKill = bKill;
+	HitText = bKill ? FString::Printf(TEXT("KILL  %.0f m"), DistanceM) : FString::Printf(TEXT("HIT  -%.0f"), Damage);
+	HitTextTimer = bKill ? 1.6f : 0.9f;
 }
 
 bool UPA250BattleHUD::IsReticleHostile() const
@@ -159,13 +161,16 @@ int32 UPA250BattleHUD::NativePaint(const FPaintArgs& Args, const FGeometry& G, c
 			const FVector2D Dir = FVector2D(Local.Y, -Local.Z).GetSafeNormal();
 			S = 0.5f * View + Dir * View.Size();
 		}
-		// Keep clear of the score bar, letter boxes and the callout line under them.
+		// Callout text is pinned at slate y=136 (font 22). 215 keeps the marker under it.
+		// The kill feed is top-right, so the right inset is wider than the left.
+		// Both are slate units, so the gap is the same at 720p, 1080p and 4K.
 		const float MinY = 215.f;
-		const bool bClamped = S.X < Margin.X || S.X > View.X - Margin.X || S.Y < MinY || S.Y > View.Y - Margin.Y;
-		S.X = FMath::Clamp(S.X, Margin.X, View.X - Margin.X);
+		const float MaxX = View.X - 220.f;
+		const bool bClamped = S.X < Margin.X || S.X > MaxX || S.Y < MinY || S.Y > View.Y - Margin.Y;
+		S.X = FMath::Clamp(S.X, Margin.X, MaxX);
 		S.Y = FMath::Clamp(S.Y, MinY, View.Y - Margin.Y);
 
-		const FString Order = PostOrder(MyFaction, P->GetHolder(), Capturer, Progress, P->IsContested());
+		const FString Order = P->IsContestLocked() ? FString() : PostOrder(MyFaction, P->GetHolder(), Capturer, Progress, P->IsContested());
 		const bool bUrgent = Order == TEXT("DEFEND") || Order == TEXT("CAPTURING");
 		const float A = bClamped ? 0.85f : 1.f;
 		const FVector2D BoxPos = S - FVector2D(0.5f * Box, 0.5f * Box);
@@ -192,6 +197,7 @@ void UPA250BattleHUD::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 {
 	Super::NativeTick(MyGeometry, InDeltaTime);
 	HitmarkerTimer = FMath::Max(0.f, HitmarkerTimer - InDeltaTime);
+	HitTextTimer = FMath::Max(0.f, HitTextTimer - InDeltaTime);
 }
 
 TSharedRef<SWidget> UPA250BattleHUD::RebuildWidget()
@@ -205,8 +211,14 @@ TSharedRef<SWidget> UPA250BattleHUD::RebuildWidget()
 		const APA250BattleGameMode* GM = WeakThis.IsValid() ? WeakThis->GameMode.Get() : nullptr;
 		if (!GM) return FText::GetEmpty();
 		// Post letters are painted under this bar (NativePaint).
-		return FText::FromString(FString::Printf(TEXT("BRITISH %d          CONTINENTAL %d          Time %.0fs"),
-			GM->TicketsRemaining(TEXT("british")), GM->TicketsRemaining(TEXT("continental")), GM->TimeRemaining()));
+		// Bleed shows next to the side losing tickets for holding fewer posts.
+		auto Bleed = [GM](const TCHAR* F) {
+			const int32 B = GM->GetBleedPerInterval(F);
+			return B > 0 ? FString::Printf(TEXT(" (-%d/%.0fs)"), B, GM->BleedIntervalSeconds) : FString();
+		};
+		return FText::FromString(FString::Printf(TEXT("BRITISH %d%s          CONTINENTAL %d%s          Time %.0fs"),
+			GM->TicketsRemaining(TEXT("british")), *Bleed(TEXT("british")),
+			GM->TicketsRemaining(TEXT("continental")), *Bleed(TEXT("continental")), GM->TimeRemaining()));
 	};
 
 	auto Capture = [WeakThis]() {
@@ -225,7 +237,7 @@ TSharedRef<SWidget> UPA250BattleHUD::RebuildWidget()
 			APA250ControlPoint* P = Posts[i].Get();
 			if (!P) continue;
 			if (FVector::Dist2D(Me->GetActorLocation(), P->GetActorLocation()) > P->Radius) continue;
-			const FString Name = FString::Printf(TEXT("%c  %s"), PostLetter(i), *APA250ControlPoint::DisplayName(P->PostId));
+			const FString Name = FString::Printf(TEXT("%c  %s"), PostLetter(i), *P->GetObjectiveTitle());
 			const bool bLowering = !P->GetHolder().IsNone() && P->GetHolder() != Me->FactionId;
 			if (P->IsContested())
 			{
@@ -364,13 +376,21 @@ TSharedRef<SWidget> UPA250BattleHUD::RebuildWidget()
 		if (WeakThis->IsReticleHostile()) return FSlateColor(FLinearColor(1.f, 0.15f, 0.15f));
 		return FSlateColor(FLinearColor::White);
 	};
+	// Hitmarker: a big X right on the crosshair, white for a hit, red for a kill, fading out.
 	auto Hitmarker = [WeakThis]() {
 		if (!WeakThis.IsValid() || WeakThis->GetHitmarkerTimer() <= 0.f) return FText::GetEmpty();
-		return FText::FromString(WeakThis->IsHitmarkerKill() ? TEXT("X") : TEXT("+"));
+		return FText::FromString(TEXT("X"));
 	};
 	auto HitColor = [WeakThis]() {
 		if (!WeakThis.IsValid()) return FSlateColor(FLinearColor::White);
-		return WeakThis->IsHitmarkerKill() ? FSlateColor(FLinearColor(1.f, 0.1f, 0.1f)) : FSlateColor(FLinearColor::White);
+		const float A = FMath::Clamp(WeakThis->GetHitmarkerTimer() / UPA250BattleHUD::HitmarkerSeconds, 0.f, 1.f);
+		return WeakThis->IsHitmarkerKill() ? FSlateColor(FLinearColor(1.f, 0.12f, 0.1f, A)) : FSlateColor(FLinearColor(1.f, 1.f, 1.f, A));
+	};
+	auto HitLine = [WeakThis]() { return WeakThis.IsValid() ? FText::FromString(WeakThis->GetHitText()) : FText::GetEmpty(); };
+	auto HitTextColor = [WeakThis]() {
+		if (!WeakThis.IsValid()) return FSlateColor(FLinearColor::White);
+		const float A = FMath::Clamp(WeakThis->GetHitTextTimer() / 0.4f, 0.f, 1.f);
+		return WeakThis->IsHitmarkerKill() ? FSlateColor(FLinearColor(1.f, 0.25f, 0.2f, A)) : FSlateColor(FLinearColor(1.f, 1.f, 1.f, A));
 	};
 	auto KillFeed = [WeakThis]() {
 		const APA250BattleGameMode* GM = WeakThis.IsValid() ? WeakThis->GameMode.Get() : nullptr;
@@ -401,8 +421,10 @@ TSharedRef<SWidget> UPA250BattleHUD::RebuildWidget()
 		+ SOverlay::Slot().VAlign(VAlign_Center).HAlign(HAlign_Center)
 		[SNew(SBox).Padding_Lambda(SpreadPad)
 			[SNew(STextBlock).Font(Big).ColorAndOpacity_Lambda(ReticleColor).Text_Lambda(Reticle)]]
-		+ SOverlay::Slot().VAlign(VAlign_Center).HAlign(HAlign_Center).Padding(0, 40, 0, 0)
-		[SNew(STextBlock).Font(Big).ColorAndOpacity_Lambda(HitColor).Text_Lambda(Hitmarker)]
+		+ SOverlay::Slot().VAlign(VAlign_Center).HAlign(HAlign_Center)
+		[SNew(STextBlock).Font(FCoreStyle::GetDefaultFontStyle("Bold", 46)).ColorAndOpacity_Lambda(HitColor).ShadowOffset(FVector2D(1, 1)).Text_Lambda(Hitmarker)]
+		+ SOverlay::Slot().VAlign(VAlign_Center).HAlign(HAlign_Center).Padding(0, 64, 0, 0)
+		[SNew(STextBlock).Font(FCoreStyle::GetDefaultFontStyle("Bold", 16)).ColorAndOpacity_Lambda(HitTextColor).ShadowOffset(FVector2D(1, 1)).Text_Lambda(HitLine)]
 		+ SOverlay::Slot().VAlign(VAlign_Center).HAlign(HAlign_Center).Padding(0, 90, 0, 0)
 		[SNew(STextBlock).Font(Small).ColorAndOpacity(FLinearColor(1.f, 1.f, 1.f, 0.7f)).ShadowOffset(FVector2D(1, 1)).Text_Lambda(Planted)]
 		+ SOverlay::Slot().VAlign(VAlign_Center).HAlign(HAlign_Center).Padding(0, 0, 0, 140)

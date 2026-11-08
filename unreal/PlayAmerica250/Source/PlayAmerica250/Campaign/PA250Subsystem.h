@@ -15,6 +15,29 @@ enum class EPA250Flow : uint8
 	Diplomacy
 };
 
+/** Campaign hours advanced per real second. The default is 1 h/s; slower steps sit below it. */
+struct FPA250CampaignSpeed
+{
+	static constexpr float HoursPerSecond[] = { 0.25f, 0.5f, 1.f, 2.f, 6.f, 24.f, 120.f };
+	static constexpr int32 Count = sizeof(HoursPerSecond) / sizeof(HoursPerSecond[0]);
+	static constexpr int32 DefaultIndex = 2;
+
+	static int32 Clamp(int32 Idx) { return FMath::Clamp(Idx, 0, Count - 1); }
+	static float HoursAt(int32 Idx) { return HoursPerSecond[Clamp(Idx)]; }
+	static FString Format(float HoursPerRealSecond)
+	{
+		if (FMath::IsNearlyEqual(HoursPerRealSecond, 0.25f))
+		{
+			return TEXT("¼ h/s");
+		}
+		if (FMath::IsNearlyEqual(HoursPerRealSecond, 0.5f))
+		{
+			return TEXT("½ h/s");
+		}
+		return FString::Printf(TEXT("%d h/s"), FMath::RoundToInt(HoursPerRealSecond));
+	}
+};
+
 UCLASS()
 class PLAYAMERICA250_API UPA250Subsystem : public UGameInstanceSubsystem, public FTickableGameObject
 {
@@ -42,6 +65,7 @@ public:
 	bool IsPaused() const { return bPaused; }
 	void SetSpeedIndex(int32 Idx);
 	int32 GetSpeedIndex() const { return SpeedIndex; }
+	float GetHoursPerSecond() const { return FPA250CampaignSpeed::HoursAt(SpeedIndex); }
 
 	UFUNCTION(BlueprintCallable, Category = "PA250")
 	bool NewCampaign(FString& OutError);
@@ -81,6 +105,20 @@ public:
 	// The player talked and walked away without agreement: the envoy likes them less.
 	bool RegisterDiplomacyFailure(FString& OutError);
 
+	/** Staff / logistics: purchase, request_assistance, requisition, capacity_investment, knox_support, dismiss. */
+	UFUNCTION(BlueprintCallable, Category = "PA250")
+	bool ChooseLogistics(const FString& LetterId, const FString& Choice, FString& OutError);
+	UFUNCTION(BlueprintCallable, Category = "PA250")
+	bool ResolveCommander(const FString& Action, FString& OutError);
+	UFUNCTION(BlueprintPure, Category = "PA250")
+	bool HasStaffEvent() const;
+	/** True when the shown letter still needs a choice; false for a delivered/refused notice. */
+	bool IsPendingLetterAwaitingChoice() const;
+	FString GetPendingLetterId() const;
+	FString GetPendingLetterSubject() const;
+	FString GetPendingLetterBody() const;
+	FString GetPendingLetterKind() const;
+
 	UFUNCTION(BlueprintCallable, Category = "PA250")
 	bool SaveCampaign(FString& OutError);
 	UFUNCTION(BlueprintCallable, Category = "PA250")
@@ -106,7 +144,6 @@ public:
 	static FName LevelNameForFlow(EPA250Flow Flow);
 	void TravelToFlowLevel(UObject* WorldContext) const;
 
-	static constexpr float HoursPerSecond[5] = { 6.f, 12.f, 24.f, 48.f, 120.f };
 	static constexpr int32 MaxHoursPerFrame = 32;
 
 private:
@@ -116,7 +153,7 @@ private:
 	pa250::CampaignController Controller;
 	bool bCampaignActive = false;
 	bool bPaused = true;
-	int32 SpeedIndex = 0;
+	int32 SpeedIndex = FPA250CampaignSpeed::DefaultIndex;
 	float HourAccumulator = 0.f;
 	TArray<FString> AutosavePaths;
 };

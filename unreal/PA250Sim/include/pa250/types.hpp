@@ -59,8 +59,83 @@ struct Army {
     std::string previous_province;
     std::map<std::string, int> units;  // unit class -> strength
     int morale = 70;
+    int readiness = 100;  // 0..100 material/rest readiness (campaign, not battlefield morale)
+    int fatigue = 0;      // 0..100; rises with fighting, falls with rest
     std::vector<std::string> path;  // edge ids remaining (current edge first)
     int hours_into_edge = 0;
+};
+
+// Usable war materials (not the same as faction "supplies" accrual or gold).
+struct FactionStores {
+    int powder = 0;
+    int arms = 0;
+    int provisions = 0;
+};
+
+// Structured staff letter. Flavor text is display-only and never parsed for state.
+struct CorrespondenceItem {
+    std::string id;
+    int64_t created_hour = 0;
+    int64_t resolve_on_hour = 0;  // when reply/delivery is applied
+    std::string recipient;        // committee_of_safety | town_selectmen | merchant | washington_hq | congress
+    std::string kind;  // purchase | request_assistance | requisition | capacity_investment | knox_support | commander_report
+    std::string status;  // needs_approval | pending | approved | partial | delayed | refused | delivered | dismissed
+    int powder = 0;
+    int arms = 0;
+    int provisions = 0;
+    int gold_cost = 0;
+    int committed_powder = 0;
+    int committed_arms = 0;
+    int received_powder = 0;
+    int received_arms = 0;
+    bool fictionalized = true;
+    std::string subject;
+    std::string body;
+    std::string reason;
+    bool awaiting_choice = false;  // true until the player picks a path
+};
+
+struct StaffState {
+    std::string clerk_name = "Clerk Hale";  // fictionalized composite
+    int capacity_per_day = 2;
+    int letters_processed_today = 0;
+    int64_t capacity_day_index = -1;  // hour_index/24 of last reset
+    std::vector<CorrespondenceItem> queue;
+};
+
+// Detached commander: objectives and risk preference (Stage B friction).
+struct DetachedCommander {
+    std::string id = "parker";
+    std::string name = "Capt. Parker";  // fictionalized composite of local command
+    std::string army_id = "continental_militia";
+    std::string objective = "preserve_force";  // preserve_force | contest_crossing | hold_stores
+    std::string risk = "cautious";             // cautious | balanced | aggressive
+    bool pending_clarification = false;
+    std::string last_request;
+};
+
+struct CampaignProject {
+    std::string id;  // e.g. knox_ticonderoga
+    std::string status = "none";  // none | offered | underway | delivered | declined
+    int64_t start_hour = 0;
+    int64_t ready_hour = 0;
+    int pieces = 0;
+    int transport_committed = 0;
+    bool fictionalized_authorization = false;
+};
+
+struct CampaignProgress {
+    int battles_fought = 0;
+    bool lexington_fought = false;
+    bool aftermath_pending = false;
+    bool concord_followup_seeded = false;
+    bool chapter_continental = false;  // after 14 Jun 1775
+    bool chapter_washington = false;   // after 3 Jul 1775
+    int capacity_level = 0;            // 0 none, 1 procurement/repair contact
+    int64_t capacity_ready_hour = 0;
+    std::string player_role = "massachusetts_field_commander";
+    CampaignProject knox;
+    DetachedCommander commander;
 };
 
 struct Treaty {
@@ -136,13 +211,18 @@ struct CampaignState {
     std::map<std::string, Edge> edges;
     std::map<std::string, Army> armies;
     std::map<std::string, FactionInfo> factions;
-    std::map<std::string, int> supplies;         // faction -> supplies
+    std::map<std::string, int> supplies;         // faction -> abstract supply points (not powder/arms)
     std::map<std::string, int> relations;        // AI faction -> attitude toward player, -100..100
     std::map<std::string, int> prisoners_held;   // holding faction -> enemy prisoners held
     bool player_vassal = false;                  // pledged to the Crown (rogue army under its protection)
     std::string player_title;                    // title the Crown granted the player
     int player_gold = 500;                       // treasury the player can offer
     std::map<std::string, std::string> fiefs;    // province -> envoy name it was granted to
+    std::map<std::string, FactionStores> stores; // faction -> usable war materials
+    int local_support = 55;                      // 0..100 civilian cooperation (not military control)
+    StaffState staff;
+    CampaignProgress progress;
+    std::string pending_event_id;  // correspondence id that raised EventPopup
     std::vector<Treaty> treaties;
     std::vector<MemoryEntry> memory;
     PendingBattle pending_battle;
@@ -173,8 +253,9 @@ struct Orders {
 struct SideSetup {
     std::string faction;
     std::string army_id;
-    std::map<std::string, int> tickets;  // per unit class, copied from army units
-    int morale = 0;
+    std::map<std::string, int> tickets;  // per unit class, after stores gating
+    int morale = 0;                     // campaign confidence (feeds UE pressure bias)
+    int readiness = 100;
     std::string retreat_province;
 };
 struct BattleSetup {
@@ -182,6 +263,7 @@ struct BattleSetup {
     std::string province_id;
     std::string province_name;
     std::string objective = "green";
+    std::string scenario_preset = "lexington_common";  // lexington_common | concord_bridge | battle_road
     uint64_t seed = 0;
     std::string attacker_faction;
     std::string defender_faction;

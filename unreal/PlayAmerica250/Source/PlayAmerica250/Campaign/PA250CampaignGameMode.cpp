@@ -154,6 +154,42 @@ void APA250CampaignGameMode::RunCampaignSelftest()
 	Finish(Sub, TEXT("selftest_campaign"));
 }
 
+namespace
+{
+// Resolve every staff popup the way the map widget lets a player: notices are
+// acknowledged, chapter briefings are acknowledged, the detached commander gets his
+// preserve-force answer, Knox is declined, anything else is a purchase.
+void ResolveAllStaffEvents(UPA250Subsystem* Sub)
+{
+	FString StaffErr;
+	for (int32 Guard = 0; Sub->HasStaffEvent() && Guard < 16; ++Guard)
+	{
+		const FString Kind = Sub->GetPendingLetterKind();
+		const FString LetterId = Sub->GetPendingLetterId();
+		if (!Sub->IsPendingLetterAwaitingChoice() || Kind == TEXT("knox_support"))
+		{
+			Sub->ChooseLogistics(LetterId, TEXT("dismiss"), StaffErr);
+		}
+		else if (Kind == TEXT("commander_report") && Sub->GetPendingLetterSubject().Contains(TEXT("Detached")))
+		{
+			Sub->ResolveCommander(TEXT("preserve_force"), StaffErr);
+		}
+		else if (Kind == TEXT("commander_report"))
+		{
+			Sub->ChooseLogistics(LetterId, TEXT("dismiss"), StaffErr);
+		}
+		else if (!Sub->ChooseLogistics(LetterId, TEXT("purchase"), StaffErr))
+		{
+			Sub->ChooseLogistics(LetterId, TEXT("dismiss"), StaffErr);
+		}
+		if (StaffErr.Len() > 0)
+		{
+			break;
+		}
+	}
+}
+}  // namespace
+
 void APA250CampaignGameMode::RunAutoplayCampaign()
 {
 	using namespace PA250Autoplay;
@@ -166,6 +202,10 @@ void APA250CampaignGameMode::RunAutoplayCampaign()
 
 	if (Sub->AutoplayStage == TEXT("battle_done"))
 	{
+		// Resolve the aftermath staff letter so deliveries/events do not strand later hour advances.
+		ResolveAllStaffEvents(Sub);
+		Check(Sub, Sub->GetState().progress.lexington_fought || Sub->GetState().progress.battles_fought > 0,
+			TEXT("aftermath: at least one battle recorded in campaign progress"));
 		Sub->AutoplayStage = TEXT("diplomacy");
 		FString Err;
 		if (Sub->BeginDiplomacy(TEXT("british"), Err))
@@ -189,7 +229,14 @@ void APA250CampaignGameMode::RunAutoplayCampaign()
 		std::map<std::string, std::string> Before;
 		for (const auto& A : S.armies) Before[A.first] = A.second.province;
 		const int64 HourBefore = S.now.hour_index;
-		Sub->AdvanceHours(24, Err);
+		// Staff popups pause the clock for a player; autoplay answers them and keeps
+		// advancing, exactly as a player clicking through would.
+		for (int32 Advanced = 0; Advanced < 24; ++Advanced)
+		{
+			ResolveAllStaffEvents(Sub);
+			Sub->AdvanceHours(1, Err);
+		}
+		ResolveAllStaffEvents(Sub);
 		Check(Sub, S.now.hour_index == HourBefore + 24, TEXT("24 hours advanced under the ceasefire"));
 		// Ceasefire blocks entry into enemy-owned provinces; movement on friendly ground is still legal.
 		bool bRespected = true;

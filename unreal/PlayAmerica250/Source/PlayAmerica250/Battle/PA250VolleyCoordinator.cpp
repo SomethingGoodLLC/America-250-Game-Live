@@ -895,8 +895,10 @@ void UPA250VolleyCoordinator::TickFormation(FSquad& Sq, const TArray<ARFCharacte
 	// Skirmishers don't stand to receive bayonets: an incoming charge is a reason to fall back in order
 	// (and re-form at the next wall), not a blow to their nerve. Line troops feel the full shock.
 	const bool bSkirmishEvade = bBeingCharged && Ro.bWithdrawWhenExposed;
+	const float CampaignBias =
+		GameMode.IsValid() ? GameMode->GetCampaignConfidencePressure(Sq.Faction) : 0.f;
 	const float Pressure = PA250MoralePressure(Sq.RecentLoss, float(Suppressed) / Live.Num(), Strength, bClose, bFlanked,
-		bBeingCharged && !bSkirmishEvade);
+		bBeingCharged && !bSkirmishEvade) + CampaignBias;
 
 	// Deliberate withdrawal orders (never panic): heavily outnumbered while weakened (any role),
 	// or exposed in the open at close range (roles that withdraw when exposed). Cooldown = cost.
@@ -943,6 +945,17 @@ void UPA250VolleyCoordinator::TickFormation(FSquad& Sq, const TArray<ARFCharacte
 		&& (bEnemyBroken || (Live.Num() >= 1.5f * FMath::Max(1, EnemiesNear) && Strength > 0.6f));
 	if (bPress && !Sq.bPressing && IsNearViewer(Sq.Anchor))
 	{
+		// Fife and drum strike up as a line goes forward (either side; at most every 25 s per side).
+		if (GameMode.IsValid())
+		{
+			static TMap<FName, double> LastMarch;
+			if (Now - LastMarch.FindRef(Sq.Faction, -1000.0) > 25.0)
+			{
+				LastMarch.Add(Sq.Faction, Now);
+				FPA250BattleAudio::PlayAt(GameMode.Get(), Sq.Faction == TEXT("british") ? TEXT("march_british") : TEXT("march_patriot"),
+					Sq.Anchor + FVector(0.f, 0.f, 120.f), EPA250SoundRange::Gunfire, 0.7f, 0.f);
+			}
+		}
 		if (Sq.Faction == GameMode->GetPlayerFaction()) Shout(Sq.Faction, TEXT("forward"), TEXT("Forward! Push them off the ground!"), Sq.Anchor);
 		else ShoutNearListener(TEXT("enemy_advancing"), TEXT("Their line is advancing!"));
 	}
@@ -1274,6 +1287,11 @@ void UPA250VolleyCoordinator::Shout(FName VoiceFaction, const TCHAR* Key, const 
 	if (GameMode.IsValid())
 	{
 		FPA250BattleAudio::PlayVoice(GameMode.Get(), VoiceFaction, Key, Where + FVector(0.f, 0.f, 150.f));
+		// The drummer rolls under "Make ready!"; the roll's closing accent lands as the muskets come up.
+		if (FCString::Strcmp(Key, TEXT("make_ready")) == 0)
+		{
+			FPA250BattleAudio::PlayAt(GameMode.Get(), TEXT("drum_roll"), Where + FVector(0.f, 0.f, 100.f), EPA250SoundRange::Voice, 0.8f, 0.03f);
+		}
 	}
 }
 

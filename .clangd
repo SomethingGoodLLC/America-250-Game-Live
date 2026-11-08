@@ -1,11 +1,12 @@
-# Unreal Engine sources: use the UBT-generated compile database.
-# Regenerate:
+# Unreal + PA250Sim: one merged compile database (rsp-expanded; clangd dislikes @*.rsp + spaces).
+# Refresh after a UE build:
+#   python3 unreal/PlayAmerica250/Scripts/regen_compile_commands.py
+# Or from scratch via UBT, then run the same script:
 #   "/Users/Shared/Epic Games/UE_5.8/Engine/Build/BatchFiles/Mac/Build.sh" \
 #     -Mode=GenerateClangDatabase \
 #     -OutputDir=unreal/PlayAmerica250 \
 #     PlayAmerica250Editor Mac Development \
 #     -Project="$PWD/unreal/PlayAmerica250/PlayAmerica250.uproject"
-# then expand @*.rsp entries into arguments (clangd is unreliable with rsp + spaces).
 CompileFlags:
   CompilationDatabase: unreal/PlayAmerica250
   Add:
@@ -16,6 +17,20 @@ CompileFlags:
   Remove:
     - -Werror
     - -fno-temp-file
+Diagnostics:
+  UnusedIncludes: None
+  MissingIncludes: None
+
+---
+# Pure C++ sim tree: prefer the CMake database when opened as standalone TUs.
+If:
+  PathMatch: .*/unreal/PA250Sim/.*
+CompileFlags:
+  CompilationDatabase: unreal/PA250Sim/build
+  Add:
+    - -std=c++17
+  Remove:
+    - -Werror
 Diagnostics:
   UnusedIncludes: None
   MissingIncludes: None

@@ -1,6 +1,7 @@
 #include "PA250VisualsCommandlet.h"
 #include "RFCharacter.h"
 #include "MusketWeapon.h"
+#include "PA250SoldierAnimInstance.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Animation/AnimSingleNodeInstance.h"
@@ -13,6 +14,8 @@
 #include "AnimationRuntime.h"
 #include "Animation/Skeleton.h"
 #include "Components/CapsuleComponent.h"
+#include "PA250FactionVisuals.h"
+#include "PA250Smoke.h"
 
 UPA250VisualsCommandlet::UPA250VisualsCommandlet()
 {
@@ -45,8 +48,8 @@ int32 UPA250VisualsCommandlet::Main(const FString& Params)
 			// A bare commandlet world has no GameMode to dispatch BeginPlay.
 			if (!Soldier->HasActorBegunPlay()) Soldier->DispatchBeginPlay();
 			Check(Soldier->IsUsingPeriodSoldier() && Soldier->GetMesh()->GetSkeletalMeshAsset()->GetPathName().StartsWith(TEXT("/Game/american_soldier/")), TEXT("spawned pawn uses Fab soldier"));
-			UAnimSingleNodeInstance* Anim = Soldier->GetMesh()->GetSingleNodeInstance();
-			Check(Anim && Anim->GetCurrentAsset() && Anim->GetCurrentAsset()->GetPathName().Contains(TEXT("ThirdPersonIdle")), TEXT("compatible pack idle replaces Manny AnimBP"));
+			const UPA250SoldierAnimInstance* Anim = Cast<UPA250SoldierAnimInstance>(Soldier->GetMesh()->GetAnimInstance());
+			Check(Anim && Anim->GetLocomotion() && Anim->GetLocomotion()->GetPathName().Contains(TEXT("ThirdPersonIdle")), TEXT("compatible pack idle replaces Manny AnimBP"));
 			Check(!Soldier->HatMesh->IsVisible() && !Soldier->TeamMarker->IsVisible(), TEXT("primitive hat and floating cone hidden"));
 			AMusketWeapon* Weapon = Soldier->Musket.Get();
 			Check(Weapon && (Weapon->GetAnimatedMesh() ? Weapon->GetAnimatedMesh()->GetSkeletalMeshAsset()->GetPathName() : Weapon->GetMusketMesh()->GetStaticMesh()->GetPathName()).StartsWith(TEXT("/Game/HS_WeaponPack_01/")), TEXT("spawned weapon uses Horizon musket"));
@@ -64,7 +67,11 @@ int32 UPA250VisualsCommandlet::Main(const FString& Params)
 				M->RefreshBoneTransforms();
 				M->FinalizeBoneTransform();
 				M->UpdateComponentToWorld(EUpdateTransformFlags::None, ETeleportType::TeleportPhysics);
-				if (AMusketWeapon* W = Soldier->Musket.Get()) W->UpdateVisuals(1.f / 30.f);
+				if (AMusketWeapon* W = Soldier->Musket.Get())
+				{
+					W->UpdateVisuals(1.f / 30.f);
+					W->PoseSupportHand();
+				}
 			}
 		}
 		for (ARFCharacter* Soldier : {British, Continental})
@@ -79,6 +86,32 @@ int32 UPA250VisualsCommandlet::Main(const FString& Params)
 				*Soldier->FactionId.ToString(), Along, *Muzzle.ToCompactString(), MuzzleHeight);
 			Check(Along > 0.97f, TEXT("barrel points where the soldier faces (not the hand bone axis)"));
 			Check(Muzzle.X > 50.f && MuzzleHeight > 60.f && MuzzleHeight < 170.f, TEXT("muzzle is in front of the body at a carrying height"));
+
+			// Left hand solved onto the stock inside pose evaluation (the wrist sits 10 cm behind the spot).
+			if (USkeletalMeshComponent* GunMesh = Weapon->GetAnimatedMesh(); GunMesh && GunMesh->GetBoneIndex(TEXT("b_gun_LeftHandSpot")) != INDEX_NONE)
+			{
+				const UPA250SoldierAnimInstance* BodyAnim = Cast<UPA250SoldierAnimInstance>(Soldier->GetMesh()->GetAnimInstance());
+				const FVector Spot = GunMesh->GetBoneLocation(TEXT("b_gun_LeftHandSpot"), EBoneSpaces::WorldSpace);
+				const float Gap = FVector::Dist(Soldier->GetMesh()->GetBoneLocation(TEXT("hand_l"), EBoneSpaces::WorldSpace), Spot);
+				bool bBonesValid = true;
+				for (const FTransform& B : Soldier->GetMesh()->GetComponentSpaceTransforms())
+				{
+					bBonesValid &= !B.ContainsNaN() && B.IsRotationNormalized();
+				}
+				USkeletalMeshComponent* BodyMesh = Soldier->GetMesh();
+				const FVector Sh = BodyMesh->GetBoneLocation(TEXT("upperarm_l"), EBoneSpaces::WorldSpace);
+				const FVector El = BodyMesh->GetBoneLocation(TEXT("lowerarm_l"), EBoneSpaces::WorldSpace);
+				const FVector Wr = BodyMesh->GetBoneLocation(TEXT("hand_l"), EBoneSpaces::WorldSpace);
+				const float Reach = FVector::Dist(Sh, El) + FVector::Dist(El, Wr);
+				UE_LOG(LogTemp, Display, TEXT("PA250.Visuals measure %s: left wrist to stock spot=%.1f cm (arm reach %.1f cm, shoulder to spot %.1f cm)"),
+					*Soldier->FactionId.ToString(), Gap, Reach, FVector::Dist(Sh, Spot));
+				// In reach: the wrist lands on its target (10 cm behind the spot). Out of reach (the unarmed
+				// idle carries the gun low and far forward): the straightened arm points right at the spot.
+				const float Short = FMath::Max(0.f, FVector::Dist(Sh, Spot) - 10.f - Reach);
+				Check(BodyAnim && BodyAnim->GetSupportHandTarget().bEnabled && Gap < 10.f + Short + 3.f,
+					TEXT("left arm solved onto the musket stock (anim-thread IK)"));
+				Check(bBonesValid, TEXT("every body bone is finite with a unit rotation after the hand IK"));
+			}
 
 			// Pack animations: lock falls on the shot, then the reload is scrubbed by the sequencer.
 			USkeletalMeshComponent* Gun = Weapon->GetAnimatedMesh();
@@ -104,10 +137,52 @@ int32 UPA250VisualsCommandlet::Main(const FString& Params)
 			Check(A0 == 0.f && A1 <= A2 && A2 < A3 && A3 == 1.f && AMusketWeapon::ReloadAnimAlpha(P::Jammed, 0.5f) < 0.f
 				&& AMusketWeapon::ReloadAnimAlpha(P::MissDelay, 0.5f) < 0.f, TEXT("reload animation follows the drill phases and holds on fumble/jam"));
 		}
+		{
+			auto* Coat = Cast<UMaterialInstanceDynamic>(Continental->GetMesh()->GetMaterial(1));
+			auto* Under = Cast<UMaterialInstanceDynamic>(Continental->GetMesh()->GetMaterial(0));
+			const FLinearColor C = Coat ? Coat->K2_GetVectorParameterValue(TEXT("CoatColor")) : FLinearColor::Black;
+			Check(Coat && C.R >= C.B && C.R < 1.2f && Under && Under->GetMaterial()->GetName() == TEXT("M_PA250_SoldierUnder")
+				&& !Cast<UMaterialInstanceDynamic>(British->GetMesh()->GetMaterial(0)),
+				TEXT("Patriots wear homespun (earth-tone coat, own waistcoat/breeches); regulars keep the pack's whites"));
+			FLinearColor A, B, A2, B2;
+			int32 Distinct = 0;
+			TSet<uint32> Seen;
+			for (uint32 Seed = 0; Seed < 40; ++Seed)
+			{
+				UPA250FactionVisuals::HomespunFor(Seed, A, B);
+				Seen.Add(GetTypeHash(A.ToFColor(false)));
+			}
+			Distinct = Seen.Num();
+			UPA250FactionVisuals::HomespunFor(7, A, B);
+			UPA250FactionVisuals::HomespunFor(7, A2, B2);
+			Check(Distinct >= 12 && A == A2 && B == B2 && A.R < 0.6f, TEXT("homespun: varied per man, stable per seed, never bright"));
+		}
 		auto* Red = Cast<UMaterialInstanceDynamic>(British->GetMesh()->GetMaterial(1));
-		auto* Blue = Cast<UMaterialInstanceDynamic>(Continental->GetMesh()->GetMaterial(1));
-		Check(Red && Blue && Red->K2_GetVectorParameterValue(TEXT("CoatColor")).R > Red->K2_GetVectorParameterValue(TEXT("CoatColor")).B
-			&& Blue->K2_GetVectorParameterValue(TEXT("CoatColor")).B > Blue->K2_GetVectorParameterValue(TEXT("CoatColor")).R, TEXT("British red and Continental blue use distinct coat materials"));
+		bool bNeverRed = true;
+		for (uint32 Seed = 0; Seed < 200; ++Seed)
+		{
+			FLinearColor Coat, Under;
+			UPA250FactionVisuals::HomespunFor(Seed, Coat, Under);
+			bNeverRed &= Coat.R < 1.6f * Coat.G;
+		}
+		const FLinearColor R = Red ? Red->K2_GetVectorParameterValue(TEXT("CoatColor")) : FLinearColor::Black;
+		Check(Red && R.R > 2.f * R.G && R.R > 2.f * R.B && bNeverRed, TEXT("British wear red; Patriot homespun is never red (friend/foe at a glance)"));
+	}
+	{
+		// Smoke puff: blown forward, then drifts downwind, swells, and fades out by Life.
+		FPA250SmokePuff P;
+		P.Pos = FVector::ZeroVector; P.Vel = FVector(260.f, 0.f, 0.f); P.Life = 25.f; P.Size0 = 60.f; P.Size1 = 500.f; P.Peak = 0.5f;
+		float Peak = 0.f, SizeAt3 = 0.f;
+		FVector PosAt2;
+		for (int32 i = 0; i < 30 * 26; ++i)
+		{
+			P.Step(1.f / 30.f, UPA250SmokeSubsystem::Wind());
+			Peak = FMath::Max(Peak, P.Opacity());
+			if (i == 60) PosAt2 = P.Pos;
+			if (i == 90) SizeAt3 = P.Size();
+		}
+		Check(PosAt2.X > 100.f && PosAt2.X < 300.f && P.Pos.Z > 0.f && P.Pos.X > 1000.f, TEXT("smoke: blown a metre or two out, then drifts downwind and rises"));
+		Check(Peak > 0.45f && P.IsDead() && P.Opacity() == 0.f && SizeAt3 > 250.f, TEXT("smoke: thick at first, billows within seconds, gone after its life"));
 	}
 	GEngine->DestroyWorldContext(World);
 	World->DestroyWorld(false);

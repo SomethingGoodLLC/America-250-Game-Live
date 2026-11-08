@@ -103,6 +103,16 @@ public:
 	static constexpr float PoleHeight = 900.f;
 	/** Preview/test only: hand the post to a faction immediately (the flag then animates up). */
 	void DebugSetHolder(FName NewHolder) { Capturer = NAME_None; CaptureProgress = 0.f; SetHolder(NewHolder); }
+	/** Concord's magazine and foothold are not the crossing: they cannot change hands. */
+	void SetContestLocked(bool bLocked) { bContestLocked = bLocked; }
+	bool IsContestLocked() const { return bContestLocked; }
+	/** Scenario setup already chose the holder; BeginPlay must not restore the level default. */
+	void MarkHoldersAssigned() { bHoldersAssigned = true; }
+	/** Empty means DisplayName(PostId). Concord calls the green "North Bridge". */
+	void SetObjectiveTitle(FString Title) { ObjectiveTitle = std::move(Title); }
+	FString GetObjectiveTitle() const { return ObjectiveTitle.IsEmpty() ? DisplayName(PostId) : ObjectiveTitle; }
+	/** One capture step from explicit counts. A locked post does not move. */
+	bool ApplyCapturePressure(FName Sole, int32 Attackers, int32 Defenders, float DeltaSeconds);
 	FVector2D GetPoleOffset() const { return PoleOffset; }
 	/** Test hook: the cloth's current vertex count (0 before it is built). */
 	int32 GetClothVertexCount() const;
@@ -141,6 +151,9 @@ private:
 
 	FName Holder = NAME_None;
 	FName Capturer = NAME_None;
+	bool bContestLocked = false;
+	bool bHoldersAssigned = false;
+	FString ObjectiveTitle;
 	float CaptureProgress = 0.f;
 	bool bContested = false;
 	bool bFlippedSinceLastCheck = false;

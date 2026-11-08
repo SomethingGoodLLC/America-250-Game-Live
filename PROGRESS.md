@@ -2,6 +2,19 @@
 
 **Vertical slice M0–M8 complete. Battle Feel B1–B4 complete.** Nothing committed or stashed; all changes are uncommitted in the working tree.
 
+## 2026-11-08 — April campaign loop (Stage A–C foundations)
+- **Sim:** `FactionStores` (powder/arms/provisions), `StaffState` + correspondence queue (one clerk), `CampaignProgress` (aftermath, Concord follow-up, chapter gates, Knox project, detached commander). Schema stays **2**; new fields default on load.
+- **Loop:** battle → `apply_battle_result` expends stores / sets aftermath → `EventPopup` letter → purchase / request_assistance / requisition / capacity_investment → timed delivery (commit ≠ receive) → ticket gating in `build_battle_setup` changes the next fight. Concord follow-up marches seeded after a logistics choice.
+- **Player role:** composite Massachusetts field commander (fictionalized); Continental / Washington chapters gated to 14 Jun / 3 Jul 1775. Knox offered on/after 17 Dec 1775 as a campaign project (not automatic Boston).
+- **Battle:** `scenario_preset` (`lexington_common` | `concord_bridge` | `battle_road`) and its `terrain_tags` are read by the battle on shared `L_Lexington`. Concord (`bridge_crossing`) contests only the crossing; the magazine and foothold stay locked. Battle Road (`return_march`) does not bleed for ground, and the clock goes to whoever kept more of their starting pool. Campaign morale/readiness adds capped pressure bias (does not merge with squad Steady/Shaken/Rout). Manual reload and volley lane/epoch logic untouched except that one pressure addend.
+- **UI:** map header shows Gold | Powder | Arms | Prov | Local support; staff panel with choice buttons.
+- **Verified:** `pa250sim_tests` 8980 checks, 0 failed (incl. `logistics_loop`, `commander_and_knox_gates`); golden `clock_golden_1775.json` regenerated. `PlayAmerica250Editor` Mac Development **Succeeded**. `-run=PA250Battle` checks=249 fails=0; `-run=PA250Combat` fails=0. Slice autoplay / PIE staff panel not re-run in this pass.
+- **Review fixes (2026-11-08, later pass):** delivered/refused letters are now clearable notices (any choice clears `pending_event_id`, never re-charges/re-delivers — previously the delivery popup could never be dismissed and autoplay's staff loop could spin on it); commander dismiss clears `pending_clarification`; declining Knox sets `declined`; `resolve_commander_request` only consumes the commander's own letter (a June chapter briefing could previously be answered as a commander order) and now moves army morale/readiness, not just strings; `ensure_logistics_defaults` no longer resets real 0 `local_support`/`readiness` to 55/100; battle powder/arms spend uses the stores-gated fielded tickets, not the paper roster (a 5-man gated force previously burned powder for 23); a second capacity investment cannot be charged while one is underway, and a ready repair contact adds +2 arms to later purchases; a full clerk desk slips purchase/request deliveries by a day; the Concord follow-up orders the militia from wherever the first battle left it. Map widget: commander buttons only on the detached commander's letter, chapter/notice letters get a single Acknowledge, choice rows hidden for non-awaiting letters (`IsPendingLetterAwaitingChoice`). Autoplay answers staff popups while advancing the ceasefire day (previously stopped after 1 hour on the seeded commander letter). New `logistics_edges` ctest case (17 checks failed before, 0 after). Re-verified: ctest 100% (golden hash unchanged), editor build **Succeeded**, `PA250Battle` 249/0, `PA250Combat` fails=0, `run_slice_autoplay.sh` **PASSED**.
+- **Campaign speed:** the map clock defaults to **1 campaign hour per real second** (it was 6). Speed− / Speed+ and keys 1–7 step through ¼, ½, 1, 2, 6, 24, and 120 h/s. The header shows that rate. Battle time is unchanged.
+- **Concord crossing:** the North Bridge fight fields one British company (at most 6, and never more men than the provincials on the crossing). A creek and a plank bridge are built under that post; the magazine and foothold stay locked. The ground is still the Lexington field.
+- **Known limits:** campaign-confidence pressure bias is a margin effect (≤0.35 added pressure, cannot shake a full-strength squad by itself); Knox delivery is a state flag, no playable artillery; PIE staff panel still not exercised. Concord and Battle Road still share `L_Lexington` geometry.
+- **Review pass (2026-11-08, correctness):** a ceasefire now halts a march already underway before it enters enemy ground (friendly legs and safe passage still complete). Concord (`bridge_crossing`) contests only the crossing post; the magazine and foothold stay locked. Battle Road (`return_march`) does not bleed tickets for ground, and the clock goes to whoever kept the larger share of their starting pool. Escalating Parker's company (`hold_stores`) forfeits the town if his army loses the field without holding the post; Boston stays protected. A staff letter raised in the same hour as contact stays pending after the battle interrupt, so the panel can be answered once the fight ends. Verified: `pa250sim_tests` 9033 checks, 0 failed (incl. `ceasefire_halts_march_in_progress`, `letter_survives_contact`, `escalate_risks_the_ground`, `logistics_loop`, `logistics_edges`); golden `clock_golden_1775.json` unchanged, not regenerated. `PlayAmerica250Editor` Mac Development **Succeeded**. `-run=PA250Battle` checks=264 fails=0; `-run=PA250Combat` fails=0. `scripts/run_slice_autoplay.sh` **PASSED**. PIE staff panel still not exercised.
+
 ## 2026-11-08 — Line volleys: two-rank lane safety + cancel-safe stagger
 - Kept existing two-rank Line `FormationOffsets` (N≥4). No single-rank collapse.
 - Coordinated mode remains `FPA250TacticalRole::bIndividualFire == false` (editable by role, not faction).
@@ -1138,3 +1151,129 @@ Context: Lexington Green was a British win (77 militia vs ~240 light infantry). 
   - After skirmishers fall back from charges and the heavier muster: British wins with 42 left vs 0. 24 militia arrived; militia withdrew 23 times and routed 6; British routed 2 and charged 8 times.
   - The Americans run out of tickets first. Militia are Recruits (slower reload, worse aim), which cancels much of their numbers. The British take posts early and bleed them.
 - Not verified in PIE: militia actually hugging the walls, and how the walls look on the Battle Road.
+
+## 2026-11-08 — Flag fixes (Meetinghouse pole, marker overlap)
+
+- **Clear-spot pole placement** (`APA250ControlPoint::FindClearPoleSpot`): at BeginPlay the pole and its flag need 2.5 m of open air from WorldStatic scenery, searching the post, then rings of 8 at 2.5/5/7.5 m (deterministic). Only the pole moves; the capture zone, slots and HUD distance stay on the post. Logged once per post. Result in L_Lexington: Green and Buckman stay on the post; the Meetinghouse pole moves 250 cm off the wall.
+- **Bug found:** `FCollisionObjectQueryParams(ECC_WorldStatic)` queried nothing, because `ECC_WorldStatic` is 0 and resolved to the int32 bitfield constructor. Every spot looked clear. Fixed with `AddObjectTypesToQuery`.
+- **HUD:** edge-pinned markers start at local Y 215, below the score bar, letter boxes and callout line.
+- Fixed without touching `build_levels.py` / `L_Lexington` (the Codex session is working there).
+- Verified:
+  - re-rendered `docs/preview/lexington_flags_flag_meetinghouse.png`: Pine Tree flag clear above the eave, markers clear of the callout;
+  - `-run=PA250Battle` checks=249 fails=0.
+
+## 2026-11-08 — Trained minutemen + ducking behind walls (and a 4-battle measurement)
+- `DA_CombatProfiles`: continental / militia → **Trained** / Irregular (was Recruit). Minute companies drilled; many men were French & Indian War veterans.
+- **Ducking:**
+  - Crouched capsule half-height 50 cm, so a crouched man is 1.0 m tall, under the 1.1 m wall collision.
+  - Player: hold **Left Ctrl** to duck. Firing always rises first (a crouched musket would only hit the wall).
+  - Bots at a covered firing position duck unless loaded with a target in sight (`PA250ShouldDuck`): down to reload, up to fire. Never in the open, on the move, routing or charging.
+  - No crouch animation exists; the mannequin's mesh sinks with the capsule (stopgap).
+- Checks: `-run=PA250Battle` 249/249. New tests:
+  - a crouched man is hidden behind a 1.1 m wall while a standing man's head shows (real traces);
+  - duck rules;
+  - the minutemen assignment.
+- **Four full L_Lexington battles** (slice autoplay, each PASSED; collected one at a time because another session kept rebuilding the module):
+
+| battle | winner | tickets left (B / C) | militia arrived | post flips | charges B / C | routs B / C | militia withdrawals | bleed ticks |
+|---|---|---|---|---|---|---|---|---|
+| 1 | British | 32 / 0 | 22 | 3 | 12 / 2 | 3 / 4 | 19 | 37 |
+| 2 | British | 58 / 0 | 20 | 5 | 9 / 2 | 1 / 5 | 22 | 38 |
+| 3 | British | 49 / 0 | 24 | 5 | 9 / 9 | 1 / 2 | 22 | 28 |
+| 4 | British | 28 / 0 | 23 | 9 | 11 / 3 | 2 / 5 | 29 | 43 |
+
+- Reading: 28–43 tickets per battle go to post bleed. Under Conquest rules the side holding more posts bleeds the other, and the militia's cover-and-fall-back play keeps them off the posts. The scoring, not the firefight, decides it.
+- Muster tuning (50% / 15 s / 2×) was not raised further.
+
+## 2026-11-08 — Decision: Lexington stays a likely British win
+- The user chose to accept the result: Lexington Green (dawn, ~77 militia vs ~240 regulars) was historically a British win. The Battle Road walls, militia muster, trained minutemen and ducking stay in, since they make the fight closer and play the way the militia fought. No Lexington-specific objective or bleed change.
+- Revisit if later battles (e.g. a Battle Road / Concord scenario) need the "hold then march out" objective; it was designed but not built.
+
+## 2026-11-08 — Stone walls fixed + Patriot cover facing the Green
+
+- **"Half-transparent" walls were floating stones.** `place_stone_wall` placed each KiteDemo rock by its centre at a fixed lift. River rocks are flat, so the courses hovered with daylight under them, and 65 cm spacing plus ±15° tilt left see-through gaps.
+  - Fix: every stone is seated on the ground or on the stone below, using its real scaled height (sunk 14/9 cm), tilted at most ±4°, every 48 cm.
+  - Courses stack until 1.05–1.1 m, the height of the invisible 1.1 m cover box, so what you see matches what blocks; the cap course keeps ~20% gaps.
+- **The incremental builder made invisible walls.** `build_lexington_battle_road()` never called `flush_scatter()`, so it added only the hidden collision boxes. It now flushes. Battle Road / Patriot stones live in their own scatter groups (`brwall_`, `ptwall_`), and the builder removes those plus `BattleRoad_*`, `PatriotCover_*` and `Muster_*` before re-placing, so reruns are idempotent.
+- **Patriot cover (GAME INVENTION)** in `build_levels.py`:
+  - `PATRIOT_WALLS`: three 16 m stone walls 38–48 m from flag B, each turned to face the Green.
+    - W1 due west, W2 west-northwest with a gap between them;
+    - SW between Buckman Tavern and the Green.
+  - `PATRIOT_TREES`: 10 trees 30–64 m from the Green, kept out of the walls' lines of fire.
+  - Spots were searched offline with the level's own `keep_clear` (roads, building pads, posts) plus fences, existing trees and the Continental spawn cluster.
+  - Nothing fits on the Meetinghouse side (road + pad). All new walls are tagged `PA250Cover` automatically.
+- L_Lexington rebuilt with `PA250_LEVELS=lexington` (full build).
+- **Preview:** `-PA250Preview=<label>` adds `wall_east` (close-up) and `wall_patriot` (behind W1, looking at flag B). Inspected: solid seated walls; a chest-high wall with the Green and flag in view.
+- **Verified:**
+  - `-run=PA250Battle` checks=249 fails=0 (cover segments 152 → 170; all Battle Road checks pass);
+  - `RUNS=2` slice autoplay PASSED (one Continental win, one British win; post_flips=5).
+- An editor that already had L_Lexington open holds the old map. Reload it without saving, or the rebuilt map gets overwritten.
+
+## 2026-11-08 — Post control matters more; hit feedback for the player
+
+### Tickets
+- Not a bug: this battle's pools come from the campaign armies at that moment. British 24 line units → 96 tickets; Americans 2 line + 8 militia → 40 tickets (×4 soldiers per unit).
+- **Bleed now scales with post control (Battlefront-style):** the side holding fewer posts loses, per 5 s, 1 ticket per post of difference, +1 when the other side holds every post. Holding all 3 = 4 per 5 s = 48 a minute; it was a flat 12 a minute.
+  - `FPA250TicketLedger::BleedAmount`; the legacy flat 1 is kept when the caller passes no post count.
+  - The other session's scenario switch (`UsesPostBleed`, e.g. Battle Road: no bleed for ground) is untouched.
+- The HUD score bar shows the bleed next to the losing side, e.g. "BRITISH 71 (-4/5s)".
+
+### Hit feedback (local player only)
+- Hitmarker: a large X centred on the crosshair, white for a hit, red for a kill, fading over 0.45 s (kills 0.7 s). Text under it: "HIT -78" or "KILL 68 m". It was a small "+" 40 px below the crosshair, easy to confuse with the crosshair itself.
+- Sounds (2D, synthesized): `hit_confirm` (two bright blips), `kill_confirm` (low thump + chime). Melee hits use the same path.
+- Impact marker: wherever the player's own ball lands, a glowing dot shows for 1.5 s (white on a miss, bigger and red on an enemy), so misses show where the shot went.
+
+### Verification
+- `BUILD` Succeeded. `-run=PA250Battle` checks=269 fails=0. New checks:
+  - bleed amounts 1 / 2 / 4;
+  - 48 tickets a minute when holding all posts;
+  - bleed floors at 0;
+  - confirm sounds exist;
+  - impact markers spawn with a 1.5 s life (larger on a hit).
+- Slice autoplay PASSED: British win; 23 bleed ticks; 83 s of game time; British finished with 61 tickets.
+- The other session fixed the same `HitText` shadowing warning in `PA250BattleHUD.cpp` (renamed the lambda `HitLine`) while I was building.
+- Not verified in PIE: hitmarker readability, sound levels, marker visibility at 80 m.
+
+## 2026-11-08 — Black-powder smoke + Patriot homespun
+
+- **There was no muzzle smoke before this.** `SpawnMuzzleSmoke` looked for Niagara assets under `/Game/ThirdParty/FX`, which doesn't exist.
+- **Smoke** (`Battle/PA250Smoke.*`, `UPA250SmokeSubsystem`, a world subsystem; game/PIE worlds only, skipped without a renderer so commandlets and autoplay are unaffected):
+  - Each shot blows out 3 puffs along the barrel. The jet decays in about a second, then puffs drift on a light breeze (70, 30 cm/s), rise slowly, swell from 0.6–1.5 m to 4–6 m and fade over 22–32 s. Cap 240 puffs, oldest first.
+  - All puffs are one `UProceduralMeshComponent` of camera-facing quads, sorted back to front each frame (one draw call).
+  - `M_PA250_Smoke` (`tools/ue/build_smoke_material.py`): translucent; vertex colour = colour/opacity, a soft disc broken up by world-space noise, depth fade into the ground.
+  - Pure `FPA250SmokePuff::Step/Size/Opacity`.
+- **Homespun:** 1775 Patriots (militia, minutemen and the new army) wore their own clothes. Every Continental-side soldier gets a seeded coat from 8 undyed/vegetable-dye wool colours (brown, drab, grey, butternut, dull green, olive drab, dark brown, undyed) with ±15% shade, plus a waistcoat/breeches colour (buff, tan, linen, brown, grey).
+  - The palette never includes red (checked over 200 seeds), so red still means a regular at a glance. HUD and flag colours stay blue for the faction.
+  - New `M_PA250_SoldierUnder` (mesh slot 0, from `M_american_s_armor2skin`) via `tools/ue/build_soldier_visuals.py`, which now builds both clothing materials. Fab originals are never saved.
+  - Coat tint boost: ×3.5 homespun, ×3 regulars (was ×2, which left coat bodies almost black).
+- **Preview:** `-PA250Preview=smoke` fires three scripted 15-man volleys west of the Green and captures `smoke_fresh` and `smoke_bank` (+15 s). Preview labels `flags` / `walls` / `smoke` now capture only their own shots.
+  - Inspected: a thick bank after the volleys; 15 s later it has drifted downwind and thinned, veiling trees.
+  - Soldier comparison (`Saved/PA250/PA250_FabSoldiers.png`): one regular and four varied Patriots, no blue.
+- **Verified:** `-run=PA250Visuals` failures=0 (new homespun and smoke checks; the old "Continental blue" check was replaced by "regulars red, Patriots never red"); `-run=PA250Battle` checks=272 fails=0; slice autoplay PASSED.
+- **Limits / not done:**
+  - The soldier model is cut as a military coat (lapels, cross-belts); recolouring can't make it a civilian frock coat or hunting shirt. That needs another character model.
+  - A thin dark straight line on the ground about 10 m from the smoke-preview camera (seen in both smoke stills, unrelated to the smoke) is not investigated.
+  - Another full UBT build (not this session's) ran at 14:38; any game launched during it fails with "ConflictingInstance".
+
+## 2026-11-08 — Lexington visual review
+
+- Smoke draw cost: puffs past 70 m are not drawn (they keep moving), aged puffs within 1.6 m merge once the bank is thick, and the mesh rebuilds on alternate frames unless a new shot just fired. Muzzle flash and the shared breeze were already in from the other session.
+- Left hand is solved onto the musket's `b_gun_LeftHandSpot` each frame. The body clips are still unarmed idle/walk/run. Not seen in a rendered shot.
+- Homespun seed is stored on the soldier and reused when he respawns, including the player. Slot 0 is the pack's pants/waistcoat/boots material; skin, face and hair are separate materials and are not tinted.
+- Patriot wall and tree spots are checked in `build_lexington` and `build_lexington_battle_road` against roads, pads, posts, the four Common fences and the meadow trees. Stones seat on the lower ground sample under the rock. The incremental builder was not run (another game had L_Campaign open).
+- HUD markers stay 220 px in from the right so they clear the kill feed. The 215 px top inset is the same slate gap at 720p, 1080p and 4K because the callout is a fixed offset, not a fraction of the screen. Not re-rendered.
+- The thin dark line in the smoke stills sits where the road edge crosses the view, about 2.5 m beside that camera, on a map with virtual shadows on. Not changed.
+- Smoke does not block line of sight. The Pine Tree flag is still the Continental colours.
+- Build: first link failed because the march block declared a second `Now` (`-Werror,-Wshadow`). That declaration now uses the `Now` already in the function. Rebuild succeeded (compile `PA250VolleyCoordinator.cpp`, link).
+- `-run=PA250Visuals` failures=0. `-run=PA250Battle` checks=272 fails=0. `scripts/run_slice_autoplay.sh` PASSED (Continental win).
+- `-PA250Preview=smoke` did not capture. The bare `UnrealEditor` binary exits and relaunches the `.app`, and that launch died with SIGBUS in the Mac cursor image load while another UnrealBuildTool mutex was already held. No new stills.
+
+## 2026-11-08 — Skinning crash + mouse/trackpad look
+
+- **Crash** (`Assertion failed: IsRotationNormalized()` in `UpdateRefToLocalMatricesInner`, three reports, one a frame after a respawn): `AMusketWeapon::PoseSupportHand` const-cast the body's `GetComponentSpaceTransforms()` from an actor tick and swapped the array (`CS = MoveTemp(Posed)`). On a freshly spawned or re-meshed soldier that ran before its tick prerequisite took effect, racing the parallel animation task.
+  - New `UPA250SoldierAnimInstance` (native, `RF/PA250SoldierAnimInstance.*`) plays the pack idle/walk/run and solves the left arm inside pose evaluation (`FPA250SoldierAnimProxy::SolveSupportHand`, `AnimationCore::SolveTwoBoneIK`). The musket now only publishes a component-space target; nothing writes bone buffers from game code.
+  - Measured: the stock spot is 76 cm from the shoulder and the arm reaches 52 cm in the unarmed idle carry, so the straightened arm stops 24 cm short (same as before). Hand on the stock needs a musket carry/aim body pose.
+- **Look dead on trackpad**: look deltas only reach `IA_Look` while the game viewport has mouse capture (`FSceneViewport::OnMouseMove`). PIE starts without it (`GameGetsMouseControl=False`), and only a click inside the viewport captured. Moving (WASD) now re-takes capture through `FInputModeGameOnly` when the viewport has focus and no UI cursor is shown (`ARFCharacter::EnsureGameMouseCapture`; logs `PA250 input: ... took it`).
+- Horizontal look ×0.6 relative to vertical (`ARFCharacter::YawLookScale`); left/right was too fast.
+- Verified: build Succeeded; `-run=PA250Visuals` failures=0 (new: left arm solved, every body bone finite with unit rotation); `-run=PA250Battle` checks=272 fails=0.
+- Not verified in PIE: that the crash is gone during real play, or the look feel on a trackpad. The commandlets run with `-nullrhi`, so GPU skinning (where the assert fires) never runs there.
