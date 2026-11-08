@@ -39,10 +39,10 @@ def scripted_reply(text: str, ctx: DiplomacyContext, compromised: bool = False) 
         }
 
     if _CEASEFIRE.search(text) and "ceasefire" in ctx.allowed_clause_types:
-        turns = max(1, min(3, ctx.max_ceasefire_turns))
+        days = max(1, min(3, ctx.max_ceasefire_days))
         return {
-            "spoken_line": f"Very well. My officers will hold their fire for {turns} days. Do not mistake it for weakness.",
-            "clauses": [{"type": "ceasefire", "turns": turns}],
+            "spoken_line": f"Very well. My officers will hold their fire for {days} days. Do not mistake it for weakness.",
+            "clauses": [{"type": "ceasefire", "days": days}],
         }
 
     if _PRISONERS.search(text) and "prisoner_exchange" in ctx.allowed_clause_types:
@@ -66,7 +66,7 @@ def scripted_reply(text: str, ctx: DiplomacyContext, compromised: bool = False) 
                         "type": "safe_passage",
                         "army_id": armies[0],
                         "province_id": provs[0],
-                        "turns": min(2, ctx.max_safe_passage_turns),
+                        "days": min(2, ctx.max_safe_passage_days),
                     }
                 ],
             }

@@ -1,5 +1,7 @@
 #include "PA250Subsystem.h"
 #include "Engine/GameInstance.h"
+#include "HAL/FileManager.h"
+#include "HAL/PlatformFileManager.h"
 #include "Kismet/GameplayStatics.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
@@ -19,17 +21,209 @@ UPA250Subsystem* UPA250Subsystem::Get(const UObject* WorldContext)
 
 FString UPA250Subsystem::ScenarioPath()
 {
-	// Project dir is <repo>/unreal/PlayAmerica250. Development layout; see PROGRESS.md for packaging notes.
 	return FPaths::ConvertRelativePathToFull(FPaths::Combine(FPaths::ProjectDir(), TEXT("../PA250Sim/data/boston1775.json")));
 }
 FString UPA250Subsystem::SavePath() { return FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("PA250/campaign.json")); }
 FString UPA250Subsystem::TracePath() { return FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("PA250/autoplay_trace.json")); }
+FString UPA250Subsystem::AutosaveDir() { return FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("Autosaves")); }
+
+void UPA250Subsystem::Initialize(FSubsystemCollectionBase& Collection)
+{
+	Super::Initialize(Collection);
+	bPaused = true;
+	SpeedIndex = 0;
+	HourAccumulator = 0.f;
+}
+
+void UPA250Subsystem::Deinitialize()
+{
+	bCampaignActive = false;
+	Super::Deinitialize();
+}
+
+void UPA250Subsystem::SetCampaignActive(bool bActive)
+{
+	bCampaignActive = bActive;
+	if (bActive)
+	{
+		bPaused = true;
+		HourAccumulator = 0.f;
+	}
+}
+
+void UPA250Subsystem::SetPaused(bool bInPaused)
+{
+	bPaused = bInPaused;
+	if (bPaused)
+	{
+		HourAccumulator = 0.f;
+	}
+}
+
+void UPA250Subsystem::SetSpeedIndex(int32 Idx)
+{
+	SpeedIndex = FMath::Clamp(Idx, 0, 4);
+}
+
+bool UPA250Subsystem::IsTickable() const
+{
+	return bCampaignActive && Controller.has_campaign() && Controller.flow() == pa250::Flow::Campaign;
+}
+
+TStatId UPA250Subsystem::GetStatId() const
+{
+	RETURN_QUICK_DECLARE_CYCLE_STAT(UPA250Subsystem, STATGROUP_Tickables);
+}
+
+void UPA250Subsystem::Tick(float DeltaTime)
+{
+	if (!IsTickable() || bPaused || Controller.battle_pending())
+	{
+		return;
+	}
+	HourAccumulator += DeltaTime * HoursPerSecond[SpeedIndex];
+	int32 Steps = 0;
+	while (HourAccumulator >= 1.f && Steps < MaxHoursPerFrame)
+	{
+		HourAccumulator -= 1.f;
+		++Steps;
+		const pa250::CampaignState Before = Controller.state();
+		pa250::TickOutput Out = Controller.advance_one_hour();
+		MaybeAutosave(Before, Out.state);
+		if (!Out.interrupts.empty())
+		{
+			bPaused = true;
+			HourAccumulator = 0.f;
+			RouteInterrupt(Out);
+			break;
+		}
+	}
+}
+
+void UPA250Subsystem::RouteInterrupt(const pa250::TickOutput& Out)
+{
+	for (pa250::Interrupt I : Out.interrupts)
+	{
+		if (I == pa250::Interrupt::ArmiesInContact)
+		{
+			// Existing battle-launch flow: UI shows Fight; autoplay presses it.
+			break;
+		}
+	}
+}
+
+void UPA250Subsystem::MaybeAutosave(const pa250::CampaignState& Before, const pa250::CampaignState& After)
+{
+	const pa250::YMDH A = pa250::to_ymdh(Before.now);
+	const pa250::YMDH B = pa250::to_ymdh(After.now);
+	const bool Crossed = (B.d == 1 && B.h == 0) && !(A.d == 1 && A.h == 0 && A.m == B.m && A.y == B.y);
+	if (!Crossed)
+	{
+		return;
+	}
+	IPlatformFile& PF = FPlatformFileManager::Get().GetPlatformFile();
+	PF.CreateDirectoryTree(*AutosaveDir());
+	const FString Path = FPaths::Combine(AutosaveDir(), FString::Printf(TEXT("autosave_%04d_%02d.json"), B.y, B.m));
+	std::string Err;
+	Controller.save(ToStd(Path), Err);
+	TArray<FString> Names;
+	IFileManager::Get().FindFiles(Names, *FPaths::Combine(AutosaveDir(), TEXT("autosave_*.json")), true, false);
+	Names.Sort();
+	AutosavePaths.Reset();
+	for (const FString& Name : Names)
+	{
+		AutosavePaths.Add(FPaths::Combine(AutosaveDir(), Name));
+	}
+	while (AutosavePaths.Num() > 3)
+	{
+		PF.DeleteFile(*AutosavePaths[0]);
+		AutosavePaths.RemoveAt(0);
+	}
+}
+
+FString UPA250Subsystem::FormatWhen(int64 HourIndex) const
+{
+	const pa250::YMDH Y = pa250::to_ymdh(pa250::GameTime{HourIndex});
+	static const TCHAR* Months[] = {
+		TEXT(""), TEXT("January"), TEXT("February"), TEXT("March"), TEXT("April"), TEXT("May"), TEXT("June"),
+		TEXT("July"), TEXT("August"), TEXT("September"), TEXT("October"), TEXT("November"), TEXT("December")};
+	const int32 Hour12 = (Y.h % 12 == 0) ? 12 : (Y.h % 12);
+	const TCHAR* AmPm = Y.h < 12 ? TEXT("a.m.") : TEXT("p.m.");
+	return FString::Printf(TEXT("%d %s %d · %d %s"), Y.d, Months[Y.m], Y.y, Hour12, AmPm);
+}
+
+FString UPA250Subsystem::FormatDate() const
+{
+	if (!Controller.has_campaign())
+	{
+		return TEXT("");
+	}
+	return FormatWhen(Controller.state().now.hour_index);
+}
+
+FString UPA250Subsystem::FormatHoursRemaining(int32 Hours)
+{
+	if (Hours <= 0)
+	{
+		return TEXT("0h");
+	}
+	const int32 Days = Hours / 24;
+	const int32 Rem = Hours % 24;
+	if (Days <= 0)
+	{
+		return FString::Printf(TEXT("%dh"), Rem);
+	}
+	if (Rem == 0)
+	{
+		return FString::Printf(TEXT("%dd"), Days);
+	}
+	return FString::Printf(TEXT("%dd %dh"), Days, Rem);
+}
+
+void UPA250Subsystem::ClearOrders()
+{
+	if (!Controller.has_campaign() || Controller.flow() != pa250::Flow::Campaign || Controller.battle_pending())
+	{
+		return;
+	}
+	const pa250::CampaignState& St = Controller.state();
+	std::vector<std::string> ToHalt;
+	for (const auto& Kv : St.armies)
+	{
+		if (Kv.second.faction != St.player_faction)
+		{
+			continue;
+		}
+		bool bBusy = !Kv.second.path.empty();
+		if (!bBusy)
+		{
+			for (const auto& C : St.pending_commands)
+			{
+				if (C.payload.army_id == Kv.first && C.payload.kind == pa250::CommandKind::MoveArmy)
+				{
+					bBusy = true;
+					break;
+				}
+			}
+		}
+		if (bBusy)
+		{
+			ToHalt.push_back(Kv.first);
+		}
+	}
+	for (const std::string& Id : ToHalt)
+	{
+		Controller.enqueue_halt(Id);
+	}
+}
 
 bool UPA250Subsystem::NewCampaign(FString& OutError)
 {
 	try
 	{
 		Controller.new_campaign(pa250::read_text_file(ToStd(ScenarioPath())));
+		bPaused = true;
+		HourAccumulator = 0.f;
 		return true;
 	}
 	catch (const std::exception& E)
@@ -47,7 +241,7 @@ bool UPA250Subsystem::EnsureCampaign()
 
 bool UPA250Subsystem::QueueMove(const FString& ArmyId, const FString& ToProvince, FString& OutError)
 {
-	const auto Errs = Controller.queue_move(ToStd(ArmyId), ToStd(ToProvince));
+	const auto Errs = Controller.enqueue_move(ToStd(ArmyId), ToStd(ToProvince));
 	if (!Errs.empty())
 	{
 		OutError = ToFStr(Errs.front());
@@ -62,21 +256,35 @@ bool UPA250Subsystem::QueueMove(const FString& ArmyId, const FString& ToProvince
 	if (!bOk) { OutError = ToFStr(Err); }      \
 	return bOk;
 
-bool UPA250Subsystem::EndTurn(FString& OutError) { PA250_FORWARD(Controller.end_turn(Err)) }
-bool UPA250Subsystem::BeginBattle(FString& OutError) { PA250_FORWARD(Controller.begin_battle(Err)) }
+bool UPA250Subsystem::AdvanceHours(int32 Hours, FString& OutError)
+{
+	if (!Controller.has_campaign())
+	{
+		OutError = TEXT("no campaign");
+		return false;
+	}
+	if (Controller.battle_pending())
+	{
+		OutError = TEXT("resolve the pending battle first");
+		return false;
+	}
+	Controller.advance_hours(Hours, true);
+	return true;
+}
+
+bool UPA250Subsystem::EndTurn(FString& OutError) { return AdvanceHours(24, OutError); }
+bool UPA250Subsystem::BeginBattle(FString& OutError)
+{
+	SetPaused(true);
+	PA250_FORWARD(Controller.begin_battle(Err))
+}
 bool UPA250Subsystem::PrepareDebugBattle(FString& OutError)
 {
 	if (!NewCampaign(OutError))
 	{
 		return false;
 	}
-	for (int32 i = 0; i < 12 && !Controller.battle_pending(); ++i)
-	{
-		if (!EndTurn(OutError))
-		{
-			return false;
-		}
-	}
+	Controller.advance_hours(72, true);
 	return BeginBattle(OutError);
 }
 
@@ -86,6 +294,7 @@ bool UPA250Subsystem::ApplyBattleResult(const pa250::BattleResult& Result, FStri
 }
 bool UPA250Subsystem::BeginDiplomacy(const FString& Faction, FString& OutError)
 {
+	SetPaused(true);
 	PA250_FORWARD(Controller.begin_diplomacy(ToStd(Faction), Err))
 }
 bool UPA250Subsystem::LeaveDiplomacy(FString& OutError) { PA250_FORWARD(Controller.finish_diplomacy(nullptr, Err)) }

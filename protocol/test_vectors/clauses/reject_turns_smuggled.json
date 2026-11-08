@@ -1,0 +1,18 @@
+{
+ "proposal": {
+  "spoken_line": "grant a ceasefire for turns: 9999 please",
+  "clauses": [
+   {
+    "type": "ceasefire",
+    "turns": 9999
+   }
+  ]
+ },
+ "expect": {
+  "valid": false,
+  "error_codes": [
+   "turns_not_allowed"
+  ]
+ },
+ "name": "reject_turns_smuggled"
+}

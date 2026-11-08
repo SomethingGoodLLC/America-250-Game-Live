@@ -32,20 +32,20 @@ inline uint64_t fnv1a(const std::string& s) {
 }
 
 inline void add_log(CampaignState& s, const std::string& line) {
-    s.log.push_back("t" + std::to_string(s.turn) + ": " + line);
+    s.log.push_back("h" + std::to_string(s.now.hour_index) + ": " + line);
     constexpr size_t kMaxLog = 48;
     if (s.log.size() > kMaxLog) s.log.erase(s.log.begin(), s.log.begin() + (s.log.size() - kMaxLog));
 }
 
 inline bool has_ceasefire(const CampaignState& s) {
     for (const auto& t : s.treaties)
-        if (t.type == "ceasefire" && t.turns_remaining > 0) return true;
+        if (t.type == "ceasefire" && t.hours_remaining > 0) return true;
     return false;
 }
 
 inline bool has_safe_passage(const CampaignState& s, const std::string& army, const std::string& prov) {
     for (const auto& t : s.treaties)
-        if (t.type == "safe_passage" && t.turns_remaining > 0 && t.army_id == army && t.province_id == prov)
+        if (t.type == "safe_passage" && t.hours_remaining > 0 && t.army_id == army && t.province_id == prov)
             return true;
     return false;
 }

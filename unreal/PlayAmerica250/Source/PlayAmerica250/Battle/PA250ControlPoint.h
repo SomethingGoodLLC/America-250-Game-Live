@@ -1,4 +1,4 @@
-// PA250ControlPoint.h — the single capture objective on the Green. Server-side presence/hold timers.
+// PA250ControlPoint.h — capturable conquest post (Green / Meetinghouse / Buckman).
 #pragma once
 
 #include "CoreMinimal.h"
@@ -17,22 +17,51 @@ public:
 	APA250ControlPoint();
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objective")
+	FName PostId = TEXT("green");
+
+	/** Faction that owns the post at BeginPlay, or NAME_None for neutral. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objective")
+	FName InitialOwner = NAME_None;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objective")
 	float Radius = 1200.f;
 
-	/** Seconds of uncontested presence to flip the holder. */
+	/** Seconds of sole presence (one attacker) to complete one ownership step. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objective")
-	float CaptureSeconds = 8.f;
+	float CaptureSeconds = 3.5f;
 
-	/** Current holder faction, or NAME_None. */
+	/** Extra rate per additional attacker: rate = 1 + (n-1)*scale. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objective")
+	float CapturePerAttackerScale = 0.35f;
+
+	/** Multiplier applied while any overlapping soldier is suppressed (volley). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Objective")
+	float CaptureRateScale = 1.f;
+
 	UFUNCTION(BlueprintPure, Category = "Objective")
 	FName GetHolder() const { return Holder; }
 
-	/** Continuous seconds the current holder has kept the point. */
 	UFUNCTION(BlueprintPure, Category = "Objective")
-	float GetHoldSeconds() const { return HoldSeconds; }
+	FName GetCapturer() const { return Capturer; }
 
-	/** Alive soldiers per faction currently on the point. */
+	/** 0..1 progress toward the next ownership step (to neutral or to capturer). */
+	UFUNCTION(BlueprintPure, Category = "Objective")
+	float GetCaptureProgress() const { return CaptureProgress; }
+
+	UFUNCTION(BlueprintPure, Category = "Objective")
+	bool IsContested() const { return bContested; }
+
 	int32 GetPresence(FName Faction) const { const int32* N = Presence.Find(Faction); return N ? *N : 0; }
+
+	/** True if this post flipped ownership since the last call (clears the flag). */
+	bool ConsumeFlipFlag()
+	{
+		const bool B = bFlippedSinceLastCheck;
+		bFlippedSinceLastCheck = false;
+		return B;
+	}
+
+	void ApplyTuning(float InRadius, float InCaptureSeconds, float InPerAttackerScale);
 
 protected:
 	virtual void Tick(float DeltaSeconds) override;
@@ -46,10 +75,12 @@ protected:
 
 private:
 	void UpdateColor();
+	void SetHolder(FName NewHolder);
 
 	FName Holder = NAME_None;
 	FName Capturer = NAME_None;
 	float CaptureProgress = 0.f;
-	float HoldSeconds = 0.f;
+	bool bContested = false;
+	bool bFlippedSinceLastCheck = false;
 	TMap<FName, int32> Presence;
 };

@@ -217,7 +217,7 @@ FString APA250DiplomacyGameMode::DescribeClause(const TSharedPtr<FJsonObject>& C
 	C->TryGetStringField(TEXT("type"), Type);
 	if (Type == TEXT("ceasefire"))
 	{
-		return FString::Printf(TEXT("Ceasefire for %d turns"), (int32)C->GetNumberField(TEXT("turns")));
+		return FString::Printf(TEXT("Ceasefire for %d days"), (int32)C->GetNumberField(TEXT("days")));
 	}
 	if (Type == TEXT("prisoner_exchange"))
 	{
@@ -229,7 +229,7 @@ FString APA250DiplomacyGameMode::DescribeClause(const TSharedPtr<FJsonObject>& C
 	}
 	if (Type == TEXT("safe_passage"))
 	{
-		return FString::Printf(TEXT("Safe passage for %s through %s for %d turns"), *C->GetStringField(TEXT("army_id")), *ProvName(C->GetStringField(TEXT("province_id"))), (int32)C->GetNumberField(TEXT("turns")));
+		return FString::Printf(TEXT("Safe passage for %s through %s for %d days"), *C->GetStringField(TEXT("army_id")), *ProvName(C->GetStringField(TEXT("province_id"))), (int32)C->GetNumberField(TEXT("days")));
 	}
 	if (Type == TEXT("cede_province"))
 	{
@@ -406,7 +406,7 @@ void APA250DiplomacyGameMode::ScriptAdvance()
 	else if (ScriptIndex == 1)
 	{
 		Check(Sub, bGotResponse, TEXT("envoy answered the ceasefire request"));
-		Check(Sub, TermLines.Num() == 1 && TermLines[0].Contains(TEXT("Ceasefire for 3 turns")), TEXT("ceasefire(3) tabled and sim-validated"));
+		Check(Sub, TermLines.Num() == 1 && TermLines[0].Contains(TEXT("Ceasefire for 3 days")), TEXT("ceasefire(3) tabled and sim-validated"));
 		const FString Before = Sub->GetStateHash();
 		const int32 Turn = Sub->GetTurn();
 		if (!bSelftest)
@@ -414,7 +414,7 @@ void APA250DiplomacyGameMode::ScriptAdvance()
 			Sub->AutoplayStage = TEXT("diplomacy_done");
 		}
 		Accept();  // applies through the sim; non-selftest travels to the campaign
-		bGotCeasefire = Sub->GetState().treaties.size() == 1 && Sub->GetState().treaties[0].type == "ceasefire" && Sub->GetState().treaties[0].turns_remaining == 3;
+		bGotCeasefire = Sub->GetState().treaties.size() == 1 && Sub->GetState().treaties[0].type == "ceasefire" && Sub->GetState().treaties[0].hours_remaining == 72;
 		Check(Sub, Sub->GetStateHash() != Before, TEXT("accepting changed the state"));
 		Check(Sub, bGotCeasefire, TEXT("ceasefire(3) is in force"));
 		Check(Sub, Sub->GetFlow() == EPA250Flow::Campaign && Sub->GetTurn() == Turn, TEXT("flow back to campaign, same turn"));

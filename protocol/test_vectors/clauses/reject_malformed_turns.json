@@ -13,7 +13,7 @@
  "expect": {
   "valid": false,
   "error_codes": [
-   "malformed_clause"
+   "turns_not_allowed"
   ]
  }
 }

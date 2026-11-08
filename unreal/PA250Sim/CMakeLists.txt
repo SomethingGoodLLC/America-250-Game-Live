@@ -5,7 +5,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 add_library(pa250sim STATIC
-  src/turn.cpp src/battle.cpp src/diplomacy.cpp src/serialize.cpp src/controller.cpp)
+  src/time.cpp src/path.cpp src/clock.cpp src/battle.cpp src/diplomacy.cpp src/serialize.cpp src/controller.cpp)
 target_include_directories(pa250sim PUBLIC include third_party PRIVATE src)
 target_compile_options(pa250sim PRIVATE -Wall -Wextra -Wno-unused-parameter)
 

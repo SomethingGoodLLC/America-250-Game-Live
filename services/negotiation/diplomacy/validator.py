@@ -18,11 +18,11 @@ def _err(code: str, detail: str = "") -> str:
     return f"{code}: {detail}" if detail else code
 
 
-def _check_turns(errors: list[str], kind: str, turns: int, max_turns: int) -> None:
-    if turns < 1:
-        errors.append(_err(f"{kind}_turns_invalid", "turns must be >= 1"))
-    elif turns > max_turns:
-        errors.append(_err(f"{kind}_too_long", f"{turns} > {max_turns}"))
+def _check_days(errors: list[str], kind: str, days: int, max_days: int) -> None:
+    if days < 1:
+        errors.append(_err(f"{kind}_days_invalid", "days must be >= 1"))
+    elif days > max_days:
+        errors.append(_err(f"{kind}_too_long", f"{days} > {max_days}"))
 
 
 def _validate_clause(ctx: DiplomacyContext, cl: Any, errors: list[str]) -> None:
@@ -33,7 +33,7 @@ def _validate_clause(ctx: DiplomacyContext, cl: Any, errors: list[str]) -> None:
         errors.append(_err("clause_type_not_allowed", cl.type))
         return
     if cl.type == "ceasefire":
-        _check_turns(errors, "ceasefire", cl.turns, ctx.max_ceasefire_turns)
+        _check_days(errors, "ceasefire", cl.days, ctx.max_ceasefire_days)
     elif cl.type == "prisoner_exchange":
         if not cl.has_counts:
             errors.append(_err("prisoner_counts_missing"))
@@ -63,7 +63,7 @@ def _validate_clause(ctx: DiplomacyContext, cl: Any, errors: list[str]) -> None:
             errors.append(_err("unknown_province", cl.province_id))
         elif prov_owner != ctx.faction:
             errors.append(_err("province_not_owned_by_envoy", cl.province_id))
-        _check_turns(errors, "safe_passage", cl.turns, ctx.max_safe_passage_turns)
+        _check_days(errors, "safe_passage", cl.days, ctx.max_safe_passage_days)
     elif cl.type == "cede_province":
         prov_owner = ctx.provinces.get(cl.province_id)
         if prov_owner is None:
@@ -98,7 +98,7 @@ def check_raw_proposal(ctx: DiplomacyContext, raw: Any) -> tuple[DiplomacyPropos
 
 def apply_context_patch(raw_ctx: Mapping[str, Any], patch: Mapping[str, Any] | None) -> dict[str, Any]:
     """Shallow merge used by the shared test vectors (`context_patch`)."""
-    merged = dict(raw_ctx)
+    out = dict(raw_ctx)
     if patch:
-        merged.update(patch)
-    return merged
+        out.update(dict(patch))
+    return out

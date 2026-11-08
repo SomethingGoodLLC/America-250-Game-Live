@@ -6,12 +6,14 @@ Usage:
     [--data boston1775.json] [--compare PREV_TRACE.json]
 Exit status 0 = every assertion passed.
 """
+
 from __future__ import annotations
 
 import argparse
 import json
 import sys
 from pathlib import Path
+from typing import Any
 
 ROOT = Path(__file__).resolve().parent.parent
 errors: list[str] = []
@@ -23,18 +25,18 @@ def check(cond: bool, msg: str) -> None:
         errors.append(msg)
 
 
-def ordered_subsequence(events: list[dict], wanted: list[str]) -> bool:
+def ordered_subsequence(events: list[dict[str, Any]], wanted: list[str]) -> bool:
     it = iter(e["event"] for e in events)
     return all(any(w == e for e in it) for w in wanted)
 
 
-def pre_battle_hashes(events: list[dict]) -> list[tuple[str, int, str]]:
+def pre_battle_hashes(events: list[dict[str, Any]]) -> list[tuple[str, int, str]]:
     out = []
     for e in events:
         if e["event"] == "begin_battle":
             break
-        if e["event"] in ("new_campaign", "end_turn"):
-            out.append((e["event"], e["turn"], e["hash"]))
+        if e["event"] in ("new_campaign", "advance_hour", "interrupt"):
+            out.append((e["event"], e["hour_index"], e["hash"]))
     return out
 
 
@@ -44,9 +46,7 @@ def main() -> int:
     ap.add_argument("--battle")
     ap.add_argument(
         "--data",
-        default=str(
-            ROOT / "unreal" / "PA250Sim" / "data" / "boston1775.json"
-        ),
+        default=str(ROOT / "unreal" / "PA250Sim" / "data" / "boston1775.json"),
     )
     ap.add_argument("--compare")
     a = ap.parse_args()
@@ -63,21 +63,20 @@ def main() -> int:
 
     flow = [
         "new_campaign",
-        "end_turn",
-        "end_turn",
-        "end_turn",
+        "advance_hour",
+        "interrupt",
         "begin_battle",
         "finish_battle",
         "begin_diplomacy",
         "finish_diplomacy",
-        "end_turn",
+        "advance_hour",
         "save",
         "load",
     ]
     check(
         ordered_subsequence(events, flow),
-        "flow order: campaign -> 3 turns -> battle -> result -> "
-        "diplomacy -> result -> turn -> save -> load",
+        "flow order: campaign -> hours -> contact -> battle -> result -> "
+        "diplomacy -> result -> hours -> save -> load",
     )
     fd = [e for e in events if e["event"] == "finish_diplomacy"]
     check(
@@ -85,8 +84,7 @@ def main() -> int:
         "exactly one DiplomacyResult, and it changed state",
     )
     no_change = any(
-        e["event"] == "finish_diplomacy" and e["detail"] == "no_change"
-        for e in events
+        e["event"] == "finish_diplomacy" and e["detail"] == "no_change" for e in events
     )
     check(not no_change, "no rejected/empty result was applied")
     saves = [e for e in events if e["event"] == "save"]
@@ -96,14 +94,23 @@ def main() -> int:
         "save/load hash identical",
     )
     check(
-        loads and loads[-1]["hash"] == trace.get("final_hash"),
+        bool(loads) and loads[-1]["hash"] == trace.get("final_hash"),
         "final hash equals the loaded hash",
     )
-    ends = [e for e in events if e["event"] == "end_turn"]
+    pre = pre_battle_hashes(events)
+    hours = [h for _, h, _ in pre]
     check(
-        len(ends) >= 4 and [e["turn"] for e in ends[:3]] == [1, 2, 3],
-        "turn boundaries 1,2,3 before the battle",
+        len(pre) >= 2
+        and all(b == a + 1 for a, b in zip(hours, hours[1:], strict=False)),
+        f"hour boundaries consecutive before the battle ({len(pre)} boundaries)",
     )
+    after = [i for i, e in enumerate(events) if e["event"] == "finish_diplomacy"]
+    post = [
+        e
+        for e in events[after[0] if after else len(events) :]
+        if e["event"] in ("advance_hour", "interrupt")
+    ]
+    check(len(post) >= 24, f"24 hours advanced after diplomacy ({len(post)})")
 
     if a.battle:
         b = json.loads(Path(a.battle).read_text())
@@ -119,7 +126,10 @@ def main() -> int:
                 ok &= 0 <= n <= tickets
         check(ok, f"battle losses <= ticket pools: {res['losses']}")
         data = json.loads(Path(a.data).read_text())
-        adj = {p["id"]: p["adjacent"] for p in data["provinces"]}
+        adj: dict[str, set[str]] = {p["id"]: set() for p in data["provinces"]}
+        for edge in data["edges"]:
+            adj[edge["a"]].add(edge["b"])
+            adj[edge["b"]].add(edge["a"])
         retreat = res["retreat_province"]
         province = res["province_id"]
         check(
@@ -133,7 +143,7 @@ def main() -> int:
         prev_h = pre_battle_hashes(prev["events"])
         check(
             bool(now_h) and now_h == prev_h,
-            "state hashes identical at every turn boundary before "
+            "state hashes identical at every hour boundary before "
             f"the battle ({len(now_h)} boundaries)",
         )
 

@@ -5,6 +5,7 @@
 #include "Misc/Parse.h"
 #include "Misc/Paths.h"
 #include "HAL/PlatformMisc.h"
+#include <stdlib.h>
 
 namespace PA250Autoplay
 {
@@ -67,6 +68,14 @@ void Finish(UPA250Subsystem* Sub, const FString& Name)
 	}
 	UE_LOG(LogTemp, Display, TEXT("PA250 %s %s (%d failure(s))"), *Name, bPassed ? TEXT("PASSED") : TEXT("FAILED"), GFailures.Num());
 	GLog->Flush();
-	FPlatformMisc::RequestExitWithStatus(true, bPassed ? 0 : 1);
+	const uint8 ExitCode = bPassed ? 0 : 1;
+#if PLATFORM_MAC
+	// FMacPlatformMisc has no RequestExitWithStatus: the generic one forwards to RequestExit, whose
+	// forced path calls _Exit(0) and drops the code. Every result file is already written and the log
+	// flushed, so exit directly with the verdict.
+	_Exit(ExitCode);
+#else
+	FPlatformMisc::RequestExitWithStatus(true, ExitCode);
+#endif
 }
 }

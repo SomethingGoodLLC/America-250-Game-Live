@@ -1,7 +1,9 @@
 #include "RFCharacter.h"
 #include "Camera/CameraComponent.h"
 #include "Components/CapsuleComponent.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Engine/SkeletalMesh.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "Engine/LocalPlayer.h"
@@ -13,6 +15,9 @@
 #include "InputModifiers.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "MusketWeapon.h" // IWYU pragma: keep
+#include "PA250ThirdPartyAssets.h"
+#include "PA250BattleGameMode.h"
+#include "PA250VolleyCoordinator.h"
 #include "RFGameMode.h"
 #include "RFHealthComponent.h"
 #include "UObject/ConstructorHelpers.h"
@@ -25,10 +30,14 @@ ARFCharacter::ARFCharacter()
 
 	SpringArm = CreateDefaultSubobject<USpringArmComponent>(TEXT("SpringArm"));
 	SpringArm->SetupAttachment(RootComponent);
-	SpringArm->TargetArmLength = 400.f;
+	SpringArm->TargetArmLength = 350.f;
 	SpringArm->bUsePawnControlRotation = true;
 	SpringArm->bDoCollisionTest = false;
-	SpringArm->SocketOffset = FVector(0.f, 50.f, 70.f);
+	SpringArm->SocketOffset = FVector(0.f, 60.f, 65.f);
+	SpringArm->bEnableCameraLag = true;
+	SpringArm->CameraLagSpeed = 10.f;
+	SpringArm->bEnableCameraRotationLag = true;
+	SpringArm->CameraRotationLagSpeed = 10.f;
 
 	Camera = CreateDefaultSubobject<UCameraComponent>(TEXT("Camera"));
 	Camera->SetupAttachment(SpringArm);
@@ -76,8 +85,38 @@ void ARFCharacter::SetTeam(FName InFaction, FName InUnitClass)
 	ApplyTeamMarker();
 }
 
+void ARFCharacter::ApplyThirdPartySoldierMesh()
+{
+	// Visual only: a period-uniform mesh from Content/ThirdParty replaces the mannequin
+	// when it shares the mannequin skeleton (so ABP_Unarmed still drives it).
+	static TWeakObjectPtr<USkeletalMesh> British, Continental;
+	static bool bResolved = false;
+	if (!bResolved)
+	{
+		bResolved = true;
+		British = PA250ThirdParty::LoadFirstOf<USkeletalMesh>(PA250ThirdParty::SoldierBritish);
+		Continental = PA250ThirdParty::LoadFirstOf<USkeletalMesh>(PA250ThirdParty::SoldierContinental);
+	}
+	USkeletalMesh* Wanted = FactionId == TEXT("british") ? British.Get()
+	                      : FactionId == TEXT("continental") ? Continental.Get()
+	                                                         : nullptr;
+	USkeletalMeshComponent* MeshComp = GetMesh();
+	if (!Wanted || !MeshComp || MeshComp->GetSkeletalMeshAsset() == Wanted)
+	{
+		return;
+	}
+	const USkeletalMesh* Current = MeshComp->GetSkeletalMeshAsset();
+	if (Current && Current->GetSkeleton() != Wanted->GetSkeleton())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("PA250: %s skipped (not on the UE5 mannequin skeleton)"), *Wanted->GetPathName());
+		return;
+	}
+	MeshComp->SetSkeletalMeshAsset(Wanted);
+}
+
 void ARFCharacter::ApplyTeamMarker()
 {
+	ApplyThirdPartySoldierMesh();
 	if (!TeamMarker || !TeamMarker->GetStaticMesh())
 	{
 		return;
@@ -153,6 +192,11 @@ void ARFCharacter::SpawnMusket()
 void ARFCharacter::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
+	if (SuppressionTimer > 0.f)
+	{
+		SuppressionTimer = FMath::Max(0.f, SuppressionTimer - DeltaTime);
+		if (SuppressionTimer <= 0.f) SuppressionSwayDegrees = 0.f;
+	}
 	if (!FMath::IsNearlyEqual(CurrentFOV, TargetFOV, 0.1f))
 	{
 		CurrentFOV = FMath::FInterpTo(CurrentFOV, TargetFOV, DeltaTime, FOVInterpSpeed);
@@ -164,21 +208,27 @@ void ARFCharacter::Tick(float DeltaTime)
 
 void ARFCharacter::BuildDefaultInput()
 {
-	if (IMC_ThirdPerson && IA_Move && IA_Look && IA_Fire)
-	{
-		return;
-	}
 	auto MakeAction = [this](const TCHAR* Name, EInputActionValueType Type) {
 		UInputAction* A = NewObject<UInputAction>(this, Name);
 		A->ValueType = Type;
 		return A;
 	};
+	if (IMC_ThirdPerson && IA_Move && IA_Look && IA_Fire)
+	{
+		if (!IA_Reload)
+		{
+			IA_Reload = MakeAction(TEXT("IA_RF_Reload"), EInputActionValueType::Boolean);
+			IMC_ThirdPerson->MapKey(IA_Reload, EKeys::R);
+		}
+		return;
+	}
 	IA_Move = MakeAction(TEXT("IA_RF_Move"), EInputActionValueType::Axis2D);
 	IA_Look = MakeAction(TEXT("IA_RF_Look"), EInputActionValueType::Axis2D);
 	IA_Jump = MakeAction(TEXT("IA_RF_Jump"), EInputActionValueType::Boolean);
 	IA_Sprint = MakeAction(TEXT("IA_RF_Sprint"), EInputActionValueType::Boolean);
 	IA_Aim = MakeAction(TEXT("IA_RF_Aim"), EInputActionValueType::Boolean);
 	IA_Fire = MakeAction(TEXT("IA_RF_Fire"), EInputActionValueType::Boolean);
+	IA_Reload = MakeAction(TEXT("IA_RF_Reload"), EInputActionValueType::Boolean);
 
 	IMC_ThirdPerson = NewObject<UInputMappingContext>(this, TEXT("IMC_RF_Default"));
 	auto Swizzle = [this]() {
@@ -211,6 +261,7 @@ void ARFCharacter::BuildDefaultInput()
 	Map(IA_Aim, EKeys::LeftAlt);
 	Map(IA_Fire, EKeys::LeftMouseButton);
 	Map(IA_Fire, EKeys::F);             // trackpad: tap-to-look would otherwise fire
+	Map(IA_Reload, EKeys::R);
 }
 
 void ARFCharacter::PawnClientRestart()
@@ -242,6 +293,8 @@ void ARFCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompone
 		EIC->BindAction(IA_Aim, ETriggerEvent::Started, this, &ARFCharacter::StartAim);
 		EIC->BindAction(IA_Aim, ETriggerEvent::Completed, this, &ARFCharacter::StopAim);
 		EIC->BindAction(IA_Fire, ETriggerEvent::Started, this, &ARFCharacter::OnFirePressed);
+		EIC->BindAction(IA_Reload, ETriggerEvent::Started, this, &ARFCharacter::OnReloadStarted);
+		EIC->BindAction(IA_Reload, ETriggerEvent::Completed, this, &ARFCharacter::OnReloadCompleted);
 	}
 }
 
@@ -272,17 +325,33 @@ void ARFCharacter::StartAim()
 {
 	bAiming = true;
 	TargetFOV = AimedFOV;
-	SpringArm->SocketOffset = FVector(0.f, 80.f, 70.f);
+	SpringArm->SocketOffset = FVector(0.f, 85.f, 65.f);
 }
 
 void ARFCharacter::StopAim()
 {
 	bAiming = false;
 	TargetFOV = DefaultFOV;
-	SpringArm->SocketOffset = FVector(0.f, 50.f, 70.f);
+	SpringArm->SocketOffset = FVector(0.f, 60.f, 65.f);
 }
 
 void ARFCharacter::OnFirePressed() { FireMusket(); }
+void ARFCharacter::OnReloadStarted()
+{
+	if (!Musket || bIsDead) return;
+	Musket->SetReloadHeld(true);
+	Musket->CommitReload();
+}
+void ARFCharacter::OnReloadCompleted()
+{
+	if (Musket) Musket->SetReloadHeld(false);
+}
+
+void ARFCharacter::ApplySuppression(float Seconds, float SwayDegrees)
+{
+	SuppressionTimer = FMath::Max(SuppressionTimer, Seconds);
+	SuppressionSwayDegrees = FMath::Max(SuppressionSwayDegrees, SwayDegrees);
+}
 
 // ---------------------------------------------------------------- combat
 
@@ -295,7 +364,12 @@ bool ARFCharacter::FireMusket()
 	FVector ViewLoc;
 	FRotator ViewRot;
 	Controller->GetPlayerViewPoint(ViewLoc, ViewRot);
-	const FVector TraceEnd = ViewLoc + ViewRot.Vector() * 20000.f;
+	FVector Dir = ViewRot.Vector();
+	if (SuppressionTimer > 0.f && SuppressionSwayDegrees > 0.f)
+	{
+		Dir = FMath::VRandCone(Dir, FMath::DegreesToRadians(SuppressionSwayDegrees));
+	}
+	const FVector TraceEnd = ViewLoc + Dir * 20000.f;
 	FHitResult Hit;
 	FCollisionQueryParams Params(SCENE_QUERY_STAT(MusketAim), true, this);
 	Params.AddIgnoredActor(Musket);
@@ -310,13 +384,26 @@ bool ARFCharacter::FireMusketAt(FVector TargetLocation)
 		return false;
 	}
 	const FVector Muzzle = Musket->GetMuzzleLocation()->GetComponentLocation();
-	// Lift the aim point to cancel the projectile's gravity drop over the flight time.
 	const float Dist = FVector::Dist(Muzzle, TargetLocation);
 	const float Speed = FMath::Max(Musket->GetTuning().ProjectileSpeed, 1.f);
 	const float T = Dist / Speed;
-	const float GravityScale = 0.3f;  // keep in sync with AMusketProjectile
+	const float GravityScale = 0.3f;
 	TargetLocation.Z += 0.5f * 980.f * GravityScale * T * T;
-	return Musket->Fire((TargetLocation - Muzzle).GetSafeNormal());
+	FVector Dir = (TargetLocation - Muzzle).GetSafeNormal();
+	if (SuppressionTimer > 0.f && SuppressionSwayDegrees > 0.f)
+	{
+		Dir = FMath::VRandCone(Dir, FMath::DegreesToRadians(SuppressionSwayDegrees));
+	}
+	const float OwnerSpeed = GetVelocity().Size2D();
+	const bool bShot = Musket->Fire(Dir, bAiming, OwnerSpeed, FormationAccuracyScale);
+	if (bShot)
+	{
+		if (APA250BattleGameMode* GM = GetWorld() ? GetWorld()->GetAuthGameMode<APA250BattleGameMode>() : nullptr)
+		{
+			GM->NotifyShot(this, Dir, true);
+		}
+	}
+	return bShot;
 }
 
 void ARFCharacter::OnDeath(AActor* Victim)

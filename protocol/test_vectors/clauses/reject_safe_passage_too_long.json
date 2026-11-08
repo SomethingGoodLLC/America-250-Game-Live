@@ -8,7 +8,7 @@
     "type": "safe_passage",
     "army_id": "continental_militia",
     "province_id": "charlestown",
-    "turns": 9
+    "days": 91
    }
   ]
  },
@@ -17,5 +17,15 @@
   "error_codes": [
    "safe_passage_too_long"
   ]
+ },
+ "context_patch": {
+  "provinces": {
+   "boston": "british",
+   "cambridge": "continental",
+   "charlestown": "british",
+   "concord": "continental",
+   "lexington": "continental",
+   "roxbury": "continental"
+  }
  }
 }

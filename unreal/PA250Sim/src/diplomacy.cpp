@@ -6,14 +6,14 @@ DiplomacyContext build_diplomacy_context(const CampaignState& s, const std::stri
     DiplomacyContext c;
     c.faction = faction;
     c.counterpart = detail::other_faction(faction);
-    c.turn = s.turn;
+    c.hour_index = s.now.hour_index;
     auto rit = s.relations.find(faction);
     c.relation = rit == s.relations.end() ? 0 : rit->second;
     auto fit = s.factions.find(faction);
     if (fit != s.factions.end()) {
         c.allowed_clause_types = fit->second.allowed_clause_types;
-        c.max_ceasefire_turns = fit->second.max_ceasefire_turns;
-        c.max_safe_passage_turns = fit->second.max_safe_passage_turns;
+        c.max_ceasefire_days = fit->second.max_ceasefire_days;
+        c.max_safe_passage_days = fit->second.max_safe_passage_days;
         c.protected_provinces = fit->second.protected_provinces;
     }
     for (const auto& kv : s.provinces) c.provinces[kv.first] = kv.second.owner;
@@ -29,10 +29,10 @@ namespace {
 
 using detail::err;
 
-void check_turns(std::vector<std::string>& e, const char* type, int turns, int max_turns) {
-    if (turns < 1) e.push_back(err(std::string(type) + "_turns_invalid", "turns must be >= 1"));
-    else if (turns > max_turns)
-        e.push_back(err(std::string(type) + "_too_long", std::to_string(turns) + " > " + std::to_string(max_turns)));
+void check_days(std::vector<std::string>& e, const char* type, int days, int max_days) {
+    if (days < 1) e.push_back(err(std::string(type) + "_days_invalid", "days must be >= 1"));
+    else if (days > max_days)
+        e.push_back(err(std::string(type) + "_too_long", std::to_string(days) + " > " + std::to_string(max_days)));
 }
 
 void validate_clause(const DiplomacyContext& c, const Clause& cl, std::vector<std::string>& e) {
@@ -47,7 +47,7 @@ void validate_clause(const DiplomacyContext& c, const Clause& cl, std::vector<st
         return;
     }
     if (cl.type == "ceasefire") {
-        check_turns(e, "ceasefire", cl.turns, c.max_ceasefire_turns);
+        check_days(e, "ceasefire", cl.days, c.max_ceasefire_days);
     } else if (cl.type == "prisoner_exchange") {
         if (!cl.has_counts) {
             e.push_back(err("prisoner_counts_missing"));
@@ -75,7 +75,7 @@ void validate_clause(const DiplomacyContext& c, const Clause& cl, std::vector<st
         auto pit = c.provinces.find(cl.province_id);
         if (pit == c.provinces.end()) e.push_back(err("unknown_province", cl.province_id));
         else if (pit->second != c.faction) e.push_back(err("province_not_owned_by_envoy", cl.province_id));
-        check_turns(e, "safe_passage", cl.turns, c.max_safe_passage_turns);
+        check_days(e, "safe_passage", cl.days, c.max_safe_passage_days);
     } else if (cl.type == "cede_province") {
         auto pit = c.provinces.find(cl.province_id);
         if (pit == c.provinces.end()) {
@@ -104,7 +104,7 @@ std::vector<std::string> validate_proposal(const DiplomacyContext& c, const Dipl
 namespace {
 
 std::string summarize(const Clause& cl) {
-    if (cl.type == "ceasefire") return "ceasefire for " + std::to_string(cl.turns) + " turns";
+    if (cl.type == "ceasefire") return "ceasefire for " + std::to_string(cl.days) + " days";
     if (cl.type == "prisoner_exchange") {
         std::string s = "prisoner exchange (";
         bool first = true;
@@ -115,7 +115,8 @@ std::string summarize(const Clause& cl) {
         return s + ")";
     }
     if (cl.type == "safe_passage")
-        return "safe passage for " + cl.army_id + " through " + cl.province_id + " for " + std::to_string(cl.turns) + " turns";
+        return "safe passage for " + cl.army_id + " through " + cl.province_id + " for " +
+               std::to_string(cl.days) + " days";
     return "cession of " + cl.province_id;
 }
 
@@ -132,26 +133,25 @@ void add_troops(CampaignState& s, const std::string& faction, const std::string&
 
 CampaignState apply_diplomacy(const CampaignState& in, const DiplomacyResult& r) {
     CampaignState s = in;
-    if (!r.accepted || r.proposal.clauses.empty()) return s;  // rejected or empty: no-op
-    // Only an AI envoy's terms can be applied; the player never acts as the envoy.
+    if (!r.accepted || r.proposal.clauses.empty()) return s;
     if (r.faction == in.player_faction || !in.factions.count(r.faction)) return s;
-    // Re-validate from authoritative state; all-or-nothing.
     DiplomacyContext ctx = build_diplomacy_context(in, r.faction);
     auto errors = validate_proposal(ctx, r.proposal);
-    if (!errors.empty()) return s;  // invalid result: strict no-op (state, log and hash untouched)
+    if (!errors.empty()) return s;
     std::string summary;
     for (const auto& cl : r.proposal.clauses) {
         summary += (summary.empty() ? "" : "; ") + summarize(cl);
         if (cl.type == "ceasefire") {
+            const int hours = cl.days * 24;
             bool merged = false;
             for (auto& t : s.treaties)
                 if (t.type == "ceasefire") {
-                    t.turns_remaining = std::max(t.turns_remaining, cl.turns);
+                    t.hours_remaining = std::max(t.hours_remaining, hours);
                     merged = true;
                 }
-            if (!merged) s.treaties.push_back({"ceasefire", cl.turns, "", ""});
+            if (!merged) s.treaties.push_back({"ceasefire", hours, "", ""});
         } else if (cl.type == "safe_passage") {
-            s.treaties.push_back({"safe_passage", cl.turns, cl.army_id, cl.province_id});
+            s.treaties.push_back({"safe_passage", cl.days * 24, cl.army_id, cl.province_id});
         } else if (cl.type == "cede_province") {
             s.provinces.at(cl.province_id).owner = ctx.counterpart;
         } else if (cl.type == "prisoner_exchange") {
@@ -165,7 +165,7 @@ CampaignState apply_diplomacy(const CampaignState& in, const DiplomacyResult& r)
     }
     int& rel = s.relations[r.faction];
     rel = detail::clamp_int(rel + 3 * static_cast<int>(r.proposal.clauses.size()), -100, 100);
-    s.memory.push_back({s.turn, r.faction, "Agreed: " + summary});
+    s.memory.push_back({s.now.hour_index, r.faction, "Agreed: " + summary});
     return s;
 }
 

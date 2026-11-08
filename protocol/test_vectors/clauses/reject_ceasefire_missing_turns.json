@@ -1,5 +1,5 @@
 {
- "name": "reject_ceasefire_missing_turns",
+ "name": "reject_ceasefire_missing_days",
  "description": "",
  "proposal": {
   "spoken_line": "x",
@@ -12,7 +12,7 @@
  "expect": {
   "valid": false,
   "error_codes": [
-   "ceasefire_turns_invalid"
+   "ceasefire_days_invalid"
   ]
  }
 }

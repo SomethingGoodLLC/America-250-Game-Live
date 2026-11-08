@@ -40,7 +40,22 @@ BattleSetup build_battle_setup(const CampaignState& state, const std::string& pr
     b.player_faction = state.player_faction;
     b.attacker_faction = ait->second.faction;
     b.defender_faction = dit->second.faction;
-    b.seed = detail::mix64(state.seed ^ detail::mix64(static_cast<uint64_t>(state.turn)) ^ detail::fnv1a(province));
+    b.seed = detail::mix64(state.seed ^ detail::mix64(static_cast<uint64_t>(state.now.hour_index)) ^
+                           detail::fnv1a(province));
+    for (const auto& tag : pit->second.terrain) b.terrain_tags.push_back(tag);
+    // The clock pauses on contact, so the attacker's previous province is the edge just marched.
+    if (!ait->second.previous_province.empty()) {
+        for (const auto& ek : state.edges) {
+            const Edge& e = ek.second;
+            const bool connects = (e.a == ait->second.previous_province && e.b == province) ||
+                                  (e.b == ait->second.previous_province && e.a == province);
+            if (!connects) continue;
+            if (e.type == "neck") b.terrain_tags.push_back("chokepoint");
+            if (e.type == "boat") b.terrain_tags.push_back("disordered");
+        }
+    }
+    std::sort(b.terrain_tags.begin(), b.terrain_tags.end());
+    b.terrain_tags.erase(std::unique(b.terrain_tags.begin(), b.terrain_tags.end()), b.terrain_tags.end());
     for (const Army* a : {&ait->second, &dit->second}) {
         SideSetup s;
         s.faction = a->faction;
@@ -97,6 +112,12 @@ CampaignState apply_battle_result(const CampaignState& in, const BattleResult& r
             }
         }
     }
+    for (const std::string& aid : {pb.attacker_army, pb.defender_army}) {
+        auto it = s.armies.find(aid);
+        if (it == s.armies.end()) continue;
+        it->second.path.clear();
+        it->second.hours_into_edge = 0;
+    }
     for (auto it = s.armies.begin(); it != s.armies.end();) {
         if (detail::total_units(it->second) <= 0) {
             detail::add_log(s, "army destroyed: " + it->first);
@@ -109,7 +130,7 @@ CampaignState apply_battle_result(const CampaignState& in, const BattleResult& r
     // Ownership: only if the winner held the objective.
     if (r.objective_holder == r.winner) s.provinces.at(r.province_id).owner = r.winner;
 
-    s.memory.push_back({s.turn, r.winner, "Battle of " + s.provinces.at(r.province_id).name + " won by " + r.winner});
+    s.memory.push_back({s.now.hour_index, r.winner, "Battle of " + s.provinces.at(r.province_id).name + " won by " + r.winner});
     s.pending_battle = PendingBattle{};
     detail::add_log(s, "battle at " + r.province_id + " won by " + r.winner);
     return s;

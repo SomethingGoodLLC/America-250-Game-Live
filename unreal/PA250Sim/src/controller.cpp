@@ -20,7 +20,7 @@ void CampaignController::record(const std::string& event, const std::string& det
     TraceEntry e;
     e.seq = static_cast<int>(trace_.size());
     e.event = event;
-    e.turn = state_.turn;
+    e.hour_index = state_.now.hour_index;
     e.flow = flow_name(flow_);
     e.hash = started_ ? state_hash_hex(state_) : "";
     e.detail = detail;
@@ -30,8 +30,12 @@ void CampaignController::record(const std::string& event, const std::string& det
 std::string CampaignController::trace_json() const {
     nlohmann::json arr = nlohmann::json::array();
     for (const auto& e : trace_)
-        arr.push_back({{"seq", e.seq}, {"event", e.event}, {"turn", e.turn}, {"flow", e.flow},
-                       {"hash", e.hash}, {"detail", e.detail}});
+        arr.push_back({{"seq", e.seq},
+                       {"event", e.event},
+                       {"hour_index", e.hour_index},
+                       {"flow", e.flow},
+                       {"hash", e.hash},
+                       {"detail", e.detail}});
     return arr.dump(1);
 }
 
@@ -39,43 +43,69 @@ void CampaignController::new_campaign(const std::string& scenario_json) {
     state_ = load_scenario(scenario_json);
     started_ = true;
     flow_ = Flow::Campaign;
-    orders_ = Orders{};
     setup_ = BattleSetup{};
     context_ = DiplomacyContext{};
     record("new_campaign", state_.scenario);
 }
 
-std::vector<std::string> CampaignController::queue_move(const std::string& army_id, const std::string& to) {
+std::vector<std::string> CampaignController::enqueue_move(const std::string& army_id,
+                                                          const std::string& to_province) {
     if (!started_ || flow_ != Flow::Campaign) return {detail::err("not_in_campaign")};
     if (state_.pending_battle.active) return {detail::err("battle_pending")};
     auto ait = state_.armies.find(army_id);
     if (ait != state_.armies.end() && ait->second.faction != state_.player_faction)
         return {detail::err("not_player_army", army_id)};
-    Order o{army_id, to};
-    auto errs = validate_order(state_, o);
-    if (!errs.empty()) return errs;
-    for (auto& existing : orders_.orders)
-        if (existing.army_id == army_id) {
-            existing = o;
-            return {};
-        }
-    orders_.orders.push_back(o);
+    PathPlan plan = plan_path(state_, army_id, to_province);
+    if (!plan.ok) return {detail::err(plan.error.empty() ? "no_route" : plan.error)};
+    CommandPayload p;
+    p.kind = CommandKind::MoveArmy;
+    p.army_id = army_id;
+    p.dest_province = to_province;
+    p.edge_path = plan.edges;
+    state_ = enqueue_command(state_, p);
     return {};
 }
 
-bool CampaignController::end_turn(std::string& error) {
+std::vector<std::string> CampaignController::enqueue_halt(const std::string& army_id) {
+    if (!started_ || flow_ != Flow::Campaign) return {detail::err("not_in_campaign")};
+    if (state_.pending_battle.active) return {detail::err("battle_pending")};
+    auto ait = state_.armies.find(army_id);
+    if (ait == state_.armies.end()) return {detail::err("unknown_army", army_id)};
+    if (ait->second.faction != state_.player_faction) return {detail::err("not_player_army", army_id)};
+    CommandPayload p;
+    p.kind = CommandKind::HaltArmy;
+    p.army_id = army_id;
+    state_ = enqueue_command(state_, p);
+    return {};
+}
+
+TickOutput CampaignController::advance_one_hour() {
+    TickOutput out;
     if (!started_ || flow_ != Flow::Campaign) {
-        error = "end_turn only in campaign flow";
-        return false;
+        out.state = state_;
+        return out;
     }
-    if (state_.pending_battle.active) {
-        error = "resolve the pending battle first";
-        return false;
+    out = advance_hour(state_);
+    state_ = out.state;
+    if (!out.interrupts.empty()) {
+        std::string d;
+        for (auto i : out.interrupts) d += std::to_string(static_cast<int>(i)) + ",";
+        record("interrupt", d);
+    } else {
+        record("advance_hour");
     }
-    state_ = resolve_turn(state_, orders_);
-    orders_.orders.clear();
-    record("end_turn", state_.pending_battle.active ? "battle_pending:" + state_.pending_battle.province : "");
-    return true;
+    return out;
+}
+
+TickOutput CampaignController::advance_hours(int n, bool stop_on_interrupt) {
+    TickOutput last;
+    last.state = state_;
+    for (int i = 0; i < n; ++i) {
+        last = advance_one_hour();
+        if (stop_on_interrupt && !last.interrupts.empty()) break;
+        if (state_.pending_battle.active) break;
+    }
+    return last;
 }
 
 bool CampaignController::begin_battle(std::string& error) {
@@ -106,6 +136,8 @@ bool CampaignController::finish_battle(const BattleResult& r, std::string& error
         error = "battle result does not match the pending battle";
         return false;
     }
+    // Apply at this hour boundary. advance_hour will not consume commands while a battle is
+    // pending, so the result cannot wait for a later tick.
     state_ = apply_battle_result(state_, r);
     setup_ = BattleSetup{};
     flow_ = Flow::Campaign;
@@ -144,7 +176,7 @@ bool CampaignController::finish_diplomacy(const DiplomacyResult* result, std::st
             return false;
         }
         const uint64_t before = state_hash(state_);
-        state_ = apply_diplomacy(state_, *result);  // sim re-validates; invalid results are a no-op
+        state_ = apply_diplomacy(state_, *result);
         detail = state_hash(state_) == before ? "no_change" : "applied";
     }
     context_ = DiplomacyContext{};
@@ -155,7 +187,7 @@ bool CampaignController::finish_diplomacy(const DiplomacyResult* result, std::st
 
 bool CampaignController::save(const std::string& path, std::string& error) {
     if (!started_ || flow_ != Flow::Campaign) {
-        error = "save only at a turn boundary in campaign flow";
+        error = "save only in campaign flow at an hour boundary";
         return false;
     }
     try {
@@ -183,7 +215,6 @@ bool CampaignController::load(const std::string& path, std::string& error) {
     }
     started_ = true;
     flow_ = Flow::Campaign;
-    orders_ = Orders{};
     setup_ = BattleSetup{};
     context_ = DiplomacyContext{};
     record("load", path);

@@ -1,5 +1,7 @@
 #include "RFHealthComponent.h"
 #include "GameFramework/Actor.h"
+#include "MusketWeapon.h"
+#include "RFCharacter.h"
 
 URFHealthComponent::URFHealthComponent()
 {
@@ -23,7 +25,16 @@ void URFHealthComponent::OnTakeAnyDamage(AActor* DamagedActor, float Damage, con
 	{
 		return;
 	}
-	CurrentHealth = FMath::Clamp(CurrentHealth - Damage, 0.f, MaxHealth);
+	float Applied = Damage;
+	if (const ARFCharacter* C = Cast<ARFCharacter>(GetOwner()))
+	{
+		if (C->Musket && C->Musket->IsReloading())
+		{
+			const float Vuln = C->Musket->GetTuning().ActiveReload.ReloadVulnerability;
+			Applied *= FMath::Max(1.f, Vuln);
+		}
+	}
+	CurrentHealth = FMath::Clamp(CurrentHealth - Applied, 0.f, MaxHealth);
 	if (CurrentHealth <= 0.f)
 	{
 		LastInstigator = InstigatedBy;

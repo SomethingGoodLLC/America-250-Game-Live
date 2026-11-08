@@ -1,4 +1,4 @@
-// PA250BotController.h — code-driven bot brain: advance to the objective, engage the nearest enemy, reload.
+// PA250BotController.h — code-driven bot brain: capture posts, defend under attack, engage, reload.
 #pragma once
 
 #include "CoreMinimal.h"
@@ -14,7 +14,8 @@ enum class EBotState : uint8
 	Advance,
 	Engage,
 	Reload,
-	HoldObjective
+	HoldObjective,
+	Defend
 };
 
 UCLASS()
@@ -25,22 +26,23 @@ class PLAYAMERICA250_API APA250BotController : public AAIController
 public:
 	APA250BotController();
 
-	/** Aim error cone half-angle in degrees. */
 	UPROPERTY(EditAnywhere, Category = "Bot")
 	float AimErrorDegrees = 2.5f;
 
-	/** Enemies farther than this are ignored. */
 	UPROPERTY(EditAnywhere, Category = "Bot")
 	float SightRange = 6000.f;
 
-	/** Fire when the nearest visible enemy is within this range. */
 	UPROPERTY(EditAnywhere, Category = "Bot")
 	float EngageRange = 3500.f;
+
+	UPROPERTY(EditAnywhere, Category = "Bot")
+	float ReloadSkill = 0.6f;
 
 	UPROPERTY(VisibleAnywhere, Category = "Bot")
 	EBotState State = EBotState::Advance;
 
-	void SetObjective(APA250ControlPoint* InObjective) { Objective = InObjective; }
+	void SetPosts(const TArray<TWeakObjectPtr<APA250ControlPoint>>& InPosts) { Posts = InPosts; }
+	void SetObjective(APA250ControlPoint* InObjective);
 
 protected:
 	virtual void Tick(float DeltaSeconds) override;
@@ -49,7 +51,9 @@ private:
 	ARFCharacter* FindNearestEnemy(const ARFCharacter* Me, float& OutDist) const;
 	bool HasLineOfSight(const ARFCharacter* Me, const ARFCharacter* Enemy) const;
 	void MoveToward(const ARFCharacter* Me, const FVector& Dest, float Acceptance);
+	APA250ControlPoint* PickGoal(const ARFCharacter* Me) const;
 
+	TArray<TWeakObjectPtr<APA250ControlPoint>> Posts;
 	TWeakObjectPtr<APA250ControlPoint> Objective;
 	float ThinkTimer = 0.f;
 };

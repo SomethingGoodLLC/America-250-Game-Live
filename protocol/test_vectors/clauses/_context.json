@@ -12,8 +12,8 @@
  "counterpart": "continental",
  "faction": "british",
  "limits": {
-  "max_ceasefire_turns": 3,
-  "max_safe_passage_turns": 3
+  "max_ceasefire_days": 365,
+  "max_safe_passage_days": 90
  },
  "memory": [],
  "prisoners_held": {
@@ -26,12 +26,12 @@
  "provinces": {
   "boston": "british",
   "cambridge": "continental",
-  "charlestown": "british",
+  "charlestown": "continental",
   "concord": "continental",
   "lexington": "continental",
   "roxbury": "continental"
  },
  "relation": -20,
  "treaties": [],
- "turn": 0
+ "hour_index": 0
 }

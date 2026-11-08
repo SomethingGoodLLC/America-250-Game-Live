@@ -6,7 +6,7 @@
   "clauses": [
    {
     "type": "ceasefire",
-    "turns": 4
+    "days": 400
    }
   ]
  },

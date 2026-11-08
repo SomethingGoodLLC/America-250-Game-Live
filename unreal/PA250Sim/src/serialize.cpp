@@ -1,6 +1,8 @@
 // Scenario loading, canonical save format, state hash, and JSON bridges.
+#include <deque>
 #include <fstream>
 #include <limits>
+#include <set>
 #include <sstream>
 #include <stdexcept>
 
@@ -10,6 +12,61 @@
 namespace pa250 {
 
 using json = nlohmann::json;
+
+void rebuild_adjacency(CampaignState& s) {
+    for (auto& kv : s.provinces) kv.second.adjacent.clear();
+    for (const auto& ek : s.edges) {
+        const Edge& e = ek.second;
+        if (!s.provinces.count(e.a) || !s.provinces.count(e.b)) continue;
+        s.provinces[e.a].adjacent.push_back(e.b);
+        s.provinces[e.b].adjacent.push_back(e.a);
+    }
+    for (auto& kv : s.provinces) {
+        auto& adj = kv.second.adjacent;
+        std::sort(adj.begin(), adj.end());
+        adj.erase(std::unique(adj.begin(), adj.end()), adj.end());
+    }
+}
+
+std::vector<std::string> validate_scenario_graph(const CampaignState& s) {
+    std::vector<std::string> errors;
+    std::set<int> indices;
+    int max_idx = 0;
+    for (const auto& kv : s.provinces) {
+        if (kv.second.map_index < 1) errors.push_back("map_index < 1 for " + kv.first);
+        if (!indices.insert(kv.second.map_index).second) errors.push_back("duplicate map_index " + kv.first);
+        max_idx = std::max(max_idx, kv.second.map_index);
+    }
+    if (static_cast<int>(indices.size()) != static_cast<int>(s.provinces.size()))
+        errors.push_back("map_index count mismatch");
+    for (int i = 1; i <= max_idx; ++i)
+        if (!indices.count(i)) errors.push_back("map_index gap at " + std::to_string(i));
+    if (max_idx != static_cast<int>(s.provinces.size())) errors.push_back("map_index not contiguous 1..N");
+
+    std::set<std::string> edge_ids;
+    for (const auto& ek : s.edges) {
+        const Edge& e = ek.second;
+        if (e.id != ek.first) errors.push_back("edge key/id mismatch " + ek.first);
+        if (!edge_ids.insert(e.id).second) errors.push_back("duplicate edge id " + e.id);
+        if (!s.provinces.count(e.a) || !s.provinces.count(e.b))
+            errors.push_back("edge endpoint missing: " + e.id);
+    }
+
+    // Connectivity via BFS on adjacency.
+    if (!s.provinces.empty()) {
+        std::string start = s.provinces.begin()->first;
+        std::set<std::string> seen{start};
+        std::deque<std::string> q{start};
+        while (!q.empty()) {
+            std::string cur = q.front();
+            q.pop_front();
+            for (const auto& n : s.provinces.at(cur).adjacent)
+                if (seen.insert(n).second) q.push_back(n);
+        }
+        if (seen.size() != s.provinces.size()) errors.push_back("province graph not connected");
+    }
+    return errors;
+}
 
 namespace {
 
@@ -24,19 +81,29 @@ std::vector<Point> pts_from_json(const json& a) {
     return v;
 }
 json treaty_to_json(const Treaty& t) {
-    return {{"type", t.type}, {"turns_remaining", t.turns_remaining}, {"army_id", t.army_id}, {"province_id", t.province_id}};
+    return {{"type", t.type},
+            {"hours_remaining", t.hours_remaining},
+            {"army_id", t.army_id},
+            {"province_id", t.province_id}};
 }
 Treaty treaty_from_json(const json& j) {
     Treaty t;
     t.type = j.at("type").get<std::string>();
-    t.turns_remaining = j.at("turns_remaining").get<int>();
+    t.hours_remaining = j.at("hours_remaining").get<int>();
     t.army_id = j.value("army_id", "");
     t.province_id = j.value("province_id", "");
     return t;
 }
 json army_to_json(const Army& a) {
-    return {{"id", a.id}, {"name", a.name}, {"faction", a.faction}, {"province", a.province},
-            {"previous_province", a.previous_province}, {"units", a.units}, {"morale", a.morale}};
+    return {{"id", a.id},
+            {"name", a.name},
+            {"faction", a.faction},
+            {"province", a.province},
+            {"previous_province", a.previous_province},
+            {"units", a.units},
+            {"morale", a.morale},
+            {"path", a.path},
+            {"hours_into_edge", a.hours_into_edge}};
 }
 Army army_from_json(const json& j) {
     Army a;
@@ -47,12 +114,19 @@ Army army_from_json(const json& j) {
     a.previous_province = j.value("previous_province", "");
     a.units = j.at("units").get<std::map<std::string, int>>();
     a.morale = j.value("morale", 70);
+    a.path = j.value("path", std::vector<std::string>{});
+    a.hours_into_edge = j.value("hours_into_edge", 0);
     return a;
 }
 json faction_to_json(const FactionInfo& f) {
-    return {{"display_name", f.display_name}, {"envoy_name", f.envoy_name}, {"envoy_title", f.envoy_title},
-            {"allowed_clause_types", f.allowed_clause_types}, {"protected_provinces", f.protected_provinces},
-            {"max_ceasefire_turns", f.max_ceasefire_turns}, {"max_safe_passage_turns", f.max_safe_passage_turns}};
+    return {{"display_name", f.display_name},
+            {"envoy_name", f.envoy_name},
+            {"envoy_title", f.envoy_title},
+            {"allowed_clause_types", f.allowed_clause_types},
+            {"protected_provinces", f.protected_provinces},
+            {"max_ceasefire_days", f.max_ceasefire_days},
+            {"max_safe_passage_days", f.max_safe_passage_days},
+            {"controls_harbor", f.controls_harbor}};
 }
 FactionInfo faction_from_json(const json& j) {
     FactionInfo f;
@@ -61,13 +135,20 @@ FactionInfo faction_from_json(const json& j) {
     f.envoy_title = j.value("envoy_title", "");
     f.allowed_clause_types = j.value("allowed_clause_types", std::vector<std::string>{});
     f.protected_provinces = j.value("protected_provinces", std::vector<std::string>{});
-    f.max_ceasefire_turns = j.value("max_ceasefire_turns", 3);
-    f.max_safe_passage_turns = j.value("max_safe_passage_turns", 3);
+    f.max_ceasefire_days = j.value("max_ceasefire_days", j.value("max_ceasefire_turns", 365));
+    f.max_safe_passage_days = j.value("max_safe_passage_days", j.value("max_safe_passage_turns", 90));
+    f.controls_harbor = j.value("controls_harbor", false);
     return f;
 }
 json province_to_json(const Province& p) {
-    return {{"id", p.id}, {"name", p.name}, {"owner", p.owner}, {"adjacent", p.adjacent},
-            {"polygon", pts_to_json(p.polygon)}, {"label", json::array({p.label.x, p.label.y})},
+    return {{"id", p.id},
+            {"name", p.name},
+            {"owner", p.owner},
+            {"map_index", p.map_index},
+            {"terrain", p.terrain},
+            {"adjacent", p.adjacent},
+            {"polygon", pts_to_json(p.polygon)},
+            {"label", json::array({p.label.x, p.label.y})},
             {"supply_value", p.supply_value}};
 }
 Province province_from_json(const json& j) {
@@ -75,52 +156,114 @@ Province province_from_json(const json& j) {
     p.id = j.at("id").get<std::string>();
     p.name = j.value("name", p.id);
     p.owner = j.at("owner").get<std::string>();
-    p.adjacent = j.at("adjacent").get<std::vector<std::string>>();
+    p.map_index = j.value("map_index", 0);
+    p.terrain = j.value("terrain", std::vector<std::string>{});
+    p.adjacent = j.value("adjacent", std::vector<std::string>{});
     std::sort(p.adjacent.begin(), p.adjacent.end());
     p.polygon = pts_from_json(j.value("polygon", json::array()));
     if (j.contains("label")) p.label = {j.at("label").at(0).get<double>(), j.at("label").at(1).get<double>()};
     p.supply_value = j.value("supply_value", 1);
     return p;
 }
+Edge edge_from_json(const json& j) {
+    Edge e;
+    e.id = j.at("id").get<std::string>();
+    e.a = j.at("a").get<std::string>();
+    e.b = j.at("b").get<std::string>();
+    e.type = j.at("type").get<std::string>();
+    e.march_hours = j.value("march_hours", 1);
+    e.can_dismantle = j.value("can_dismantle", false);
+    e.note = j.value("note", "");
+    return e;
+}
+json edge_to_json(const Edge& e) {
+    json j{{"id", e.id}, {"a", e.a}, {"b", e.b}, {"type", e.type}, {"march_hours", e.march_hours}};
+    if (e.can_dismantle) j["can_dismantle"] = true;
+    if (!e.note.empty()) j["note"] = e.note;
+    return j;
+}
+json command_to_json(const Command& c) {
+    return {{"apply_on_hour", c.apply_on_hour},
+            {"sequence", c.sequence},
+            {"kind", static_cast<int>(c.payload.kind)},
+            {"army_id", c.payload.army_id},
+            {"dest_province", c.payload.dest_province},
+            {"edge_path", c.payload.edge_path},
+            {"result_json", c.payload.result_json}};
+}
+Command command_from_json(const json& j) {
+    Command c;
+    c.apply_on_hour = j.at("apply_on_hour").get<int64_t>();
+    c.sequence = j.at("sequence").get<uint64_t>();
+    c.payload.kind = static_cast<CommandKind>(j.at("kind").get<int>());
+    c.payload.army_id = j.value("army_id", "");
+    c.payload.dest_province = j.value("dest_province", "");
+    c.payload.edge_path = j.value("edge_path", std::vector<std::string>{});
+    c.payload.result_json = j.value("result_json", "");
+    return c;
+}
 
 CampaignState state_from_json(const json& j, bool is_save) {
     CampaignState s;
-    if (is_save && j.at("schema_version").get<int>() != kSchemaVersion) throw std::runtime_error("unsupported save version");
+    if (is_save) {
+        const int ver = j.at("schema_version").get<int>();
+        if (ver != kSchemaVersion)
+            throw std::runtime_error("unsupported save version " + std::to_string(ver) +
+                                     " (need " + std::to_string(kSchemaVersion) +
+                                     "); turn-based v1 saves cannot be loaded");
+    }
     s.scenario = j.value("scenario", "");
     s.seed = j.at("seed").get<uint64_t>();
     s.player_faction = j.value("player_faction", std::string(kContinental));
     s.ai_objective = j.value("ai_objective", "");
-    s.turn = is_save ? j.at("turn").get<int>() : 0;
+    s.march_hours_per_day = j.value("march_hours_per_day", kDefaultMarchHoursPerDay);
+    if (j.contains("now")) {
+        s.now.hour_index = j.at("now").at("hour_index").get<int64_t>();
+    } else if (j.contains("start_ymdh")) {
+        const json& y = j.at("start_ymdh");
+        s.now = from_ymdh(YMDH{y.at("y").get<int32_t>(), static_cast<uint8_t>(y.at("m").get<int>()),
+                               static_cast<uint8_t>(y.at("d").get<int>()),
+                               static_cast<uint8_t>(y.value("h", 0))});
+    } else if (!is_save) {
+        s.now = from_ymdh(YMDH{1775, 4, 18, 20});
+    }
     for (const auto& p : j.at("provinces")) {
         Province pr = province_from_json(p);
         s.provinces[pr.id] = pr;
     }
+    if (j.contains("edges")) {
+        for (const auto& e : j.at("edges")) {
+            Edge ed = edge_from_json(e);
+            s.edges[ed.id] = ed;
+        }
+    }
+    rebuild_adjacency(s);
     for (const auto& a : j.at("armies")) {
         Army ar = army_from_json(a);
         s.armies[ar.id] = ar;
     }
-    for (auto it = j.at("factions").begin(); it != j.at("factions").end(); ++it) s.factions[it.key()] = faction_from_json(it.value());
+    for (auto it = j.at("factions").begin(); it != j.at("factions").end(); ++it)
+        s.factions[it.key()] = faction_from_json(it.value());
     s.supplies = j.at("supplies").get<std::map<std::string, int>>();
     s.relations = j.at("relations").get<std::map<std::string, int>>();
     s.prisoners_held = j.at("prisoners_held").get<std::map<std::string, int>>();
     if (is_save) {
         for (const auto& t : j.at("treaties")) s.treaties.push_back(treaty_from_json(t));
         for (const auto& m : j.at("memory"))
-            s.memory.push_back({m.at("turn").get<int>(), m.at("faction").get<std::string>(), m.at("text").get<std::string>()});
+            s.memory.push_back({m.at("hour_index").get<int64_t>(), m.at("faction").get<std::string>(),
+                                m.at("text").get<std::string>()});
         const json& pb = j.at("pending_battle");
         s.pending_battle = {pb.at("active").get<bool>(), pb.at("province").get<std::string>(),
                             pb.at("attacker_army").get<std::string>(), pb.at("defender_army").get<std::string>()};
         s.log = j.at("log").get<std::vector<std::string>>();
+        s.next_command_seq = j.value("next_command_seq", 1);
+        if (j.contains("pending_commands"))
+            for (const auto& c : j.at("pending_commands")) s.pending_commands.push_back(command_from_json(c));
     }
-    // Integrity: adjacency symmetric and ids resolvable.
-    for (const auto& kv : s.provinces)
-        for (const auto& n : kv.second.adjacent) {
-            auto it = s.provinces.find(n);
-            if (it == s.provinces.end() || !detail::contains(it->second.adjacent, kv.first))
-                throw std::runtime_error("asymmetric or unknown adjacency: " + kv.first + " -> " + n);
-        }
     for (const auto& kv : s.armies)
         if (!s.provinces.count(kv.second.province)) throw std::runtime_error("army in unknown province: " + kv.first);
+    auto gerr = validate_scenario_graph(s);
+    if (!gerr.empty() && !s.edges.empty()) throw std::runtime_error("scenario graph invalid: " + gerr.front());
     return s;
 }
 
@@ -152,12 +295,15 @@ std::string serialize(const CampaignState& s) {
     json j;
     j["schema_version"] = kSchemaVersion;
     j["scenario"] = s.scenario;
-    j["turn"] = s.turn;
+    j["now"] = {{"hour_index", s.now.hour_index}};
     j["seed"] = s.seed;
     j["player_faction"] = s.player_faction;
     j["ai_objective"] = s.ai_objective;
+    j["march_hours_per_day"] = s.march_hours_per_day;
     j["provinces"] = json::array();
     for (const auto& kv : s.provinces) j["provinces"].push_back(province_to_json(kv.second));
+    j["edges"] = json::array();
+    for (const auto& kv : s.edges) j["edges"].push_back(edge_to_json(kv.second));
     j["armies"] = json::array();
     for (const auto& kv : s.armies) j["armies"].push_back(army_to_json(kv.second));
     j["factions"] = json::object();
@@ -168,9 +314,15 @@ std::string serialize(const CampaignState& s) {
     j["treaties"] = json::array();
     for (const auto& t : s.treaties) j["treaties"].push_back(treaty_to_json(t));
     j["memory"] = json::array();
-    for (const auto& m : s.memory) j["memory"].push_back({{"turn", m.turn}, {"faction", m.faction}, {"text", m.text}});
-    j["pending_battle"] = {{"active", s.pending_battle.active}, {"province", s.pending_battle.province},
-                           {"attacker_army", s.pending_battle.attacker_army}, {"defender_army", s.pending_battle.defender_army}};
+    for (const auto& m : s.memory)
+        j["memory"].push_back({{"hour_index", m.hour_index}, {"faction", m.faction}, {"text", m.text}});
+    j["pending_battle"] = {{"active", s.pending_battle.active},
+                           {"province", s.pending_battle.province},
+                           {"attacker_army", s.pending_battle.attacker_army},
+                           {"defender_army", s.pending_battle.defender_army}};
+    j["pending_commands"] = json::array();
+    for (const auto& c : s.pending_commands) j["pending_commands"].push_back(command_to_json(c));
+    j["next_command_seq"] = s.next_command_seq;
     j["log"] = s.log;
     return j.dump();
 }
@@ -196,10 +348,11 @@ std::string context_to_json(const DiplomacyContext& c) {
     json j;
     j["faction"] = c.faction;
     j["counterpart"] = c.counterpart;
-    j["turn"] = c.turn;
+    j["hour_index"] = c.hour_index;
     j["relation"] = c.relation;
     j["allowed_clause_types"] = c.allowed_clause_types;
-    j["limits"] = {{"max_ceasefire_turns", c.max_ceasefire_turns}, {"max_safe_passage_turns", c.max_safe_passage_turns}};
+    j["limits"] = {{"max_ceasefire_days", c.max_ceasefire_days},
+                   {"max_safe_passage_days", c.max_safe_passage_days}};
     j["protected_provinces"] = c.protected_provinces;
     j["provinces"] = c.provinces;
     j["armies"] = c.armies;
@@ -216,16 +369,31 @@ DiplomacyContext context_from_json(const std::string& text) {
         DiplomacyContext c;
         c.faction = j.at("faction").get<std::string>();
         c.counterpart = j.at("counterpart").get<std::string>();
-        c.turn = j.at("turn").get<int>();
+        if (j.contains("hour_index"))
+            c.hour_index = j.at("hour_index").get<int64_t>();
+        else if (j.contains("turn"))
+            c.hour_index = j.at("turn").get<int64_t>();  // legacy test vectors
         c.relation = j.at("relation").get<int>();
         c.allowed_clause_types = j.at("allowed_clause_types").get<std::vector<std::string>>();
-        c.max_ceasefire_turns = j.at("limits").at("max_ceasefire_turns").get<int>();
-        c.max_safe_passage_turns = j.at("limits").at("max_safe_passage_turns").get<int>();
+        const json& lim = j.at("limits");
+        c.max_ceasefire_days = lim.value("max_ceasefire_days", lim.value("max_ceasefire_turns", 365));
+        c.max_safe_passage_days = lim.value("max_safe_passage_days", lim.value("max_safe_passage_turns", 90));
         c.protected_provinces = j.at("protected_provinces").get<std::vector<std::string>>();
         c.provinces = j.at("provinces").get<std::map<std::string, std::string>>();
         c.armies = j.at("armies").get<std::map<std::string, std::string>>();
         c.prisoners_held = j.at("prisoners_held").get<std::map<std::string, int>>();
-        for (const auto& t : j.at("treaties")) c.treaties.push_back(treaty_from_json(t));
+        for (const auto& t : j.at("treaties")) {
+            if (t.contains("hours_remaining"))
+                c.treaties.push_back(treaty_from_json(t));
+            else {
+                Treaty tr;
+                tr.type = t.at("type").get<std::string>();
+                tr.hours_remaining = t.value("turns_remaining", 0) * 24;
+                tr.army_id = t.value("army_id", "");
+                tr.province_id = t.value("province_id", "");
+                c.treaties.push_back(tr);
+            }
+        }
         c.memory = j.value("memory", std::vector<std::string>{});
         return c;
     } catch (const json::exception& e) {
@@ -237,15 +405,17 @@ namespace {
 
 json clause_to_json(const Clause& c) {
     json j{{"type", c.type}};
-    if (c.type == "ceasefire") j["turns"] = c.turns;
-    else if (c.type == "prisoner_exchange") j["counts"] = c.counts;
-    else if (c.type == "safe_passage") j.update({{"army_id", c.army_id}, {"province_id", c.province_id}, {"turns", c.turns}});
-    else if (c.type == "cede_province") j["province_id"] = c.province_id;
+    if (c.type == "ceasefire")
+        j["days"] = c.days;
+    else if (c.type == "prisoner_exchange")
+        j["counts"] = c.counts;
+    else if (c.type == "safe_passage")
+        j.update({{"army_id", c.army_id}, {"province_id", c.province_id}, {"days", c.days}});
+    else if (c.type == "cede_province")
+        j["province_id"] = c.province_id;
     return j;
 }
 
-// Integers must fit in int32: a silent narrowing (4294967299 -> 3) would let the sim accept a clause
-// the Python validator rejects.
 bool int_field(const json& v, int& out) {
     constexpr int64_t kMin = std::numeric_limits<int>::min();
     constexpr int64_t kMax = std::numeric_limits<int>::max();
@@ -278,8 +448,10 @@ std::vector<std::string> proposal_from_json(const std::string& text, DiplomacyPr
     for (auto it = j.begin(); it != j.end(); ++it)
         if (it.key() != "spoken_line" && it.key() != "clauses") errors.push_back(err("unexpected_field", it.key()));
     if (j.contains("spoken_line")) {
-        if (!j["spoken_line"].is_string()) errors.push_back(err("malformed_proposal", "spoken_line"));
-        else out.spoken_line = j["spoken_line"].get<std::string>();  // stored for display only
+        if (!j["spoken_line"].is_string())
+            errors.push_back(err("malformed_proposal", "spoken_line"));
+        else
+            out.spoken_line = j["spoken_line"].get<std::string>();
     }
     if (!j.contains("clauses")) return errors;
     if (!j["clauses"].is_array()) {
@@ -293,10 +465,14 @@ std::vector<std::string> proposal_from_json(const std::string& text, DiplomacyPr
             continue;
         }
         c.type = cj["type"].get<std::string>();
+        if (cj.contains("turns")) {
+            errors.push_back(err("turns_not_allowed", "use days instead of turns"));
+            continue;
+        }
         static const std::map<std::string, std::vector<std::string>> kFields = {
-            {"ceasefire", {"type", "turns"}},
+            {"ceasefire", {"type", "days"}},
             {"prisoner_exchange", {"type", "counts"}},
-            {"safe_passage", {"type", "army_id", "province_id", "turns"}},
+            {"safe_passage", {"type", "army_id", "province_id", "days"}},
             {"cede_province", {"type", "province_id"}}};
         auto kf = kFields.find(c.type);
         for (auto it = cj.begin(); it != cj.end(); ++it) {
@@ -305,11 +481,13 @@ std::vector<std::string> proposal_from_json(const std::string& text, DiplomacyPr
                 errors.push_back(err("unexpected_field", c.type + "." + k));
                 continue;
             }
-            if (k == "turns") {
-                if (!int_field(it.value(), c.turns)) errors.push_back(err("malformed_clause", "turns"));
+            if (k == "days") {
+                if (!int_field(it.value(), c.days)) errors.push_back(err("malformed_clause", "days"));
             } else if (k == "army_id" || k == "province_id") {
-                if (!it.value().is_string()) errors.push_back(err("malformed_clause", k));
-                else (k == "army_id" ? c.army_id : c.province_id) = it.value().get<std::string>();
+                if (!it.value().is_string())
+                    errors.push_back(err("malformed_clause", k));
+                else
+                    (k == "army_id" ? c.army_id : c.province_id) = it.value().get<std::string>();
             } else if (k == "counts") {
                 c.has_counts = true;
                 if (!it.value().is_object()) {
@@ -318,8 +496,10 @@ std::vector<std::string> proposal_from_json(const std::string& text, DiplomacyPr
                 }
                 for (auto ci = it.value().begin(); ci != it.value().end(); ++ci) {
                     int n = 0;
-                    if (!int_field(ci.value(), n)) errors.push_back(err("malformed_clause", "counts." + ci.key()));
-                    else c.counts[ci.key()] = n;
+                    if (!int_field(ci.value(), n))
+                        errors.push_back(err("malformed_clause", "counts." + ci.key()));
+                    else
+                        c.counts[ci.key()] = n;
                 }
             }
         }
@@ -339,10 +519,13 @@ std::string setup_to_json(const BattleSetup& b) {
     j["attacker_faction"] = b.attacker_faction;
     j["defender_faction"] = b.defender_faction;
     j["player_faction"] = b.player_faction;
+    j["terrain_tags"] = b.terrain_tags;
     j["sides"] = json::object();
     for (const auto& kv : b.sides)
-        j["sides"][kv.first] = {{"faction", kv.second.faction}, {"army_id", kv.second.army_id},
-                                {"tickets", kv.second.tickets}, {"morale", kv.second.morale},
+        j["sides"][kv.first] = {{"faction", kv.second.faction},
+                                {"army_id", kv.second.army_id},
+                                {"tickets", kv.second.tickets},
+                                {"morale", kv.second.morale},
                                 {"retreat_province", kv.second.retreat_province}};
     return j.dump();
 }
@@ -359,6 +542,7 @@ BattleSetup setup_from_json(const std::string& text) {
         b.attacker_faction = j.at("attacker_faction").get<std::string>();
         b.defender_faction = j.at("defender_faction").get<std::string>();
         b.player_faction = j.at("player_faction").get<std::string>();
+        b.terrain_tags = j.value("terrain_tags", std::vector<std::string>{});
         for (auto it = j.at("sides").begin(); it != j.at("sides").end(); ++it) {
             SideSetup s;
             s.faction = it.value().at("faction").get<std::string>();
@@ -375,8 +559,12 @@ BattleSetup setup_from_json(const std::string& text) {
 }
 
 std::string result_to_json(const BattleResult& r) {
-    json j{{"province_id", r.province_id}, {"winner", r.winner}, {"objective_holder", r.objective_holder},
-           {"losses", r.losses}, {"retreat_province", r.retreat_province}};
+    json j{{"province_id", r.province_id},
+           {"winner", r.winner},
+           {"objective_holder", r.objective_holder},
+           {"objectives_held", r.objectives_held},
+           {"losses", r.losses},
+           {"retreat_province", r.retreat_province}};
     return j.dump();
 }
 
@@ -387,6 +575,7 @@ BattleResult result_from_json(const std::string& text) {
         r.province_id = j.at("province_id").get<std::string>();
         r.winner = j.at("winner").get<std::string>();
         r.objective_holder = j.value("objective_holder", "");
+        r.objectives_held = j.value("objectives_held", std::map<std::string, std::string>{});
         r.losses = j.value("losses", std::map<std::string, std::map<std::string, int>>{});
         r.retreat_province = j.value("retreat_province", "");
         return r;

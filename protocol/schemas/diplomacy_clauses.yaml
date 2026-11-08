@@ -28,10 +28,10 @@ definitions:
   ceasefire:
     type: object
     additionalProperties: false
-    required: [type, turns]
+    required: [type, days]
     properties:
       type: {const: ceasefire}
-      turns: {type: integer, minimum: 1, maximum: 3, description: "Red line: at most max_ceasefire_turns (3)."}
+      days: {type: integer, minimum: 1, maximum: 365, description: "GAME INVENTION: 1–365 days; sim stores hours_remaining = days*24."}
   prisoner_exchange:
     type: object
     additionalProperties: false
@@ -47,12 +47,12 @@ definitions:
   safe_passage:
     type: object
     additionalProperties: false
-    required: [type, army_id, province_id, turns]
+    required: [type, army_id, province_id, days]
     properties:
       type: {const: safe_passage}
       army_id: {type: string, description: "A counterpart army id present in the context."}
       province_id: {type: string, description: "A province owned by the envoy's faction."}
-      turns: {type: integer, minimum: 1, maximum: 3}
+      days: {type: integer, minimum: 1, maximum: 90, description: "GAME INVENTION: 1–90 days."}
   cede_province:
     type: object
     additionalProperties: false

@@ -8,12 +8,22 @@
     "type": "safe_passage",
     "army_id": "continental_militia",
     "province_id": "charlestown",
-    "turns": 2
+    "days": 2
    }
   ]
  },
  "expect": {
   "valid": true,
   "error_codes": []
+ },
+ "context_patch": {
+  "provinces": {
+   "boston": "british",
+   "cambridge": "continental",
+   "charlestown": "british",
+   "concord": "continental",
+   "lexington": "continental",
+   "roxbury": "continental"
+  }
  }
 }

@@ -80,6 +80,26 @@ public:
 	TObjectPtr<UInputAction> IA_Aim;
 	UPROPERTY(EditDefaultsOnly, Category = "Input")
 	TObjectPtr<UInputAction> IA_Fire;
+	UPROPERTY(EditDefaultsOnly, Category = "Input")
+	TObjectPtr<UInputAction> IA_Reload;
+
+	/** Extra accuracy multiplier from formation (1 = normal, 0.8 = tighter spread). */
+	float FormationAccuracyScale = 1.f;
+	float SuppressionSwayDegrees = 0.f;
+	float SuppressionTimer = 0.f;
+	bool bInLine = false;
+	int32 LineSize = 0;
+
+	UFUNCTION(BlueprintPure, Category = "Combat")
+	bool IsAiming() const { return bAiming; }
+
+	UFUNCTION(BlueprintPure, Category = "Combat")
+	bool IsInLine() const { return bInLine; }
+
+	UFUNCTION(BlueprintPure, Category = "Combat")
+	int32 GetLineSize() const { return LineSize; }
+
+	void ApplySuppression(float Seconds, float SwayDegrees);
 
 	UPROPERTY(EditAnywhere, Category = "Camera")
 	float DefaultFOV = 90.f;
@@ -110,6 +130,9 @@ protected:
 	void StartAim();
 	void StopAim();
 	void OnFirePressed();
+	void OnReloadStarted();
+	void ApplyThirdPartySoldierMesh();
+	void OnReloadCompleted();
 
 	UFUNCTION()
 	void OnDeath(AActor* Victim);

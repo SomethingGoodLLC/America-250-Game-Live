@@ -45,7 +45,7 @@ bool FPA250FlowTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("back in campaign"), Sub->GetFlow() == EPA250Flow::Campaign);
 
 	TestTrue(TEXT("begin diplomacy again"), Sub->BeginDiplomacy(TEXT("british"), Err));
-	const FString Good = TEXT("{\"spoken_line\":\"Agreed.\",\"clauses\":[{\"type\":\"ceasefire\",\"turns\":3}]}");
+	const FString Good = TEXT("{\"spoken_line\":\"Agreed.\",\"clauses\":[{\"type\":\"ceasefire\",\"days\":3}]}");
 	TestEqual(TEXT("valid proposal"), Sub->ValidateProposalJson(Good).Num(), 0);
 	TestTrue(TEXT("accept"), Sub->AcceptProposalJson(Good, Err));
 	TestNotEqual(TEXT("ceasefire changed the state"), Sub->GetStateHash(), HashBefore);

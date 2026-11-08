@@ -402,6 +402,9 @@ DerivedDataCache/
 .vs/
 *.xcworkspace
 unreal/PA250Sim/build/
+# Fab marketplace packs (large, licensed per user; re-download from Fab instead of committing).
+# Open World Demo Collection, ~6.3 GB. build_levels.py falls back to placeholders without it.
+unreal/PlayAmerica250/Content/KiteDemo/
 # Machine-local clangd DB (regenerate via UBT -Mode=GenerateClangDatabase)
 unreal/PlayAmerica250/compile_commands.json
 compile_commands.json

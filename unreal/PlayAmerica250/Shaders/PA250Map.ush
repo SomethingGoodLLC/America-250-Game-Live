@@ -1,0 +1,84 @@
+// PA250 province map compositing (included from M_ProvinceMap Custom node as /PA250/PA250Map.ush).
+// Inputs expected as Custom node params: ProvinceID, BorderDist, CoastDist, Paper, Noise, ProvinceState.
+
+float DecodeIndex(float3 idSample)
+{
+	return floor(idSample.r * 255.0 + 0.5) + floor(idSample.g * 255.0 + 0.5) * 256.0;
+}
+
+float4 PA250ComposeMap(
+	float2 UV,
+	Texture2D ProvinceID,
+	SamplerState ProvinceIDSampler,
+	Texture2D BorderDist,
+	SamplerState BorderDistSampler,
+	Texture2D CoastDist,
+	SamplerState CoastDistSampler,
+	Texture2D Paper,
+	SamplerState PaperSampler,
+	Texture2D Noise,
+	SamplerState NoiseSampler,
+	Texture2D ProvinceState,
+	SamplerState ProvinceStateSampler,
+	float BandPx,
+	float MaxDistPx,
+	float3 InkColor,
+	float3 PaperBlue)
+{
+	float3 idSample = ProvinceID.SampleLevel(ProvinceIDSampler, UV, 0).rgb;
+	float index = DecodeIndex(idSample);
+	float isLand = idSample.b > 0.5 ? 1.0 : 0.0;
+
+	float2 texSize;
+	ProvinceID.GetDimensions(texSize.x, texSize.y);
+	float2 texel = 1.0 / texSize;
+
+	float dNorm = BorderDist.SampleLevel(BorderDistSampler, UV, 0).r;
+	float d = dNorm * MaxDistPx;
+	float coastNorm = CoastDist.SampleLevel(CoastDistSampler, UV, 0).r;
+	float coastPx = coastNorm * 64.0;
+
+	float3 paper = Paper.Sample(PaperSampler, UV * 4.0).rgb;
+	float n = Noise.Sample(NoiseSampler, UV * 8.0).r;
+
+	float stateW = 16.0;
+	ProvinceState.GetDimensions(stateW, /*dummy*/ float dummyH);
+	float2 ownerUV = float2((index + 0.5) / max(stateW, 1.0), 0.25);
+	float2 flagsUV = float2((index + 0.5) / max(stateW, 1.0), 0.75);
+	float4 owner = ProvinceState.SampleLevel(ProvinceStateSampler, ownerUV, 0);
+	float4 flags = ProvinceState.SampleLevel(ProvinceStateSampler, flagsUV, 0);
+
+	float3 col = paper;
+
+	if (isLand < 0.5)
+	{
+		col = lerp(paper, PaperBlue, 0.55);
+		float ripple = step(0.82, frac(coastPx / 7.0)) * (1.0 - smoothstep(0.0, 45.0, coastPx));
+		col = lerp(col, InkColor, ripple * 0.35);
+	}
+	else
+	{
+		// Owned land: edge wash + faint interior tint only. Unowned (owner.a==0) stays bare parchment.
+		float band = 1.0 - smoothstep(0.0, BandPx + n * 8.0, d);
+		float wash = owner.a * (band * 0.55 + 0.08);
+		float selectBoost = max(flags.r, flags.g) * 0.25;
+		wash = saturate(wash + selectBoost);
+		col = lerp(paper, lerp(paper, owner.rgb, 0.35), wash);
+
+		float ink = 1.0 - smoothstep(0.0, 1.25, d);
+		float3 nId = ProvinceID.SampleLevel(ProvinceIDSampler, UV + float2(texel.x, 0), 0).rgb;
+		float nIndex = DecodeIndex(nId);
+		float2 nOwnerUV = float2((nIndex + 0.5) / max(stateW, 1.0), 0.25);
+		float4 nOwner = ProvinceState.SampleLevel(ProvinceStateSampler, nOwnerUV, 0);
+		float ownerDiff = (owner.a > 0.01 && nOwner.a > 0.01 && any(abs(owner.rgb - nOwner.rgb) > 0.05)) ? 1.0 : 0.0;
+		float3 inkCol = lerp(InkColor, owner.rgb * 0.35, ownerDiff * 0.6);
+		col = lerp(col, inkCol, ink * (0.55 + ownerDiff * 0.25));
+	}
+
+	// Neatline (double ink near UV edges)
+	float edge = min(min(UV.x, 1.0 - UV.x), min(UV.y, 1.0 - UV.y));
+	float neat = (1.0 - smoothstep(0.004, 0.008, edge)) + (1.0 - smoothstep(0.012, 0.016, edge)) * 0.5;
+	col = lerp(col, InkColor, saturate(neat) * 0.7);
+
+	return float4(col, 1.0);
+}

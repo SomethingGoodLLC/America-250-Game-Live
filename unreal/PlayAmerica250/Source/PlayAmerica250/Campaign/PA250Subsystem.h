@@ -1,9 +1,9 @@
 // PA250Subsystem.h — exposes the PA250Sim core (pa250::CampaignController) to Unreal.
-// The sim is authoritative; this class only forwards commands and holds state across OpenLevel.
 #pragma once
 
 #include "CoreMinimal.h"
 #include "Subsystems/GameInstanceSubsystem.h"
+#include "Tickable.h"
 #include "pa250/controller.hpp"
 #include "PA250Subsystem.generated.h"
 
@@ -16,37 +16,49 @@ enum class EPA250Flow : uint8
 };
 
 UCLASS()
-class PLAYAMERICA250_API UPA250Subsystem : public UGameInstanceSubsystem
+class PLAYAMERICA250_API UPA250Subsystem : public UGameInstanceSubsystem, public FTickableGameObject
 {
 	GENERATED_BODY()
 
 public:
 	static UPA250Subsystem* Get(const UObject* WorldContext);
 
-	// ---- paths ----
-	static FString ScenarioPath();   // <repo>/unreal/PA250Sim/data/boston1775.json
-	static FString SavePath();       // Saved/PA250/campaign.json
-	static FString TracePath();      // Saved/PA250/autoplay_trace.json
+	static FString ScenarioPath();
+	static FString SavePath();
+	static FString TracePath();
+	static FString AutosaveDir();
 
-	// ---- campaign ----
+	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+	virtual void Deinitialize() override;
+
+	// FTickableGameObject
+	virtual void Tick(float DeltaTime) override;
+	virtual TStatId GetStatId() const override;
+	virtual bool IsTickable() const override;
+	virtual bool IsTickableInEditor() const override { return false; }
+
+	void SetCampaignActive(bool bActive);
+	void SetPaused(bool bInPaused);
+	bool IsPaused() const { return bPaused; }
+	void SetSpeedIndex(int32 Idx);
+	int32 GetSpeedIndex() const { return SpeedIndex; }
+
 	UFUNCTION(BlueprintCallable, Category = "PA250")
 	bool NewCampaign(FString& OutError);
-	/** Starts a campaign if none exists. */
 	bool EnsureCampaign();
 
 	UFUNCTION(BlueprintCallable, Category = "PA250")
 	bool QueueMove(const FString& ArmyId, const FString& ToProvince, FString& OutError);
 	UFUNCTION(BlueprintCallable, Category = "PA250")
-	void ClearOrders() { Controller.clear_orders(); }
+	void ClearOrders();
 	UFUNCTION(BlueprintCallable, Category = "PA250")
 	bool EndTurn(FString& OutError);
+	bool AdvanceHours(int32 Hours, FString& OutError);
 
-	// ---- battle ----
 	UFUNCTION(BlueprintPure, Category = "PA250")
 	bool IsBattlePending() const { return Controller.battle_pending(); }
 	UFUNCTION(BlueprintCallable, Category = "PA250")
 	bool BeginBattle(FString& OutError);
-	/** Debug/selftest: starts a campaign, marches the British to the meeting and enters Battle flow. */
 	bool PrepareDebugBattle(FString& OutError);
 	const pa250::BattleSetup& GetBattleSetup() const { return Controller.battle_setup(); }
 	UFUNCTION(BlueprintCallable, Category = "PA250")
@@ -55,21 +67,16 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "PA250")
 	bool ApplyBattleResultJson(const FString& ResultJson, FString& OutError);
 
-	// ---- diplomacy ----
 	UFUNCTION(BlueprintCallable, Category = "PA250")
 	bool BeginDiplomacy(const FString& Faction, FString& OutError);
 	UFUNCTION(BlueprintCallable, Category = "PA250")
 	FString GetDiplomacyContextJson() const;
-	/** Sim-side validation of a proposal against the pending context. Returns the error list (empty = valid). */
 	TArray<FString> ValidateProposalJson(const FString& ProposalJson) const;
-	/** Accepted proposal -> DiplomacyResult -> applied by the sim (re-validated there). */
 	UFUNCTION(BlueprintCallable, Category = "PA250")
 	bool AcceptProposalJson(const FString& ProposalJson, FString& OutError);
-	/** Leave / Reject: back to the campaign with no state change. */
 	UFUNCTION(BlueprintCallable, Category = "PA250")
 	bool LeaveDiplomacy(FString& OutError);
 
-	// ---- persistence / inspection ----
 	UFUNCTION(BlueprintCallable, Category = "PA250")
 	bool SaveCampaign(FString& OutError);
 	UFUNCTION(BlueprintCallable, Category = "PA250")
@@ -79,23 +86,33 @@ public:
 	UFUNCTION(BlueprintPure, Category = "PA250")
 	EPA250Flow GetFlow() const;
 	UFUNCTION(BlueprintPure, Category = "PA250")
-	int32 GetTurn() const { return Controller.state().turn; }
+	int32 GetTurn() const { return static_cast<int32>(Controller.state().now.hour_index / 24); }
+	int64 GetHourIndex() const { return Controller.state().now.hour_index; }
+	FString FormatDate() const;
+	FString FormatWhen(int64 HourIndex) const;
+	static FString FormatHoursRemaining(int32 Hours);
 
 	const pa250::CampaignState& GetState() const { return Controller.state(); }
 	const pa250::CampaignController& GetController() const { return Controller; }
 	pa250::CampaignController& GetControllerMutable() { return Controller; }
 
-	/** Autoplay progress across OpenLevel: "" / battle / battle_done / diplomacy / diplomacy_done. */
 	FString AutoplayStage;
-
-	/** Writes Saved/PA250/autoplay_trace.json (every flow transition with its state hash). */
 	bool WriteTrace(const FString& Extra = FString()) const;
 
-	// ---- level travel ----
 	static FName LevelNameForFlow(EPA250Flow Flow);
-	/** Opens the level for the current flow (L_Campaign / L_Lexington / L_DiplomacyRoom). */
 	void TravelToFlowLevel(UObject* WorldContext) const;
 
+	static constexpr float HoursPerSecond[5] = { 6.f, 12.f, 24.f, 48.f, 120.f };
+	static constexpr int32 MaxHoursPerFrame = 32;
+
 private:
+	void MaybeAutosave(const pa250::CampaignState& Before, const pa250::CampaignState& After);
+	void RouteInterrupt(const pa250::TickOutput& Out);
+
 	pa250::CampaignController Controller;
+	bool bCampaignActive = false;
+	bool bPaused = true;
+	int32 SpeedIndex = 0;
+	float HourAccumulator = 0.f;
+	TArray<FString> AutosavePaths;
 };

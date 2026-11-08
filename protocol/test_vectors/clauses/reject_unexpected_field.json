@@ -6,8 +6,8 @@
   "clauses": [
    {
     "type": "ceasefire",
-    "turns": 2,
-    "province_id": "boston"
+    "province_id": "boston",
+    "days": 2
    }
   ]
  },

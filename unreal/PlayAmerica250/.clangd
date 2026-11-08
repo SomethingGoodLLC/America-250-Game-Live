@@ -1,6 +1,7 @@
 CompileFlags:
   CompilationDatabase: .
   Add:
+    - -std=c++20
     - -Wno-unused-command-line-argument
   Remove:
     - -Werror

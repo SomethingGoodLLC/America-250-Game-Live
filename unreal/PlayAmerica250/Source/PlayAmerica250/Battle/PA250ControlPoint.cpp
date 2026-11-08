@@ -8,7 +8,7 @@
 APA250ControlPoint::APA250ControlPoint()
 {
 	PrimaryActorTick.bCanEverTick = true;
-	PrimaryActorTick.TickInterval = 0.2f;
+	PrimaryActorTick.TickInterval = 0.1f;
 
 	Zone = CreateDefaultSubobject<USphereComponent>(TEXT("Zone"));
 	Zone->InitSphereRadius(Radius);
@@ -28,10 +28,38 @@ APA250ControlPoint::APA250ControlPoint()
 	}
 }
 
+void APA250ControlPoint::ApplyTuning(float InRadius, float InCaptureSeconds, float InPerAttackerScale)
+{
+	Radius = InRadius;
+	CaptureSeconds = InCaptureSeconds;
+	CapturePerAttackerScale = InPerAttackerScale;
+	if (Zone)
+	{
+		Zone->SetSphereRadius(Radius);
+	}
+	if (Disc)
+	{
+		Disc->SetRelativeLocation(FVector(0.f, 0.f, -Radius + 8.f));
+		Disc->SetRelativeScale3D(FVector(Radius / 50.f, Radius / 50.f, 0.05f));
+	}
+}
+
 void APA250ControlPoint::BeginPlay()
 {
 	Super::BeginPlay();
 	Zone->SetSphereRadius(Radius);
+	Holder = InitialOwner;
+	UpdateColor();
+}
+
+void APA250ControlPoint::SetHolder(FName NewHolder)
+{
+	if (Holder == NewHolder)
+	{
+		return;
+	}
+	Holder = NewHolder;
+	bFlippedSinceLastCheck = true;
 	UpdateColor();
 }
 
@@ -64,38 +92,60 @@ void APA250ControlPoint::Tick(float DeltaSeconds)
 
 	const int32 Brit = GetPresence(TEXT("british"));
 	const int32 Cont = GetPresence(TEXT("continental"));
-	FName Sole = NAME_None;
-	if (Brit > 0 && Cont == 0) Sole = TEXT("british");
-	else if (Cont > 0 && Brit == 0) Sole = TEXT("continental");
+	bContested = Brit > 0 && Cont > 0;
 
-	if (Sole != NAME_None)
+	FName Sole = NAME_None;
+	int32 Attackers = 0;
+	if (Brit > 0 && Cont == 0)
 	{
-		if (Sole == Holder)
+		Sole = TEXT("british");
+		Attackers = Brit;
+	}
+	else if (Cont > 0 && Brit == 0)
+	{
+		Sole = TEXT("continental");
+		Attackers = Cont;
+	}
+
+	if (bContested || Sole == NAME_None)
+	{
+		// Contested or empty: no progress. Holder unchanged.
+		if (Sole == NAME_None)
 		{
-			CaptureProgress = 0.f;
 			Capturer = NAME_None;
 		}
-		else
-		{
-			if (Capturer != Sole)
-			{
-				Capturer = Sole;
-				CaptureProgress = 0.f;
-			}
-			CaptureProgress += DeltaSeconds;
-			if (CaptureProgress >= CaptureSeconds)
-			{
-				Holder = Sole;
-				HoldSeconds = 0.f;
-				CaptureProgress = 0.f;
-				Capturer = NAME_None;
-				UpdateColor();
-			}
-		}
+		return;
 	}
-	// Contested or empty: progress pauses; the holder keeps the point.
-	if (Holder != NAME_None)
+
+	if (Sole == Holder)
 	{
-		HoldSeconds += DeltaSeconds;
+		CaptureProgress = 0.f;
+		Capturer = NAME_None;
+		return;
 	}
+
+	if (Capturer != Sole)
+	{
+		Capturer = Sole;
+		CaptureProgress = 0.f;
+	}
+
+	const float Rate = (1.f + FMath::Max(0, Attackers - 1) * CapturePerAttackerScale) * FMath::Max(0.05f, CaptureRateScale);
+	CaptureProgress += (DeltaSeconds * Rate) / FMath::Max(0.1f, CaptureSeconds);
+	if (CaptureProgress < 1.f)
+	{
+		return;
+	}
+
+	CaptureProgress = 0.f;
+	if (!Holder.IsNone() && Holder != Sole)
+	{
+		// Enemy-owned → neutral first.
+		SetHolder(NAME_None);
+		Capturer = Sole;
+		return;
+	}
+	// Neutral → capturer.
+	SetHolder(Sole);
+	Capturer = NAME_None;
 }

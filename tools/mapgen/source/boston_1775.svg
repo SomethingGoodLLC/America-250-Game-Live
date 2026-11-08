@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="800" viewBox="0 0 1000 800">
+  <!-- Play America 250: Boston 1775 map source. Coordinates are SVG user units,
+       origin top-left, y down. Layers (group ids): provinces, water, rivers, roads.
+       Province order is paint order (later wins on overlap), matching map_index order.
+       map_index is read from boston1775.json by build_map.py; it is not stored here.
+       PROVISIONAL: coastline, necks, Back Bay and rivers are authored, not traced. -->
+  <g id="water">
+    <path id="sea" d="M0,0 L1000,0 L1000,800 L0,800 Z" fill="#b9c8c4"/>
+    <path id="back_bay" d="M524,500 L488,508 L522,575 L650,598 L700,613 L770,636 L772,624 L732,600 L696,540 L696,457 L640,462 L558,484 Z" fill="#b9c8c4"/>
+  </g>
+  <g id="provinces">
+    <path id="concord" d="M0,40 L240,40 L280,230 L250,420 L0,420 Z" fill="#bfc79a" stroke="#5a3d22" stroke-width="2"/>
+    <path id="lincoln" d="M240,40 L400,30 L420,200 L400,320 L280,230 Z" fill="#bfc79a" stroke="#5a3d22" stroke-width="2"/>  <!-- PROVISIONAL override -->
+    <path id="lexington" d="M400,30 L580,30 L620,215 L522,222 L506,300 L500,296 L420,200 Z" fill="#e3d9a8" stroke="#5a3d22" stroke-width="2"/>  <!-- PROVISIONAL override -->
+    <path id="menotomy" d="M420,200 L520,320 L560,420 L480,430 L400,320 Z" fill="#e3d9a8" stroke="#5a3d22" stroke-width="2"/>
+    <path id="cambridge" d="M250,420 L280,230 L400,320 L480,430 L520,500 L380,520 Z" fill="#dcc9a0" stroke="#5a3d22" stroke-width="2"/>
+    <path id="charlestown" d="M598,322 L700,300 L760,380 L720,445 L640,452 L560,475 L490,478 L492,462 L560,452 L620,425 Z" fill="#cfc39a" stroke="#5a3d22" stroke-width="2"/>  <!-- PROVISIONAL override -->
+    <path id="medford" d="M520,220 L620,210 L640,310 L560,340 L500,300 Z" fill="#e3d9a8" stroke="#5a3d22" stroke-width="2"/>
+    <path id="watertown" d="M180,460 L300,440 L380,520 L300,560 L180,540 Z" fill="#e3d9a8" stroke="#5a3d22" stroke-width="2"/>
+    <path id="brookline" d="M320,520 L480,500 L520,580 L400,620 L300,580 Z" fill="#e3d9a8" stroke="#5a3d22" stroke-width="2"/>
+    <path id="roxbury" d="M470,570 L650,600 L800,650 L760,700 L470,700 Z" fill="#dcc9a0" stroke="#5a3d22" stroke-width="2"/>
+    <path id="boston" d="M700,480 L815,470 L870,520 L840,600 L800,625 L795,652 L778,652 L776,625 L735,600 L700,540 Z" fill="#dcc9a0" stroke="#5a3d22" stroke-width="2"/>  <!-- PROVISIONAL override -->
+    <path id="dorchester" d="M700,700 L760,700 L800,650 L822,641 L860,720 L700,740 Z" fill="#cfc39a" stroke="#5a3d22" stroke-width="2"/>  <!-- PROVISIONAL override -->
+    <path id="chelsea" d="M625,250 L700,265 L760,300 L880,280 L900,380 L820,420 L765,375 L740,320 L680,288 L625,285 Z" fill="#c9d0b0" stroke="#5a3d22" stroke-width="2"/>  <!-- PROVISIONAL override -->
+  </g>
+  <g id="rivers">
+    <path id="charles_river" d="M110,468 L200,495 L290,515 L385,522 L450,512 L488,506 L524,500" fill="none" stroke="#7f9aa6" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+    <path id="mystic_river" d="M600,250 L560,300 L545,345" fill="none" stroke="#7f9aa6" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+  <g id="roads">
+    <path id="concord-lincoln" class="road" d="M110,240 L265,160 L320,130" fill="none" stroke="#7a4a2a" stroke-width="3"/>
+    <path id="lincoln-lexington" class="road" d="M320,130 L410,115 L490,150" fill="none" stroke="#7a4a2a" stroke-width="3"/>
+    <path id="lexington-menotomy" class="road" d="M490,150 L470,260 L480,320" fill="none" stroke="#7a4a2a" stroke-width="3"/>
+    <path id="menotomy-cambridge" class="road" d="M480,320 L440,375 L400,430" fill="none" stroke="#7a4a2a" stroke-width="3"/>
+    <path id="menotomy-medford" class="road" d="M480,320 L497,303 L506,300 L540,285 L580,270" fill="none" stroke="#7a4a2a" stroke-width="3"/>
+    <path id="charlestown-medford" class="neck" d="M680,385 L640,345 L615,322 L595,300 L580,270" fill="none" stroke="#7a4a2a" stroke-width="3"/>
+    <path id="charlestown-cambridge" class="neck" d="M680,385 L680,430 L620,445 L560,463 L495,470 L440,455 L400,430" fill="none" stroke="#7a4a2a" stroke-width="3"/>
+    <path id="cambridge-watertown" class="road" d="M400,430 L340,480 L260,500" fill="none" stroke="#7a4a2a" stroke-width="3"/>
+    <path id="cambridge-brookline" class="bridge" d="M400,430 L403,512 L403,540 L400,570" fill="none" stroke="#7a4a2a" stroke-width="3"/>
+    <path id="brookline-roxbury" class="road" d="M400,570 L480,600 L580,650" fill="none" stroke="#7a4a2a" stroke-width="3"/>
+    <path id="roxbury-boston" class="neck" d="M580,650 L700,650 L786,648 L787,620 L770,580 L755,550" fill="none" stroke="#7a4a2a" stroke-width="3"/>
+    <path id="roxbury-dorchester" class="road" d="M580,650 L700,690 L760,715" fill="none" stroke="#7a4a2a" stroke-width="3"/>
+    <path id="boston-charlestown" class="ferry" d="M755,550 L762,490 L740,462 L715,440 L680,385" fill="none" stroke="#7a4a2a" stroke-width="3" stroke-dasharray="10 8"/>
+    <path id="boston-cambridge" class="boat" d="M755,550 L698,520 L620,510 L540,495 L514,494 L470,485 L430,460 L400,430" fill="none" stroke="#7a4a2a" stroke-width="3" stroke-dasharray="10 8"/>
+    <path id="boston-chelsea" class="ferry" d="M755,550 L790,480 L830,445 L850,400 L830,360" fill="none" stroke="#7a4a2a" stroke-width="3" stroke-dasharray="10 8"/>
+    <path id="chelsea-medford" class="road" d="M830,360 L740,300 L660,275 L600,270 L580,270" fill="none" stroke="#7a4a2a" stroke-width="3"/>
+  </g>
+</svg>

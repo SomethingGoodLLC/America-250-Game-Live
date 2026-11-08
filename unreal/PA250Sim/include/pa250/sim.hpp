@@ -7,6 +7,10 @@
 
 namespace pa250 {
 
+// ---- Calendar -----------------------------------------------------------
+YMDH to_ymdh(GameTime t);
+GameTime from_ymdh(YMDH v);
+
 // ---- Scenario / persistence --------------------------------------------
 std::string read_text_file(const std::string& path);                // throws std::runtime_error
 bool write_text_file(const std::string& path, const std::string& text);
@@ -15,10 +19,16 @@ std::string serialize(const CampaignState& state);                  // canonical
 CampaignState deserialize(const std::string& json_text);            // throws std::runtime_error
 uint64_t state_hash(const CampaignState& state);                    // FNV-1a 64 of serialize()
 std::string state_hash_hex(const CampaignState& state);
+void rebuild_adjacency(CampaignState& s);                           // from edges
+std::vector<std::string> validate_scenario_graph(const CampaignState& s);
 
-// ---- Turn resolution ----------------------------------------------------
+// ---- Hourly clock / commands / paths ------------------------------------
+TickOutput advance_hour(const CampaignState& s);  // pure; consumes pending_commands due this hour
+CampaignState enqueue_command(const CampaignState& s, CommandPayload p);  // apply_on_hour=now+1
+PathPlan plan_path(const CampaignState& s, const std::string& army_id, const std::string& dest);
+
+// Order validation (adjacency / ceasefire) for UI hints
 std::vector<std::string> validate_order(const CampaignState& state, const Order& order);
-CampaignState resolve_turn(const CampaignState& state, const Orders& orders);
 
 // ---- Battle ------------------------------------------------------------
 std::string choose_retreat(const CampaignState& state, const std::string& province,

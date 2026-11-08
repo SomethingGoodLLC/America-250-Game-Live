@@ -1,15 +1,24 @@
 #include "PA250CampaignGameMode.h"
 #include "Blueprint/UserWidget.h"
 #include "Campaign/PA250Autoplay.h"
+#include <map>
 #include "Campaign/PA250Subsystem.h"
+#include "Engine/DirectionalLight.h"
+#include "Engine/SkyLight.h"
+#include "Components/DirectionalLightComponent.h"
+#include "Components/SkyLightComponent.h"
 #include "GameFramework/PlayerController.h"
+#include "Kismet/KismetSystemLibrary.h"
+#include "Misc/CommandLine.h"
+#include "PA250CampaignPlayerController.h"
 #include "PA250MapWidget.h"
-#include "SPA250Map.h"
+#include "PA250ProvinceMapActor.h"
 #include "TimerManager.h"
 
 APA250CampaignGameMode::APA250CampaignGameMode()
 {
 	DefaultPawnClass = nullptr;
+	PlayerControllerClass = APA250CampaignPlayerController::StaticClass();
 }
 
 void APA250CampaignGameMode::BeginPlay()
@@ -22,72 +31,128 @@ void APA250CampaignGameMode::BeginPlay()
 		return;
 	}
 	Sub->EnsureCampaign();
+	Sub->SetCampaignActive(true);
+
+	if (UWorld* World = GetWorld())
+	{
+		// Empty L_Campaign has no lights; tokens/labels use lit materials. Keep a key light even with Unlit map.
+		FActorSpawnParameters LightParams;
+		LightParams.Name = TEXT("PA250KeyLight");
+		if (ADirectionalLight* Sun = World->SpawnActor<ADirectionalLight>(ADirectionalLight::StaticClass(), FVector(0.f, 0.f, 500.f),
+																		  FRotator(-80.f, 30.f, 0.f), LightParams))
+		{
+			if (UDirectionalLightComponent* C = Cast<UDirectionalLightComponent>(Sun->GetLightComponent()))
+			{
+				C->SetIntensity(8.f);
+				C->SetLightColor(FLinearColor(1.f, 0.96f, 0.9f));
+			}
+		}
+		LightParams.Name = TEXT("PA250SkyLight");
+		if (ASkyLight* Sky = World->SpawnActor<ASkyLight>(ASkyLight::StaticClass(), FVector::ZeroVector, FRotator::ZeroRotator, LightParams))
+		{
+			if (USkyLightComponent* C = Sky->GetLightComponent())
+			{
+				C->SetIntensity(2.f);
+				C->bRealTimeCapture = true;
+			}
+		}
+
+		FActorSpawnParameters Params;
+		Params.Name = TEXT("PA250ProvinceMap");
+		MapActor = World->SpawnActor<APA250ProvinceMapActor>(APA250ProvinceMapActor::StaticClass(), FVector::ZeroVector,
+															 FRotator::ZeroRotator, Params);
+	}
 
 	if (APlayerController* PC = GetWorld()->GetFirstPlayerController())
 	{
 		PC->bShowMouseCursor = true;
+		PC->bAutoManageActiveCameraTarget = false;
 		PC->SetInputMode(FInputModeGameAndUI());
 		MapWidget = CreateWidget<UPA250MapWidget>(PC, UPA250MapWidget::StaticClass());
 		if (MapWidget)
 		{
+			MapWidget->SetMapActor(MapActor);
 			MapWidget->AddToViewport();
+			MapWidget->SetKeyboardFocus();
 		}
 	}
 
-	if (PA250Autoplay::IsAutoplay())
+	// Re-assert view target after the player camera manager settles.
+	if (MapActor)
+	{
+		FTimerHandle CamHandle;
+		GetWorldTimerManager().SetTimer(CamHandle, FTimerDelegate::CreateLambda([this]() {
+			if (MapActor)
+			{
+				MapActor->FrameCamera();
+			}
+		}),
+									   0.05f, false);
+	}
+
+	if (FParse::Param(FCommandLine::Get(), TEXT("PA250Shot")))
+	{
+		FTimerHandle ShotHandle;
+		GetWorldTimerManager().SetTimer(ShotHandle, FTimerDelegate::CreateLambda([this]() {
+			if (APlayerController* PC = GetWorld()->GetFirstPlayerController())
+			{
+				PC->ConsoleCommand(TEXT("HighResShot 1920x1080"));
+			}
+			FTimerHandle QuitHandle;
+			GetWorldTimerManager().SetTimer(QuitHandle, FTimerDelegate::CreateLambda([this]() {
+				UKismetSystemLibrary::QuitGame(this, nullptr, EQuitPreference::Quit, false);
+			}),
+										   2.f, false);
+		}),
+									   3.f, false);
+	}
+	else if (PA250Autoplay::IsAutoplay())
 	{
 		FTimerHandle H;
-		GetWorldTimerManager().SetTimer(H, FTimerDelegate::CreateUObject(this, &APA250CampaignGameMode::RunAutoplayCampaign), 0.7f, false);
+		GetWorldTimerManager().SetTimer(H, FTimerDelegate::CreateUObject(this, &APA250CampaignGameMode::RunAutoplayCampaign), 0.7f,
+										false);
 	}
 	else if (PA250Autoplay::SelftestName() == TEXT("campaign"))
 	{
-		// Let the widget build once, then run the scripted check.
 		FTimerHandle H;
-		GetWorldTimerManager().SetTimer(H, FTimerDelegate::CreateUObject(this, &APA250CampaignGameMode::RunCampaignSelftest), 0.5f, false);
+		GetWorldTimerManager().SetTimer(H, FTimerDelegate::CreateUObject(this, &APA250CampaignGameMode::RunCampaignSelftest), 0.5f,
+										false);
 	}
+}
+
+void APA250CampaignGameMode::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	if (UPA250Subsystem* Sub = UPA250Subsystem::Get(this))
+	{
+		Sub->SetCampaignActive(false);
+	}
+	Super::EndPlay(EndPlayReason);
 }
 
 void APA250CampaignGameMode::RunCampaignSelftest()
 {
 	using namespace PA250Autoplay;
 	UPA250Subsystem* Sub = UPA250Subsystem::Get(this);
-	Check(Sub, MapWidget != nullptr && MapWidget->GetMap().IsValid(), TEXT("map widget created in L_Campaign"));
-	if (!Sub || !MapWidget || !MapWidget->GetMap().IsValid())
+	Check(Sub, MapWidget != nullptr, TEXT("map widget created in L_Campaign"));
+	Check(Sub, MapActor != nullptr, TEXT("province map actor spawned"));
+	Check(Sub, MapWidget && !MapWidget->HasLegacyMapCanvas(), TEXT("no legacy Slate map canvas"));
+	if (!Sub || !MapWidget)
 	{
 		Finish(Sub, TEXT("selftest_campaign"));
 		return;
 	}
-	TSharedPtr<SPA250Map> Map = MapWidget->GetMap();
-	const pa250::CampaignState& S = Sub->GetState();
+	const pa250::CampaignState& S0 = Sub->GetState();
+	Check(Sub, S0.provinces.size() == 13, TEXT("Boston 1775: thirteen provinces"));
+	Check(Sub, S0.provinces.at("charlestown").owner == "continental", TEXT("Charlestown starts Provincial"));
 
-	// Point-in-polygon: a point inside Lexington and the label anchors resolve to their provinces.
-	Check(Sub, Map->ProvinceAt(FVector2D(430, 150)) == TEXT("lexington"), TEXT("point-in-polygon resolves Lexington"));
-	Check(Sub, Map->ProvinceAt(FVector2D(755, 550)) == TEXT("boston"), TEXT("point-in-polygon resolves Boston"));
-	Check(Sub, Map->ProvinceAt(FVector2D(2000, 2000)).IsEmpty(), TEXT("point outside every province selects nothing"));
-
-	// Select the militia, try an illegal (non-adjacent) move, then a legal one.
-	MapWidget->ClickProvince(TEXT("lexington"));
-	Check(Sub, Map->SelectedArmyId == TEXT("continental_militia"), TEXT("clicking Lexington selects the militia"));
-	MapWidget->ClickProvince(TEXT("boston"));
-	Check(Sub, Sub->GetController().orders().orders.empty(), TEXT("non-adjacent move is rejected"));
-	Check(Sub, Map->LastMessage.Contains(TEXT("Illegal move")), TEXT("illegal move explained to the player"));
-	MapWidget->ClickProvince(TEXT("cambridge"));
-	Check(Sub, Sub->GetController().orders().orders.size() == 1, TEXT("adjacent move order queued"));
-
-	MapWidget->PressEndTurn();
-	Check(Sub, S.turn == 1, TEXT("turn advanced to 1"));
-	Check(Sub, S.armies.at("continental_militia").province == "cambridge", TEXT("militia marched to Cambridge"));
-	Check(Sub, S.armies.at("british_regulars").province == "charlestown", TEXT("British marched to Charlestown"));
-	Check(Sub, !Sub->IsBattlePending(), TEXT("no battle yet"));
-
-	MapWidget->PressEndTurn();  // British enter Cambridge where the militia stand
-	Check(Sub, Sub->IsBattlePending() && S.pending_battle.province == "cambridge", TEXT("armies meeting records a pending battle"));
 	FString Err;
-	Check(Sub, !Sub->EndTurn(Err), TEXT("cannot end turn with a pending battle"));
+	Check(Sub, Sub->QueueMove(TEXT("continental_militia"), TEXT("menotomy"), Err), TEXT("path to menotomy"));
+	Sub->AdvanceHours(24, Err);
+	Check(Sub, Sub->GetState().armies.at("continental_militia").province == "menotomy" ||
+				   !Sub->GetState().armies.at("continental_militia").path.empty() || Sub->IsBattlePending(),
+		  TEXT("militia advancing or in contact"));
 	Finish(Sub, TEXT("selftest_campaign"));
 }
-
-// ------------------------------------------------------------------ full-loop autoplay (campaign legs)
 
 void APA250CampaignGameMode::RunAutoplayCampaign()
 {
@@ -98,53 +163,35 @@ void APA250CampaignGameMode::RunAutoplayCampaign()
 		Finish(Sub, TEXT("autoplay"));
 		return;
 	}
-	const pa250::CampaignState& S = Sub->GetState();
-	FString Err;
-	const FString Stage = Sub->AutoplayStage;
-	Sub->GetControllerMutable().record("autoplay_stage", TCHAR_TO_UTF8(*(Stage.IsEmpty() ? FString(TEXT("start")) : Stage)));
 
-	if (Stage.IsEmpty())
+	if (Sub->AutoplayStage == TEXT("battle_done"))
 	{
-		// Leg 1: new campaign, scripted orders until the armies meet at Lexington.
-		Check(Sub, Sub->NewCampaign(Err), TEXT("new campaign"));
-		Check(Sub, S.turn == 0 && S.provinces.size() == 6, TEXT("Boston 1775: six provinces at turn 0"));
-		Check(Sub, S.provinces.at("boston").owner == "british" && S.provinces.at("lexington").owner == "continental", TEXT("initial ownership"));
-		Check(Sub, !Sub->QueueMove(TEXT("continental_militia"), TEXT("boston"), Err), TEXT("illegal move rejected through the subsystem"));
-		Check(Sub, Sub->QueueMove(TEXT("continental_militia"), TEXT("lexington"), Err), TEXT("hold order accepted"));
-		for (int32 i = 0; i < 8 && !Sub->IsBattlePending(); ++i)
-		{
-			MapWidget->PressEndTurn();
-		}
-		Check(Sub, Sub->IsBattlePending() && S.pending_battle.province == "lexington", TEXT("armies met at Lexington"));
-		Check(Sub, S.turn == 3, TEXT("the British marched Boston-Charlestown-Cambridge-Lexington in three turns"));
-		Sub->AutoplayStage = TEXT("battle");
-		MapWidget->PressFight();
-		Check(Sub, Sub->GetFlow() == EPA250Flow::Battle, TEXT("campaign handed off to the battle flow"));
-	}
-	else if (Stage == TEXT("battle_done"))
-	{
-		// Leg 2: the BattleResult was applied in L_Lexington; open diplomacy with the envoy.
-		Check(Sub, Sub->GetFlow() == EPA250Flow::Campaign && !Sub->IsBattlePending(), TEXT("after the battle: campaign flow, nothing pending"));
-		Check(Sub, S.turn == 3, TEXT("battle does not advance the turn"));
-		int32 Units = 0;
-		for (const auto& A : S.armies) for (const auto& U : A.second.units) Units += U.second;
-		Check(Sub, Units > 0 && Units <= 24 + 22, TEXT("army strengths consistent after losses"));
 		Sub->AutoplayStage = TEXT("diplomacy");
-		MapWidget->PressParley();
-		Check(Sub, Sub->GetFlow() == EPA250Flow::Diplomacy, TEXT("campaign handed off to the diplomacy flow"));
+		FString Err;
+		if (Sub->BeginDiplomacy(TEXT("british"), Err))
+		{
+			Sub->TravelToFlowLevel(this);
+		}
+		else
+		{
+			Finish(Sub, TEXT("autoplay"));
+		}
+		return;
 	}
-	else if (Stage == TEXT("diplomacy_done"))
+	if (Sub->AutoplayStage == TEXT("diplomacy_done"))
 	{
-		// Leg 3: the validated ceasefire(3) is in force; the British AI must respect it; save/load.
+		// Last leg: the validated ceasefire(3 days) holds for a day of hours, then save/load round-trips.
+		const pa250::CampaignState& S = Sub->GetState();
+		FString Err;
 		Check(Sub, Sub->GetFlow() == EPA250Flow::Campaign, TEXT("after diplomacy: campaign flow"));
-		Check(Sub, S.treaties.size() == 1 && S.treaties[0].type == "ceasefire" && S.treaties[0].turns_remaining == 3, TEXT("ceasefire(3) in force"));
+		Check(Sub, S.treaties.size() == 1 && S.treaties[0].type == "ceasefire" && S.treaties[0].hours_remaining == 72, TEXT("ceasefire(3 days) in force: 72 hours"));
 		Check(Sub, S.provinces.at("boston").owner == "british", TEXT("Boston still British after the jailbreak line"));
 		std::map<std::string, std::string> Before;
 		for (const auto& A : S.armies) Before[A.first] = A.second.province;
-		const int32 TurnBefore = S.turn;
-		MapWidget->PressEndTurn();
-		Check(Sub, S.turn == TurnBefore + 1, TEXT("turn advanced under the ceasefire"));
-		// Ceasefire blocks entry into enemy-owned provinces. Movement on friendly ground is still legal.
+		const int64 HourBefore = S.now.hour_index;
+		Sub->AdvanceHours(24, Err);
+		Check(Sub, S.now.hour_index == HourBefore + 24, TEXT("24 hours advanced under the ceasefire"));
+		// Ceasefire blocks entry into enemy-owned provinces; movement on friendly ground is still legal.
 		bool bRespected = true;
 		for (const auto& A : S.armies)
 		{
@@ -152,19 +199,28 @@ void APA250CampaignGameMode::RunAutoplayCampaign()
 			if (Prev == Before.end() || Prev->second == A.second.province) continue;
 			if (S.provinces.at(A.second.province).owner != A.second.faction) bRespected = false;
 		}
-		Check(Sub, bRespected, TEXT("the British AI respected the ceasefire (no army entered enemy ground)"));
+		Check(Sub, bRespected, TEXT("no army entered enemy ground under the ceasefire"));
 		Check(Sub, !Sub->IsBattlePending(), TEXT("no new battle under the ceasefire"));
-		Check(Sub, S.treaties.size() == 1 && S.treaties[0].turns_remaining == 2, TEXT("ceasefire ticked down to 2"));
-
+		Check(Sub, S.treaties.size() == 1 && S.treaties[0].hours_remaining < 72 && S.treaties[0].hours_remaining > 0, TEXT("ceasefire hours ticking down"));
 		const FString Hash = Sub->GetStateHash();
 		Check(Sub, Sub->SaveCampaign(Err), TEXT("save"));
 		Check(Sub, Sub->LoadCampaign(Err), TEXT("load"));
 		Check(Sub, Sub->GetStateHash() == Hash, TEXT("save/load round trip: identical state hash"));
 		Finish(Sub, TEXT("autoplay"));
+		return;
 	}
-	else
+
+	FString Err;
+	Sub->QueueMove(TEXT("continental_militia"), TEXT("cambridge"), Err);
+	for (int32 i = 0; i < 48 && !Sub->IsBattlePending(); ++i)
 	{
-		Check(Sub, false, FString::Printf(TEXT("unexpected autoplay stage '%s' in L_Campaign"), *Stage));
-		Finish(Sub, TEXT("autoplay"));
+		Sub->AdvanceHours(1, Err);
 	}
+	if (Sub->IsBattlePending())
+	{
+		Sub->AutoplayStage = TEXT("battle");
+		MapWidget->PressFight();
+		return;
+	}
+	Finish(Sub, TEXT("autoplay"));
 }

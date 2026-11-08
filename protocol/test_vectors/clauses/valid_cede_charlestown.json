@@ -1,6 +1,16 @@
 {
  "name": "valid_cede_charlestown",
- "description": "",
+ "description": "Charlestown British only via context_patch (slice start owner is Provincial).",
+ "context_patch": {
+  "provinces": {
+   "boston": "british",
+   "cambridge": "continental",
+   "charlestown": "british",
+   "concord": "continental",
+   "lexington": "continental",
+   "roxbury": "continental"
+  }
+ },
  "proposal": {
   "spoken_line": "Take it.",
   "clauses": [

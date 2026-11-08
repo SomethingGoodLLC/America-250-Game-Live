@@ -9,20 +9,45 @@ namespace pa250 {
 
 inline constexpr const char* kBritish = "british";
 inline constexpr const char* kContinental = "continental";
-inline constexpr int kSchemaVersion = 1;
+inline constexpr int kSchemaVersion = 2;
+inline constexpr int64_t kEpochYear = 1607;  // 1607-01-01 00:00 = hour_index 0 (proleptic Gregorian)
+inline constexpr int kDefaultMarchHoursPerDay = 10;
+
+struct GameTime {
+    int64_t hour_index = 0;
+};
+
+struct YMDH {
+    int32_t y = 1607;
+    uint8_t m = 1;
+    uint8_t d = 1;
+    uint8_t h = 0;
+};
 
 struct Point {
     double x = 0.0;
     double y = 0.0;
 };
 
+struct Edge {
+    std::string id;
+    std::string a;
+    std::string b;
+    std::string type;  // road | neck | bridge | ferry | boat
+    int march_hours = 1;
+    bool can_dismantle = false;
+    std::string note;
+};
+
 struct Province {
     std::string id;
     std::string name;
     std::string owner;
-    std::vector<std::string> adjacent;  // sorted
-    std::vector<Point> polygon;         // map-space outline for the UI
-    Point label;                        // label anchor for the UI
+    int map_index = 0;                      // 1..N explicit; never from file order
+    std::vector<std::string> terrain;       // tags
+    std::vector<std::string> adjacent;      // derived from edges, sorted
+    std::vector<Point> polygon;             // map-space outline (legacy / bootstrap)
+    Point label;                            // label anchor for the UI
     int supply_value = 1;
 };
 
@@ -34,17 +59,19 @@ struct Army {
     std::string previous_province;
     std::map<std::string, int> units;  // unit class -> strength
     int morale = 70;
+    std::vector<std::string> path;  // edge ids remaining (current edge first)
+    int hours_into_edge = 0;
 };
 
 struct Treaty {
     std::string type;  // "ceasefire" | "safe_passage"
-    int turns_remaining = 0;
+    int hours_remaining = 0;
     std::string army_id;       // safe_passage only
     std::string province_id;   // safe_passage only
 };
 
 struct MemoryEntry {
-    int turn = 0;
+    int64_t hour_index = 0;
     std::string faction;
     std::string text;
 };
@@ -62,17 +89,45 @@ struct FactionInfo {
     std::string envoy_title;
     std::vector<std::string> allowed_clause_types;
     std::vector<std::string> protected_provinces;  // red line: may never be ceded
-    int max_ceasefire_turns = 3;
-    int max_safe_passage_turns = 3;
+    int max_ceasefire_days = 365;
+    int max_safe_passage_days = 90;
+    bool controls_harbor = false;
 };
 
+// ---- Commands -----------------------------------------------------------
+enum class CommandKind : uint8_t {
+    MoveArmy = 1,
+    HaltArmy = 2,
+    ApplyBattleResult = 3,
+    ApplyDiplomacy = 4,
+};
+
+struct CommandPayload {
+    CommandKind kind = CommandKind::MoveArmy;
+    std::string army_id;
+    std::string dest_province;           // MoveArmy
+    std::vector<std::string> edge_path;  // MoveArmy (optional precomputed)
+    // ApplyBattleResult / ApplyDiplomacy stored as JSON text for round-trip simplicity
+    std::string result_json;
+};
+
+struct Command {
+    int64_t apply_on_hour = 0;
+    uint64_t sequence = 0;
+    CommandPayload payload;
+};
+
+enum class Interrupt : uint8_t { None = 0, ArmiesInContact, DiplomacyRequest, EventPopup };
+
 struct CampaignState {
-    int turn = 0;
+    GameTime now;
     uint64_t seed = 0;
     std::string scenario;
     std::string player_faction = kContinental;
     std::string ai_objective;  // province the AI marches toward
+    int march_hours_per_day = kDefaultMarchHoursPerDay;
     std::map<std::string, Province> provinces;
+    std::map<std::string, Edge> edges;
     std::map<std::string, Army> armies;
     std::map<std::string, FactionInfo> factions;
     std::map<std::string, int> supplies;         // faction -> supplies
@@ -81,13 +136,24 @@ struct CampaignState {
     std::vector<Treaty> treaties;
     std::vector<MemoryEntry> memory;
     PendingBattle pending_battle;
+    std::vector<Command> pending_commands;
+    uint64_t next_command_seq = 1;
     std::vector<std::string> log;
 };
 
-// ---- Orders -------------------------------------------------------------
+struct PathPlan {
+    bool ok = false;
+    std::string error;
+    std::vector<std::string> edges;
+    std::vector<std::string> provinces;  // including start
+    int total_march_hours = 0;
+    GameTime arrival;
+};
+
+// ---- Orders (legacy test helper: one-step intent) -----------------------
 struct Order {
     std::string army_id;
-    std::string to_province;  // equal to current province = hold
+    std::string to_province;
 };
 struct Orders {
     std::vector<Order> orders;
@@ -110,20 +176,28 @@ struct BattleSetup {
     std::string attacker_faction;
     std::string defender_faction;
     std::string player_faction;
+    std::vector<std::string> terrain_tags;
     std::map<std::string, SideSetup> sides;  // keyed by faction
 };
 struct BattleResult {
     std::string province_id;
     std::string winner;
-    std::string objective_holder;  // faction holding the objective at the end, or ""
+    std::string objective_holder;  // plurality owner of posts at the end, or ""
+    std::map<std::string, std::string> objectives_held;  // post_id -> faction (omit neutral)
     std::map<std::string, std::map<std::string, int>> losses;  // faction -> class -> lost
     std::string retreat_province;  // loser's retreat; empty = sim chooses
+};
+
+struct TickOutput {
+    CampaignState state;
+    std::vector<Interrupt> interrupts;
+    std::vector<BattleSetup> battles;
 };
 
 // ---- Diplomacy ----------------------------------------------------------
 struct Clause {
     std::string type;
-    int turns = -1;
+    int days = -1;  // ceasefire / safe_passage (wire field; turns rejected)
     std::map<std::string, int> counts;  // prisoner_exchange: faction -> prisoners released
     bool has_counts = false;
     std::string army_id;
@@ -136,11 +210,11 @@ struct DiplomacyProposal {
 struct DiplomacyContext {
     std::string faction;        // the envoy's faction
     std::string counterpart;
-    int turn = 0;
+    int64_t hour_index = 0;
     int relation = 0;
     std::vector<std::string> allowed_clause_types;
-    int max_ceasefire_turns = 3;
-    int max_safe_passage_turns = 3;
+    int max_ceasefire_days = 365;
+    int max_safe_passage_days = 90;
     std::vector<std::string> protected_provinces;
     std::map<std::string, std::string> provinces;  // id -> owner
     std::map<std::string, std::string> armies;     // id -> faction

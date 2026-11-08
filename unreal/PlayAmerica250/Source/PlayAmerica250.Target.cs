@@ -12,5 +12,6 @@ public class PlayAmerica250Target : TargetRules
 		IncludeOrderVersion = EngineIncludeOrderVersion.Unreal5_8;
 		ExtraModuleNames.Add("PlayAmerica250");
 		ExtraModuleNames.Add("PA250Sim");
+		ExtraModuleNames.Add("PA250Shaders");
 	}
 }

@@ -8,7 +8,7 @@
     "type": "safe_passage",
     "army_id": "ghosts",
     "province_id": "charlestown",
-    "turns": 1
+    "days": 1
    }
   ]
  },
@@ -17,5 +17,15 @@
   "error_codes": [
    "unknown_army"
   ]
+ },
+ "context_patch": {
+  "provinces": {
+   "boston": "british",
+   "cambridge": "continental",
+   "charlestown": "british",
+   "concord": "continental",
+   "lexington": "continental",
+   "roxbury": "continental"
+  }
  }
 }

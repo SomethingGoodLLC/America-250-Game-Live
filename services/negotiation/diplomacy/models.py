@@ -16,9 +16,9 @@ ALLOWED_CLAUSE_TYPES: tuple[str, ...] = (
 
 # Keys permitted per clause type (strict: anything else is rejected, matching the C++ parser).
 CLAUSE_FIELDS: dict[str, tuple[str, ...]] = {
-    "ceasefire": ("type", "turns"),
+    "ceasefire": ("type", "days"),
     "prisoner_exchange": ("type", "counts"),
-    "safe_passage": ("type", "army_id", "province_id", "turns"),
+    "safe_passage": ("type", "army_id", "province_id", "days"),
     "cede_province": ("type", "province_id"),
 }
 
@@ -26,7 +26,7 @@ CLAUSE_FIELDS: dict[str, tuple[str, ...]] = {
 class Treaty(BaseModel):
     model_config = ConfigDict(extra="ignore")
     type: str
-    turns_remaining: int
+    hours_remaining: int = 0
     army_id: str = ""
     province_id: str = ""
 
@@ -38,7 +38,7 @@ class DiplomacyContext(BaseModel):
 
     faction: str
     counterpart: str
-    turn: int
+    hour_index: int = 0
     relation: int
     allowed_clause_types: list[str]
     limits: dict[str, int]
@@ -50,19 +50,19 @@ class DiplomacyContext(BaseModel):
     memory: list[str] = Field(default_factory=list)
 
     @property
-    def max_ceasefire_turns(self) -> int:
-        return int(self.limits.get("max_ceasefire_turns", 3))
+    def max_ceasefire_days(self) -> int:
+        return int(self.limits.get("max_ceasefire_days", self.limits.get("max_ceasefire_turns", 365)))
 
     @property
-    def max_safe_passage_turns(self) -> int:
-        return int(self.limits.get("max_safe_passage_turns", 3))
+    def max_safe_passage_days(self) -> int:
+        return int(self.limits.get("max_safe_passage_days", self.limits.get("max_safe_passage_turns", 90)))
 
 
 class Clause(BaseModel):
     """A parsed clause. Missing numeric fields stay -1 / empty so validation can reject them."""
 
     type: str
-    turns: int = -1
+    days: int = -1
     counts: dict[str, int] = Field(default_factory=dict)
     has_counts: bool = False
     army_id: str = ""
@@ -71,7 +71,7 @@ class Clause(BaseModel):
     def to_wire(self) -> dict[str, Any]:
         t = self.type
         if t == "ceasefire":
-            return {"type": t, "turns": self.turns}
+            return {"type": t, "days": self.days}
         if t == "prisoner_exchange":
             return {"type": t, "counts": dict(self.counts)}
         if t == "safe_passage":
@@ -79,7 +79,7 @@ class Clause(BaseModel):
                 "type": t,
                 "army_id": self.army_id,
                 "province_id": self.province_id,
-                "turns": self.turns,
+                "days": self.days,
             }
         if t == "cede_province":
             return {"type": t, "province_id": self.province_id}
@@ -129,17 +129,20 @@ def parse_proposal(raw: Any) -> tuple[DiplomacyProposal, list[str]]:
         if not isinstance(cj, Mapping) or not isinstance(cj.get("type"), str):
             errors.append(_err("malformed_clause", "missing type"))
             continue
+        if "turns" in cj:
+            errors.append(_err("turns_not_allowed", "use days instead of turns"))
+            continue
         clause = Clause(type=cj["type"])
         allowed_keys = CLAUSE_FIELDS.get(clause.type)
         for k, v in cj.items():
             if allowed_keys is not None and k not in allowed_keys:
                 errors.append(_err("unexpected_field", f"{clause.type}.{k}"))
                 continue
-            if k == "turns":
+            if k == "days":
                 if _is_int(v):
-                    clause.turns = v
+                    clause.days = v
                 else:
-                    errors.append(_err("malformed_clause", "turns"))
+                    errors.append(_err("malformed_clause", "days"))
             elif k in ("army_id", "province_id"):
                 if isinstance(v, str):
                     setattr(clause, k, v)

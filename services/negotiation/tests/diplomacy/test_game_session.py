@@ -46,7 +46,7 @@ def test_ceasefire_line_yields_validated_proposal(base_context: dict) -> None:
     types = [m["type"] for m in msgs]
     assert "ai_response" in types and "diplomacy_proposal" in types
     prop = _proposal(msgs)
-    assert prop["clauses"] == [{"type": "ceasefire", "turns": 3}]
+    assert prop["clauses"] == [{"type": "ceasefire", "days": 3}]
     assert prop["rejected"] == []
     assert prop["provider"] == "mock"
 

@@ -54,7 +54,7 @@ def test_turns_to_messages_alternates_and_ends_with_user() -> None:
 
 
 def test_stream_dialogue_uses_single_tool_and_emits_events(base_context: dict) -> None:
-    fake = SimpleNamespace(messages=FakeMessages({"spoken_line": "Done.", "clauses": [{"type": "ceasefire", "turns": 2}]}))
+    fake = SimpleNamespace(messages=FakeMessages({"spoken_line": "Done.", "clauses": [{"type": "ceasefire", "days": 2}]}))
     prov = ClaudeProvider({"client": fake, "model": "test-model"})
 
     async def run() -> list[Any]:
@@ -69,7 +69,7 @@ def test_stream_dialogue_uses_single_tool_and_emits_events(base_context: dict) -
     assert "never cede boston" in call["system"].lower()
     ctx = DiplomacyContext(**base_context)
     wire, errors = finalize_proposal(ctx, events[1].payload["proposal"])
-    assert errors == [] and wire["clauses"] == [{"type": "ceasefire", "turns": 2}]
+    assert errors == [] and wire["clauses"] == [{"type": "ceasefire", "days": 2}]
 
 
 def test_model_output_with_boston_cession_is_rejected_by_python(base_context: dict) -> None:
