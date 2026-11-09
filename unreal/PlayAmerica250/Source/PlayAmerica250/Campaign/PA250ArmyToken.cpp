@@ -52,24 +52,35 @@ APA250ArmyToken::APA250ArmyToken()
 }
 
 void APA250ArmyToken::Configure(const FString& InArmyId, const FString& Faction, const FString& DisplayName,
-								const FString& StrengthLabel, int32 StackIndex, bool bSelected)
+								const FString& StrengthLabel, int32 StackIndex, bool bPlayerForce, bool bSelected)
 {
 	ArmyId = InArmyId;
+	// A solid rectangular flag is an army. Towns are hollow diamonds, so the two
+	// never share a shape. The side word is always printed: colour is not the only cue.
+	const bool bBrit = Faction.Equals(TEXT("british"), ESearchCase::IgnoreCase);
+	const FString Side = bPlayerForce ? TEXT("Yours") : (bBrit ? TEXT("British") : Faction);
+	const FColor Ink = bBrit ? FColor(145, 24, 18) : FColor(16, 48, 130);
 	NameText->SetText(FText::FromString(DisplayName));
-	NameText->SetTextRenderColor(bSelected ? FColor(150, 20, 10) : FColor(20, 12, 4));
-	NameText->SetWorldSize(bSelected ? 30.f : 24.f);
-	StrengthText->SetText(FText::FromString(StrengthLabel));
+	NameText->SetTextRenderColor(Ink);
+	NameText->SetWorldSize(bSelected ? 24.f : 20.f);
+	const FString Plate = bSelected ? (Side + TEXT(" · ") + StrengthLabel) : Side;
+	StrengthText->SetText(FText::FromString(Plate));
+	StrengthText->SetTextRenderColor(Ink);
+	StrengthText->SetWorldSize(bSelected ? 16.f : 18.f);
+	StrengthText->SetVisibility(true);
 	// Re-assert after spawn/registration: constructor-time world rotation can be
 	// reset before the component registers, which left the flag face-down.
+	// Keep the constructor's large flag (0.65 x 0.45). A smaller runtime scale
+	// disappeared into the town diamonds.
 	FlagMesh->SetAbsolute(false, false, true);
 	FlagMesh->SetWorldRotation(FRotator::ZeroRotator);
-	FlagMesh->SetRelativeScale3D(bSelected ? FVector(0.85f, 0.6f, 1.f) : FVector(0.65f, 0.45f, 1.f));
-	SetActorScale3D(FVector::OneVector * (bSelected ? 1.25f : 1.f));
+	FlagMesh->SetRelativeScale3D(bSelected ? FVector(0.78f, 0.54f, 1.f) : FVector(0.65f, 0.45f, 1.f));
+	FlagMesh->SetRelativeLocation(FVector(0.f, 0.f, 36.f));
+	SetActorScale3D(FVector::OneVector);
 
-	// British: pre-1801 Union (FACT) — blue field stand-in (no St Patrick saltire).
-	// Provincial: plain buff pennant (GAME INVENTION; no standard Provincial flag at Lexington).
-	const bool bBrit = Faction.Equals(TEXT("british"), ESearchCase::IgnoreCase);
-	const FLinearColor Color = bBrit ? FLinearColor(0.05f, 0.12f, 0.48f) : FLinearColor(0.72f, 0.42f, 0.06f);
+	// Bright faction colour on the flag; the printed side word carries the same fact.
+	// No flag or insignia is claimed as authentic.
+	const FLinearColor Color = bBrit ? FLinearColor(0.82f, 0.14f, 0.11f) : FLinearColor(0.12f, 0.34f, 0.82f);
 	if (UMaterialInterface* Base = FlagMesh->GetMaterial(0))
 	{
 		if (UMaterialInstanceDynamic* MID = FlagMesh->CreateAndSetMaterialInstanceDynamic(0))

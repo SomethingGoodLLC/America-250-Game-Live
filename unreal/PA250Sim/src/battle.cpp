@@ -3,6 +3,12 @@
 namespace pa250 {
 namespace {
 
+int ticket_total(const std::map<std::string, int>& tickets) {
+    int n = 0;
+    for (const auto& kv : tickets) n += std::max(0, kv.second);
+    return n;
+}
+
 std::map<std::string, int> gate_tickets_by_stores(const CampaignState& state, const Army& army) {
     std::map<std::string, int> tickets = army.units;
     const auto sit = state.stores.find(army.faction);
@@ -35,13 +41,27 @@ std::map<std::string, int> gate_tickets_by_stores(const CampaignState& state, co
             if (kv.first == "militia") kv.second = (kv.second * 3) / 4;
         }
     }
-    return tickets;
-}
 
-int ticket_total(const std::map<std::string, int>& tickets) {
-    int n = 0;
-    for (const auto& kv : tickets) n += std::max(0, kv.second);
-    return n;
+    // Temporary personnel commitments hold paper units out of fielding without touching
+    // Army.units, arms, readiness, or morale.
+    for (const auto& pc : state.progress.personnel_commitments) {
+        if (pc.army_id != army.id || pc.count <= 0) continue;
+        if (pc.release_on_hour > 0 && state.now.hour_index >= pc.release_on_hour) continue;
+        auto uit = tickets.find(pc.unit_class);
+        if (uit == tickets.end()) continue;
+        uit->second = std::max(0, uit->second - pc.count);
+    }
+
+    // Never gate a still-existing army to a zero ticket pool: that made the next fight
+    // end on the first Tick as tickets_exhausted before anyone spawned.
+    if (ticket_total(tickets) <= 0 && total > 0) {
+        for (const auto& kv : army.units) {
+            if (kv.second <= 0) continue;
+            tickets[kv.first] = 1;
+            break;
+        }
+    }
+    return tickets;
 }
 
 // North Bridge is one British company, not the column on the road. That company

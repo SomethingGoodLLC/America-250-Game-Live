@@ -83,8 +83,8 @@ std::string roll_assistance(const CampaignState& s, CorrespondenceItem& letter) 
 
 void deliver_committed(CampaignState& s, CorrespondenceItem& letter) {
     if (letter.status == "delivered" || letter.status == "refused" || letter.status == "dismissed") return;
-    if (letter.committed_powder <= 0 && letter.committed_arms <= 0 && letter.kind != "capacity_investment" &&
-        letter.kind != "knox_support") {
+    if (letter.committed_powder <= 0 && letter.committed_arms <= 0 && letter.committed_provisions <= 0 &&
+        letter.kind != "capacity_investment" && letter.kind != "knox_support") {
         letter.status = "delivered";
         return;
     }
@@ -92,6 +92,7 @@ void deliver_committed(CampaignState& s, CorrespondenceItem& letter) {
     // Never double-count: only add the unpaid remainder.
     const int add_p = letter.committed_powder - letter.received_powder;
     const int add_a = letter.committed_arms - letter.received_arms;
+    const int add_v = letter.committed_provisions - letter.received_provisions;
     if (add_p > 0) {
         st.powder += add_p;
         letter.received_powder += add_p;
@@ -99,6 +100,10 @@ void deliver_committed(CampaignState& s, CorrespondenceItem& letter) {
     if (add_a > 0) {
         st.arms += add_a;
         letter.received_arms += add_a;
+    }
+    if (add_v > 0) {
+        st.provisions += add_v;
+        letter.received_provisions += add_v;
     }
     if (letter.kind == "capacity_investment") {
         // Arms arrive through the committed/received remainder above (committed at choice
@@ -115,7 +120,8 @@ void deliver_committed(CampaignState& s, CorrespondenceItem& letter) {
     letter.status = "delivered";
     letter.awaiting_choice = false;
     detail::add_log(s, "delivery received for " + letter.id + " powder+" + std::to_string(std::max(0, add_p)) +
-                           " arms+" + std::to_string(std::max(0, add_a)));
+                           " arms+" + std::to_string(std::max(0, add_a)) + " prov+" +
+                           std::to_string(std::max(0, add_v)));
 }
 
 void seed_aftermath_letter(CampaignState& s, std::vector<Interrupt>* interrupts) {
@@ -310,6 +316,8 @@ void ensure_logistics_defaults(CampaignState& s) {
     if (s.progress.knox.status.empty()) s.progress.knox.status = "none";
     // local_support and readiness use 0 as a real (exhausted) value; their defaults come
     // from the struct initializers and the JSON loaders, so never "repair" a real 0 here.
+    // Donor reserves are seeded by opening-war correspondence (not every campaign load),
+    // so the clock golden hash stays stable until that catalog path runs.
 }
 
 std::string scenario_preset_for_province(const std::string& province_id) {
@@ -345,6 +353,11 @@ CampaignState choose_logistics(const CampaignState& in, const std::string& lette
     const bool clerk_backlogged = !clerk_has_capacity(s);
 
     const std::string id = letter->id;
+
+    if (letter->kind == "source_decision" || letter->kind == "historical_notice") {
+        return apply_source_decision(s, id, choice);
+    }
+
     letter->awaiting_choice = false;
 
     if (choice == "dismiss") {
@@ -558,11 +571,14 @@ CampaignState resolve_commander_request(const CampaignState& in, const std::stri
 void tick_logistics(CampaignState& s, std::vector<Interrupt>& interrupts) {
     ensure_logistics_defaults(s);
     reset_clerk_day(s);
+    release_due_personnel_commitments(s);
+    deliver_due_shipments(s, &interrupts);
     resolve_due_letters(s, &interrupts);
     rest_armies_hourly(s);
     seed_aftermath_letter(s, &interrupts);
     maybe_commander_friction(s, &interrupts);
     maybe_chapter_gates(s, &interrupts);
+    seed_opening_war_correspondence(s, &interrupts);
 }
 
 }  // namespace pa250

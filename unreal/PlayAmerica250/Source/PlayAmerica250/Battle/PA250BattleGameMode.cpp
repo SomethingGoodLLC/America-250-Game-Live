@@ -386,6 +386,14 @@ void APA250BattleGameMode::ApplyScenarioPreset()
 			SpawnCreekBridge(GetWorld(), Green->GetActorLocation() + FVector(0.f, 0.f, -140.f));
 		}
 	}
+	// DebugSetHolder marks flips; clear so scenario setup is not scored as capture flips.
+	for (const TWeakObjectPtr<APA250ControlPoint>& WP : Posts)
+	{
+		if (WP.IsValid())
+		{
+			WP->ConsumeFlipFlag();
+		}
+	}
 	UE_LOG(LogTemp, Display, TEXT("PA250 battle scenario_preset=%s province=%s crossing=%d preserve=%d tags=%d"),
 		*Preset, UTF8_TO_TCHAR(Setup.province_id.c_str()), ScenarioFight.bContestSingleCrossing ? 1 : 0,
 		ScenarioFight.bRewardForcePreservation ? 1 : 0, Tags.Num());
@@ -475,9 +483,16 @@ void APA250BattleGameMode::EnsureInitialized()
 	// Tickets = reinforcement pool in soldiers. Spent on death + bleed (M6), not spawn.
 	for (const auto& FK : InitialPool)
 	{
+		int32 Units = 0;
 		int32 Total = 0;
-		for (const auto& CK : FK.Value) Total += CK.Value * SoldiersPerUnit;
+		for (const auto& CK : FK.Value)
+		{
+			Units += CK.Value;
+			Total += CK.Value * SoldiersPerUnit;
+		}
 		Ledger.Pool.Add(FK.Key, Total);
+		UE_LOG(LogTemp, Display, TEXT("PA250 tickets %s: %d units -> %d soldiers"), *FK.Key.ToString(), Units,
+			Total);
 	}
 
 	for (TActorIterator<APlayerStart> It(GetWorld()); It; ++It)
@@ -1473,12 +1488,20 @@ void APA250BattleGameMode::BleedTickets(float DeltaSeconds)
 void APA250BattleGameMode::CheckTicketExhaustion()
 {
 	// Conquest: a side at 0 tickets loses at once, even with soldiers still standing.
-	// A side that started with no reinforcements (debug setups) only loses once it is wiped out.
+	// A side that started with no reinforcement tickets only loses after it has fielded at
+	// least once and been wiped — never on the first Tick before spawn (stores gating used
+	// to leave Continental at 0 tickets and kick Concord back to the map immediately).
 	auto Out = [this](FName F) {
 		if (PoolTotal(F) > 0) return false;
 		int32 Initial = 0;
 		for (const auto& CK : InitialPool.FindRef(F)) Initial += CK.Value;
-		return Initial > 0 || CountAlive(F, TEXT("line_infantry")) + CountAlive(F, TEXT("militia")) <= 0;
+		const int32 Alive =
+			CountAlive(F, TEXT("line_infantry")) + CountAlive(F, TEXT("militia"));
+		if (Initial > 0)
+		{
+			return true;
+		}
+		return EverFielded.FindRef(F) && Alive <= 0;
 	};
 	const bool BritOut = Out(TEXT("british"));
 	const bool ContOut = Out(TEXT("continental"));
@@ -1670,6 +1693,13 @@ void APA250BattleGameMode::Tick(float DeltaSeconds)
 	}
 	BleedTickets(DeltaSeconds);
 	TickMuster(DeltaSeconds);
+	for (const FName F : {FName(TEXT("british")), FName(TEXT("continental"))})
+	{
+		if (CountAlive(F, TEXT("line_infantry")) + CountAlive(F, TEXT("militia")) > 0)
+		{
+			EverFielded.FindOrAdd(F) = true;
+		}
+	}
 	CheckTicketExhaustion();
 	if (SpawnScreen && SpawnScreen->IsInViewport() && !CanSpawn(PlayerFaction))
 	{

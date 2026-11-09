@@ -412,6 +412,11 @@ unreal/PlayAmerica250/Content/american_soldier/
 unreal/PlayAmerica250/Content/ThirdParty/
 # Machine-local clangd DB (regenerate via UBT -Mode=GenerateClangDatabase)
 unreal/PlayAmerica250/compile_commands.json
+
+# Campaign map presentation / de Costa hotspot JSON (*.json ignore otherwise)
+!unreal/PlayAmerica250/Content/Map/Boston1775/Raw/
+!unreal/PlayAmerica250/Content/Map/Boston1775/Raw/**
+!unreal/PlayAmerica250/Content/Map/Boston1775/Raw/*.json
 compile_commands.json
 
 # Canonical sim data and shared clause vectors. The broad data/ and *.json

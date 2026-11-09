@@ -15,7 +15,7 @@ class PLAYAMERICA250_API APA250ArmyToken : public AActor
 public:
 	APA250ArmyToken();
 	void Configure(const FString& InArmyId, const FString& Faction, const FString& DisplayName, const FString& StrengthLabel,
-			   int32 StackIndex, bool bSelected);
+			   int32 StackIndex, bool bPlayerForce, bool bSelected);
 
 	UPROPERTY(VisibleAnywhere)
 	TObjectPtr<USceneComponent> Root;

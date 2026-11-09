@@ -145,13 +145,19 @@ json letter_to_json(const CorrespondenceItem& c) {
             {"gold_cost", c.gold_cost},
             {"committed_powder", c.committed_powder},
             {"committed_arms", c.committed_arms},
+            {"committed_provisions", c.committed_provisions},
             {"received_powder", c.received_powder},
             {"received_arms", c.received_arms},
+            {"received_provisions", c.received_provisions},
             {"fictionalized", c.fictionalized},
             {"subject", c.subject},
             {"body", c.body},
             {"reason", c.reason},
-            {"awaiting_choice", c.awaiting_choice}};
+            {"awaiting_choice", c.awaiting_choice},
+            {"source_id", c.source_id},
+            {"event_id", c.event_id},
+            {"decision_id", c.decision_id},
+            {"decision_applied", c.decision_applied}};
 }
 CorrespondenceItem letter_from_json(const json& j) {
     CorrespondenceItem c;
@@ -167,14 +173,78 @@ CorrespondenceItem letter_from_json(const json& j) {
     c.gold_cost = j.value("gold_cost", 0);
     c.committed_powder = j.value("committed_powder", 0);
     c.committed_arms = j.value("committed_arms", 0);
+    c.committed_provisions = j.value("committed_provisions", 0);
     c.received_powder = j.value("received_powder", 0);
     c.received_arms = j.value("received_arms", 0);
+    c.received_provisions = j.value("received_provisions", 0);
     c.fictionalized = j.value("fictionalized", true);
     c.subject = j.value("subject", "");
     c.body = j.value("body", "");
     c.reason = j.value("reason", "");
     c.awaiting_choice = j.value("awaiting_choice", false);
+    c.source_id = j.value("source_id", "");
+    c.event_id = j.value("event_id", "");
+    c.decision_id = j.value("decision_id", "");
+    c.decision_applied = j.value("decision_applied", false);
     return c;
+}
+json personnel_to_json(const PersonnelCommitment& p) {
+    return {{"id", p.id},
+            {"army_id", p.army_id},
+            {"unit_class", p.unit_class},
+            {"count", p.count},
+            {"reason", p.reason},
+            {"release_on_hour", p.release_on_hour}};
+}
+PersonnelCommitment personnel_from_json(const json& j) {
+    PersonnelCommitment p;
+    p.id = j.value("id", "");
+    p.army_id = j.value("army_id", "");
+    p.unit_class = j.value("unit_class", "");
+    p.count = j.value("count", 0);
+    p.reason = j.value("reason", "");
+    p.release_on_hour = j.value("release_on_hour", int64_t{0});
+    return p;
+}
+json donor_to_json(const DonorReserve& d) {
+    return {{"id", d.id},
+            {"label", d.label},
+            {"powder", d.powder},
+            {"arms", d.arms},
+            {"provisions", d.provisions}};
+}
+DonorReserve donor_from_json(const json& j) {
+    DonorReserve d;
+    d.id = j.value("id", "");
+    d.label = j.value("label", "");
+    d.powder = j.value("powder", 0);
+    d.arms = j.value("arms", 0);
+    d.provisions = j.value("provisions", 0);
+    return d;
+}
+json shipment_to_json(const Shipment& sh) {
+    return {{"id", sh.id},
+            {"donor_reserve_id", sh.donor_reserve_id},
+            {"dest_faction", sh.dest_faction},
+            {"powder", sh.powder},
+            {"arms", sh.arms},
+            {"provisions", sh.provisions},
+            {"commit_hour", sh.commit_hour},
+            {"deliver_on_hour", sh.deliver_on_hour},
+            {"status", sh.status}};
+}
+Shipment shipment_from_json(const json& j) {
+    Shipment sh;
+    sh.id = j.value("id", "");
+    sh.donor_reserve_id = j.value("donor_reserve_id", "");
+    sh.dest_faction = j.value("dest_faction", "");
+    sh.powder = j.value("powder", 0);
+    sh.arms = j.value("arms", 0);
+    sh.provisions = j.value("provisions", 0);
+    sh.commit_hour = j.value("commit_hour", int64_t{0});
+    sh.deliver_on_hour = j.value("deliver_on_hour", int64_t{0});
+    sh.status = j.value("status", "");
+    return sh;
 }
 json staff_to_json(const StaffState& st) {
     json q = json::array();
@@ -196,6 +266,8 @@ StaffState staff_from_json(const json& j) {
     return st;
 }
 json progress_to_json(const CampaignProgress& p) {
+    json pcs = json::array();
+    for (const auto& pc : p.personnel_commitments) pcs.push_back(personnel_to_json(pc));
     return {{"battles_fought", p.battles_fought},
             {"lexington_fought", p.lexington_fought},
             {"aftermath_pending", p.aftermath_pending},
@@ -205,6 +277,10 @@ json progress_to_json(const CampaignProgress& p) {
             {"capacity_level", p.capacity_level},
             {"capacity_ready_hour", p.capacity_ready_hour},
             {"player_role", p.player_role},
+            {"personnel_commitments", pcs},
+            {"resolved_event_ids", p.resolved_event_ids},
+            {"received_source_ids", p.received_source_ids},
+            {"offensive_postponed", p.offensive_postponed},
             {"knox",
              {{"id", p.knox.id},
               {"status", p.knox.status},
@@ -233,6 +309,12 @@ CampaignProgress progress_from_json(const json& j) {
     p.capacity_level = j.value("capacity_level", 0);
     p.capacity_ready_hour = j.value("capacity_ready_hour", int64_t{0});
     p.player_role = j.value("player_role", "massachusetts_field_commander");
+    p.resolved_event_ids = j.value("resolved_event_ids", std::vector<std::string>{});
+    p.received_source_ids = j.value("received_source_ids", std::vector<std::string>{});
+    p.offensive_postponed = j.value("offensive_postponed", false);
+    if (j.contains("personnel_commitments"))
+        for (const auto& pc : j.at("personnel_commitments"))
+            p.personnel_commitments.push_back(personnel_from_json(pc));
     if (j.contains("knox")) {
         const json& k = j.at("knox");
         p.knox.id = k.value("id", "knox_ticonderoga");
@@ -406,6 +488,12 @@ CampaignState state_from_json(const json& j, bool is_save) {
     }
     if (j.contains("staff")) s.staff = staff_from_json(j.at("staff"));
     if (j.contains("progress")) s.progress = progress_from_json(j.at("progress"));
+    if (j.contains("donor_reserves")) {
+        for (auto it = j.at("donor_reserves").begin(); it != j.at("donor_reserves").end(); ++it)
+            s.donor_reserves[it.key()] = donor_from_json(it.value());
+    }
+    if (j.contains("shipments"))
+        for (const auto& sh : j.at("shipments")) s.shipments.push_back(shipment_from_json(sh));
     ensure_logistics_defaults(s);
     if (is_save) {
         for (const auto& t : j.at("treaties")) s.treaties.push_back(treaty_from_json(t));
@@ -481,6 +569,10 @@ std::string serialize(const CampaignState& s) {
     for (const auto& kv : s.stores) j["stores"][kv.first] = stores_to_json(kv.second);
     j["staff"] = staff_to_json(s.staff);
     j["progress"] = progress_to_json(s.progress);
+    j["donor_reserves"] = json::object();
+    for (const auto& kv : s.donor_reserves) j["donor_reserves"][kv.first] = donor_to_json(kv.second);
+    j["shipments"] = json::array();
+    for (const auto& sh : s.shipments) j["shipments"].push_back(shipment_to_json(sh));
     j["treaties"] = json::array();
     for (const auto& t : s.treaties) j["treaties"].push_back(treaty_to_json(t));
     j["memory"] = json::array();

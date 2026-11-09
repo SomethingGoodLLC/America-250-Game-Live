@@ -1,0 +1,748 @@
+{
+  "schema_version": 1,
+  "scenario": "boston1775",
+  "source_svg": "tools/mapgen/source/boston_1775.svg",
+  "uv_origin": "top-left, v down",
+  "texture_size": {
+    "width": 4096,
+    "height": 3277
+  },
+  "svg_viewbox": [
+    0.0,
+    0.0,
+    1000.0,
+    800.0
+  ],
+  "normalization_px": {
+    "border_dist": 48.0,
+    "coast_dist": 64.0
+  },
+  "provinces": [
+    {
+      "id": "concord",
+      "map_index": 1,
+      "label_anchor_uv": [
+        0.138794,
+        0.292188
+      ],
+      "token_anchor_uv": [
+        0.092896,
+        0.165853
+      ],
+      "pole_border_dist_px": 568.24292,
+      "bounds_uv": {
+        "u0": 0.0,
+        "v0": 0.049741,
+        "u1": 0.279785,
+        "v1": 0.525175
+      },
+      "area_px": 1674379
+    },
+    {
+      "id": "lincoln",
+      "map_index": 2,
+      "label_anchor_uv": [
+        0.332642,
+        0.138084
+      ],
+      "token_anchor_uv": [
+        0.342407,
+        0.213457
+      ],
+      "pole_border_dist_px": 312.200256,
+      "bounds_uv": {
+        "u0": 0.23999,
+        "v0": 0.037534,
+        "u1": 0.419922,
+        "v1": 0.399451
+      },
+      "area_px": 599054
+    },
+    {
+      "id": "lexington",
+      "map_index": 3,
+      "label_anchor_uv": [
+        0.505493,
+        0.159139
+      ],
+      "token_anchor_uv": [
+        0.505493,
+        0.159139
+      ],
+      "pole_border_dist_px": 382.990875,
+      "bounds_uv": {
+        "u0": 0.399902,
+        "v0": 0.037229,
+        "u1": 0.619141,
+        "v1": 0.370766
+      },
+      "area_px": 647678
+    },
+    {
+      "id": "menotomy",
+      "map_index": 4,
+      "label_anchor_uv": [
+        0.477905,
+        0.431034
+      ],
+      "token_anchor_uv": [
+        0.453979,
+        0.392585
+      ],
+      "pole_border_dist_px": 197.625916,
+      "bounds_uv": {
+        "u0": 0.399902,
+        "v0": 0.249924,
+        "u1": 0.560059,
+        "v1": 0.537382
+      },
+      "area_px": 301913
+    },
+    {
+      "id": "cambridge",
+      "map_index": 5,
+      "label_anchor_uv": [
+        0.33728,
+        0.463686
+      ],
+      "token_anchor_uv": [
+        0.380249,
+        0.521056
+      ],
+      "pole_border_dist_px": 321.602234,
+      "bounds_uv": {
+        "u0": 0.25,
+        "v0": 0.287458,
+        "u1": 0.52002,
+        "v1": 0.641745
+      },
+      "area_px": 661288
+    },
+    {
+      "id": "charlestown",
+      "map_index": 6,
+      "label_anchor_uv": [
+        0.678589,
+        0.477418
+      ],
+      "token_anchor_uv": [
+        0.678589,
+        0.477418
+      ],
+      "pole_border_dist_px": 272.001831,
+      "bounds_uv": {
+        "u0": 0.48999,
+        "v0": 0.374733,
+        "u1": 0.76001,
+        "v1": 0.597803
+      },
+      "area_px": 345405
+    },
+    {
+      "id": "medford",
+      "map_index": 7,
+      "label_anchor_uv": [
+        0.566528,
+        0.342844
+      ],
+      "token_anchor_uv": [
+        0.566528,
+        0.342844
+      ],
+      "pole_border_dist_px": 239.081573,
+      "bounds_uv": {
+        "u0": 0.5,
+        "v0": 0.262435,
+        "u1": 0.640137,
+        "v1": 0.425084
+      },
+      "area_px": 219441
+    },
+    {
+      "id": "watertown",
+      "map_index": 8,
+      "label_anchor_uv": [
+        0.269653,
+        0.624809
+      ],
+      "token_anchor_uv": [
+        0.226196,
+        0.624199
+      ],
+      "pole_border_dist_px": 221.46106,
+      "bounds_uv": {
+        "u0": 0.179932,
+        "v0": 0.549893,
+        "u1": 0.373291,
+        "v1": 0.700031
+      },
+      "area_px": 260265
+    },
+    {
+      "id": "brookline",
+      "map_index": 9,
+      "label_anchor_uv": [
+        0.402222,
+        0.70415
+      ],
+      "token_anchor_uv": [
+        0.359985,
+        0.697437
+      ],
+      "pole_border_dist_px": 217.559189,
+      "bounds_uv": {
+        "u0": 0.299805,
+        "v0": 0.624962,
+        "u1": 0.519043,
+        "v1": 0.775099
+      },
+      "area_px": 286714
+    },
+    {
+      "id": "roxbury",
+      "map_index": 10,
+      "label_anchor_uv": [
+        0.529663,
+        0.80058
+      ],
+      "token_anchor_uv": [
+        0.577515,
+        0.805462
+      ],
+      "pole_border_dist_px": 245.0,
+      "bounds_uv": {
+        "u0": 0.469971,
+        "v0": 0.712237,
+        "u1": 0.799805,
+        "v1": 0.875191
+      },
+      "area_px": 518177
+    },
+    {
+      "id": "boston",
+      "map_index": 11,
+      "label_anchor_uv": [
+        0.78479,
+        0.680348
+      ],
+      "token_anchor_uv": [
+        0.78479,
+        0.680348
+      ],
+      "pole_border_dist_px": 291.487549,
+      "bounds_uv": {
+        "u0": 0.699951,
+        "v0": 0.587428,
+        "u1": 0.870117,
+        "v1": 0.815075
+      },
+      "area_px": 337067
+    },
+    {
+      "id": "dorchester",
+      "map_index": 12,
+      "label_anchor_uv": [
+        0.809204,
+        0.865273
+      ],
+      "token_anchor_uv": [
+        0.785522,
+        0.882057
+      ],
+      "pole_border_dist_px": 138.224457,
+      "bounds_uv": {
+        "u0": 0.699951,
+        "v0": 0.801038,
+        "u1": 0.860107,
+        "v1": 0.925236
+      },
+      "area_px": 130499
+    },
+    {
+      "id": "chelsea",
+      "map_index": 13,
+      "label_anchor_uv": [
+        0.827759,
+        0.436527
+      ],
+      "token_anchor_uv": [
+        0.827759,
+        0.436527
+      ],
+      "pole_border_dist_px": 245.122421,
+      "bounds_uv": {
+        "u0": 0.625,
+        "v0": 0.312481,
+        "u1": 0.900146,
+        "v1": 0.525175
+      },
+      "area_px": 317699
+    }
+  ],
+  "edges": [
+    {
+      "id": "concord-lincoln",
+      "a": "concord",
+      "b": "lincoln",
+      "type": "road",
+      "polyline_uv": [
+        [
+          0.11,
+          0.3
+        ],
+        [
+          0.265,
+          0.2
+        ],
+        [
+          0.32,
+          0.1625
+        ]
+      ]
+    },
+    {
+      "id": "lincoln-lexington",
+      "a": "lincoln",
+      "b": "lexington",
+      "type": "road",
+      "polyline_uv": [
+        [
+          0.32,
+          0.1625
+        ],
+        [
+          0.41,
+          0.14375
+        ],
+        [
+          0.49,
+          0.1875
+        ]
+      ]
+    },
+    {
+      "id": "lexington-menotomy",
+      "a": "lexington",
+      "b": "menotomy",
+      "type": "road",
+      "polyline_uv": [
+        [
+          0.49,
+          0.1875
+        ],
+        [
+          0.47,
+          0.325
+        ],
+        [
+          0.48,
+          0.4
+        ]
+      ]
+    },
+    {
+      "id": "menotomy-cambridge",
+      "a": "menotomy",
+      "b": "cambridge",
+      "type": "road",
+      "polyline_uv": [
+        [
+          0.48,
+          0.4
+        ],
+        [
+          0.44,
+          0.46875
+        ],
+        [
+          0.4,
+          0.5375
+        ]
+      ]
+    },
+    {
+      "id": "menotomy-medford",
+      "a": "menotomy",
+      "b": "medford",
+      "type": "road",
+      "polyline_uv": [
+        [
+          0.48,
+          0.4
+        ],
+        [
+          0.497,
+          0.37875
+        ],
+        [
+          0.506,
+          0.375
+        ],
+        [
+          0.54,
+          0.35625
+        ],
+        [
+          0.58,
+          0.3375
+        ]
+      ]
+    },
+    {
+      "id": "charlestown-medford",
+      "a": "charlestown",
+      "b": "medford",
+      "type": "neck",
+      "polyline_uv": [
+        [
+          0.68,
+          0.48125
+        ],
+        [
+          0.64,
+          0.43125
+        ],
+        [
+          0.615,
+          0.4025
+        ],
+        [
+          0.595,
+          0.375
+        ],
+        [
+          0.58,
+          0.3375
+        ]
+      ]
+    },
+    {
+      "id": "charlestown-cambridge",
+      "a": "charlestown",
+      "b": "cambridge",
+      "type": "neck",
+      "polyline_uv": [
+        [
+          0.68,
+          0.48125
+        ],
+        [
+          0.68,
+          0.5375
+        ],
+        [
+          0.62,
+          0.55625
+        ],
+        [
+          0.56,
+          0.57875
+        ],
+        [
+          0.495,
+          0.5875
+        ],
+        [
+          0.44,
+          0.56875
+        ],
+        [
+          0.4,
+          0.5375
+        ]
+      ]
+    },
+    {
+      "id": "cambridge-watertown",
+      "a": "cambridge",
+      "b": "watertown",
+      "type": "road",
+      "polyline_uv": [
+        [
+          0.4,
+          0.5375
+        ],
+        [
+          0.34,
+          0.6
+        ],
+        [
+          0.26,
+          0.625
+        ]
+      ]
+    },
+    {
+      "id": "cambridge-brookline",
+      "a": "cambridge",
+      "b": "brookline",
+      "type": "bridge",
+      "polyline_uv": [
+        [
+          0.4,
+          0.5375
+        ],
+        [
+          0.403,
+          0.64
+        ],
+        [
+          0.403,
+          0.675
+        ],
+        [
+          0.4,
+          0.7125
+        ]
+      ]
+    },
+    {
+      "id": "brookline-roxbury",
+      "a": "brookline",
+      "b": "roxbury",
+      "type": "road",
+      "polyline_uv": [
+        [
+          0.4,
+          0.7125
+        ],
+        [
+          0.48,
+          0.75
+        ],
+        [
+          0.58,
+          0.8125
+        ]
+      ]
+    },
+    {
+      "id": "roxbury-boston",
+      "a": "roxbury",
+      "b": "boston",
+      "type": "neck",
+      "polyline_uv": [
+        [
+          0.58,
+          0.8125
+        ],
+        [
+          0.7,
+          0.8125
+        ],
+        [
+          0.786,
+          0.81
+        ],
+        [
+          0.787,
+          0.775
+        ],
+        [
+          0.77,
+          0.725
+        ],
+        [
+          0.755,
+          0.6875
+        ]
+      ]
+    },
+    {
+      "id": "roxbury-dorchester",
+      "a": "roxbury",
+      "b": "dorchester",
+      "type": "road",
+      "polyline_uv": [
+        [
+          0.58,
+          0.8125
+        ],
+        [
+          0.7,
+          0.8625
+        ],
+        [
+          0.76,
+          0.89375
+        ]
+      ]
+    },
+    {
+      "id": "boston-charlestown",
+      "a": "boston",
+      "b": "charlestown",
+      "type": "ferry",
+      "polyline_uv": [
+        [
+          0.755,
+          0.6875
+        ],
+        [
+          0.762,
+          0.6125
+        ],
+        [
+          0.74,
+          0.5775
+        ],
+        [
+          0.715,
+          0.55
+        ],
+        [
+          0.68,
+          0.48125
+        ]
+      ]
+    },
+    {
+      "id": "boston-cambridge",
+      "a": "boston",
+      "b": "cambridge",
+      "type": "boat",
+      "polyline_uv": [
+        [
+          0.755,
+          0.6875
+        ],
+        [
+          0.698,
+          0.65
+        ],
+        [
+          0.62,
+          0.6375
+        ],
+        [
+          0.54,
+          0.61875
+        ],
+        [
+          0.514,
+          0.6175
+        ],
+        [
+          0.47,
+          0.60625
+        ],
+        [
+          0.43,
+          0.575
+        ],
+        [
+          0.4,
+          0.5375
+        ]
+      ]
+    },
+    {
+      "id": "boston-chelsea",
+      "a": "boston",
+      "b": "chelsea",
+      "type": "ferry",
+      "polyline_uv": [
+        [
+          0.755,
+          0.6875
+        ],
+        [
+          0.79,
+          0.6
+        ],
+        [
+          0.83,
+          0.55625
+        ],
+        [
+          0.85,
+          0.5
+        ],
+        [
+          0.83,
+          0.45
+        ]
+      ]
+    },
+    {
+      "id": "chelsea-medford",
+      "a": "chelsea",
+      "b": "medford",
+      "type": "road",
+      "polyline_uv": [
+        [
+          0.83,
+          0.45
+        ],
+        [
+          0.74,
+          0.375
+        ],
+        [
+          0.66,
+          0.34375
+        ],
+        [
+          0.6,
+          0.3375
+        ],
+        [
+          0.58,
+          0.3375
+        ]
+      ]
+    }
+  ],
+  "rivers": [
+    {
+      "id": "charles_river",
+      "polyline_uv": [
+        [
+          0.11,
+          0.585
+        ],
+        [
+          0.2,
+          0.61875
+        ],
+        [
+          0.29,
+          0.64375
+        ],
+        [
+          0.385,
+          0.6525
+        ],
+        [
+          0.45,
+          0.64
+        ],
+        [
+          0.488,
+          0.6325
+        ],
+        [
+          0.524,
+          0.625
+        ]
+      ]
+    },
+    {
+      "id": "mystic_river",
+      "polyline_uv": [
+        [
+          0.6,
+          0.3125
+        ],
+        [
+          0.56,
+          0.375
+        ],
+        [
+          0.545,
+          0.43125
+        ]
+      ]
+    }
+  ]
+}

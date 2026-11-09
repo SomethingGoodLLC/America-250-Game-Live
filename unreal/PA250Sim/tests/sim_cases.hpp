@@ -58,6 +58,42 @@ inline int& g_failed() {
 
 static CampaignState fresh() { return load_scenario(read_text_file(g_data_dir() + "/boston1775.json")); }
 
+static void ensure_opening_war_catalog() {
+    if (!correspondence_catalog_loaded())
+        load_correspondence_catalog(read_text_file(g_data_dir() + "/opening_war_correspondence.json"));
+}
+
+static void clear_staff_desk(CampaignState& s) {
+    s.staff.queue.clear();
+    s.pending_event_id.clear();
+}
+
+static int ticket_sum(const std::map<std::string, int>& tickets) {
+    int n = 0;
+    for (const auto& kv : tickets) n += kv.second;
+    return n;
+}
+
+static void advance_clearing_battles(CampaignState& s, int hours) {
+    for (int i = 0; i < hours; ++i) {
+        s = advance_hour(s).state;
+        if (s.pending_battle.active) s.pending_battle = {};
+        // Clear desk clutter that is not an opening-war playable decision.
+        while (!s.pending_event_id.empty()) {
+            CorrespondenceItem* letter = nullptr;
+            for (auto& c : s.staff.queue)
+                if (c.id == s.pending_event_id) letter = &c;
+            if (!letter) break;
+            if (letter->kind == "source_decision") break;  // leave playable decisions for the test
+            s = choose_logistics(s, letter->id, letter->kind == "commander_report" &&
+                                                       letter->subject.find("Detached") != std::string::npos
+                                                   ? "preserve_force"
+                                                   : "dismiss");
+            if (letter->kind == "knox_support") break;
+        }
+    }
+}
+
 static DiplomacyResult accepted(const DiplomacyProposal& p) { return DiplomacyResult{"british", true, p}; }
 
 static DiplomacyProposal proposal_from(const std::string& text) {
@@ -831,18 +867,21 @@ static void test_logistics_loop() {
         if (loaded.pending_battle.active) loaded.pending_battle = {};
     }
     CHECK(loaded.stores.at("continental").powder == powder_del);
-    // Ticket gating: empty powder stands down militia.
+    // Ticket gating: empty stores stand the force down hard, but never to a zero pool while
+    // the army still exists (that used to end Concord on the first Tick).
     CampaignState gated = fresh();
     ensure_logistics_defaults(gated);
     gated.stores["continental"].powder = 0;
-    gated.stores["continental"].arms = 100;
+    gated.stores["continental"].arms = 0;
     gated.pending_battle = {true, "lexington", "british_regulars", "continental_militia"};
     gated.armies.at("british_regulars").province = "lexington";
     gated.armies.at("continental_militia").province = "lexington";
     auto setup = build_battle_setup(gated, "lexington");
     CHECK(setup.valid);
     CHECK(setup.scenario_preset == "lexington_common");
-    CHECK(setup.sides.at("continental").tickets.at("militia") == 0);
+    int cont_tickets = 0;
+    for (const auto& ck : setup.sides.at("continental").tickets) cont_tickets += ck.second;
+    CHECK(cont_tickets == 1);
     // Requisition is immediate and lowers local support.
     CampaignState req = fresh();
     ensure_logistics_defaults(req);
@@ -1047,6 +1086,337 @@ static void test_logistics_edges() {
     }
 }
 
+static void test_opening_war_l3_loop() {
+    ensure_opening_war_catalog();
+    CHECK(correspondence_catalog_entries().size() == 8);
+    CHECK(find_correspondence_entry("L3") != nullptr);
+    CHECK(find_correspondence_entry("L3")->institutional_url.find("masshist.org") != std::string::npos);
+
+    // L3 is not eligible during the April 19 contact window.
+    {
+        CampaignState s = fresh();
+        ensure_logistics_defaults(s);
+        s.progress.lexington_fought = true;
+        s.now = from_ymdh(YMDH{1775, 4, 19, 10});
+        s.pending_battle = {true, "lexington", "british_regulars", "continental_militia"};
+        clear_staff_desk(s);
+        s.progress.received_source_ids = {"L1", "L2"};
+        std::vector<Interrupt> ints;
+        tick_logistics(s, ints);
+        bool got_l3 = false;
+        for (const auto& c : s.staff.queue)
+            if (c.source_id == "L3") got_l3 = true;
+        CHECK(!got_l3);
+    }
+
+    // Accelerate the existing clock from May 3 toward May 4 (eligibility gate).
+    CampaignState s = fresh();
+    ensure_logistics_defaults(s);
+    s.progress.lexington_fought = true;
+    s.progress.aftermath_pending = false;
+    s.progress.battles_fought = 2;
+    s.progress.commander.last_request = "done";
+    s.progress.commander.pending_clarification = false;
+    s.now = from_ymdh(YMDH{1775, 5, 3, 20});
+    clear_staff_desk(s);
+    s.progress.received_source_ids = {"L1", "L2"};
+    const int support0 = s.local_support;
+    const int ready0 = s.armies.at("continental_militia").readiness;
+    const int morale0 = s.armies.at("continental_militia").morale;
+    const int arms0 = s.stores.at("continental").arms;
+    advance_clearing_battles(s, 6);  // crosses into May 4 via advance_hour
+    CHECK(to_ymdh(s.now).y == 1775 && to_ymdh(s.now).m == 5 && to_ymdh(s.now).d >= 4);
+
+    CorrespondenceItem* l3 = nullptr;
+    for (auto& c : s.staff.queue)
+        if (c.source_id == "L3" && c.awaiting_choice) l3 = &c;
+    if (!l3) {
+        clear_staff_desk(s);
+        std::vector<Interrupt> ints;
+        tick_logistics(s, ints);
+        for (auto& c : s.staff.queue)
+            if (c.source_id == "L3" && c.awaiting_choice) l3 = &c;
+    }
+    CHECK(l3 != nullptr);
+    if (!l3) return;
+    CHECK(l3->kind == "source_decision");
+    CHECK(l3->body.find("HISTORICAL DOCUMENT") != std::string::npos);
+    CHECK(l3->body.find("Game adaptation—not a historical quotation.") != std::string::npos);
+    CHECK(l3->body.find("John Adams") != std::string::npos);  // historical recipient preserved
+    const std::string l3_id = l3->id;
+    const std::string hist_body = l3->body;
+
+    // Retain workers: personnel commitment, no support/readiness/arms/morale change.
+    s = choose_logistics(s, l3_id, "retain_workers");
+    CHECK(s.local_support == support0);
+    CHECK(s.armies.at("continental_militia").readiness == ready0);
+    CHECK(s.armies.at("continental_militia").morale == morale0);
+    CHECK(s.stores.at("continental").arms == arms0);
+    CHECK(s.progress.personnel_commitments.size() == 1);
+    CHECK(s.progress.personnel_commitments[0].count == 3);
+    CHECK(std::find(s.progress.resolved_event_ids.begin(), s.progress.resolved_event_ids.end(),
+                    "evt_l3_shelter_work") != s.progress.resolved_event_ids.end());
+
+    s.pending_battle = {true, "lexington", "british_regulars", "continental_militia"};
+    s.armies.at("british_regulars").province = "lexington";
+    s.armies.at("continental_militia").province = "lexington";
+    auto setup = build_battle_setup(s, "lexington");
+    CampaignState baseline = s;
+    baseline.progress.personnel_commitments.clear();
+    auto setup0 = build_battle_setup(baseline, "lexington");
+    CHECK(ticket_sum(setup.sides.at("continental").tickets) ==
+          ticket_sum(setup0.sides.at("continental").tickets) - 3);
+
+    // Exactly-once: re-choosing does not stack commitments.
+    const size_t pc_n = s.progress.personnel_commitments.size();
+    s = choose_logistics(s, l3_id, "retain_workers");
+    CHECK(s.progress.personnel_commitments.size() == pc_n);
+
+    // Save/load preserves commitment; release at hour via clock.
+    CampaignState loaded = deserialize(serialize(s));
+    CHECK(loaded.progress.personnel_commitments.size() == 1);
+    const int64_t release = loaded.progress.personnel_commitments[0].release_on_hour;
+    while (loaded.now.hour_index < release) {
+        loaded = advance_hour(loaded).state;
+        if (loaded.pending_battle.active) loaded.pending_battle = {};
+    }
+    std::vector<Interrupt> after;
+    tick_logistics(loaded, after);
+    CHECK(loaded.progress.personnel_commitments.empty());
+
+    // Purchase provisions: commit ≠ receive; no support gain; historical body unchanged on prior letter.
+    CampaignState buy = fresh();
+    ensure_logistics_defaults(buy);
+    buy.progress.lexington_fought = true;
+    buy.now = from_ymdh(YMDH{1775, 5, 4, 2});
+    clear_staff_desk(buy);
+    buy.progress.received_source_ids = {"L1", "L2"};
+    const int support_b = buy.local_support;
+    const int gold_b = buy.player_gold;
+    const int prov_b = buy.stores.at("continental").provisions;
+    {
+        std::vector<Interrupt> ints;
+        tick_logistics(buy, ints);
+    }
+    std::string buy_id;
+    for (const auto& c : buy.staff.queue)
+        if (c.source_id == "L3") buy_id = c.id;
+    CHECK(!buy_id.empty());
+    buy = choose_logistics(buy, buy_id, "purchase_provisions");
+    CHECK(buy.player_gold == gold_b - 25);
+    CHECK(buy.stores.at("continental").provisions == prov_b);  // not yet
+    CHECK(buy.local_support == support_b);
+    for (int i = 0; i < 10; ++i) {
+        buy = advance_hour(buy).state;
+        if (buy.pending_battle.active) buy.pending_battle = {};
+    }
+    CHECK(buy.stores.at("continental").provisions == prov_b + 8);
+    // Re-delivery after save must not duplicate.
+    const int prov_del = buy.stores.at("continental").provisions;
+    CampaignState buy2 = deserialize(serialize(buy));
+    for (int i = 0; i < 12; ++i) {
+        buy2 = advance_hour(buy2).state;
+        if (buy2.pending_battle.active) buy2.pending_battle = {};
+    }
+    CHECK(buy2.stores.at("continental").provisions == prov_del);
+
+    // Shared lodging: no gold, no support, no readiness hit.
+    CampaignState share = fresh();
+    ensure_logistics_defaults(share);
+    share.progress.lexington_fought = true;
+    share.now = from_ymdh(YMDH{1775, 5, 4, 2});
+    clear_staff_desk(share);
+    share.progress.received_source_ids = {"L1", "L2"};
+    const int ready_s = share.armies.at("continental_militia").readiness;
+    const int support_s = share.local_support;
+    const int gold_s = share.player_gold;
+    {
+        std::vector<Interrupt> ints;
+        tick_logistics(share, ints);
+    }
+    std::string share_id;
+    for (const auto& c : share.staff.queue)
+        if (c.source_id == "L3") share_id = c.id;
+    share = choose_logistics(share, share_id, "shared_lodging");
+    CHECK(share.player_gold == gold_s);
+    CHECK(share.local_support == support_s);
+    CHECK(share.armies.at("continental_militia").readiness == ready_s);
+
+    // L2 never appears as Patriot live intelligence (retrospective exhibit only).
+    CampaignState crown = fresh();
+    ensure_logistics_defaults(crown);
+    crown.progress.lexington_fought = true;
+    crown.now = from_ymdh(YMDH{1775, 4, 20, 2});
+    clear_staff_desk(crown);
+    crown.progress.received_source_ids = {"L1"};
+    {
+        std::vector<Interrupt> ints;
+        tick_logistics(crown, ints);
+    }
+    bool l2 = false;
+    for (const auto& c : crown.staff.queue)
+        if (c.source_id == "L2") {
+            l2 = true;
+            CHECK(c.kind == "historical_notice");
+            CHECK(c.body.find("not live intelligence") != std::string::npos ||
+                  c.reason.find("Not live Patriot intelligence") != std::string::npos);
+            const int gold_c = crown.player_gold;
+            const int powder_c = crown.stores.at("continental").powder;
+            crown = choose_logistics(crown, c.id, "dismiss");
+            CHECK(crown.player_gold == gold_c);
+            CHECK(crown.stores.at("continental").powder == powder_c);
+        }
+    CHECK(l2);
+
+    // Historical pane text is catalog-backed and not rewritten by a prior decision path.
+    CHECK(hist_body.find("Abigail Adams") != std::string::npos);
+    CHECK(find_correspondence_entry("L3")->evidence_summary.find("Guards maintained") != std::string::npos);
+}
+
+static void test_opening_war_l5_l7() {
+    ensure_opening_war_catalog();
+
+    // L5 requires L3 resolved and clock ≥ May 24.
+    CampaignState s = fresh();
+    ensure_logistics_defaults(s);
+    s.progress.lexington_fought = true;
+    s.progress.resolved_event_ids = {"evt_l3_shelter_work"};
+    s.progress.received_source_ids = {"L1", "L2", "L3", "L4"};
+    s.now = from_ymdh(YMDH{1775, 5, 24, 2});
+    clear_staff_desk(s);
+    {
+        std::vector<Interrupt> ints;
+        tick_logistics(s, ints);
+    }
+    std::string l5_id;
+    for (const auto& c : s.staff.queue)
+        if (c.source_id == "L5") l5_id = c.id;
+    CHECK(!l5_id.empty());
+    CHECK(s.staff.queue.back().body.find("subsequent") != std::string::npos ||
+          s.staff.queue.back().body.find("Game adaptation") != std::string::npos);
+    const int support5 = s.local_support;
+    s = choose_logistics(s, l5_id, "evacuate_preserve_boats");
+    CHECK(s.local_support == support5);
+    CHECK(std::find(s.progress.resolved_event_ids.begin(), s.progress.resolved_event_ids.end(),
+                    "evt_l5_forage_boats") != s.progress.resolved_event_ids.end());
+
+    // L7 after continental chapter + June 25: donor transfer accounting.
+    CampaignState l7 = fresh();
+    ensure_logistics_defaults(l7);
+    ensure_donor_reserve_defaults(l7);
+    l7.progress.lexington_fought = true;
+    l7.progress.chapter_continental = true;
+    l7.progress.player_role = "continental_field_commander";
+    l7.progress.resolved_event_ids = {"evt_l3_shelter_work", "evt_l5_forage_boats"};
+    l7.progress.received_source_ids = {"L1", "L2", "L3", "L4", "L5", "L6", "D8"};
+    l7.now = from_ymdh(YMDH{1775, 6, 25, 2});
+    clear_staff_desk(l7);
+    {
+        std::vector<Interrupt> ints;
+        tick_logistics(l7, ints);
+    }
+    std::string l7_id;
+    for (const auto& c : l7.staff.queue)
+        if (c.source_id == "L7") l7_id = c.id;
+    CHECK(!l7_id.empty());
+    const int donor0 = l7.donor_reserves.at("ny_powder").powder;
+    const int powder0 = l7.stores.at("continental").powder;
+    l7 = choose_logistics(l7, l7_id, "request_transfer");
+    CHECK(l7.donor_reserves.at("ny_powder").powder == donor0 - 8);
+    CHECK(l7.stores.at("continental").powder == powder0);  // not yet
+    CHECK(l7.shipments.size() == 1);
+    CHECK(l7.shipments[0].status == "in_transit");
+    CampaignState mid = deserialize(serialize(l7));
+    CHECK(mid.donor_reserves.at("ny_powder").powder == donor0 - 8);
+    CHECK(mid.shipments.size() == 1);
+    for (int i = 0; i < 14; ++i) {
+        mid = advance_hour(mid).state;
+        if (mid.pending_battle.active) mid.pending_battle = {};
+    }
+    CHECK(mid.stores.at("continental").powder == powder0 + 8);
+    CHECK(mid.shipments[0].status == "delivered");
+    // No duplicate delivery after another save/load cycle.
+    const int powder_del = mid.stores.at("continental").powder;
+    CampaignState mid2 = deserialize(serialize(mid));
+    for (int i = 0; i < 20; ++i) {
+        mid2 = advance_hour(mid2).state;
+        if (mid2.pending_battle.active) mid2.pending_battle = {};
+    }
+    CHECK(mid2.stores.at("continental").powder == powder_del);
+
+    // Procurement is distinct from donor transfer.
+    CampaignState proc = fresh();
+    ensure_logistics_defaults(proc);
+    ensure_donor_reserve_defaults(proc);
+    proc.progress.lexington_fought = true;
+    proc.progress.chapter_continental = true;
+    proc.progress.resolved_event_ids = {"evt_l3_shelter_work"};
+    proc.progress.received_source_ids = {"L1", "L2", "L3", "L4", "L5", "L6", "D8"};
+    proc.now = from_ymdh(YMDH{1775, 6, 25, 2});
+    clear_staff_desk(proc);
+    {
+        std::vector<Interrupt> ints;
+        tick_logistics(proc, ints);
+    }
+    std::string proc_id;
+    for (const auto& c : proc.staff.queue)
+        if (c.source_id == "L7") proc_id = c.id;
+    const int donor_p = proc.donor_reserves.at("ny_powder").powder;
+    const int gold_p = proc.player_gold;
+    const int powder_p = proc.stores.at("continental").powder;
+    proc = choose_logistics(proc, proc_id, "fund_procurement");
+    CHECK(proc.donor_reserves.at("ny_powder").powder == donor_p);  // untouched
+    CHECK(proc.player_gold == gold_p - 35);
+    CHECK(proc.stores.at("continental").powder == powder_p);
+    for (int i = 0; i < 20; ++i) {
+        proc = advance_hour(proc).state;
+        if (proc.pending_battle.active) proc.pending_battle = {};
+    }
+    CHECK(proc.stores.at("continental").powder == powder_p + 6);
+
+    // Conserve: no powder, offensive postponed.
+    CampaignState cons = fresh();
+    ensure_logistics_defaults(cons);
+    ensure_donor_reserve_defaults(cons);
+    cons.progress.lexington_fought = true;
+    cons.progress.chapter_continental = true;
+    cons.progress.resolved_event_ids = {"evt_l3_shelter_work"};
+    cons.progress.received_source_ids = {"L1", "L2", "L3", "L4", "L5", "L6", "D8"};
+    cons.now = from_ymdh(YMDH{1775, 6, 25, 2});
+    clear_staff_desk(cons);
+    {
+        std::vector<Interrupt> ints;
+        tick_logistics(cons, ints);
+    }
+    std::string cons_id;
+    for (const auto& c : cons.staff.queue)
+        if (c.source_id == "L7") cons_id = c.id;
+    const int powder_c = cons.stores.at("continental").powder;
+    const int donor_c = cons.donor_reserves.at("ny_powder").powder;
+    cons = choose_logistics(cons, cons_id, "conserve_ammunition");
+    CHECK(cons.stores.at("continental").powder == powder_c);
+    CHECK(cons.donor_reserves.at("ny_powder").powder == donor_c);
+    CHECK(cons.progress.offensive_postponed);
+
+    // All eight institutional URLs present in catalog.
+    const char* urls[] = {
+        "https://founders.archives.gov/documents/Adams/06-02-02-0086",
+        "https://clements.umich.edu/exhibit/bloody-work/gallery-of-letters/hugh-percy/",
+        "https://www.masshist.org/digitaladams/archive/doc?id=L17750504aa",
+        "https://founders.archives.gov/documents/Adams/06-03-02-0006",
+        "https://www.masshist.org/digitaladams/archive/doc?id=L17750524aa",
+        "https://founders.archives.gov/documents/Adams/06-03-02-0017",
+        "https://founders.archives.gov/documents/Washington/03-01-02-0010",
+        "https://founders.archives.gov/documents/Washington/03-01-02-0016",
+    };
+    const char* ids[] = {"L1", "L2", "L3", "L4", "L5", "L6", "D8", "L7"};
+    for (int i = 0; i < 8; ++i) {
+        const auto* e = find_correspondence_entry(ids[i]);
+        CHECK(e != nullptr);
+        CHECK(e->institutional_url == urls[i]);
+    }
+}
+
 static void test_commander_and_knox_gates() {
     CampaignState s = fresh();
     ensure_logistics_defaults(s);
@@ -1101,6 +1471,7 @@ inline int run_all(Reporter& rep, const std::string& data_dir, const std::string
     g_write_golden() = write_golden;
     g_checks() = 0;
     g_failed() = 0;
+    ensure_opening_war_catalog();
     struct Case {
         const char* name;
         void (*fn)();
@@ -1136,6 +1507,8 @@ inline int run_all(Reporter& rep, const std::string& data_dir, const std::string
         {"logistics_loop", test_logistics_loop},
         {"logistics_edges", test_logistics_edges},
         {"commander_and_knox_gates", test_commander_and_knox_gates},
+        {"opening_war_l3_loop", test_opening_war_l3_loop},
+        {"opening_war_l5_l7", test_opening_war_l5_l7},
     };
     for (auto& c : cases) {
         int before = g_failed();

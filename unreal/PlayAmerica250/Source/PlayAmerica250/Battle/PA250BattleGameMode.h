@@ -216,6 +216,8 @@ private:
 	pa250::BattleSetup Setup;
 	pa250::BattleResult Result;
 	TMap<FName, TMap<FName, int32>> InitialPool;
+	/** True once a side has had at least one living soldier this battle (for zero-ticket wipe rules). */
+	TMap<FName, bool> EverFielded;
 	/** Remaining tickets (death + bleed) and per-class deaths. HUD shows Ledger.Pool. */
 	FPA250TicketLedger Ledger;
 	TMap<FName, TArray<TWeakObjectPtr<AActor>>> Starts;

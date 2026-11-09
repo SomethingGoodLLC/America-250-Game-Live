@@ -1,0 +1,245 @@
+{
+  "donor_reserve_defaults": [
+    {
+      "id": "ny_powder",
+      "label": "New York powder reserve (gameplay abstraction—not a mapped warehouse)",
+      "powder": 18,
+      "arms": 0,
+      "provisions": 0
+    }
+  ],
+  "entries": [
+    {
+      "source_id": "L1",
+      "event_id": "evt_l1_tudor_trade",
+      "mode": "historical_reference",
+      "author": "William Tudor",
+      "recipient": "John Adams",
+      "document_date": "1775-04-04",
+      "reported_event_date": "",
+      "source_type": "letter",
+      "institutional_url": "https://founders.archives.gov/documents/Adams/06-02-02-0086",
+      "uncertainty_notes": "Editor supplies later effective dates of trade measures; anticipated damage is not proof all trade had already stopped on April 4. Tudor's contempt for merchants is political judgment, not a neutral loyalty measure.",
+      "evidence_summary": "Boston correspondent describes frightened townspeople and dispirited merchants anticipating restrictions on fishing and trade; asks Adams (as Novanglus) to address the new measures.",
+      "text_kind": "paraphrase_from_report",
+      "eligible_from": {"y": 1775, "m": 4, "d": 19, "h": 12},
+      "faction_visibility": ["continental"],
+      "requires_lexington": true,
+      "requires_chapter_continental": false,
+      "requires_resolved_events": [],
+      "activate_decisions": false,
+      "adaptation_relay": "",
+      "adaptation_dispatch": "",
+      "choices": []
+    },
+    {
+      "source_id": "L2",
+      "event_id": "evt_l2_gage_percy",
+      "mode": "retrospective_exhibit",
+      "author": "[Thomas Gage]",
+      "recipient": "[Hugh Percy]",
+      "document_date": "1775-04-19",
+      "reported_event_date": "1775-04-19",
+      "source_type": "autograph_draft",
+      "institutional_url": "https://clements.umich.edu/exhibit/bloody-work/gallery-of-letters/hugh-percy/",
+      "uncertainty_notes": "Surviving draft of a plan, not proof every movement occurred as proposed. Does not establish who fired first at Lexington. Confidential Crown planning—not Patriot live intelligence.",
+      "evidence_summary": "Gage tells Percy that Pigot will cross with reinforcements and ammunition; boats may return with exhausted grenadiers/light infantry and wounded; proposes Montresor with entrenching tools and a redoubt before further withdrawal.",
+      "text_kind": "paraphrase_from_report",
+      "eligible_from": {"y": 1775, "m": 4, "d": 20, "h": 0},
+      "faction_visibility": ["continental", "british"],
+      "requires_lexington": true,
+      "requires_chapter_continental": false,
+      "requires_resolved_events": [],
+      "activate_decisions": false,
+      "adaptation_relay": "",
+      "adaptation_dispatch": "",
+      "choices": []
+    },
+    {
+      "source_id": "L3",
+      "event_id": "evt_l3_shelter_work",
+      "mode": "playable",
+      "author": "Abigail Adams",
+      "recipient": "John Adams",
+      "document_date": "1775-05-04",
+      "reported_event_date": "",
+      "source_type": "letter",
+      "institutional_url": "https://www.masshist.org/digitaladams/archive/doc?id=L17750504aa",
+      "uncertainty_notes": "Household experience from Braintree, not an official petition or a complete regional survey. Guarding, enlistment interest, blocked Boston access, and shelter for Quincy relatives are reported; recruitment or loyalty outcomes are not documented here.",
+      "evidence_summary": "Guards maintained; people return to husbandry; schooling stopped; men consider army service; cannot admit someone into Boston for business; after an alarm, a bereaved widow and relatives shelter with her.",
+      "text_kind": "paraphrase_from_report",
+      "eligible_from": {"y": 1775, "m": 5, "d": 4, "h": 0},
+      "faction_visibility": ["continental"],
+      "requires_lexington": true,
+      "requires_chapter_continental": false,
+      "requires_resolved_events": [],
+      "activate_decisions": true,
+      "adaptation_relay": "Braintree Committee of Correspondence (fictional staff relay—not Abigail writing our commander)",
+      "adaptation_dispatch": "Several households need lodging while guards and enlistment draw workers away. The committee asks whether we can help without stripping the farms. Amounts below are gameplay tuning—not historical prices or quotas.",
+      "choices": [
+        {
+          "id": "purchase_provisions",
+          "label": "Purchase household provisions",
+          "effects_summary": "Gameplay tuning: spend 25 gold now; +8 provisions after 8 hours (commit ≠ receive). No automatic local-support or recruitment bonus."
+        },
+        {
+          "id": "shared_lodging",
+          "label": "Arrange shared lodging and rotating escorts",
+          "effects_summary": "Gameplay tuning: uses clerk capacity (desk work slips). No gold spend; no automatic local-support gain; serving soldiers' readiness unchanged."
+        },
+        {
+          "id": "retain_workers",
+          "label": "Retain workers locally; limit immediate mobilization",
+          "effects_summary": "Gameplay tuning: commit 3 militia paper units to household labor for 72 hours (personnel availability only). Arms, readiness, and morale of serving soldiers unchanged. No automatic local-support gain."
+        }
+      ]
+    },
+    {
+      "source_id": "L4",
+      "event_id": "evt_l4_warren_recommendation",
+      "mode": "historical_reference",
+      "author": "Joseph Warren",
+      "recipient": "John Adams",
+      "document_date": "1775-05-20",
+      "reported_event_date": "",
+      "source_type": "letter",
+      "institutional_url": "https://founders.archives.gov/documents/Adams/06-03-02-0006",
+      "uncertainty_notes": "Recommendation invoking friendship and reported worth; does not prove the appointment occurred or that the candidate was incompetent. Warren was then president pro tempore of the Provincial Congress (editorial note).",
+      "evidence_summary": "Warren tells Adams that Abigail recommended one of Adams's brothers for a major's place; the request arrived late, but he will try to obtain a place.",
+      "text_kind": "paraphrase_from_report",
+      "eligible_from": {"y": 1775, "m": 5, "d": 20, "h": 0},
+      "faction_visibility": ["continental"],
+      "requires_lexington": true,
+      "requires_chapter_continental": false,
+      "requires_resolved_events": [],
+      "activate_decisions": false,
+      "adaptation_relay": "",
+      "adaptation_dispatch": "",
+      "choices": []
+    },
+    {
+      "source_id": "L5",
+      "event_id": "evt_l5_forage_boats",
+      "mode": "playable",
+      "author": "Abigail Adams",
+      "recipient": "John Adams",
+      "document_date": "1775-05-24",
+      "reported_event_date": "earlier Sunday alarm / Grape Island hay (letter reports prior events)",
+      "source_type": "letter",
+      "institutional_url": "https://www.masshist.org/digitaladams/archive/doc?id=L17750524aa",
+      "uncertainty_notes": "May 24 is the writing date, not automatically the action date of the reported alarm. Some quantities and reports are hearsay; destruction and every rumor are not independently verified by this letter alone.",
+      "evidence_summary": "Reports an earlier Sunday alarm, uncertainty about ships, families fleeing, a British expedition seeking hay on Grape Island; colonists initially lack boats; boats assembled and hay/barn burned; household supplies soldiers and shelters refugees.",
+      "text_kind": "paraphrase_from_report",
+      "eligible_from": {"y": 1775, "m": 5, "d": 24, "h": 0},
+      "faction_visibility": ["continental"],
+      "requires_lexington": true,
+      "requires_chapter_continental": false,
+      "requires_resolved_events": ["evt_l3_shelter_work"],
+      "activate_decisions": true,
+      "adaptation_relay": "Coastal towns committee (fictional subsequent dilemma inspired by May 24 pressures—not Abigail's requests)",
+      "adaptation_dispatch": "A coastal report suggests forage is still exposed. Boats are scarce, and nearby families are already moving. This is a game adaptation after the May 24 report—not a reenactment of the earlier Sunday. Amounts are gameplay tuning.",
+      "choices": [
+        {
+          "id": "guarded_removal",
+          "label": "Attempt guarded removal of forage",
+          "effects_summary": "Gameplay tuning: commit 2 militia paper units for 48 hours as boat/guard crews; risk −4 provisions if boats are delayed. Civilian consent assumed contested."
+        },
+        {
+          "id": "negotiate_local",
+          "label": "Negotiate local denial or removal",
+          "effects_summary": "Gameplay tuning: spend 15 gold and 8 hours waiting; on delivery gain +4 provisions if consent holds. No automatic loyalty bonus."
+        },
+        {
+          "id": "evacuate_preserve_boats",
+          "label": "Cover evacuation; preserve boats",
+          "effects_summary": "Gameplay tuning: −6 provisions (forage left exposed/lost); no personnel hold; boats kept for later use (no instant powder)."
+        }
+      ]
+    },
+    {
+      "source_id": "L6",
+      "event_id": "evt_l6_warren_rumor",
+      "mode": "historical_reference",
+      "author": "James Warren",
+      "recipient": "John Adams",
+      "document_date": "1775-06-11",
+      "reported_event_date": "",
+      "source_type": "letter",
+      "institutional_url": "https://founders.archives.gov/documents/Adams/06-03-02-0017",
+      "uncertainty_notes": "Rumored troop and financial votes are not confirmed treasury funds. Editor notes Congress had not yet voted its first bills of credit. Do not treat rumor as cash on hand.",
+      "evidence_summary": "Provincial Congress member reports impatience for Continental support and need for civil government; rumored votes briefly cheer him; a contrary letter suggesting reduced forces to avoid debt disappoints him.",
+      "text_kind": "paraphrase_from_report",
+      "eligible_from": {"y": 1775, "m": 6, "d": 11, "h": 0},
+      "faction_visibility": ["continental"],
+      "requires_lexington": true,
+      "requires_chapter_continental": false,
+      "requires_resolved_events": [],
+      "activate_decisions": false,
+      "adaptation_relay": "",
+      "adaptation_dispatch": "",
+      "choices": []
+    },
+    {
+      "source_id": "D8",
+      "event_id": "evt_d8_congress_instructions",
+      "mode": "historical_reference",
+      "author": "Continental Congress",
+      "recipient": "George Washington",
+      "document_date": "1775-06-22",
+      "reported_event_date": "",
+      "source_type": "instructions",
+      "institutional_url": "https://founders.archives.gov/documents/Washington/03-01-02-0010",
+      "uncertainty_notes": "Governing instructions document, not a personal letter or unlimited command authority. Editor distinguishes June 20 approval from the June 22 received document and additions.",
+      "evidence_summary": "Requires returns of forces, stores and provisions; consultation with a council of war; Continental provisioning; certain vacancies may be filled provisionally subject to colonial legislatures.",
+      "text_kind": "paraphrase_from_report",
+      "eligible_from": {"y": 1775, "m": 6, "d": 22, "h": 0},
+      "faction_visibility": ["continental"],
+      "requires_lexington": true,
+      "requires_chapter_continental": true,
+      "requires_resolved_events": [],
+      "activate_decisions": false,
+      "adaptation_relay": "",
+      "adaptation_dispatch": "",
+      "choices": []
+    },
+    {
+      "source_id": "L7",
+      "event_id": "evt_l7_powder_allocation",
+      "mode": "playable",
+      "author": "George Washington",
+      "recipient": "John Hancock",
+      "document_date": "1775-06-25",
+      "reported_event_date": "",
+      "source_type": "letter",
+      "institutional_url": "https://founders.archives.gov/documents/Washington/03-01-02-0016",
+      "uncertainty_notes": "Founders Online corrects copies dated June 24 to June 25; source note identifies Thomas Mifflin's handwriting. Washington is traveling through New York, not yet commanding at Cambridge (assumes command 3 July).",
+      "evidence_summary": "In New York, Washington opens correspondence for Hancock, learns of the provincial army's powder shortage, finds New York nearly depleted after a shipment toward Cambridge, asks Congress for effective supply, and intends to continue his journey.",
+      "text_kind": "paraphrase_from_report",
+      "eligible_from": {"y": 1775, "m": 6, "d": 25, "h": 0},
+      "faction_visibility": ["continental"],
+      "requires_lexington": true,
+      "requires_chapter_continental": true,
+      "requires_resolved_events": ["evt_l3_shelter_work"],
+      "activate_decisions": true,
+      "adaptation_relay": "Authorized Continental logistics relay (fictional)—Washington still en route via New York; Cambridge command not yet assumed",
+      "adaptation_dispatch": "Boston urgently needs powder, but another locality's reserve is thin. The New York powder reserve is a disclosed gameplay abstraction (finite donor stockpile), not free powder from our own wagons. Funds are not powder; approval is not delivery.",
+      "choices": [
+        {
+          "id": "request_transfer",
+          "label": "Request transfer from donor reserve",
+          "effects_summary": "Gameplay tuning: if ny_powder has ≥8 powder, subtract 8 from the donor immediately, ship 12 hours, credit continental stores only on delivery. Insufficient reserve → partial or refusal with explanation."
+        },
+        {
+          "id": "fund_procurement",
+          "label": "Fund procurement",
+          "effects_summary": "Gameplay tuning: spend 35 gold; separate merchant shipment (not the donor reserve) for 6 powder after 16 hours—may delay. Never silently equals a transfer."
+        },
+        {
+          "id": "conserve_ammunition",
+          "label": "Conserve ammunition; postpone offensive",
+          "effects_summary": "Gameplay tuning: no powder added; mark offensive postponed. Distinct from transfer or procurement."
+        }
+      ]
+    }
+  ]
+}

@@ -22,7 +22,16 @@ PREVIEW_CANDIDATES = [
 ]
 
 
-def _import_texture(src_path: str, dest_path: str, *, nearest: bool, srgb: bool, compression: str) -> unreal.Texture2D | None:
+def _import_texture(
+    src_path: str,
+    dest_path: str,
+    *,
+    nearest: bool,
+    srgb: bool,
+    compression: str,
+    mips: bool = False,
+    never_stream: bool = False,
+) -> unreal.Texture2D | None:
     if not os.path.isfile(src_path):
         unreal.log_warning(f"skip missing {src_path}")
         return None
@@ -39,8 +48,24 @@ def _import_texture(src_path: str, dest_path: str, *, nearest: bool, srgb: bool,
         raise RuntimeError(f"failed to import {src_path}")
     if nearest:
         tex.set_editor_property("filter", unreal.TextureFilter.TF_NEAREST)
+    else:
+        tex.set_editor_property("filter", unreal.TextureFilter.TF_BILINEAR)
     tex.set_editor_property("srgb", srgb)
-    tex.set_editor_property("mip_gen_settings", unreal.TextureMipGenSettings.TMGS_NO_MIPMAPS)
+    if mips:
+        tex.set_editor_property(
+            "mip_gen_settings",
+            unreal.TextureMipGenSettings.TMGS_SIMPLE_AVERAGE,
+        )
+    else:
+        tex.set_editor_property(
+            "mip_gen_settings",
+            unreal.TextureMipGenSettings.TMGS_NO_MIPMAPS,
+        )
+    if never_stream:
+        try:
+            tex.set_editor_property("never_stream", True)
+        except Exception:
+            pass
     if compression == "vector":
         try:
             tex.set_editor_property("compression_settings", unreal.TextureCompressionSettings.TC_VECTOR_DISPLACEMENTMAP)
@@ -51,6 +76,20 @@ def _import_texture(src_path: str, dest_path: str, *, nearest: bool, srgb: bool,
             tex.set_editor_property("compression_settings", unreal.TextureCompressionSettings.TC_GRAYSCALE)
         except Exception:
             pass
+    elif compression == "bc7":
+        try:
+            tex.set_editor_property(
+                "compression_settings",
+                unreal.TextureCompressionSettings.TC_BC7,
+            )
+        except Exception:
+            try:
+                tex.set_editor_property(
+                    "compression_settings",
+                    unreal.TextureCompressionSettings.TC_DEFAULT,
+                )
+            except Exception:
+                pass
     unreal.EditorAssetLibrary.save_asset(dest_path)
     return tex
 
@@ -86,8 +125,52 @@ def _make_unlit_texture_mat(mat_path: str, param_name: str, default_tex) -> unre
     return mat
 
 
+def import_decosta(*, use_bc7: bool = True) -> unreal.Texture2D | None:
+    """Import the July 1775 De Costa–Hall engraving for the campaign overview."""
+    src = os.path.normpath(
+        os.path.join(
+            unreal.Paths.project_content_dir(),
+            "PA250",
+            "Source",
+            "M01-de-costa-boston-concord.jpg",
+        )
+    )
+    dest = "/Game/PA250/Textures/T_DeCostaBostonConcord"
+    os.makedirs(unreal.Paths.project_content_dir() + "PA250/Textures", exist_ok=True)
+    tex = _import_texture(
+        src,
+        dest,
+        nearest=False,
+        srgb=True,
+        compression="bc7" if use_bc7 else "default",
+        mips=True,
+        never_stream=True,
+    )
+    if tex is None:
+        return None
+    # Report mip generation for non-power-of-two source (6761x5314).
+    try:
+        platform = tex.get_editor_property("platform_data")
+        mips = platform.mips if platform is not None else None
+        mip_count = len(mips) if mips is not None else -1
+    except Exception:
+        mip_count = -1
+    try:
+        # Force rebuild so mip chain exists before we inspect.
+        tex.set_editor_property("mip_gen_settings", unreal.TextureMipGenSettings.TMGS_SIMPLE_AVERAGE)
+        unreal.EditorAssetLibrary.save_asset(dest)
+    except Exception as exc:
+        unreal.log_warning(f"decosta mip refresh: {exc}")
+    unreal.log(
+        f"de Costa import: {dest} size={tex.blueprint_get_size_x()}x{tex.blueprint_get_size_y()} "
+        f"mips≈{mip_count} bc7={use_bc7}"
+    )
+    return tex
+
+
 def main() -> int:
     os.makedirs(unreal.Paths.project_content_dir() + "Map/Boston1775", exist_ok=True)
+    import_decosta(use_bc7=True)
     pid = _import_texture(
         SRC + "ProvinceID.png",
         CONTENT + "/T_ProvinceID",

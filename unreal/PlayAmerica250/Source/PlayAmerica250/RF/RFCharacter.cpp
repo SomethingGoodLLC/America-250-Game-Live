@@ -658,7 +658,7 @@ namespace
 {
 // Look sensitivity: multiplier on raw mouse / trackpad deltas (1.0 = the old 1:1 feel, which was too fast).
 TAutoConsoleVariable<float> CVarLookSensitivity(
-	TEXT("pa250.LookSensitivity"), 0.35f,
+	TEXT("pa250.LookSensitivity"), 0.2f,
 	TEXT("Mouse/trackpad look sensitivity (0.05-2). [ and ] adjust it in game; saved to GameUserSettings."),
 	ECVF_Default);
 const TCHAR* SensSection = TEXT("/Script/PlayAmerica250.PA250Input");

@@ -1,6 +1,8 @@
 # Grand Strategy Style Map: private Mac port
 
-Working copy: `TestHost/Plugins/InteractiveMap`. The original download is untouched. No files from this port are installed into the game or engine. `.gitignore` excludes purchased sources/content, test outputs and logs from accidental repository inclusion; do not force-add or publish this directory.
+Working copy: `TestHost/Plugins/InteractiveMap`. The original download is untouched. No files from this port are installed into the game or engine.
+
+The port is committed to the private repository (branch `ports/grandstrategy-mac`): scripts, docs, the TestHost project and host source, the colonies1775 map, and `port-changes.patch`. `.gitignore` keeps the purchased plugin copy (`TestHost/Plugins/`), Unreal-generated folders, logs and test binaries out. `port-changes.patch` contains plugin source as diff context, so the repository must stay private. Never force-add the plugin, and do not publish this directory.
 
 ## Environment
 
@@ -45,4 +47,11 @@ The generator script compiles all 14 translation units using C++20, libc++, PIC,
 
 ## Existing limitations
 
-`MapModeGen::FromMask` is declared but not implemented by `Map::GenerateMap`; using it leaves no lookup map. Tectonic-height generation does not populate its elevation array (implementation is commented out) and ignores requested dimensions. These upstream paths were not replaced or disabled. Windows support is preserved in configuration but has not been rebuilt or run here. Intel macOS is unsupported by the arm64-only archive. The compute-shader multi-pass `StartPixel` gap is not covered by the small GPU automation test. No source or assets were uploaded.
+`MapModeGen::FromMask` is declared but not implemented by `Map::GenerateMap`; using it leaves no lookup map. Tectonic-height generation does not populate its elevation array (implementation is commented out) and ignores requested dimensions. These upstream paths were not replaced or disabled. Windows support is preserved in configuration but has not been rebuilt or run here. Intel macOS is unsupported by the arm64-only archive. The compute-shader multi-pass `StartPixel` gap is not covered by the small GPU automation test.
+
+Found while building the Thirteen Colonies map (`colonies1775/README.md`), all on Metal in editor-binary `-game`:
+- In game, map-mode dynamic textures from `ReplaceColorComputeShader` reach the GPU black for a 2048 × 2048 lookup texture, in the sample's political/lookup views too. Root cause not found; the untested large-image multi-pass path or the dynamic texture upload is the likely place. The colonies map avoids it with a project-local material.
+- The editor-only `UMapObject::PostLoad` reads the lookup texture before it has platform data when the MapObject loads as a level dependency, which is a SIGSEGV in `ReadTextureToArray`. The host works around it by preloading in `TestHost/Source/PortHost/PortHost.cpp`; the plugin is unchanged.
+- The sample HUD's debug key Q (Show LookupTexture) crashed on the colonies level.
+
+The plugin itself was never committed or uploaded.

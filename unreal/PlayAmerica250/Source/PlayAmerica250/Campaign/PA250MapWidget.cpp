@@ -72,10 +72,209 @@ FText UPA250MapWidget::HeaderText() const
 		Get(St.relations, "british"), Treaties.IsEmpty() ? TEXT("none") : *Treaties));
 }
 
+FText UPA250MapWidget::DateText() const
+{
+	UPA250Subsystem* S = Sub();
+	if (!S || !S->GetController().has_campaign())
+	{
+		return FText::FromString(TEXT("No campaign"));
+	}
+	return FText::FromString(FString::Printf(TEXT("%s  ·  %s  ·  %s"), *S->FormatDate(),
+											 S->IsPaused() ? TEXT("Paused") : TEXT("Running"),
+											 *FPA250CampaignSpeed::Format(S->GetHoursPerSecond())));
+}
+
+FText UPA250MapWidget::TreasuryText() const
+{
+	UPA250Subsystem* S = Sub();
+	if (!S || !S->GetController().has_campaign())
+	{
+		return FText::GetEmpty();
+	}
+	return FText::FromString(FString::Printf(TEXT("Treasury: Gold %d"), S->GetState().player_gold));
+}
+
+FText UPA250MapWidget::StoresText() const
+{
+	UPA250Subsystem* S = Sub();
+	if (!S || !S->GetController().has_campaign())
+	{
+		return FText::GetEmpty();
+	}
+	const pa250::CampaignState& St = S->GetState();
+	auto It = St.stores.find("continental");
+	if (It == St.stores.end())
+	{
+		return FText::FromString(TEXT("Stores: —"));
+	}
+	return FText::FromString(FString::Printf(TEXT("Stores: Powder %d · Arms %d · Provisions %d"), It->second.powder,
+											 It->second.arms, It->second.provisions));
+}
+
+FText UPA250MapWidget::SupportText() const
+{
+	UPA250Subsystem* S = Sub();
+	if (!S || !S->GetController().has_campaign())
+	{
+		return FText::GetEmpty();
+	}
+	const pa250::CampaignState& St = S->GetState();
+	auto Get = [](const std::map<std::string, int>& M, const char* K) {
+		auto It = M.find(K);
+		return It == M.end() ? 0 : It->second;
+	};
+	FString Treaties;
+	for (const auto& T : St.treaties)
+	{
+		Treaties += FString::Printf(TEXT("%s%s %s"), Treaties.IsEmpty() ? TEXT("") : TEXT(", "),
+									UTF8_TO_TCHAR(T.type.c_str()), *UPA250Subsystem::FormatHoursRemaining(T.hours_remaining));
+	}
+	return FText::FromString(FString::Printf(TEXT("Support: Local %d · Supplies C %d / B %d · British attitude %d · Treaties: %s"),
+											 St.local_support, Get(St.supplies, "continental"), Get(St.supplies, "british"),
+											 Get(St.relations, "british"), Treaties.IsEmpty() ? TEXT("none") : *Treaties));
+}
+
+FText UPA250MapWidget::AboutText() const
+{
+	return FText::FromString(TEXT(
+		"About this map\n\n"
+		"Source: “A plan of the town and harbour of Boston and the country adjacent with the road from Boston to "
+		"Concord”, J. De Costa, engraved by Charles Hall, issued 29 July 1775. Working image: Library of Congress "
+		"copy of the same plate; planned source NYPL Digital Collections item 46abf040-c5ed-012f-b389-58d385a7bc34.\n\n"
+		"Historical-date caveat: this July 1775 engraving includes later siege information. Its printed soldiers, "
+		"camps and battle annotations are historical artwork — not live units and not verified April 19 positions. "
+		"A hollow ring marks who holds a town: blue Continentals (yours), red British. A solid flag is an army, "
+		"labeled Yours or British. The game date follows the campaign clock."));
+}
+
+FText UPA250MapWidget::DisclaimerText() const
+{
+	return AboutText();
+}
+
 FText UPA250MapWidget::StatusText() const
 {
 	const FString Line = !LastMessage.IsEmpty() ? LastMessage : Message;
-	return FText::FromString(Line.IsEmpty() ? TEXT("Select an army, then any province. Space pauses. − / + change speed.") : Line);
+	return FText::FromString(Line.IsEmpty()
+								 ? TEXT("Select a town or army. Drag to pan, wheel to zoom, Space pauses, Esc clears.")
+								 : Line);
+}
+
+FText UPA250MapWidget::LocationPanelText() const
+{
+	UPA250Subsystem* S = Sub();
+	if (!S || SelectedProvinceId.IsEmpty() || !S->GetController().has_campaign())
+	{
+		return FText::GetEmpty();
+	}
+	const pa250::CampaignState& St = S->GetState();
+	const std::string Pid = ToStd(SelectedProvinceId);
+	auto Pit = St.provinces.find(Pid);
+	if (Pit == St.provinces.end())
+	{
+		return FText::GetEmpty();
+	}
+	const pa250::Province& Prov = Pit->second;
+	auto OwnerLabel = [](const std::string& Owner) -> FString {
+		if (Owner == "british")
+		{
+			return TEXT("British");
+		}
+		if (Owner == "continental")
+		{
+			return TEXT("Continentals — yours");
+		}
+		return UTF8_TO_TCHAR(Owner.c_str());
+	};
+	FString Lines;
+	Lines += FString::Printf(TEXT("%s\nHeld by: %s\n"), UTF8_TO_TCHAR(Prov.name.c_str()), *OwnerLabel(Prov.owner));
+
+	// Selected friendly army first, with the details the counter hides at rest.
+	if (!SelectedArmyId.IsEmpty())
+	{
+		auto AIt = St.armies.find(ToStd(SelectedArmyId));
+		if (AIt != St.armies.end() && AIt->second.province == Pid && AIt->second.faction == St.player_faction)
+		{
+			int32 Strength = 0;
+			for (const auto& U : AIt->second.units)
+			{
+				Strength += U.second;
+			}
+			const FString Orders = AIt->second.path.empty() ? TEXT("Holding position") : TEXT("On the march");
+			Lines += FString::Printf(TEXT("\nSelected force\n%s — %d men\nMorale %d · Readiness %d · Fatigue %d\nOrders: %s\n"),
+									 UTF8_TO_TCHAR(AIt->second.name.c_str()), Strength, AIt->second.morale,
+									 AIt->second.readiness, AIt->second.fatigue, *Orders);
+		}
+	}
+
+	bool bAnyArmy = false;
+	Lines += TEXT("\nForces here\n");
+	for (const auto& Kv : St.armies)
+	{
+		if (Kv.second.province != Pid)
+		{
+			continue;
+		}
+		bAnyArmy = true;
+		const bool bPlayer = Kv.second.faction == St.player_faction;
+		if (bPlayer)
+		{
+			int32 Strength = 0;
+			for (const auto& U : Kv.second.units)
+			{
+				Strength += U.second;
+			}
+			Lines += FString::Printf(TEXT("• %s — %d men (yours)\n"), UTF8_TO_TCHAR(Kv.second.name.c_str()), Strength);
+		}
+		else
+		{
+			// Confirmed presence only; enemy strength stays unreported.
+			Lines += FString::Printf(TEXT("• %s — British, strength not reported\n"),
+									 UTF8_TO_TCHAR(Kv.second.name.c_str()));
+		}
+	}
+	if (!bAnyArmy)
+	{
+		Lines += TEXT("No forces known to be present.\n");
+	}
+
+	Lines += TEXT("\nReports\n");
+	if (St.pending_battle.active && St.pending_battle.province == Pid)
+	{
+		Lines += TEXT("Armies in contact — battle pending.\n");
+	}
+	else if (St.ai_objective == Pid)
+	{
+		Lines += TEXT("Reported enemy interest in this town (unconfirmed).\n");
+	}
+	else
+	{
+		Lines += TEXT("No threats reported.\n");
+	}
+
+	if (bShowDev)
+	{
+		Lines += FString::Printf(TEXT("\n[Dev] province=%s selected_army=%s staff_queue=%d\n"), *SelectedProvinceId,
+								 SelectedArmyId.IsEmpty() ? TEXT("none") : *SelectedArmyId,
+								 static_cast<int32>(St.staff.queue.size()));
+		if (APA250ProvinceMapActor* A = MapActor.Get())
+		{
+			Lines += FString::Printf(TEXT("[Dev] marker verified=%s zoom=%.2f centre=(%.3f, %.3f)\n"),
+									 A->IsProvinceVerified(SelectedProvinceId) ? TEXT("true") : TEXT("false"),
+									 A->GetZoomFactor(), A->GetZoomCenterUV().X, A->GetZoomCenterUV().Y);
+		}
+	}
+	return FText::FromString(Lines);
+}
+
+bool UPA250MapWidget::CanEnterBattleAtSelection() const
+{
+	UPA250Subsystem* S = Sub();
+	if (!S || SelectedProvinceId.IsEmpty() || !S->IsBattlePending())
+	{
+		return false;
+	}
+	return ToFStr(S->GetState().pending_battle.province) == SelectedProvinceId;
 }
 
 FText UPA250MapWidget::BattleText() const
@@ -243,7 +442,19 @@ FReply UPA250MapWidget::NativeOnKeyDown(const FGeometry& InGeometry, const FKeyE
 		S->SetSpeedIndex(S->GetSpeedIndex() - 1);
 		return FReply::Handled();
 	}
-	if (Key == EKeys::RightMouseButton || Key == EKeys::Escape)
+	if (Key == EKeys::Escape)
+	{
+		// Layered: close transient panels first, then clear selection. Pause is
+		// untouched (Space owns it), so Escape never changes the clock.
+		if (bShowAbout)
+		{
+			bShowAbout = false;
+			return FReply::Handled();
+		}
+		ClearSelection();
+		return FReply::Handled();
+	}
+	if (Key == EKeys::RightMouseButton)
 	{
 		ClearSelection();
 		return FReply::Handled();
@@ -355,19 +566,75 @@ TSharedRef<SWidget> UPA250MapWidget::RebuildWidget()
 				   ? EVisibility::Visible
 				   : EVisibility::Collapsed;
 	});
+	auto SourceKindAwaiting = [](UPA250Subsystem* S2, const TCHAR* Kind) {
+		return S2 && S2->HasStaffEvent() && !S2->IsBattlePending() && S2->IsPendingLetterAwaitingChoice() &&
+			   S2->GetPendingLetterKind() == Kind;
+	};
+	TAttribute<EVisibility> HistoricalNoticeVis = TAttribute<EVisibility>::CreateLambda([this, SourceKindAwaiting]() {
+		return SourceKindAwaiting(Sub(), TEXT("historical_notice")) ? EVisibility::Visible : EVisibility::Collapsed;
+	});
+	TAttribute<EVisibility> SourceL3Vis = TAttribute<EVisibility>::CreateLambda([this, SourceKindAwaiting]() {
+		UPA250Subsystem* S2 = Sub();
+		return (SourceKindAwaiting(S2, TEXT("source_decision")) && S2->GetPendingLetterSourceId() == TEXT("L3"))
+				   ? EVisibility::Visible
+				   : EVisibility::Collapsed;
+	});
+	TAttribute<EVisibility> SourceL5Vis = TAttribute<EVisibility>::CreateLambda([this, SourceKindAwaiting]() {
+		UPA250Subsystem* S2 = Sub();
+		return (SourceKindAwaiting(S2, TEXT("source_decision")) && S2->GetPendingLetterSourceId() == TEXT("L5"))
+				   ? EVisibility::Visible
+				   : EVisibility::Collapsed;
+	});
+	TAttribute<EVisibility> SourceL7Vis = TAttribute<EVisibility>::CreateLambda([this, SourceKindAwaiting]() {
+		UPA250Subsystem* S2 = Sub();
+		return (SourceKindAwaiting(S2, TEXT("source_decision")) && S2->GetPendingLetterSourceId() == TEXT("L7"))
+				   ? EVisibility::Visible
+				   : EVisibility::Collapsed;
+	});
+	TAttribute<EVisibility> ViewSourceVis = TAttribute<EVisibility>::CreateLambda([this]() {
+		UPA250Subsystem* S2 = Sub();
+		return (S2 && S2->HasStaffEvent() && !S2->GetPendingLetterSourceUrl().IsEmpty()) ? EVisibility::Visible
+																						: EVisibility::Collapsed;
+	});
 
-	// Transparent center — the 3D province map is the only map layer.
+	TAttribute<EVisibility> LocationVis = TAttribute<EVisibility>::CreateLambda([this]() {
+		return SelectedProvinceId.IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible;
+	});
+	TAttribute<EVisibility> EnterBattleVis = TAttribute<EVisibility>::CreateLambda([this]() {
+		return CanEnterBattleAtSelection() ? EVisibility::Visible : EVisibility::Collapsed;
+	});
+	TAttribute<EVisibility> AboutVis = TAttribute<EVisibility>::CreateLambda([this]() {
+		return bShowAbout ? EVisibility::Visible : EVisibility::Collapsed;
+	});
+
+	auto MakeGroup = [&BodyFont](TFunction<FText()> Fn, const TCHAR* Tip) {
+		return SNew(STextBlock)
+			.Font(BodyFont)
+			.ColorAndOpacity(FLinearColor(0.15f, 0.1f, 0.05f))
+			.ToolTipText(FText::FromString(Tip))
+			.Text_Lambda(MoveTemp(Fn));
+	};
+
+	// Transparent centre — the 3D province map is the only map layer.
 	return SNew(SOverlay)
 		+ SOverlay::Slot().VAlign(VAlign_Top).HAlign(HAlign_Fill)
 			  [SNew(SBorder)
 				   .BorderImage(FAppStyle::GetBrush("WhiteBrush"))
-				   .BorderBackgroundColor(FLinearColor(0.92f, 0.86f, 0.72f, 0.92f))
+				   .BorderBackgroundColor(FLinearColor(0.93f, 0.88f, 0.74f, 0.94f))
 				   .Padding(FMargin(14.f, 8.f))
-					   [SNew(STextBlock)
-							.Font(HeaderFont)
-							.ColorAndOpacity(FLinearColor(0.15f, 0.1f, 0.05f))
-							.AutoWrapText(true)
-							.Text_Lambda([this]() { return HeaderText(); })]]
+					   [SNew(SHorizontalBox) +
+						SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 18, 0).VAlign(VAlign_Center)
+							[SNew(STextBlock)
+								 .Font(HeaderFont)
+								 .ColorAndOpacity(FLinearColor(0.15f, 0.1f, 0.05f))
+								 .ToolTipText(FText::FromString(TEXT("Campaign date, pause state and clock speed. Space pauses; 1–7 set speed.")))
+								 .Text_Lambda([this]() { return DateText(); })] +
+						SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 18, 0).VAlign(VAlign_Center)
+							[MakeGroup([this]() { return TreasuryText(); }, TEXT("Gold available to the Continental cause. Spent through staff purchases and diplomacy."))] +
+						SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 18, 0).VAlign(VAlign_Center)
+							[MakeGroup([this]() { return StoresText(); }, TEXT("Usable war materials held by the Continental forces: powder, arms and provisions."))] +
+						SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Center)
+							[MakeGroup([this]() { return SupportText(); }, TEXT("Local support, supply accrual for each side, British attitude, and treaties currently in force."))]]]
 		+ SOverlay::Slot()
 			  .VAlign(VAlign_Center)
 			  .HAlign(HAlign_Right)
@@ -385,6 +652,30 @@ TSharedRef<SWidget> UPA250MapWidget::RebuildWidget()
 									 .Text_Lambda([this]() { return BattleText(); })] +
 							SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center).Padding(0, 12, 0, 0)
 								[MakeButton(TEXT("To arms!"), [this]() { PressFight(); })]]]
+		+ SOverlay::Slot()
+			  .VAlign(VAlign_Top)
+			  .HAlign(HAlign_Right)
+			  .Padding(FMargin(0.f, 78.f, 24.f, 0.f))
+				  [SNew(SBox).WidthOverride(360.f)
+					   [SNew(SBorder)
+							.Visibility(LocationVis)
+							.BorderImage(FAppStyle::GetBrush("WhiteBrush"))
+							.BorderBackgroundColor(FLinearColor(0.95f, 0.91f, 0.82f, 0.96f))
+							.Padding(FMargin(14.f, 12.f))
+								[SNew(SVerticalBox) +
+								 SVerticalBox::Slot().AutoHeight()
+									 [SNew(STextBlock)
+										  .Font(BodyFont)
+										  .ColorAndOpacity(FLinearColor(0.12f, 0.08f, 0.04f))
+										  .AutoWrapText(true)
+										  .Text_Lambda([this]() { return LocationPanelText(); })] +
+								 SVerticalBox::Slot().AutoHeight().Padding(0, 10, 0, 0)
+									 [SNew(SHorizontalBox) +
+									  SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 6, 0)
+										  [MakeButton(TEXT("Clear"), [this]() { ClearSelection(); })] +
+									  SHorizontalBox::Slot().AutoWidth()
+										  [MakeButton(TEXT("Enter battle"), [this]() { PressEnterBattleAtSelection(); },
+													  EnterBattleVis)]]]]]
 		+ SOverlay::Slot()
 			  .VAlign(VAlign_Center)
 			  .HAlign(HAlign_Left)
@@ -441,14 +732,166 @@ TSharedRef<SWidget> UPA250MapWidget::RebuildWidget()
 									  SHorizontalBox::Slot().AutoWidth()
 										  [MakeButton(TEXT("Acknowledge"), [this]() { PressLogistics(TEXT("dismiss")); })]] +
 								 SVerticalBox::Slot().AutoHeight().Padding(0, 10, 0, 0)
+									 [SNew(SHorizontalBox).Visibility(SourceL3Vis) +
+									  SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 6, 0)
+										  [MakeButton(TEXT("Purchase provisions"),
+													  [this]() { PressLogistics(TEXT("purchase_provisions")); })] +
+									  SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 6, 0)
+										  [MakeButton(TEXT("Shared lodging"),
+													  [this]() { PressLogistics(TEXT("shared_lodging")); })] +
+									  SHorizontalBox::Slot().AutoWidth()
+										  [MakeButton(TEXT("Retain workers"),
+													  [this]() { PressLogistics(TEXT("retain_workers")); })]] +
+								 SVerticalBox::Slot().AutoHeight().Padding(0, 10, 0, 0)
+									 [SNew(SHorizontalBox).Visibility(SourceL5Vis) +
+									  SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 6, 0)
+										  [MakeButton(TEXT("Guarded removal"),
+													  [this]() { PressLogistics(TEXT("guarded_removal")); })] +
+									  SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 6, 0)
+										  [MakeButton(TEXT("Negotiate locally"),
+													  [this]() { PressLogistics(TEXT("negotiate_local")); })] +
+									  SHorizontalBox::Slot().AutoWidth()
+										  [MakeButton(TEXT("Evacuate / keep boats"),
+													  [this]() { PressLogistics(TEXT("evacuate_preserve_boats")); })]] +
+								 SVerticalBox::Slot().AutoHeight().Padding(0, 10, 0, 0)
+									 [SNew(SHorizontalBox).Visibility(SourceL7Vis) +
+									  SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 6, 0)
+										  [MakeButton(TEXT("Request transfer"),
+													  [this]() { PressLogistics(TEXT("request_transfer")); })] +
+									  SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 6, 0)
+										  [MakeButton(TEXT("Fund procurement"),
+													  [this]() { PressLogistics(TEXT("fund_procurement")); })] +
+									  SHorizontalBox::Slot().AutoWidth()
+										  [MakeButton(TEXT("Conserve ammunition"),
+													  [this]() { PressLogistics(TEXT("conserve_ammunition")); })]] +
+								 SVerticalBox::Slot().AutoHeight().Padding(0, 10, 0, 0)
+									 [SNew(SHorizontalBox).Visibility(HistoricalNoticeVis) +
+									  SHorizontalBox::Slot().AutoWidth()
+										  [MakeButton(TEXT("Acknowledge"), [this]() { PressLogistics(TEXT("dismiss")); })]] +
+								 SVerticalBox::Slot().AutoHeight().Padding(0, 10, 0, 0)
+									 [SNew(SHorizontalBox).Visibility(ViewSourceVis) +
+									  SHorizontalBox::Slot().AutoWidth()
+										  [MakeButton(TEXT("View original source"), [this]() {
+											  if (UPA250Subsystem* S2 = Sub())
+											  {
+												  S2->OpenPendingLetterSourceUrl();
+											  }
+										  })]] +
+								 SVerticalBox::Slot().AutoHeight().Padding(0, 10, 0, 0)
 									 [SNew(SHorizontalBox).Visibility(NoticeVis) +
 									  SHorizontalBox::Slot().AutoWidth()
 										  [MakeButton(TEXT("Acknowledge"), [this]() { PressLogistics(TEXT("dismiss")); })]]]]]
+		+ SOverlay::Slot()
+			  .VAlign(VAlign_Top)
+			  .HAlign(HAlign_Left)
+			  .Padding(FMargin(24.f, 96.f, 0.f, 0.f))
+				  [SNew(SBox).WidthOverride(400.f)
+					   [SNew(SBorder)
+							.Visibility(AboutVis)
+							.BorderImage(FAppStyle::GetBrush("WhiteBrush"))
+							.BorderBackgroundColor(FLinearColor(0.95f, 0.91f, 0.82f, 0.97f))
+							.Padding(FMargin(16.f, 12.f))
+								[SNew(SVerticalBox) +
+								 SVerticalBox::Slot().AutoHeight()
+									 [SNew(STextBlock)
+										  .Font(BodyFont)
+										  .ColorAndOpacity(FLinearColor(0.12f, 0.08f, 0.04f))
+										  .AutoWrapText(true)
+										  .Text_Lambda([this]() { return AboutText(); })] +
+								 SVerticalBox::Slot().AutoHeight().Padding(0, 10, 0, 0)
+									 [MakeButton(TEXT("Close"), [this]() { PressAboutToggle(); })]]]]
+		+ SOverlay::Slot()
+			  .VAlign(VAlign_Bottom)
+			  .HAlign(HAlign_Right)
+			  .Padding(FMargin(0.f, 0.f, 16.f, 64.f))
+				  [SNew(SBorder)
+					   .Visibility(NoBattleVis)
+					   .BorderImage(FAppStyle::GetBrush("WhiteBrush"))
+					   .BorderBackgroundColor(FLinearColor(0.93f, 0.88f, 0.74f, 0.88f))
+					   .Padding(FMargin(8.f, 8.f))
+						   [SNew(SVerticalBox) +
+							SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 4)
+								[MakeButton(TEXT("Campaign overview"), [this]() { PressResetOverview(); })] +
+							SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 4)
+								[MakeButton(TEXT("Focus selected"), [this]() { PressFocusSelected(); })] +
+							SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 4)
+								[MakeButton(TEXT("Zoom +"), [this]() {
+									if (APA250ProvinceMapActor* A = MapActor.Get())
+									{
+										A->ZoomBy(1.4f);
+									}
+								})] +
+							SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 4)
+								[MakeButton(TEXT("Zoom −"), [this]() {
+									if (APA250ProvinceMapActor* A = MapActor.Get())
+									{
+										A->ZoomBy(1.f / 1.4f);
+									}
+								})] +
+							SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 4)
+								[MakeButton(TEXT("Parley"), [this]() { PressParley(); })] +
+							SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 4)
+								[MakeButton(TEXT("Save"), [this]() { PressSave(); })] +
+							SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 4)
+								[MakeButton(TEXT("Load"), [this]() { PressLoad(); })] +
+							SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 4)
+								[MakeButton(TEXT("About this map"), [this]() { PressAboutToggle(); })] +
+							SVerticalBox::Slot().AutoHeight()
+								[MakeButton(TEXT("Dev"), [this]() { PressDevToggle(); })]]]
+		+ SOverlay::Slot()
+			  .VAlign(VAlign_Bottom)
+			  .HAlign(HAlign_Left)
+			  .Padding(FMargin(16.f, 0.f, 0.f, 56.f))
+				  [SNew(SBorder)
+					   .BorderImage(FAppStyle::GetBrush("WhiteBrush"))
+					   .BorderBackgroundColor(FLinearColor(0.93f, 0.88f, 0.74f, 0.94f))
+					   .Padding(FMargin(10.f, 6.f))
+						   [SNew(SHorizontalBox) +
+							SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 6, 0)
+								[SNew(SBox).WidthOverride(12.f).HeightOverride(12.f)
+									 [SNew(SBorder)
+										  .BorderImage(FAppStyle::GetBrush("WhiteBrush"))
+										  .BorderBackgroundColor(FLinearColor(0.10f, 0.28f, 0.72f))]] +
+							SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 14, 0)
+								[SNew(STextBlock)
+									 .Font(BodyFont)
+									 .ColorAndOpacity(FLinearColor(0.15f, 0.1f, 0.05f))
+									 .Text(FText::FromString(TEXT("Your towns")))] +
+							SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 6, 0)
+								[SNew(SBox).WidthOverride(12.f).HeightOverride(12.f)
+									 [SNew(SBorder)
+										  .BorderImage(FAppStyle::GetBrush("WhiteBrush"))
+										  .BorderBackgroundColor(FLinearColor(0.78f, 0.12f, 0.10f))]] +
+							SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 14, 0)
+								[SNew(STextBlock)
+									 .Font(BodyFont)
+									 .ColorAndOpacity(FLinearColor(0.15f, 0.1f, 0.05f))
+									 .Text(FText::FromString(TEXT("British towns")))] +
+							SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 6, 0)
+								[SNew(SBox).WidthOverride(16.f).HeightOverride(10.f)
+									 [SNew(SBorder)
+										  .BorderImage(FAppStyle::GetBrush("WhiteBrush"))
+										  .BorderBackgroundColor(FLinearColor(0.12f, 0.34f, 0.82f))]] +
+							SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 14, 0)
+								[SNew(STextBlock)
+									 .Font(BodyFont)
+									 .ColorAndOpacity(FLinearColor(0.15f, 0.1f, 0.05f))
+									 .Text(FText::FromString(TEXT("Your army")))] +
+							SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 6, 0)
+								[SNew(SBox).WidthOverride(16.f).HeightOverride(10.f)
+									 [SNew(SBorder)
+										  .BorderImage(FAppStyle::GetBrush("WhiteBrush"))
+										  .BorderBackgroundColor(FLinearColor(0.82f, 0.14f, 0.11f))]] +
+							SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+								[SNew(STextBlock)
+									 .Font(BodyFont)
+									 .ColorAndOpacity(FLinearColor(0.15f, 0.1f, 0.05f))
+									 .Text(FText::FromString(TEXT("British army")))]]]
 		+ SOverlay::Slot().VAlign(VAlign_Bottom).HAlign(HAlign_Fill)
 			  [SNew(SBorder)
 				   .BorderImage(FAppStyle::GetBrush("WhiteBrush"))
-				   .BorderBackgroundColor(FLinearColor(0.92f, 0.86f, 0.72f, 0.92f))
-				   .Padding(FMargin(14.f, 8.f))
+				   .BorderBackgroundColor(FLinearColor(0.93f, 0.88f, 0.74f, 0.94f))
+				   .Padding(FMargin(14.f, 6.f))
 					   [SNew(SHorizontalBox) +
 						SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Center)
 							[SNew(STextBlock)
@@ -457,27 +900,7 @@ TSharedRef<SWidget> UPA250MapWidget::RebuildWidget()
 								 .Text_Lambda([this]() { return StatusText(); })] +
 						SHorizontalBox::Slot().AutoWidth().Padding(4, 0)
 							[MakeButton(
-								TEXT("Zoom -"),
-								[this]() {
-									if (APA250ProvinceMapActor* A = MapActor.Get())
-									{
-										A->ZoomBy(1.f / 1.4f);
-									}
-								},
-								NoBattleVis)] +
-						SHorizontalBox::Slot().AutoWidth().Padding(4, 0)
-							[MakeButton(
-								TEXT("Zoom +"),
-								[this]() {
-									if (APA250ProvinceMapActor* A = MapActor.Get())
-									{
-										A->ZoomBy(1.4f);
-									}
-								},
-								NoBattleVis)] +
-						SHorizontalBox::Slot().AutoWidth().Padding(4, 0)
-							[MakeButton(
-								TEXT("Pause/Resume"),
+								TEXT("Pause / Resume"),
 								[this]() {
 									if (UPA250Subsystem* S2 = Sub())
 									{
@@ -487,7 +910,7 @@ TSharedRef<SWidget> UPA250MapWidget::RebuildWidget()
 								NoBattleVis)] +
 						SHorizontalBox::Slot().AutoWidth().Padding(4, 0)
 							[MakeButton(
-								TEXT("Speed−"),
+								TEXT("Speed −"),
 								[this]() {
 									if (UPA250Subsystem* S2 = Sub())
 									{
@@ -497,18 +920,14 @@ TSharedRef<SWidget> UPA250MapWidget::RebuildWidget()
 								NoBattleVis)] +
 						SHorizontalBox::Slot().AutoWidth().Padding(4, 0)
 							[MakeButton(
-								TEXT("Speed+"),
+								TEXT("Speed +"),
 								[this]() {
 									if (UPA250Subsystem* S2 = Sub())
 									{
 										S2->SetSpeedIndex(S2->GetSpeedIndex() + 1);
 									}
 								},
-								NoBattleVis)] +
-						SHorizontalBox::Slot().AutoWidth().Padding(4, 0)
-							[MakeButton(TEXT("Parley"), [this]() { PressParley(); }, NoBattleVis)] +
-						SHorizontalBox::Slot().AutoWidth().Padding(4, 0)[MakeButton(TEXT("Save"), [this]() { PressSave(); })] +
-						SHorizontalBox::Slot().AutoWidth().Padding(4, 0)[MakeButton(TEXT("Load"), [this]() { PressLoad(); })]]];
+								NoBattleVis)]]];
 }
 
 void UPA250MapWidget::PressEndTurn()
@@ -553,6 +972,78 @@ void UPA250MapWidget::PressFight()
 	{
 		SetStatusMessage(Err);
 	}
+}
+
+void UPA250MapWidget::PressResetOverview()
+{
+	if (APA250ProvinceMapActor* A = MapActor.Get())
+	{
+		A->ResetOverview();
+		SetStatusMessage(TEXT("Campaign overview: Boston to Concord."));
+	}
+}
+
+void UPA250MapWidget::PressFocusSelected()
+{
+	if (APA250ProvinceMapActor* A = MapActor.Get())
+	{
+		if (SelectedProvinceId.IsEmpty())
+		{
+			SetStatusMessage(TEXT("Select a town or army first, then Focus selected."));
+			return;
+		}
+		A->FocusSelected();
+		SetStatusMessage(TEXT("Focused on the selection."));
+	}
+}
+
+void UPA250MapWidget::PressAboutToggle()
+{
+	bShowAbout = !bShowAbout;
+}
+
+void UPA250MapWidget::PressDevToggle()
+{
+	bShowDev = !bShowDev;
+	SetStatusMessage(bShowDev ? TEXT("Developer diagnostics on (selection panel).") : TEXT("Developer diagnostics off."));
+}
+
+bool UPA250MapWidget::IsPointOverHud(FVector2D ScreenPos) const
+{
+	FVector2D Size(1920.f, 1080.f);
+	if (GEngine && GEngine->GameViewport)
+	{
+		GEngine->GameViewport->GetViewportSize(Size);
+	}
+	if (ScreenPos.Y <= TopStripHeightPx || ScreenPos.Y >= Size.Y - BottomStripHeightPx)
+	{
+		return true;
+	}
+	// Selection panel (top-right) and utility stack (bottom-right).
+	if (!SelectedProvinceId.IsEmpty() && ScreenPos.X >= Size.X - 408.f && ScreenPos.Y >= TopStripHeightPx &&
+		ScreenPos.Y <= TopStripHeightPx + 340.f)
+	{
+		return true;
+	}
+	if (ScreenPos.X >= Size.X - 220.f && ScreenPos.Y >= Size.Y - BottomStripHeightPx - 380.f)
+	{
+		return true;
+	}
+	if (bShowAbout && ScreenPos.X <= 448.f && ScreenPos.Y >= TopStripHeightPx && ScreenPos.Y <= TopStripHeightPx + 420.f)
+	{
+		return true;
+	}
+	return false;
+}
+
+void UPA250MapWidget::PressEnterBattleAtSelection()
+{
+	if (!CanEnterBattleAtSelection())
+	{
+		SetStatusMessage(TEXT("Enter battle only when contact is pending at the selected town."));
+		return;
+	}
+	PressFight();
 }
 
 void UPA250MapWidget::PressSave()

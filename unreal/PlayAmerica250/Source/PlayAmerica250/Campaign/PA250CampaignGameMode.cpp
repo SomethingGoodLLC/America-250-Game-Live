@@ -90,6 +90,46 @@ void APA250CampaignGameMode::BeginPlay()
 									   0.05f, false);
 	}
 
+	if (FParse::Param(FCommandLine::Get(), TEXT("PA250DecostaProbe")))
+	{
+		FTimerHandle ProbeHandle;
+		GetWorldTimerManager().SetTimer(
+			ProbeHandle,
+			FTimerDelegate::CreateLambda([this]() {
+				UE_LOG(LogTemp, Display, TEXT("DECOSTA_PROBE: start"));
+				if (MapActor)
+				{
+					UE_LOG(LogTemp, Display, TEXT("DECOSTA_PROBE: decosta=%d presentation=%d display=%s"),
+						   MapActor->IsDeCostaMode() ? 1 : 0, MapActor->IsPresentationLoaded() ? 1 : 0,
+						   MapActor->GetDisplayTexture() ? *MapActor->GetDisplayTexture()->GetName() : TEXT("NONE"));
+				}
+				if (APA250CampaignPlayerController* CPC =
+						Cast<APA250CampaignPlayerController>(GetWorld()->GetFirstPlayerController()))
+				{
+					CPC->ClickMapAtUV(0.248f, 0.175f); // lexington draft/verified UV
+					UE_LOG(LogTemp, Display, TEXT("DECOSTA_PROBE: clicked lexington UV"));
+				}
+				if (APlayerController* PC = GetWorld()->GetFirstPlayerController())
+				{
+					PC->ConsoleCommand(TEXT("Shot showui"));
+					UE_LOG(LogTemp, Display, TEXT("DECOSTA_PROBE: Shot showui"));
+				}
+				if (FParse::Param(FCommandLine::Get(), TEXT("PA250Quit")))
+				{
+					FTimerHandle QuitHandle;
+					GetWorldTimerManager().SetTimer(
+						QuitHandle, FTimerDelegate::CreateLambda([this]() {
+							if (APlayerController* PC = GetWorld()->GetFirstPlayerController())
+							{
+								PC->ConsoleCommand(TEXT("QUIT"));
+							}
+						}),
+						2.f, false);
+				}
+			}),
+			12.f, false);
+	}
+
 	if (FParse::Param(FCommandLine::Get(), TEXT("PA250Shot")))
 	{
 		FTimerHandle ShotHandle;
@@ -177,6 +217,31 @@ void ResolveAllStaffEvents(UPA250Subsystem* Sub)
 		else if (Kind == TEXT("commander_report"))
 		{
 			Sub->ChooseLogistics(LetterId, TEXT("dismiss"), StaffErr);
+		}
+		else if (Kind == TEXT("historical_notice"))
+		{
+			Sub->ChooseLogistics(LetterId, TEXT("dismiss"), StaffErr);
+		}
+		else if (Kind == TEXT("source_decision"))
+		{
+			const FString Sid = Sub->GetPendingLetterSourceId();
+			FString Choice = TEXT("dismiss");
+			if (Sid == TEXT("L3"))
+			{
+				Choice = TEXT("shared_lodging");
+			}
+			else if (Sid == TEXT("L5"))
+			{
+				Choice = TEXT("evacuate_preserve_boats");
+			}
+			else if (Sid == TEXT("L7"))
+			{
+				Choice = TEXT("conserve_ammunition");
+			}
+			if (!Sub->ChooseLogistics(LetterId, Choice, StaffErr))
+			{
+				Sub->ChooseLogistics(LetterId, TEXT("dismiss"), StaffErr);
+			}
 		}
 		else if (!Sub->ChooseLogistics(LetterId, TEXT("purchase"), StaffErr))
 		{

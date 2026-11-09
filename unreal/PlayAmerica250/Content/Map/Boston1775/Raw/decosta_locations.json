@@ -1,0 +1,209 @@
+{
+  "schema_version": 1,
+  "scenario": "boston1775",
+  "source": {
+    "title": "A plan of the town and harbour of Boston and the country adjacent with the road from Boston to Concord",
+    "publisher": "J. De Costa",
+    "engraver": "Charles Hall",
+    "date_issued": "1775-07-29",
+    "nypl_item": "https://digitalcollections.nypl.org/items/46abf040-c5ed-012f-b389-58d385a7bc34",
+    "loc_item": "https://www.loc.gov/item/gm71002447/",
+    "file": "Content/PA250/Source/M01-de-costa-boston-concord.jpg",
+    "note": "Working source is the LOC IIIF full JPEG of the same July 1775 De Costa–Hall plate (6761x5314). The planned NYPL download size 4920x3966 was not available on this machine."
+  },
+  "rights": {
+    "status_us": "public_domain_under_us_law",
+    "worldwide_clearance": false,
+    "attribution": "Library of Congress Geography and Map Division; NYPL Digital Collections item 46abf040-c5ed-012f-b389-58d385a7bc34"
+  },
+  "image_size": {
+    "width": 6761,
+    "height": 5314
+  },
+  "uv_origin": "top-left, v down",
+  "disclaimer": "July 1775 publication includes post–April 19 siege content. Printed soldiers, camps, and battle annotations are historical artwork — not live units or verified April 19 positions.",
+  "provinces": [
+    {
+      "id": "concord",
+      "map_index": 1,
+      "marker_uv": [
+        0.143,
+        0.306
+      ],
+      "hit_radius_px": 90,
+      "label_offset_uv": [
+        0.012,
+        -0.012
+      ],
+      "verified": true
+    },
+    {
+      "id": "lincoln",
+      "map_index": 2,
+      "marker_uv": [
+        0.195,
+        0.238
+      ],
+      "hit_radius_px": 90,
+      "label_offset_uv": [
+        0.012,
+        -0.012
+      ],
+      "verified": true
+    },
+    {
+      "id": "lexington",
+      "map_index": 3,
+      "marker_uv": [
+        0.248,
+        0.175
+      ],
+      "hit_radius_px": 90,
+      "label_offset_uv": [
+        0.012,
+        -0.012
+      ],
+      "verified": true
+    },
+    {
+      "id": "menotomy",
+      "map_index": 4,
+      "marker_uv": [
+        0.345,
+        0.335
+      ],
+      "hit_radius_px": 90,
+      "label_offset_uv": [
+        0.012,
+        -0.012
+      ],
+      "verified": true
+    },
+    {
+      "id": "cambridge",
+      "map_index": 5,
+      "marker_uv": [
+        0.4,
+        0.42
+      ],
+      "hit_radius_px": 90,
+      "label_offset_uv": [
+        0.012,
+        -0.012
+      ],
+      "verified": true
+    },
+    {
+      "id": "charlestown",
+      "map_index": 6,
+      "marker_uv": [
+        0.568,
+        0.398
+      ],
+      "hit_radius_px": 90,
+      "label_offset_uv": [
+        0.012,
+        -0.012
+      ],
+      "verified": true
+    },
+    {
+      "id": "medford",
+      "map_index": 7,
+      "marker_uv": [
+        0.448,
+        0.178
+      ],
+      "hit_radius_px": 90,
+      "label_offset_uv": [
+        0.012,
+        -0.012
+      ],
+      "verified": true
+    },
+    {
+      "id": "watertown",
+      "map_index": 8,
+      "marker_uv": [
+        0.358,
+        0.475
+      ],
+      "hit_radius_px": 90,
+      "label_offset_uv": [
+        0.012,
+        -0.012
+      ],
+      "verified": true
+    },
+    {
+      "id": "brookline",
+      "map_index": 9,
+      "marker_uv": [
+        0.445,
+        0.54
+      ],
+      "hit_radius_px": 90,
+      "label_offset_uv": [
+        0.012,
+        -0.012
+      ],
+      "verified": true
+    },
+    {
+      "id": "roxbury",
+      "map_index": 10,
+      "marker_uv": [
+        0.535,
+        0.592
+      ],
+      "hit_radius_px": 90,
+      "label_offset_uv": [
+        0.012,
+        -0.012
+      ],
+      "verified": true
+    },
+    {
+      "id": "boston",
+      "map_index": 11,
+      "marker_uv": [
+        0.565,
+        0.49
+      ],
+      "hit_radius_px": 90,
+      "label_offset_uv": [
+        0.012,
+        -0.012
+      ],
+      "verified": true
+    },
+    {
+      "id": "dorchester",
+      "map_index": 12,
+      "marker_uv": [
+        0.558,
+        0.598
+      ],
+      "hit_radius_px": 90,
+      "label_offset_uv": [
+        0.012,
+        -0.012
+      ],
+      "verified": true
+    },
+    {
+      "id": "chelsea",
+      "map_index": 13,
+      "marker_uv": [
+        0.678,
+        0.343
+      ],
+      "hit_radius_px": 90,
+      "label_offset_uv": [
+        0.012,
+        -0.012
+      ],
+      "verified": true
+    }
+  ]
+}

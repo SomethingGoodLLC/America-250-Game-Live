@@ -72,13 +72,47 @@ struct FactionStores {
     int provisions = 0;
 };
 
+// Paper units temporarily held back from fielding (not equipment, readiness, or morale).
+struct PersonnelCommitment {
+    std::string id;
+    std::string army_id;
+    std::string unit_class;  // e.g. militia
+    int count = 0;
+    std::string reason;
+    int64_t release_on_hour = 0;
+};
+
+// Disclosed finite locality reserve abstraction (not a real warehouse network).
+struct DonorReserve {
+    std::string id;
+    std::string label;  // shown to the player as a gameplay abstraction
+    int powder = 0;
+    int arms = 0;
+    int provisions = 0;
+};
+
+// In-transit material from a donor reserve to a faction store. Commit ≠ receive.
+struct Shipment {
+    std::string id;
+    std::string donor_reserve_id;
+    std::string dest_faction;
+    int powder = 0;
+    int arms = 0;
+    int provisions = 0;
+    int64_t commit_hour = 0;
+    int64_t deliver_on_hour = 0;
+    std::string status;  // committed | in_transit | delivered | lost
+};
+
 // Structured staff letter. Flavor text is display-only and never parsed for state.
 struct CorrespondenceItem {
     std::string id;
     int64_t created_hour = 0;
     int64_t resolve_on_hour = 0;  // when reply/delivery is applied
     std::string recipient;        // committee_of_safety | town_selectmen | merchant | washington_hq | congress
-    std::string kind;  // purchase | request_assistance | requisition | capacity_investment | knox_support | commander_report
+    // purchase | request_assistance | requisition | capacity_investment | knox_support |
+    // commander_report | source_decision | historical_notice
+    std::string kind;
     std::string status;  // needs_approval | pending | approved | partial | delayed | refused | delivered | dismissed
     int powder = 0;
     int arms = 0;
@@ -86,13 +120,19 @@ struct CorrespondenceItem {
     int gold_cost = 0;
     int committed_powder = 0;
     int committed_arms = 0;
+    int committed_provisions = 0;
     int received_powder = 0;
     int received_arms = 0;
+    int received_provisions = 0;
     bool fictionalized = true;
     std::string subject;
     std::string body;
     std::string reason;
     bool awaiting_choice = false;  // true until the player picks a path
+    std::string source_id;         // catalog L1..L7, D8
+    std::string event_id;          // stable playable/reference event id
+    std::string decision_id;       // choice taken (empty until decided)
+    bool decision_applied = false; // exactly-once effects
 };
 
 struct StaffState {
@@ -136,6 +176,10 @@ struct CampaignProgress {
     std::string player_role = "massachusetts_field_commander";
     CampaignProject knox;
     DetachedCommander commander;
+    std::vector<PersonnelCommitment> personnel_commitments;
+    std::vector<std::string> resolved_event_ids;
+    std::vector<std::string> received_source_ids;
+    bool offensive_postponed = false;  // L7 conserve (gameplay tuning)
 };
 
 struct Treaty {
@@ -223,12 +267,46 @@ struct CampaignState {
     StaffState staff;
     CampaignProgress progress;
     std::string pending_event_id;  // correspondence id that raised EventPopup
+    std::map<std::string, DonorReserve> donor_reserves;
+    std::vector<Shipment> shipments;
     std::vector<Treaty> treaties;
     std::vector<MemoryEntry> memory;
     PendingBattle pending_battle;
     std::vector<Command> pending_commands;
     uint64_t next_command_seq = 1;
     std::vector<std::string> log;
+};
+
+// Immutable catalog entry (opening-war correspondence registry). Never mutated by choices.
+struct CorrespondenceChoiceDef {
+    std::string id;
+    std::string label;
+    std::string effects_summary;  // player-facing; amounts are gameplay tuning
+};
+
+struct CorrespondenceCatalogEntry {
+    std::string source_id;
+    std::string event_id;
+    std::string mode;  // playable | historical_reference | retrospective_exhibit
+    std::string author;
+    std::string recipient;
+    std::string document_date;
+    std::string reported_event_date;
+    std::string source_type;
+    std::string institutional_url;
+    std::string uncertainty_notes;
+    std::string evidence_summary;
+    std::string text_kind = "paraphrase_from_report";
+    YMDH eligible_from{};
+    std::vector<std::string> faction_visibility;
+    bool requires_lexington = false;
+    bool requires_chapter_continental = false;
+    std::vector<std::string> requires_resolved_events;
+    bool activate_decisions = false;
+    std::string adaptation_relay;
+    std::string adaptation_dispatch;
+    std::string adaptation_label = "Game adaptation—not a historical quotation.";
+    std::vector<CorrespondenceChoiceDef> choices;
 };
 
 struct PathPlan {

@@ -40,7 +40,8 @@ CampaignState apply_battle_result(const CampaignState& state, const BattleResult
 // ---- Logistics / correspondence / staff (pure) -------------------------
 // Ensure default stores/staff exist (called from load_scenario path).
 void ensure_logistics_defaults(CampaignState& s);
-// Player chooses among purchase | request_assistance | requisition | capacity_investment | knox_support | dismiss.
+// Player chooses among purchase | request_assistance | requisition | capacity_investment | knox_support | dismiss
+// | source_decision choice ids | acknowledge for historical_notice.
 // letter_id empty → use the pending aftermath choice letter.
 CampaignState choose_logistics(const CampaignState& state, const std::string& letter_id,
                                const std::string& choice);
@@ -48,6 +49,18 @@ CampaignState choose_logistics(const CampaignState& state, const std::string& le
 CampaignState resolve_commander_request(const CampaignState& state, const std::string& action);
 // Tick correspondence deliveries and dated chapter/project gates; may add EventPopup.
 void tick_logistics(CampaignState& s, std::vector<Interrupt>& interrupts);
+
+// Opening-war correspondence catalog (immutable). Load once from data JSON text.
+void load_correspondence_catalog(const std::string& json_text);
+bool correspondence_catalog_loaded();
+const CorrespondenceCatalogEntry* find_correspondence_entry(const std::string& source_id);
+std::vector<CorrespondenceCatalogEntry> correspondence_catalog_entries();
+void ensure_donor_reserve_defaults(CampaignState& s);
+void seed_opening_war_correspondence(CampaignState& s, std::vector<Interrupt>* interrupts);
+void release_due_personnel_commitments(CampaignState& s);
+void deliver_due_shipments(CampaignState& s, std::vector<Interrupt>* interrupts);
+CampaignState apply_source_decision(const CampaignState& state, const std::string& letter_id,
+                                    const std::string& choice);
 
 // ---- Diplomacy ---------------------------------------------------------
 DiplomacyContext build_diplomacy_context(const CampaignState& state, const std::string& faction);

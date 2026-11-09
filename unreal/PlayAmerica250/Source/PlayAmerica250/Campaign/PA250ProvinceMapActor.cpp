@@ -5,6 +5,7 @@
 #include "PA250Subsystem.h"
 #include "Camera/CameraActor.h"
 #include "Camera/CameraComponent.h"
+#include "Engine/Scene.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/TextRenderComponent.h"
 #include "DrawDebugHelpers.h"
@@ -70,6 +71,50 @@ const FWaterLabel GWaterLabels[] = {
 	{TEXT("Back Bay"), 0.64f, 0.58f},
 	{TEXT("Charles Basin"), 0.50f, 0.55f},
 };
+
+FLinearColor TownOwnerColor(const std::string& Owner)
+{
+	if (Owner == "british")
+	{
+		return FLinearColor(0.78f, 0.12f, 0.10f);
+	}
+	if (Owner == "continental")
+	{
+		return FLinearColor(0.10f, 0.28f, 0.72f);
+	}
+	return FLinearColor(0.28f, 0.22f, 0.14f);
+}
+
+FColor TownOwnerInk(const std::string& Owner)
+{
+	if (Owner == "british")
+	{
+		return FColor(150, 28, 22);
+	}
+	if (Owner == "continental")
+	{
+		return FColor(16, 48, 130);
+	}
+	return FColor(40, 32, 20);
+}
+
+void ApplyShapeColor(UStaticMeshComponent* Mesh, const FLinearColor& Color)
+{
+	if (!Mesh)
+	{
+		return;
+	}
+	UMaterialInstanceDynamic* MID = Cast<UMaterialInstanceDynamic>(Mesh->GetMaterial(0));
+	if (!MID)
+	{
+		MID = Mesh->CreateAndSetMaterialInstanceDynamic(0);
+	}
+	if (MID)
+	{
+		MID->SetVectorParameterValue(TEXT("Color"), Color);
+		MID->SetVectorParameterValue(TEXT("BaseColor"), Color);
+	}
+}
 } // namespace
 
 FRotator APA250ProvinceMapActor::FlatMapTextRotation()
@@ -102,25 +147,39 @@ void APA250ProvinceMapActor::BeginPlay()
 	// Keep the plane in XY (facing +Z). A -90° pitch tips it edge-on to a top-down camera → black.
 	SetActorRotation(FRotator::ZeroRotator);
 	SetActorLocation(FVector(0.f, 0.f, MapPlaneZ));
-	MapMesh->SetRelativeScale3D(FVector(MapWidthUU / 100.f, MapHeightUU / 100.f, 1.f));
 	MapMesh->SetCastShadow(false);
 
 	LoadTextures();
 	LoadPresentation();
+	if (ImageW > 0 && ImageH > 0)
+	{
+		MapHeightUU = MapWidthUU * (static_cast<float>(ImageH) / static_cast<float>(ImageW));
+	}
+	MapMesh->SetRelativeScale3D(FVector(MapWidthUU / 100.f, MapHeightUU / 100.f, 1.f));
 	EnsureMaterial();
 	RebuildStateTexture();
-	SpawnLabels();
-	SpawnWaterLabels();
-	SpawnFramingDecor();
+	if (bDeCostaMode)
+	{
+		// Engraving already carries town names; do not redraw stylized labels/cartouche.
+		SpawnHotspotMarkers();
+	}
+	else
+	{
+		SpawnLabels();
+		SpawnWaterLabels();
+		SpawnFramingDecor();
+	}
 	RefreshArmyTokens();
 	RefreshBattleMarker();
-	FrameCamera();
+	ResetOverview();
 }
 
 void APA250ProvinceMapActor::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
 	RebuildStateTexture();
+	RefreshHotspotVisibility();
+	RefreshTownOwnership();
 	RefreshArmyTokens();
 	RefreshBattleMarker();
 	RefreshRoutes();
@@ -164,16 +223,74 @@ UTexture2D* APA250ProvinceMapActor::LoadPngToTexture(const FString& AbsPath)
 	return Tex;
 }
 
+UTexture2D* APA250ProvinceMapActor::LoadJpegToTexture(const FString& AbsPath)
+{
+	TArray<uint8> Compressed;
+	if (!FFileHelper::LoadFileToArray(Compressed, *AbsPath) || Compressed.Num() < 8)
+	{
+		return nullptr;
+	}
+	IImageWrapperModule& ImageWrapperModule = FModuleManager::LoadModuleChecked<IImageWrapperModule>(FName("ImageWrapper"));
+	TSharedPtr<IImageWrapper> Wrapper = ImageWrapperModule.CreateImageWrapper(EImageFormat::JPEG);
+	if (!Wrapper.IsValid() || !Wrapper->SetCompressed(Compressed.GetData(), Compressed.Num()))
+	{
+		return nullptr;
+	}
+	TArray64<uint8> Raw;
+	if (!Wrapper->GetRaw(ERGBFormat::BGRA, 8, Raw))
+	{
+		return nullptr;
+	}
+	UTexture2D* Tex = UTexture2D::CreateTransient(Wrapper->GetWidth(), Wrapper->GetHeight(), PF_B8G8R8A8);
+	if (!Tex)
+	{
+		return nullptr;
+	}
+	Tex->SRGB = true;
+	Tex->Filter = TF_Bilinear;
+	Tex->NeverStream = true;
+	FTexture2DMipMap& Mip = Tex->GetPlatformData()->Mips[0];
+	void* Data = Mip.BulkData.Lock(LOCK_READ_WRITE);
+	FMemory::Memcpy(Data, Raw.GetData(), Raw.Num());
+	Mip.BulkData.Unlock();
+	Tex->UpdateResource();
+	ImageW = Wrapper->GetWidth();
+	ImageH = Wrapper->GetHeight();
+	return Tex;
+}
+
 void APA250ProvinceMapActor::LoadTextures()
 {
 	ProvinceIdTex = LoadObject<UTexture2D>(nullptr, TEXT("/Game/Map/Boston1775/T_ProvinceID.T_ProvinceID"));
 	BorderDistTex = LoadObject<UTexture2D>(nullptr, TEXT("/Game/Map/Boston1775/T_BorderDist.T_BorderDist"));
 	CoastDistTex = LoadObject<UTexture2D>(nullptr, TEXT("/Game/Map/Boston1775/T_CoastDist.T_CoastDist"));
 	PaperTex = LoadObject<UTexture2D>(nullptr, TEXT("/Game/Map/Boston1775/T_Parchment.T_Parchment"));
-	DisplayTex = LoadObject<UTexture2D>(nullptr, TEXT("/Game/Map/Boston1775/T_MapPreview.T_MapPreview"));
+
+	DisplayTex = LoadObject<UTexture2D>(nullptr, TEXT("/Game/PA250/Textures/T_DeCostaBostonConcord.T_DeCostaBostonConcord"));
+	if (DisplayTex)
+	{
+		bDeCostaMode = true;
+		ImageW = DisplayTex->GetSizeX();
+		ImageH = DisplayTex->GetSizeY();
+		DisplayTex->NeverStream = true;
+	}
 	if (!DisplayTex)
 	{
-		// Label-free display texture first: TextRender draws the names in-engine.
+		const FString DeCostaJpg = FPaths::ProjectContentDir() / TEXT("PA250/Source/M01-de-costa-boston-concord.jpg");
+		DisplayTex = LoadJpegToTexture(DeCostaJpg);
+		if (DisplayTex)
+		{
+			bDeCostaMode = true;
+			UE_LOG(LogTemp, Display, TEXT("PA250: loaded de Costa JPEG fallback %dx%d"), ImageW, ImageH);
+		}
+	}
+	if (!DisplayTex)
+	{
+		DisplayTex = LoadObject<UTexture2D>(nullptr, TEXT("/Game/Map/Boston1775/T_MapPreview.T_MapPreview"));
+		bDeCostaMode = false;
+	}
+	if (!DisplayTex)
+	{
 		const FString PreviewPng = FPaths::ConvertRelativePathToFull(
 			FPaths::Combine(FPaths::ProjectDir(), TEXT("../../tools/mapgen/out/preview_display.png")));
 		DisplayTex = LoadPngToTexture(PreviewPng);
@@ -205,26 +322,134 @@ void APA250ProvinceMapActor::LoadTextures()
 	{
 		BaseMaterial = LoadObject<UMaterialInterface>(nullptr, TEXT("/Engine/EngineMaterials/DefaultTextMaterialOpaque.DefaultTextMaterialOpaque"));
 	}
-	UE_LOG(LogTemp, Display, TEXT("PA250 map assets: mat=%s display=%s pid=%s"),
+	UE_LOG(LogTemp, Display, TEXT("PA250 map assets: mat=%s display=%s decosta=%d"),
 		BaseMaterial ? *BaseMaterial->GetName() : TEXT("NONE"), DisplayTex ? *DisplayTex->GetName() : TEXT("NONE"),
-		ProvinceIdTex ? *ProvinceIdTex->GetName() : TEXT("NONE"));
+		bDeCostaMode ? 1 : 0);
 
+	// ProvinceIdLookup stays available for tooling; de Costa picking uses hotspot JSON instead.
 	const FString BinPath = FPaths::ProjectContentDir() / TEXT("Map/Boston1775/Raw/ProvinceIdLookup.bin");
 	if (FFileHelper::LoadFileToArray(LookupBytes, *BinPath) && LookupBytes.Num() >= 8)
 	{
 		LookupW = static_cast<int32>(*reinterpret_cast<const uint32*>(LookupBytes.GetData()));
 		LookupH = static_cast<int32>(*reinterpret_cast<const uint32*>(LookupBytes.GetData() + 4));
-		TexW = LookupW;
-		TexH = LookupH;
+		if (!bDeCostaMode)
+		{
+			TexW = LookupW;
+			TexH = LookupH;
+		}
 	}
-	else
+	else if (!bDeCostaMode)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("PA250: missing ProvinceIdLookup.bin"));
 	}
+	if (bDeCostaMode && ImageW > 0 && ImageH > 0)
+	{
+		TexW = ImageW;
+		TexH = ImageH;
+	}
+}
+
+bool APA250ProvinceMapActor::LoadDeCostaLocations()
+{
+	const FString Path = FPaths::ProjectContentDir() / TEXT("Map/Boston1775/Raw/decosta_locations.json");
+	FString Text;
+	if (!FFileHelper::LoadFileToString(Text, *Path))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("PA250: missing decosta_locations.json"));
+		return false;
+	}
+	TSharedPtr<FJsonObject> Root;
+	const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Text);
+	if (!FJsonSerializer::Deserialize(Reader, Root) || !Root.IsValid())
+	{
+		return false;
+	}
+	LabelUV.Reset();
+	TokenUV.Reset();
+	HitRadiusPx.Reset();
+	VerifiedById.Reset();
+	Edges.Reset();
+
+	const TSharedPtr<FJsonObject>* SizeObj = nullptr;
+	if (Root->TryGetObjectField(TEXT("image_size"), SizeObj) && SizeObj && SizeObj->IsValid())
+	{
+		ImageW = static_cast<int32>((*SizeObj)->GetNumberField(TEXT("width")));
+		ImageH = static_cast<int32>((*SizeObj)->GetNumberField(TEXT("height")));
+		TexW = ImageW;
+		TexH = ImageH;
+	}
+
+	const TArray<TSharedPtr<FJsonValue>>* Provinces = nullptr;
+	if (Root->TryGetArrayField(TEXT("provinces"), Provinces) && Provinces)
+	{
+		for (const TSharedPtr<FJsonValue>& V : *Provinces)
+		{
+			const TSharedPtr<FJsonObject> Obj = V->AsObject();
+			if (!Obj.IsValid())
+			{
+				continue;
+			}
+			const FString Id = Obj->GetStringField(TEXT("id"));
+			const TArray<TSharedPtr<FJsonValue>>* Muv = nullptr;
+			if (Obj->TryGetArrayField(TEXT("marker_uv"), Muv) && Muv && Muv->Num() >= 2)
+			{
+				const FVector2D UV((*Muv)[0]->AsNumber(), (*Muv)[1]->AsNumber());
+				LabelUV.Add(Id, UV);
+				TokenUV.Add(Id, UV);
+			}
+			HitRadiusPx.Add(Id, static_cast<float>(Obj->GetNumberField(TEXT("hit_radius_px"))));
+			VerifiedById.Add(Id, Obj->GetBoolField(TEXT("verified")));
+		}
+	}
+
+	// Route polylines: straight segments between hotspot endpoints from sim adjacency (not pixel miles).
+	if (UPA250Subsystem* S = Sub())
+	{
+		for (const auto& Kv : S->GetState().edges)
+		{
+			const FString A = ToFStr(Kv.second.a);
+			const FString B = ToFStr(Kv.second.b);
+			if (!TokenUV.Contains(A) || !TokenUV.Contains(B))
+			{
+				continue;
+			}
+			FEdgeVis E;
+			E.From = A;
+			E.To = B;
+			E.Type = ToFStr(Kv.second.type);
+			E.PolyUV.Add(TokenUV[A]);
+			E.PolyUV.Add(TokenUV[B]);
+			Edges.Add(MoveTemp(E));
+		}
+	}
+	return LabelUV.Num() >= 13;
 }
 
 void APA250ProvinceMapActor::LoadPresentation()
 {
+	LabelUV.Reset();
+	TokenUV.Reset();
+	HitRadiusPx.Reset();
+	VerifiedById.Reset();
+	Edges.Reset();
+	MapIndexById.Reset();
+	IdByMapIndex.Reset();
+
+	if (bDeCostaMode && LoadDeCostaLocations())
+	{
+		if (UPA250Subsystem* S = Sub())
+		{
+			for (const auto& Kv : S->GetState().provinces)
+			{
+				MapIndexById.Add(ToFStr(Kv.first), Kv.second.map_index);
+				IdByMapIndex.Add(Kv.second.map_index, ToFStr(Kv.first));
+			}
+		}
+		bPresentationLoaded = LabelUV.Num() >= 13;
+		UE_LOG(LogTemp, Display, TEXT("PA250: de Costa locations loaded (%d provinces)"), LabelUV.Num());
+		return;
+	}
+
 	const FString PresPath = FPaths::ProjectContentDir() / TEXT("Map/Boston1775/Raw/map_presentation.json");
 	FString Text;
 	if (!FFileHelper::LoadFileToString(Text, *PresPath))
@@ -238,9 +463,6 @@ void APA250ProvinceMapActor::LoadPresentation()
 	{
 		return;
 	}
-	LabelUV.Reset();
-	TokenUV.Reset();
-	Edges.Reset();
 	const TArray<TSharedPtr<FJsonValue>>* Provinces = nullptr;
 	if (Root->TryGetArrayField(TEXT("provinces"), Provinces) && Provinces)
 	{
@@ -354,6 +576,11 @@ void APA250ProvinceMapActor::EnsureMaterial()
 
 void APA250ProvinceMapActor::RebuildStateTexture()
 {
+	// De Costa overview keeps the engraving free of ownership wash overlays.
+	if (bDeCostaMode)
+	{
+		return;
+	}
 	UPA250Subsystem* S = Sub();
 	if (!S || !S->GetController().has_campaign() || !DynMat)
 	{
@@ -426,6 +653,30 @@ FVector APA250ProvinceMapActor::UVToWorld(FVector2D UV, float ZOffset) const
 
 FString APA250ProvinceMapActor::ProvinceAtUV(FVector2D UV) const
 {
+	if (bDeCostaMode)
+	{
+		const float ImgW = ImageW > 0 ? static_cast<float>(ImageW) : 1.f;
+		const float ImgH = ImageH > 0 ? static_cast<float>(ImageH) : 1.f;
+		FString BestId;
+		float BestDist = TNumericLimits<float>::Max();
+		for (const TPair<FString, FVector2D>& Kv : LabelUV)
+		{
+			const float Du = (UV.X - Kv.Value.X) * ImgW;
+			const float Dv = (UV.Y - Kv.Value.Y) * ImgH;
+			const float Dist = FMath::Sqrt(Du * Du + Dv * Dv);
+			float Radius = 90.f;
+			if (const float* R = HitRadiusPx.Find(Kv.Key))
+			{
+				Radius = *R;
+			}
+			if (Dist <= Radius && Dist < BestDist)
+			{
+				BestDist = Dist;
+				BestId = Kv.Key;
+			}
+		}
+		return BestId;
+	}
 	if (LookupW <= 0 || LookupBytes.Num() < 8)
 	{
 		return FString();
@@ -612,15 +863,18 @@ void APA250ProvinceMapActor::RefreshArmyTokens()
 		}
 		FActorSpawnParameters Params;
 		Params.Owner = this;
-		const FVector Loc = UVToWorld(*UV, 8.f) + FVector(Stack * 28.f, Stack * 20.f, Stack * 2.f);
+		// Clear of the town ring. The flag is a 65uu rectangle; a 32uu nudge
+		// left it sitting on the town diamond, so the army read as another town.
+		const FVector Loc = UVToWorld(*UV, 12.f) + FVector(78.f + Stack * 40.f, 36.f + Stack * 22.f, Stack * 2.f);
 		APA250ArmyToken* Tok =
 			World->SpawnActor<APA250ArmyToken>(APA250ArmyToken::StaticClass(), Loc, APA250ProvinceMapActor::FlatMapTextRotation(), Params);
 		if (!Tok)
 		{
 			continue;
 		}
+		const bool bPlayerForce = Kv.second.faction == St.player_faction;
 		Tok->Configure(ToFStr(Kv.first), ToFStr(Kv.second.faction), ShortArmyName(Kv.second), FormatUnitsPlate(Kv.second), Stack,
-				   ToFStr(Kv.first) == SelectedArmyId);
+				   bPlayerForce, ToFStr(Kv.first) == SelectedArmyId);
 		ArmyTokens.Add(Tok);
 	}
 }
@@ -757,12 +1011,23 @@ float APA250ProvinceMapActor::FitOrthoWidth(float ViewW, float ViewH, float MapW
 	return FMath::Max(MapW, MapH * ViewW / UsableH) * 1.04f;
 }
 
+float APA250ProvinceMapActor::CampaignOverviewZoom(float ViewW, float ViewH, float MapW, float MapH)
+{
+	// Boston (0.565,0.49) to Concord (0.108,0.235), with Cambridge/Lexington inside.
+	const float SpanU = 0.565f - 0.108f;
+	const float SpanV = 0.49f - 0.235f;
+	const float Fit = FitOrthoWidth(ViewW, ViewH, MapW, MapH);
+	const float DesiredW = FMath::Max(SpanU * MapW / 0.68f, SpanV * MapH * (ViewW / FMath::Max(1.f, ViewH)) / 0.68f);
+	return FMath::Clamp(Fit / FMath::Max(1.f, DesiredW), 1.f, 4.f);
+}
+
 void APA250ProvinceMapActor::ZoomBy(float Factor)
 {
-	ZoomFactor = FMath::Clamp(ZoomFactor * Factor, 1.f, 5.f);
-	if (ZoomFactor <= 1.01f)
+	const float Old = ZoomFactor;
+	ZoomFactor = FMath::Clamp(ZoomFactor * Factor, 1.f, MaxZoomFactor);
+	if (ZoomFactor <= 1.01f && Old > ZoomFactor)
 	{
-		ZoomCenterUV = FVector2D(0.5f, 0.5f);
+		ZoomCenterUV = CampaignOverviewCenterUV();
 	}
 	else if (const FVector2D* TokUV = TokenUV.Find(SelectedProvinceId))
 	{
@@ -773,6 +1038,304 @@ void APA250ProvinceMapActor::ZoomBy(float Factor)
 		ZoomCenterUV = *LabUV;
 	}
 	FrameCamera();
+}
+
+void APA250ProvinceMapActor::ZoomAtUV(FVector2D CursorUV, float Factor)
+{
+	const float NewZoom = FMath::Clamp(ZoomFactor * Factor, 1.f, MaxZoomFactor);
+	const float Applied = NewZoom / FMath::Max(0.01f, ZoomFactor);
+	ZoomCenterUV = CursorUV - (CursorUV - ZoomCenterUV) / Applied;
+	ZoomCenterUV.X = FMath::Clamp(ZoomCenterUV.X, 0.f, 1.f);
+	ZoomCenterUV.Y = FMath::Clamp(ZoomCenterUV.Y, 0.f, 1.f);
+	ZoomFactor = NewZoom;
+	FrameCamera();
+}
+
+void APA250ProvinceMapActor::FocusSelected()
+{
+	if (const FVector2D* UV = TokenUV.Find(SelectedProvinceId))
+	{
+		ZoomCenterUV = *UV;
+		ZoomFactor = FMath::Max(ZoomFactor, 3.f);
+		FrameCamera();
+		return;
+	}
+	if (const FVector2D* UV = LabelUV.Find(SelectedProvinceId))
+	{
+		ZoomCenterUV = *UV;
+		ZoomFactor = FMath::Max(ZoomFactor, 3.f);
+		FrameCamera();
+		return;
+	}
+	ResetOverview();
+}
+
+void APA250ProvinceMapActor::ResetOverview()
+{
+	float ViewW = 1920.f;
+	float ViewH = 1080.f;
+	if (UWorld* World = GetWorld())
+	{
+		if (APlayerController* PC = World->GetFirstPlayerController())
+		{
+			int32 VX = 0;
+			int32 VY = 0;
+			PC->GetViewportSize(VX, VY);
+			if (VX > 0 && VY > 0)
+			{
+				ViewW = static_cast<float>(VX);
+				ViewH = static_cast<float>(VY);
+			}
+		}
+	}
+	ZoomFactor = CampaignOverviewZoom(ViewW, ViewH, MapWidthUU, MapHeightUU);
+	ZoomCenterUV = CampaignOverviewCenterUV();
+	FrameCamera();
+}
+
+void APA250ProvinceMapActor::PanByUV(FVector2D DeltaUV)
+{
+	if (ZoomFactor <= 1.01f)
+	{
+		return;
+	}
+	ZoomCenterUV.X = FMath::Clamp(ZoomCenterUV.X + DeltaUV.X, 0.f, 1.f);
+	ZoomCenterUV.Y = FMath::Clamp(ZoomCenterUV.Y + DeltaUV.Y, 0.f, 1.f);
+	FrameCamera();
+}
+
+bool APA250ProvinceMapActor::IsProvinceVerified(const FString& ProvinceId) const
+{
+	if (const bool* V = VerifiedById.Find(ProvinceId))
+	{
+		return *V;
+	}
+	return false;
+}
+
+void APA250ProvinceMapActor::SpawnHotspotMarkers()
+{
+	for (UStaticMeshComponent* C : HotspotMarkers)
+	{
+		if (C)
+		{
+			C->DestroyComponent();
+		}
+	}
+	for (UTextRenderComponent* C : HotspotCaptions)
+	{
+		if (C)
+		{
+			C->DestroyComponent();
+		}
+	}
+	HotspotMarkers.Reset();
+	HotspotCaptions.Reset();
+	CaptionById.Reset();
+	if (SelectionHalo)
+	{
+		SelectionHalo->DestroyComponent();
+		SelectionHalo = nullptr;
+	}
+
+	UPA250Subsystem* S = Sub();
+	const pa250::CampaignState* St = (S && S->GetController().has_campaign()) ? &S->GetState() : nullptr;
+
+	UStaticMesh* PlaneMesh = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Plane.Plane"));
+	UMaterialInterface* ShapeMat =
+		LoadObject<UMaterialInterface>(nullptr, TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
+	if (!PlaneMesh || !ShapeMat)
+	{
+		return;
+	}
+
+	// Selection halo: gold, never red. Red is British ownership; a red halo made
+	// a selected Continental town look like it had changed hands.
+	SelectionHalo = NewObject<UStaticMeshComponent>(this);
+	SelectionHalo->SetupAttachment(MapMesh);
+	SelectionHalo->RegisterComponent();
+	SelectionHalo->SetAbsolute(true, true, true);
+	SelectionHalo->SetStaticMesh(PlaneMesh);
+	SelectionHalo->SetMaterial(0, ShapeMat);
+	SelectionHalo->SetWorldRotation(FRotator(0.f, 45.f, 0.f));
+	SelectionHalo->SetWorldScale3D(FVector(0.40f, 0.40f, 1.f));
+	SelectionHalo->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	SelectionHalo->SetVisibility(false);
+	ApplyShapeColor(SelectionHalo, FLinearColor(0.86f, 0.64f, 0.12f));
+
+	for (const TPair<FString, FVector2D>& Kv : LabelUV)
+	{
+		// Town edge: a faction-coloured diamond ring. The inner diamond is parchment
+		// so the marker reads as an outline, not as a solid army flag.
+		std::string Owner;
+		if (St)
+		{
+			auto It = St->provinces.find(TCHAR_TO_UTF8(*Kv.Key));
+			if (It != St->provinces.end())
+			{
+				Owner = It->second.owner;
+			}
+		}
+		UStaticMeshComponent* Ring = NewObject<UStaticMeshComponent>(this);
+		Ring->SetupAttachment(MapMesh);
+		Ring->RegisterComponent();
+		Ring->SetAbsolute(true, true, true);
+		Ring->SetStaticMesh(PlaneMesh);
+		Ring->SetMaterial(0, ShapeMat);
+		Ring->SetWorldLocation(UVToWorld(Kv.Value, 5.f));
+		Ring->SetWorldRotation(FRotator(0.f, 45.f, 0.f));
+		Ring->SetWorldScale3D(FVector(0.24f, 0.24f, 1.f));
+		Ring->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		Ring->ComponentTags.Add(TEXT("town_ring"));
+		Ring->ComponentTags.Add(FName(*Kv.Key));
+		ApplyShapeColor(Ring, TownOwnerColor(Owner));
+		HotspotMarkers.Add(Ring);
+
+		UStaticMeshComponent* Fill = NewObject<UStaticMeshComponent>(this);
+		Fill->SetupAttachment(MapMesh);
+		Fill->RegisterComponent();
+		Fill->SetAbsolute(true, true, true);
+		Fill->SetStaticMesh(PlaneMesh);
+		Fill->SetMaterial(0, ShapeMat);
+		Fill->SetWorldLocation(UVToWorld(Kv.Value, 5.8f));
+		Fill->SetWorldRotation(FRotator(0.f, 45.f, 0.f));
+		Fill->SetWorldScale3D(FVector(0.13f, 0.13f, 1.f));
+		Fill->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		ApplyShapeColor(Fill, FLinearColor(0.86f, 0.78f, 0.62f));
+		HotspotMarkers.Add(Fill);
+
+		// Caption: short name only, offset north-east so it does not sit on the
+		// engraved town name. Visibility is zoom/selection dependent (see
+		// RefreshHotspotVisibility). Ink matches the town ring: blue yours, red British.
+		UTextRenderComponent* Cap = NewObject<UTextRenderComponent>(this);
+		Cap->SetupAttachment(MapMesh);
+		Cap->RegisterComponent();
+		Cap->SetAbsolute(true, true, true);
+		const FVector2D CapUV = Kv.Value + FVector2D(0.014f, -0.02f);
+		Cap->SetWorldLocation(UVToWorld(CapUV, 5.5f));
+		Cap->SetWorldRotation(APA250ProvinceMapActor::FlatMapTextRotation());
+		Cap->SetHorizontalAlignment(EHTA_Left);
+		Cap->SetVerticalAlignment(EVRTA_TextCenter);
+		Cap->SetWorldSize(19.f);
+		Cap->SetTextRenderColor(TownOwnerInk(Owner));
+		FString Name = Kv.Key;
+		if (St)
+		{
+			auto It = St->provinces.find(TCHAR_TO_UTF8(*Kv.Key));
+			if (It != St->provinces.end())
+			{
+				Name = ToFStr(It->second.name);
+			}
+		}
+		Cap->SetText(FText::FromString(Name));
+		HotspotCaptions.Add(Cap);
+		CaptionById.Add(Kv.Key, Cap);
+	}
+	RefreshHotspotVisibility();
+}
+
+void APA250ProvinceMapActor::RefreshTownOwnership()
+{
+	if (!bDeCostaMode)
+	{
+		return;
+	}
+	UPA250Subsystem* S = Sub();
+	const pa250::CampaignState* St = (S && S->GetController().has_campaign()) ? &S->GetState() : nullptr;
+	for (UStaticMeshComponent* Ring : HotspotMarkers)
+	{
+		if (!Ring || !Ring->ComponentHasTag(TEXT("town_ring")))
+		{
+			continue;
+		}
+		FString ProvinceId;
+		for (const FName& Tag : Ring->ComponentTags)
+		{
+			if (Tag != FName(TEXT("town_ring")))
+			{
+				ProvinceId = Tag.ToString();
+				break;
+			}
+		}
+		std::string Owner;
+		if (St && !ProvinceId.IsEmpty())
+		{
+			auto It = St->provinces.find(TCHAR_TO_UTF8(*ProvinceId));
+			if (It != St->provinces.end())
+			{
+				Owner = It->second.owner;
+			}
+		}
+		ApplyShapeColor(Ring, TownOwnerColor(Owner));
+		if (UTextRenderComponent** Cap = CaptionById.Find(ProvinceId))
+		{
+			if (*Cap)
+			{
+				(*Cap)->SetTextRenderColor(TownOwnerInk(Owner));
+			}
+		}
+	}
+}
+
+void APA250ProvinceMapActor::RefreshHotspotVisibility()
+{
+	static const TCHAR* MajorIds[] = {TEXT("boston"), TEXT("lexington"), TEXT("concord"), TEXT("cambridge"),
+									  TEXT("charlestown")};
+	const bool bDetail = ZoomFactor >= 3.2f;
+	for (const TPair<FString, UTextRenderComponent*>& Kv : CaptionById)
+	{
+		if (!Kv.Value)
+		{
+			continue;
+		}
+		bool bMajor = false;
+		for (const TCHAR* Id : MajorIds)
+		{
+			if (Kv.Key.Equals(Id))
+			{
+				bMajor = true;
+				break;
+			}
+		}
+		const bool bShow = bMajor || bDetail || Kv.Key == SelectedProvinceId;
+		Kv.Value->SetVisibility(bShow);
+		Kv.Value->SetWorldSize(Kv.Key == SelectedProvinceId ? 23.f : 19.f);
+	}
+	if (SelectionHalo)
+	{
+		const FVector2D* SelUV = LabelUV.Find(SelectedProvinceId);
+		SelectionHalo->SetVisibility(SelUV != nullptr);
+		if (SelUV)
+		{
+			SelectionHalo->SetWorldLocation(UVToWorld(*SelUV, 4.5f));
+		}
+	}
+}
+
+void APA250ProvinceMapActor::ApplyCameraPostProcess()
+{
+	if (!MapCamera)
+	{
+		return;
+	}
+	UCameraComponent* CC = MapCamera->GetCameraComponent();
+	if (!CC)
+	{
+		return;
+	}
+	// White paper + fine black lines wash out under auto-exposure / filmic tone curve.
+	FPostProcessSettings& PPS = CC->PostProcessSettings;
+	CC->PostProcessBlendWeight = 1.f;
+	PPS.bOverride_AutoExposureMethod = true;
+	PPS.AutoExposureMethod = AEM_Manual;
+	PPS.bOverride_AutoExposureBias = true;
+	PPS.AutoExposureBias = 0.f;
+	PPS.bOverride_AutoExposureApplyPhysicalCameraExposure = true;
+	PPS.AutoExposureApplyPhysicalCameraExposure = false;
+	PPS.bOverride_ToneCurveAmount = true;
+	PPS.ToneCurveAmount = 0.f;
+	PPS.bOverride_BloomIntensity = true;
+	PPS.BloomIntensity = 0.f;
 }
 
 void APA250ProvinceMapActor::FrameCamera()
@@ -832,9 +1395,13 @@ void APA250ProvinceMapActor::FrameCamera()
 		CC->SetOrthoFarClipPlane(100000.f);
 		CC->bConstrainAspectRatio = false;
 	}
+	if (bDeCostaMode)
+	{
+		ApplyCameraPostProcess();
+	}
 	PC->SetViewTarget(MapCamera);
-	UE_LOG(LogTemp, Display, TEXT("PA250 map camera at %s ortho=%.0f viewTarget=%s"), *CamLoc.ToCompactString(), OrthoW,
-		*GetNameSafe(PC->GetViewTarget()));
+	UE_LOG(LogTemp, Display, TEXT("PA250 map camera at %s ortho=%.0f viewTarget=%s zoom=%.2f"), *CamLoc.ToCompactString(), OrthoW,
+		*GetNameSafe(PC->GetViewTarget()), ZoomFactor);
 }
 
 void APA250ProvinceMapActor::OnHudSelectionChanged(const FString& ArmyId, const FString& ProvinceId)
@@ -842,6 +1409,7 @@ void APA250ProvinceMapActor::OnHudSelectionChanged(const FString& ArmyId, const 
 	SelectedArmyId = ArmyId;
 	SelectedProvinceId = ProvinceId;
 	LastTokenSig.Reset(); // force token refresh for selection highlight
+	RefreshHotspotVisibility();
 	RebuildStateTexture();
 }
 

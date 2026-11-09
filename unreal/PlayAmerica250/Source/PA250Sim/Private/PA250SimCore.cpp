@@ -6,6 +6,7 @@
 #include "src/clock.cpp"
 #include "src/battle.cpp"
 #include "src/diplomacy.cpp"
+#include "src/correspondence.cpp"
 #include "src/logistics.cpp"
 #include "src/serialize.cpp"
 #include "src/controller.cpp"

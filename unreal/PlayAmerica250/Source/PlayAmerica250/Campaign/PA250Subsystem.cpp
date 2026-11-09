@@ -5,6 +5,7 @@
 #include "HAL/FileManager.h"
 #include "HAL/PlatformFileManager.h"
 #include "Kismet/GameplayStatics.h"
+#include "HAL/PlatformProcess.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 
@@ -24,6 +25,11 @@ UPA250Subsystem* UPA250Subsystem::Get(const UObject* WorldContext)
 FString UPA250Subsystem::ScenarioPath()
 {
 	return FPaths::ConvertRelativePathToFull(FPaths::Combine(FPaths::ProjectDir(), TEXT("../PA250Sim/data/boston1775.json")));
+}
+FString UPA250Subsystem::CorrespondenceCatalogPath()
+{
+	return FPaths::ConvertRelativePathToFull(
+		FPaths::Combine(FPaths::ProjectDir(), TEXT("../PA250Sim/data/opening_war_correspondence.json")));
 }
 FString UPA250Subsystem::SavePath() { return FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("PA250/campaign.json")); }
 FString UPA250Subsystem::TracePath() { return FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("PA250/autoplay_trace.json")); }
@@ -224,10 +230,32 @@ void UPA250Subsystem::ClearOrders()
 	}
 }
 
+bool UPA250Subsystem::EnsureCorrespondenceCatalog(FString& OutError)
+{
+	if (pa250::correspondence_catalog_loaded())
+	{
+		return true;
+	}
+	try
+	{
+		pa250::load_correspondence_catalog(pa250::read_text_file(ToStd(CorrespondenceCatalogPath())));
+		return true;
+	}
+	catch (const std::exception& E)
+	{
+		OutError = ToFStr(E.what());
+		return false;
+	}
+}
+
 bool UPA250Subsystem::NewCampaign(FString& OutError)
 {
 	try
 	{
+		if (!EnsureCorrespondenceCatalog(OutError))
+		{
+			return false;
+		}
 		Controller.new_campaign(pa250::read_text_file(ToStd(ScenarioPath())));
 		bPaused = true;
 		HourAccumulator = 0.f;
@@ -397,6 +425,35 @@ FString UPA250Subsystem::GetPendingLetterKind() const
 	const pa250::CorrespondenceItem* C = FindAwaitingLetter(Controller.state());
 	return C ? ToFStr(C->kind) : FString();
 }
+
+FString UPA250Subsystem::GetPendingLetterSourceId() const
+{
+	const pa250::CorrespondenceItem* C = FindAwaitingLetter(Controller.state());
+	return C ? ToFStr(C->source_id) : FString();
+}
+
+FString UPA250Subsystem::GetPendingLetterSourceUrl() const
+{
+	const pa250::CorrespondenceItem* C = FindAwaitingLetter(Controller.state());
+	if (!C || C->source_id.empty())
+	{
+		return FString();
+	}
+	const pa250::CorrespondenceCatalogEntry* E = pa250::find_correspondence_entry(C->source_id);
+	return E ? ToFStr(E->institutional_url) : FString();
+}
+
+bool UPA250Subsystem::OpenPendingLetterSourceUrl() const
+{
+	const FString Url = GetPendingLetterSourceUrl();
+	if (Url.IsEmpty())
+	{
+		return false;
+	}
+	// Display-only: never mutates campaign state. Offline failure is fine.
+	FPlatformProcess::LaunchURL(*Url, nullptr, nullptr);
+	return true;
+}
 bool UPA250Subsystem::BeginDiplomacy(const FString& Faction, FString& OutError)
 {
 	SetPaused(true);
@@ -404,7 +461,14 @@ bool UPA250Subsystem::BeginDiplomacy(const FString& Faction, FString& OutError)
 }
 bool UPA250Subsystem::LeaveDiplomacy(FString& OutError) { PA250_FORWARD(Controller.finish_diplomacy(nullptr, Err)) }
 bool UPA250Subsystem::SaveCampaign(FString& OutError) { PA250_FORWARD(Controller.save(ToStd(SavePath()), Err)) }
-bool UPA250Subsystem::LoadCampaign(FString& OutError) { PA250_FORWARD(Controller.load(ToStd(SavePath()), Err)) }
+bool UPA250Subsystem::LoadCampaign(FString& OutError)
+{
+	if (!EnsureCorrespondenceCatalog(OutError))
+	{
+		return false;
+	}
+	PA250_FORWARD(Controller.load(ToStd(SavePath()), Err))
+}
 
 FString UPA250Subsystem::GetBattleSetupJson() const { return ToFStr(pa250::setup_to_json(Controller.battle_setup())); }
 

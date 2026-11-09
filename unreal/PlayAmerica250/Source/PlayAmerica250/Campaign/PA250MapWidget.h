@@ -1,4 +1,4 @@
-// PA250MapWidget.h — campaign HUD strips + battle broadside only (no legacy Slate map canvas).
+// PA250MapWidget.h — campaign HUD strips + location panel + battle broadside (no legacy Slate map canvas).
 #pragma once
 
 #include "CoreMinimal.h"
@@ -26,6 +26,16 @@ public:
 	void PressLoad();
 	void PressLogistics(const FString& Choice);
 	void PressCommander(const FString& Action);
+	void PressResetOverview();
+	void PressFocusSelected();
+	void PressAboutToggle();
+	void PressDevToggle();
+	void PressEnterBattleAtSelection();
+
+	/** True when a screen point falls on a HUD strip/panel (clicks there must not reach the map). */
+	bool IsPointOverHud(FVector2D ScreenPos) const;
+	bool IsAboutOpen() const { return bShowAbout; }
+	bool IsDevOpen() const { return bShowDev; }
 
 	/** Select / order by province id (used by autoplay and map-actor clicks). */
 	UFUNCTION(BlueprintCallable, Category = "PA250")
@@ -35,6 +45,7 @@ public:
 	void SetStatusMessage(const FString& Msg);
 
 	FString GetSelectedArmyId() const { return SelectedArmyId; }
+	FString GetSelectedProvinceId() const { return SelectedProvinceId; }
 	FString GetMessage() const { return Message; }
 	FString GetLastMessage() const { return LastMessage; }
 
@@ -44,8 +55,8 @@ public:
 	/** Screen-space rects of the top/bottom HUD strips at the current viewport size (for framing tests). */
 	FSlateRect GetTopStripScreenRect() const;
 	FSlateRect GetBottomStripScreenRect() const;
-	static constexpr float TopStripHeightPx = 44.f;
-	static constexpr float BottomStripHeightPx = 52.f;
+	static constexpr float TopStripHeightPx = 72.f;
+	static constexpr float BottomStripHeightPx = 48.f;
 
 	void SetMapActor(APA250ProvinceMapActor* InActor) { MapActor = InActor; }
 
@@ -57,14 +68,24 @@ protected:
 private:
 	UPA250Subsystem* Sub() const;
 	FText HeaderText() const;
+	FText DateText() const;
+	FText TreasuryText() const;
+	FText StoresText() const;
+	FText SupportText() const;
+	FText AboutText() const;
+	FText DisclaimerText() const;
 	FText StatusText() const;
 	FText BattleText() const;
 	FText StaffPanelText() const;
+	FText LocationPanelText() const;
+	bool CanEnterBattleAtSelection() const;
 	void NotifyMapSelectionChanged();
 
 	FString Message;
 	FString LastMessage;
 	FString SelectedArmyId;
 	FString SelectedProvinceId;
+	bool bShowAbout = false;
+	bool bShowDev = false;
 	TWeakObjectPtr<APA250ProvinceMapActor> MapActor;
 };

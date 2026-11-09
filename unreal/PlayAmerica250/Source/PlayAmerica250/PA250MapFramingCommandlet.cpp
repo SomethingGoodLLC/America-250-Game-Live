@@ -62,11 +62,39 @@ int32 UPA250MapFramingCommandlet::Main(const FString& Params)
 		return false;
 	};
 
-	// Plane must match the 4096x3277 presentation texture, not stretch it.
-	if (!FMath::IsNearlyEqual(MapW / MapH, 4096.f / 3277.f, 0.02f))
+	// Plane must match the de Costa image (6761x5314 per decosta_locations.json), not stretch it.
+	if (!FMath::IsNearlyEqual(MapW / MapH, 6761.f / 5314.f, 0.02f))
 	{
-		UE_LOG(LogTemp, Error, TEXT("Framing: plane aspect %.3f != texture aspect %.3f"), MapW / MapH, 4096.f / 3277.f);
+		UE_LOG(LogTemp, Error, TEXT("Framing: plane aspect %.3f != de Costa aspect %.3f"), MapW / MapH, 6761.f / 5314.f);
 		++Failures;
+	}
+	// Opening overview: Boston, Lexington and Concord must be on screen together,
+	// inside the usable band between the HUD strips.
+	{
+		const FVector2D Ctr = APA250ProvinceMapActor::CampaignOverviewCenterUV();
+		const float Zoom = APA250ProvinceMapActor::CampaignOverviewZoom(ViewW, ViewH, MapW, MapH);
+		const float OW = APA250ProvinceMapActor::ZoomedOrthoWidth(ViewW, ViewH, MapW, MapH, Zoom);
+		const float OH = OW * ViewH / ViewW;
+		const float BiasY = (BotH - TopH) * 0.5f / ViewH * OH;
+		const float MaxOffX = FMath::Max(0.f, (MapW - OW) * 0.5f);
+		const float MaxOffY = FMath::Max(0.f, (MapH - OH) * 0.5f);
+		const float CamX = FMath::Clamp((Ctr.X - 0.5f) * MapW, -MaxOffX, MaxOffX);
+		const float CamY = FMath::Clamp((Ctr.Y - 0.5f) * MapH + BiasY, -MaxOffY, MaxOffY);
+		auto ProjectOverview = [&](float U, float V) -> FVector2D {
+			return FVector2D(ViewW * 0.5f + (((U - 0.5f) * MapW - CamX) / OW) * ViewW,
+							 ViewH * 0.5f + (((V - 0.5f) * MapH - CamY) / OH) * ViewH);
+		};
+		const TCHAR* Names[] = {TEXT("concord"), TEXT("lexington"), TEXT("boston")};
+		const FVector2D UVs[] = {FVector2D(0.108f, 0.235f), FVector2D(0.248f, 0.175f), FVector2D(0.565f, 0.49f)};
+		for (int32 i = 0; i < 3; ++i)
+		{
+			const FVector2D P = ProjectOverview(UVs[i].X, UVs[i].Y);
+			if (P.X < 0.f || P.X > ViewW || P.Y < UsableTop || P.Y > UsableBot)
+			{
+				UE_LOG(LogTemp, Error, TEXT("Framing: overview %s at (%.1f,%.1f) off screen / in HUD"), Names[i], P.X, P.Y);
+				++Failures;
+			}
+		}
 	}
 	// Horizontal orientation: east (U=1) right of west, north (V=0) above south.
 	{

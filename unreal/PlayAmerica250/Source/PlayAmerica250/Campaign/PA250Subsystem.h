@@ -47,7 +47,9 @@ public:
 	static UPA250Subsystem* Get(const UObject* WorldContext);
 
 	static FString ScenarioPath();
+	static FString CorrespondenceCatalogPath();
 	static FString SavePath();
+	bool EnsureCorrespondenceCatalog(FString& OutError);
 	static FString TracePath();
 	static FString AutosaveDir();
 
@@ -118,6 +120,10 @@ public:
 	FString GetPendingLetterSubject() const;
 	FString GetPendingLetterBody() const;
 	FString GetPendingLetterKind() const;
+	FString GetPendingLetterSourceId() const;
+	FString GetPendingLetterSourceUrl() const;
+	/** Opens the institutional URL. Never changes campaign state. */
+	bool OpenPendingLetterSourceUrl() const;
 
 	UFUNCTION(BlueprintCallable, Category = "PA250")
 	bool SaveCampaign(FString& OutError);

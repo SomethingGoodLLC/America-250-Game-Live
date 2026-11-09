@@ -2,6 +2,32 @@
 
 **Vertical slice M0–M8 complete. Battle Feel B1–B4 complete.** Nothing committed or stashed; all changes are uncommitted in the working tree.
 
+## 2026-11-08 — Campaign map presentation redesign
+- **Markers:** TextRender `◇` glyphs (rendered as solid blocks, incl. over Boston) replaced with small diamond mesh markers (muted red/blue/charcoal by owner, shape + caption text, never colour alone) plus a selection halo. Captions: majors only at overview, all at zoom ≥3.2 or when selected. Army counters show only the short name at rest; strength/units on selection. Counters offset south-east of the town diamond.
+- **Framing:** opening view is the Boston–Cambridge–Lexington–Concord overview (`CampaignOverviewCenterUV`/`CampaignOverviewZoom`, ≈2.4× at 1080p), not the full sheet. `Campaign overview` + `Focus selected` actions; cursor-centred wheel zoom (`ZoomAtUV`); max zoom 8→6.
+- **HUD:** compact grouped top bar (date/pause/speed, Treasury, Stores, Support — each with a tooltip); grouped selection panel (Held by / Selected force / Forces here / Reports; enemy strength stays unreported); bottom bar keeps only status + time controls; secondary utilities moved to a small right-hand stack. Permanent disclaimer replaced by an `About this map` panel (source + July-1775 caveat preserved). Raw diagnostics behind a `Dev` toggle. HUD clicks/drags/wheel no longer reach the map (`IsPointOverHud` guard); Escape closes About, then clears selection, never touches pause.
+- **Verified (this Mac):** Editor Mac Development **Succeeded** (one UBA-cache failure required a `-NoUBA` build). Commandlets `PA250.Map.Framing` (updated: de Costa aspect + Boston/Lexington/Concord overview visibility), `PA250.Map.Picking`, `PA250.Map.SingleLayer`, `PA250.Campaign.Clock` passed; sim ctest passed. Screenshots: `Saved/Screenshots/MacEditor/HighresScreenshot00011.png` (1920×1080, no UI) and `ScreenShot00001.png` (1280×720 with UI, Lexington selected via probe).
+- **Limits:** hover tooltips on 3D markers not implemented (resource groups have Slate tooltips); unverified hotspot UVs unchanged; Fight→return, save/load UI clicks and battle entry not re-exercised this pass (sim save/load covered by ctest/autoplay paths untouched). A concurrent session was editing/building during this pass; no processes of theirs were touched.
+
+## 2026-11-08 — Opening-war correspondence (L1–L7, D8)
+- **Catalog:** [`unreal/PA250Sim/data/opening_war_correspondence.json`](unreal/PA250Sim/data/opening_war_correspondence.json) — eight institutional URLs; historical metadata separate from playable adaptation; `text_kind: paraphrase_from_report` (no claimed verbatim excerpts; no embedded manuscript scans).
+- **Sim:** `PersonnelCommitment` (paper units held out of `gate_tickets_by_stores` without touching arms/readiness/morale); disclosed `DonorReserve` + `Shipment` (commit ≠ receive); `CorrespondenceItem` gains `source_id` / `event_id` / `decision_id` / `decision_applied`; schema **2** defaults on load. Eligibility and delivery use existing `advance_hour` / map speed only (no skip-to-date UI).
+- **Playable:** L3 (May 4 shelter — no guaranteed `local_support`); L5 (fictional subsequent forage/boats after May 24 + L3 resolved); L7 (Jun 25 logistics relay after `chapter_continental` — transfer depletes `ny_powder` donor, credits continental only on shipment delivery; procurement and conserve distinct).
+- **Reference-only:** L1, L2 (retrospective exhibit for Patriots — never live intel), L4, L6, D8 — acknowledge only; source view / LaunchURL never mutates state.
+- **UI:** Staff panel dual panes in letter body; L3/L5/L7 choice rows; **View original source**; autoplay answers source letters without stalling.
+- **Verified (this Mac):** `pa250sim_tests` **9111 checks, 0 failed** (incl. `opening_war_l3_loop`, `opening_war_l5_l7`); golden `clock_golden_1775.json` regenerated (`9c697d6690de4340`). `PlayAmerica250Editor` Mac Development **Succeeded** (forced recompile of PA250SimCore / MapWidget / Subsystem / CampaignGameMode). `-run=PA250Battle` checks=272 fails=0. PIE staff-panel / slice autoplay **not re-run** this pass.
+- **Untouched:** reload, volley, de Costa map actor.
+- **Limits:** donor reserve is a disclosed gameplay abstraction (not per-province warehouses); manuscript image rights not cleared (link-out only); Crown L2 live playable deferred; PIE dual-pane not exercised.
+
+## 2026-11-08 — De Costa–Hall campaign overview
+- **Visual:** `L_Campaign` uses the July 1775 De Costa–Hall engraving as the sole overview (`T_DeCostaBostonConcord` / JPEG fallback). Stylized Boston1775 mapgen stays in-tree but is not the player-facing layer when de Costa loads.
+- **Source:** `Content/PA250/Source/M01-de-costa-boston-concord.jpg` — LOC IIIF full JPEG of the same plate (`6761×5314`). Planned NYPL download size `4920×3966` was not on disk; rights note in `decosta_locations.json` (US public domain; not worldwide clearance).
+- **Hotspots:** `Content/Map/Boston1775/Raw/decosta_locations.json` — all **13** provinces, pixel hit radii, `verified` flag (runtime always selectable). Opening towns visually checked on crops: Boston, Cambridge, Lexington, Menotomy `verified: true`; others draft.
+- **Picking / UI:** plane hit → UV → nearest hotspot (not ProvinceId color). Diamond+caption markers; army tokens from `CampaignState` only. HUD disclaimer + location panel; Enter battle only when `pending_battle` matches selection (`PressFight`). Pan = MMB or LMB-drag (≥5 px); wheel zoom; Reset view. Camera manual exposure / tone curve off in de Costa mode. Max zoom raised to 8×.
+- **Import:** `tools/ue/build_map_assets.py` gains `mips` / `bc7` / `never_stream`; `Scripts/import_decosta.py`. Inspected: sRGB, bilinear, `TMGS_SIMPLE_AVERAGE`, `TC_BC7`, never_stream. Non-POT source; Python cannot read mip count via `platform_data`. Runtime build logged ~1.2 GiB estimate while encoding — watch Mac memory; optional later resize.
+- **Gitignore:** `!unreal/PlayAmerica250/Content/Map/Boston1775/Raw/*.json` so presentation/hotspot JSON is tracked.
+- **Verified this pass:** Editor Mac Development **Succeeded**. `-run=PA250MapSingleLayer` **passed**. `-game L_Campaign` log: `display=T_DeCostaBostonConcord decosta=1`, `locations loaded (13 provinces)`. Probe `py Scripts/...` path must be absolute from `-game` cwd. BC7-vs-BC1 zoom comparison and full Fight→return not re-run in this pass. GrandStrategyMac unused.
+
 ## 2026-11-08 — April campaign loop (Stage A–C foundations)
 - **Sim:** `FactionStores` (powder/arms/provisions), `StaffState` + correspondence queue (one clerk), `CampaignProgress` (aftermath, Concord follow-up, chapter gates, Knox project, detached commander). Schema stays **2**; new fields default on load.
 - **Loop:** battle → `apply_battle_result` expends stores / sets aftermath → `EventPopup` letter → purchase / request_assistance / requisition / capacity_investment → timed delivery (commit ≠ receive) → ticket gating in `build_battle_setup` changes the next fight. Concord follow-up marches seeded after a logistics choice.
@@ -1268,6 +1294,12 @@ Context: Lexington Green was a British win (77 militia vs ~240 light infantry). 
 - `-run=PA250Visuals` failures=0. `-run=PA250Battle` checks=272 fails=0. `scripts/run_slice_autoplay.sh` PASSED (Continental win).
 - `-PA250Preview=smoke` did not capture. The bare `UnrealEditor` binary exits and relaunches the `.app`, and that launch died with SIGBUS in the Mac cursor image load while another UnrealBuildTool mutex was already held. No new stills.
 
+## 2026-11-08 — Concord kicked back to map (tickets_exhausted)
+- **Symptom:** North Bridge / Concord fight returned to campaign after ~30s, then rematches ended instantly. Log: `PA250 battle over: BRITISH victory (tickets_exhausted)` with `flips=2 bleed=0`; rematches same frame as `scenario_preset=concord_bridge`.
+- **Cause:** stores gating could leave Continental at **0 tickets**. `CheckTicketExhaustion` treated `Initial==0 && Alive==0` as out on the first Tick (before spawn). Not a map travel bug; not the skinning assert (separate, earlier crash at 18:02).
+- **Fix:** floor gated tickets to at least 1 unit while the army still exists; exhaustion for zero-ticket sides only after `EverFielded`; clear scenario `DebugSetHolder` flip flags so setup is not counted as captures. Log starting ticket pools.
+- Sim tests updated; UE Mac rebuild left to the player (active build).
+
 ## 2026-11-08 — Skinning crash + mouse/trackpad look
 
 - **Crash** (`Assertion failed: IsRotationNormalized()` in `UpdateRefToLocalMatricesInner`, three reports, one a frame after a respawn): `AMusketWeapon::PoseSupportHand` const-cast the body's `GetComponentSpaceTransforms()` from an actor tick and swapped the array (`CS = MoveTemp(Posed)`). On a freshly spawned or re-meshed soldier that ran before its tick prerequisite took effect, racing the parallel animation task.
@@ -1275,5 +1307,6 @@ Context: Lexington Green was a British win (77 militia vs ~240 light infantry). 
   - Measured: the stock spot is 76 cm from the shoulder and the arm reaches 52 cm in the unarmed idle carry, so the straightened arm stops 24 cm short (same as before). Hand on the stock needs a musket carry/aim body pose.
 - **Look dead on trackpad**: look deltas only reach `IA_Look` while the game viewport has mouse capture (`FSceneViewport::OnMouseMove`). PIE starts without it (`GameGetsMouseControl=False`), and only a click inside the viewport captured. Moving (WASD) now re-takes capture through `FInputModeGameOnly` when the viewport has focus and no UI cursor is shown (`ARFCharacter::EnsureGameMouseCapture`; logs `PA250 input: ... took it`).
 - Horizontal look ×0.6 relative to vertical (`ARFCharacter::YawLookScale`); left/right was too fast.
+- Trackpad still too fast after that: default `pa250.LookSensitivity` 0.35 → 0.2 (horizontal stays ×0.6 on top). `[` / `]` still adjust and save it.
 - Verified: build Succeeded; `-run=PA250Visuals` failures=0 (new: left arm solved, every body bone finite with unit rotation); `-run=PA250Battle` checks=272 fails=0.
 - Not verified in PIE: that the crash is gone during real play, or the look feel on a trackpad. The commandlets run with `-nullrhi`, so GPU skinning (where the assert fires) never runs there.

@@ -57,6 +57,17 @@ int32 UPA250MapSingleLayerCommandlet::Main(const FString& Params)
 		UE_LOG(LogTemp, Error, TEXT("SingleLayer: ProvinceMapActor still binds legacy campaign map texture"));
 		return 5;
 	}
+	if (!ActorText.Contains(TEXT("T_DeCostaBostonConcord")) && !ActorText.Contains(TEXT("M01-de-costa-boston-concord")))
+	{
+		UE_LOG(LogTemp, Error, TEXT("SingleLayer: ProvinceMapActor missing de Costa display texture binding"));
+		return 8;
+	}
+	const FString LocJson = FPaths::ProjectContentDir() / TEXT("Map/Boston1775/Raw/decosta_locations.json");
+	if (!FPaths::FileExists(LocJson))
+	{
+		UE_LOG(LogTemp, Error, TEXT("SingleLayer: missing decosta_locations.json"));
+		return 9;
+	}
 
 	// 5) Class defaults: constructing the actor CDO must not attach legacy-named components.
 	APA250ProvinceMapActor* CDO = GetMutableDefault<APA250ProvinceMapActor>();

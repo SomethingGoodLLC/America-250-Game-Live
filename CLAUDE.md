@@ -40,9 +40,40 @@ An original Unreal Engine 5.8 game. C++ for the authoritative simulation, Bluepr
 - Log player and model text with timestamps; keep content-safety filter on provider output.
 - Do not create git commits or stashes unless asked.
 
+## Plans
+A plan is not final until it:
+- Names each prerequisite file and confirms it exists on disk. If one is missing, the plan stops at that step; no substitutes, no guessed values.
+- Lists every code consumer of any data source it replaces (grep for it). For example, a new map image affects labels, tokens, zoom centering, HUD placement and gating counts, not only picking.
+- Covers every sim entity the change touches (all 13 provinces, all armies), or says why a subset is safe.
+- Checks each new file against ignore rules: `git check-ignore -v --no-index <path>`. The root `.gitignore` ignores `*.json`.
+- Uses only symbols, paths and settings verified in the current code.
+- States pass criteria as observable evidence (log line, screenshot, test name) and how to produce it on this Mac.
+- Names the locked decisions it touches. It reports only what was actually run; anything else is marked unverified.
+
+## Unreal on this Mac
+- Verify in a real window: editor binary, `-game -windowed`, Metal. Take screenshots after at least 10 s, never at frame 5. `HighResShot` omits Slate UI; use `Shot showui` for HUD checks.
+- `-ExecutePythonScript` is refused in `-game`; use `-ExecCmds="py <script>"`. A probe can set the cursor and call a click handler for scripted clicks.
+- Unlit map materials need fixed exposure (manual exposure, tone curve 0, no bloom), or colors wash out or darken.
+- Perspective cameras use the engine default `AspectRatio_MaintainYFOV`: FOV is horizontal only at 16:9.
+- Textures: confirm mips were generated (non-power-of-two sizes may get none). `tools/ue/build_map_assets.py` `_import_texture` always disables mips.
+- Python scripts that need Pillow run with `/opt/homebrew/bin/python3`.
+- Never write a skeletal mesh's bones from game code (no `const_cast` on `GetComponentSpaceTransforms()`, no editing bone arrays in an actor or component tick). It races the parallel animation task and crashes skinning with `Assertion failed: IsRotationNormalized()` in `UpdateRefToLocalMatricesInner`. Bone edits (IK, aim) go inside pose evaluation: `FPA250SoldierAnimProxy` in `RF/PA250SoldierAnimInstance.cpp`. Game code only publishes targets.
+- Mouse/trackpad look only gets deltas while the game viewport holds mouse capture. PIE starts without it (`GameGetsMouseControl=False`). Keep `ARFCharacter::EnsureGameMouseCapture`; never assume the player clicked the viewport (they may fire with F). If look is dead, check the log for `PA250 input:`.
+- Build with the editor closed. With it open, UBT writes `libUnrealEditor-PlayAmerica250-NNNN.dylib`, which the running editor does not load, so playtests still run the old code. Before blaming a crash on new code, compare the editor's start time with the dylib's timestamp.
+- Commandlets run `-nullrhi`, so GPU skinning (where bone asserts fire) never runs there. A bone-safety fix is verified only in a rendered PIE or `-game` run.
+
+## Map pipeline (`ports/GrandStrategyMac`, TestHost only)
+- The purchased InteractiveMap plugin is read-only. Fixes go in `TestHost/Source/PortHost`; map assets go under `/Game/<MapName>`. The repository must stay private (`port-changes.patch` holds plugin source).
+- Lookup texture: exact unique RGB per region, never filtered. Import as UserInterface (`TC_EditorIcon`), no mips, sRGB off, nearest, never stream; anything else fails silently (white map).
+- MapData JSON keys match the USTRUCT fields exactly, case-sensitive: `ID`, `Name`, `Area`, `Region`, `StructType`. A mismatch gives `NO NAME` with no error.
+- On Metal the plugin's GPU recolor renders black and its political materials sample whole-Earth textures. Use a project-local unlit material: display texture plus lookup-matched highlight.
+- `UMapObject::PostLoad` (editor) needs the lookup texture preloaded, or the level crashes on load. `PortHost.cpp` preloads only the colonies texture by path; generalize it before adding a second map.
+- The sample HUD's debug key Q crashes on custom maps.
+
 ## Docs
 - Negotiation docs live only in `services/negotiation/README.md`.
-- `PROGRESS.md` at the repo root is the only status file. No other guide files.
+- `PROGRESS.md` at the repo root is the only status file. No other guide files. Exception: `ports/GrandStrategyMac` keeps `PORT_STATUS.md`, `HANDOFF.md` and one `README.md` per map.
+- `.cursorrules` is a symlink to this file. Edit only `CLAUDE.md`.
 
 ## File protection
 - Never delete `.env`, `.env.local`, `.env.production`, `config.json`, `secrets.yaml` or similar. Never print secret values. Preserve existing values.
