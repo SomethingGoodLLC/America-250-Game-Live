@@ -23,6 +23,10 @@ public:
 	UPROPERTY(VisibleAnywhere)
 	TObjectPtr<UStaticMeshComponent> FlagMesh;
 
+	/** Light bar across the disc so an army reads as a round counter, not a town diamond. */
+	UPROPERTY(VisibleAnywhere)
+	TObjectPtr<UStaticMeshComponent> MarkMesh;
+
 	UPROPERTY(VisibleAnywhere)
 	TObjectPtr<UTextRenderComponent> StrengthText;
 

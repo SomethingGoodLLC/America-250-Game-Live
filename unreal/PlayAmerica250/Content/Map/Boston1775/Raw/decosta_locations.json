@@ -9,7 +9,7 @@
     "nypl_item": "https://digitalcollections.nypl.org/items/46abf040-c5ed-012f-b389-58d385a7bc34",
     "loc_item": "https://www.loc.gov/item/gm71002447/",
     "file": "Content/PA250/Source/M01-de-costa-boston-concord.jpg",
-    "note": "Working source is the LOC IIIF full JPEG of the same July 1775 De Costa–Hall plate (6761x5314). The planned NYPL download size 4920x3966 was not available on this machine."
+    "note": "Working source is the LOC IIIF full JPEG of the same July 1775 De Costa–Hall plate (6761x5314). The planned NYPL download size 4920x3966 was not available on this machine. Working copy padded from 6761x5314 to 6768x5316 (multiple of 4 for BC7 blocks) with edge-pixel replication; hotspot UVs rescaled by (0.998966, 0.999624)."
   },
   "rights": {
     "status_us": "public_domain_under_us_law",
@@ -17,8 +17,8 @@
     "attribution": "Library of Congress Geography and Map Division; NYPL Digital Collections item 46abf040-c5ed-012f-b389-58d385a7bc34"
   },
   "image_size": {
-    "width": 6761,
-    "height": 5314
+    "width": 6768,
+    "height": 5316
   },
   "uv_origin": "top-left, v down",
   "disclaimer": "July 1775 publication includes post–April 19 siege content. Printed soldiers, camps, and battle annotations are historical artwork — not live units or verified April 19 positions.",
@@ -27,8 +27,8 @@
       "id": "concord",
       "map_index": 1,
       "marker_uv": [
-        0.143,
-        0.306
+        0.142852,
+        0.305885
       ],
       "hit_radius_px": 90,
       "label_offset_uv": [
@@ -41,8 +41,8 @@
       "id": "lincoln",
       "map_index": 2,
       "marker_uv": [
-        0.195,
-        0.238
+        0.194798,
+        0.23791
       ],
       "hit_radius_px": 90,
       "label_offset_uv": [
@@ -55,8 +55,8 @@
       "id": "lexington",
       "map_index": 3,
       "marker_uv": [
-        0.248,
-        0.175
+        0.247743,
+        0.174934
       ],
       "hit_radius_px": 90,
       "label_offset_uv": [
@@ -69,8 +69,8 @@
       "id": "menotomy",
       "map_index": 4,
       "marker_uv": [
-        0.345,
-        0.335
+        0.344643,
+        0.334874
       ],
       "hit_radius_px": 90,
       "label_offset_uv": [
@@ -83,8 +83,8 @@
       "id": "cambridge",
       "map_index": 5,
       "marker_uv": [
-        0.4,
-        0.42
+        0.399586,
+        0.419842
       ],
       "hit_radius_px": 90,
       "label_offset_uv": [
@@ -97,8 +97,8 @@
       "id": "charlestown",
       "map_index": 6,
       "marker_uv": [
-        0.568,
-        0.398
+        0.567413,
+        0.39785
       ],
       "hit_radius_px": 90,
       "label_offset_uv": [
@@ -111,8 +111,8 @@
       "id": "medford",
       "map_index": 7,
       "marker_uv": [
-        0.448,
-        0.178
+        0.447537,
+        0.177933
       ],
       "hit_radius_px": 90,
       "label_offset_uv": [
@@ -125,8 +125,8 @@
       "id": "watertown",
       "map_index": 8,
       "marker_uv": [
-        0.358,
-        0.475
+        0.35763,
+        0.474821
       ],
       "hit_radius_px": 90,
       "label_offset_uv": [
@@ -139,8 +139,8 @@
       "id": "brookline",
       "map_index": 9,
       "marker_uv": [
-        0.445,
-        0.54
+        0.44454,
+        0.539797
       ],
       "hit_radius_px": 90,
       "label_offset_uv": [
@@ -153,8 +153,8 @@
       "id": "roxbury",
       "map_index": 10,
       "marker_uv": [
-        0.535,
-        0.592
+        0.534447,
+        0.591777
       ],
       "hit_radius_px": 90,
       "label_offset_uv": [
@@ -167,8 +167,8 @@
       "id": "boston",
       "map_index": 11,
       "marker_uv": [
-        0.565,
-        0.49
+        0.564416,
+        0.489816
       ],
       "hit_radius_px": 90,
       "label_offset_uv": [
@@ -181,8 +181,8 @@
       "id": "dorchester",
       "map_index": 12,
       "marker_uv": [
-        0.558,
-        0.598
+        0.557423,
+        0.597775
       ],
       "hit_radius_px": 90,
       "label_offset_uv": [
@@ -195,8 +195,8 @@
       "id": "chelsea",
       "map_index": 13,
       "marker_uv": [
-        0.678,
-        0.343
+        0.677299,
+        0.342871
       ],
       "hit_radius_px": 90,
       "label_offset_uv": [

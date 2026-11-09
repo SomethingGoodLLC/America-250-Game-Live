@@ -12,26 +12,36 @@ APA250ArmyToken::APA250ArmyToken()
 
 	FlagMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Flag"));
 	FlagMesh->SetupAttachment(Root);
-	static ConstructorHelpers::FObjectFinder<UStaticMesh> Plane(TEXT("/Engine/BasicShapes/Plane"));
+	MarkMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Mark"));
+	MarkMesh->SetupAttachment(Root);
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> Disc(TEXT("/Engine/BasicShapes/Cylinder"));
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> Bar(TEXT("/Engine/BasicShapes/Cube"));
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> FlagMat(
 		TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
-	if (Plane.Succeeded())
+	if (Disc.Succeeded())
 	{
-		FlagMesh->SetStaticMesh(Plane.Object);
+		FlagMesh->SetStaticMesh(Disc.Object);
 		if (FlagMat.Succeeded())
 		{
-			// Plane's default slot renders as grey checker; tint via this material.
 			FlagMesh->SetMaterial(0, FlagMat.Object);
 		}
-		// Tall pennant / flag rectangle. The token actor is pitched flat for its
-		// text, which would turn this plane face-down and cull it; keep the flag's
-		// world rotation absolute so it lies in the map XY plane facing +Z.
-		FlagMesh->SetRelativeScale3D(FVector(0.65f, 0.45f, 1.f));
-		FlagMesh->SetAbsolute(false, false, true);
-		FlagMesh->SetWorldRotation(FRotator::ZeroRotator);
-		// North of the anchor (token local -Z is screen south, so +Z is north),
-		// clear of the province label that often shares the anchor.
-		FlagMesh->SetRelativeLocation(FVector(0.f, 0.f, 38.f));
+		// Round counter. Towns are diamond rings; this must not be another diamond
+		// or a flat rectangle. Cylinder stands in Z, so a top-down camera sees a circle.
+		// Scale stays large enough to pass the framing check (X >= 0.5, Y >= 0.35).
+		FlagMesh->SetRelativeScale3D(FVector(0.55f, 0.55f, 0.04f));
+		FlagMesh->SetRelativeLocation(FVector::ZeroVector);
+		FlagMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	}
+	if (Bar.Succeeded())
+	{
+		MarkMesh->SetStaticMesh(Bar.Object);
+		if (FlagMat.Succeeded())
+		{
+			MarkMesh->SetMaterial(0, FlagMat.Object);
+		}
+		MarkMesh->SetRelativeScale3D(FVector(0.32f, 0.08f, 0.04f));
+		MarkMesh->SetRelativeLocation(FVector(0.f, 0.f, 2.f));
+		MarkMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	}
 
 	NameText = CreateDefaultSubobject<UTextRenderComponent>(TEXT("Name"));
@@ -41,6 +51,7 @@ APA250ArmyToken::APA250ArmyToken()
 	NameText->SetVerticalAlignment(EVRTA_TextCenter);
 	NameText->SetWorldSize(24.f);
 	NameText->SetTextRenderColor(FColor(20, 12, 4));
+	NameText->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 
 	StrengthText = CreateDefaultSubobject<UTextRenderComponent>(TEXT("Strength"));
 	StrengthText->SetupAttachment(Root);
@@ -49,14 +60,16 @@ APA250ArmyToken::APA250ArmyToken()
 	StrengthText->SetVerticalAlignment(EVRTA_TextCenter);
 	StrengthText->SetWorldSize(16.f);
 	StrengthText->SetTextRenderColor(FColor(28, 20, 10));
+	StrengthText->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 }
 
 void APA250ArmyToken::Configure(const FString& InArmyId, const FString& Faction, const FString& DisplayName,
 								const FString& StrengthLabel, int32 StackIndex, bool bPlayerForce, bool bSelected)
 {
 	ArmyId = InArmyId;
-	// A solid rectangular flag is an army. Towns are hollow diamonds, so the two
-	// never share a shape. The side word is always printed: colour is not the only cue.
+	// A round counter with a bar is an army. Towns stay hollow diamonds.
+	// The side word is always printed: colour is not the only cue.
+	// No collision: the map plane receives the click, and the map hit-tests this actor.
 	const bool bBrit = Faction.Equals(TEXT("british"), ESearchCase::IgnoreCase);
 	const FString Side = bPlayerForce ? TEXT("Yours") : (bBrit ? TEXT("British") : Faction);
 	const FColor Ink = bBrit ? FColor(145, 24, 18) : FColor(16, 48, 130);
@@ -68,18 +81,34 @@ void APA250ArmyToken::Configure(const FString& InArmyId, const FString& Faction,
 	StrengthText->SetTextRenderColor(Ink);
 	StrengthText->SetWorldSize(bSelected ? 16.f : 18.f);
 	StrengthText->SetVisibility(true);
-	// Re-assert after spawn/registration: constructor-time world rotation can be
-	// reset before the component registers, which left the flag face-down.
-	// Keep the constructor's large flag (0.65 x 0.45). A smaller runtime scale
-	// disappeared into the town diamonds.
-	FlagMesh->SetAbsolute(false, false, true);
+	NameText->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	StrengthText->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	// Absolute world transform: the token actor is pitched for its text, which
+	// would squash a relative cylinder into a sliver and move it off the click spot.
+	const FVector DiscScale = bSelected ? FVector(0.68f, 0.68f, 0.05f) : FVector(0.55f, 0.55f, 0.04f);
+	const FVector Here = GetActorLocation();
+	FlagMesh->SetAbsolute(true, true, true);
+	FlagMesh->SetWorldLocation(Here + FVector(0.f, 0.f, 1.f));
 	FlagMesh->SetWorldRotation(FRotator::ZeroRotator);
-	FlagMesh->SetRelativeScale3D(bSelected ? FVector(0.78f, 0.54f, 1.f) : FVector(0.65f, 0.45f, 1.f));
-	FlagMesh->SetRelativeLocation(FVector(0.f, 0.f, 36.f));
+	FlagMesh->SetWorldScale3D(DiscScale);
+	FlagMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	if (MarkMesh)
+	{
+		MarkMesh->SetAbsolute(true, true, true);
+		MarkMesh->SetWorldLocation(Here + FVector(0.f, 0.f, 3.f));
+		MarkMesh->SetWorldRotation(FRotator::ZeroRotator);
+		MarkMesh->SetWorldScale3D(bSelected ? FVector(0.40f, 0.09f, 0.05f) : FVector(0.32f, 0.08f, 0.04f));
+		MarkMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		const FLinearColor Bar = FLinearColor(0.93f, 0.88f, 0.74f);
+		if (UMaterialInstanceDynamic* BarMid = MarkMesh->CreateAndSetMaterialInstanceDynamic(0))
+		{
+			BarMid->SetVectorParameterValue(TEXT("Color"), Bar);
+			BarMid->SetVectorParameterValue(TEXT("BaseColor"), Bar);
+		}
+	}
 	SetActorScale3D(FVector::OneVector);
 
-	// Bright faction colour on the flag; the printed side word carries the same fact.
-	// No flag or insignia is claimed as authentic.
+	// Bright faction colour on the disc. No flag or insignia is claimed as authentic.
 	const FLinearColor Color = bBrit ? FLinearColor(0.82f, 0.14f, 0.11f) : FLinearColor(0.12f, 0.34f, 0.82f);
 	if (UMaterialInterface* Base = FlagMesh->GetMaterial(0))
 	{

@@ -21,6 +21,7 @@
 #include "Modules/ModuleManager.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
+#include "PixelFormat.h"
 #include "TextureResource.h"
 #include "UObject/ConstructorHelpers.h"
 #include "UObject/UObjectIterator.h"
@@ -177,6 +178,14 @@ void APA250ProvinceMapActor::BeginPlay()
 void APA250ProvinceMapActor::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
+	static bool bLoggedResidentTexture = false;
+	if (!bLoggedResidentTexture && DisplayTex && DisplayTex->GetSizeX() > 32)
+	{
+		bLoggedResidentTexture = true;
+		const int32 NumMips = DisplayTex->GetPlatformData() ? DisplayTex->GetPlatformData()->Mips.Num() : -1;
+		UE_LOG(LogTemp, Display, TEXT("PA250 display texture resident: %dx%d format=%s mips=%d"), DisplayTex->GetSizeX(),
+			   DisplayTex->GetSizeY(), GetPixelFormatString(DisplayTex->GetPixelFormat()), NumMips);
+	}
 	RebuildStateTexture();
 	RefreshHotspotVisibility();
 	RefreshTownOwnership();
@@ -325,6 +334,13 @@ void APA250ProvinceMapActor::LoadTextures()
 	UE_LOG(LogTemp, Display, TEXT("PA250 map assets: mat=%s display=%s decosta=%d"),
 		BaseMaterial ? *BaseMaterial->GetName() : TEXT("NONE"), DisplayTex ? *DisplayTex->GetName() : TEXT("NONE"),
 		bDeCostaMode ? 1 : 0);
+	if (DisplayTex)
+	{
+		const int32 NumMips = DisplayTex->GetPlatformData() ? DisplayTex->GetPlatformData()->Mips.Num() : -1;
+		UE_LOG(LogTemp, Display, TEXT("PA250 display texture: %dx%d format=%s mips=%d never_stream=%d"),
+			   DisplayTex->GetSizeX(), DisplayTex->GetSizeY(), GetPixelFormatString(DisplayTex->GetPixelFormat()), NumMips,
+			   DisplayTex->NeverStream ? 1 : 0);
+	}
 
 	// ProvinceIdLookup stays available for tooling; de Costa picking uses hotspot JSON instead.
 	const FString BinPath = FPaths::ProjectContentDir() / TEXT("Map/Boston1775/Raw/ProvinceIdLookup.bin");
@@ -706,6 +722,43 @@ FString APA250ProvinceMapActor::ProvinceAtWorld(const FVector& World) const
 	return ProvinceAtUV(UV);
 }
 
+FString APA250ProvinceMapActor::ArmyAtWorld(const FVector& World) const
+{
+	// Disc is 55uu across. A click on the counter, including its rim, must count
+	// even when that point is outside the town hotspot.
+	FString Best;
+	float BestDist = 48.f;
+	for (const APA250ArmyToken* Tok : ArmyTokens)
+	{
+		if (!IsValid(Tok))
+		{
+			continue;
+		}
+		const float Dist = FVector::Dist2D(Tok->GetActorLocation(), World);
+		if (Dist < BestDist)
+		{
+			BestDist = Dist;
+			Best = Tok->ArmyId;
+		}
+	}
+	return Best;
+}
+
+FString APA250ProvinceMapActor::ProvinceForArmy(const FString& ArmyId) const
+{
+	UPA250Subsystem* S = Sub();
+	if (!S || ArmyId.IsEmpty() || !S->GetController().has_campaign())
+	{
+		return FString();
+	}
+	const auto It = S->GetState().armies.find(TCHAR_TO_UTF8(*ArmyId));
+	if (It == S->GetState().armies.end())
+	{
+		return FString();
+	}
+	return ToFStr(It->second.province);
+}
+
 void APA250ProvinceMapActor::SpawnLabels()
 {
 	for (UTextRenderComponent* C : ProvinceLabels)
@@ -863,9 +916,10 @@ void APA250ProvinceMapActor::RefreshArmyTokens()
 		}
 		FActorSpawnParameters Params;
 		Params.Owner = this;
-		// Clear of the town ring. The flag is a 65uu rectangle; a 32uu nudge
-		// left it sitting on the town diamond, so the army read as another town.
-		const FVector Loc = UVToWorld(*UV, 12.f) + FVector(78.f + Stack * 40.f, 36.f + Stack * 22.f, Stack * 2.f);
+		// Beside the town ring, close enough that the counter and the town are one place.
+		// The old 78uu shove put the symbol outside the town's click radius, and the
+		// mesh ate the trace, so the army could not be selected.
+		const FVector Loc = UVToWorld(*UV, 14.f) + FVector(46.f + Stack * 36.f, 18.f + Stack * 16.f, Stack * 2.f);
 		APA250ArmyToken* Tok =
 			World->SpawnActor<APA250ArmyToken>(APA250ArmyToken::StaticClass(), Loc, APA250ProvinceMapActor::FlatMapTextRotation(), Params);
 		if (!Tok)

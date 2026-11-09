@@ -19,6 +19,15 @@
 - **Untouched:** reload, volley, de Costa map actor.
 - **Limits:** donor reserve is a disclosed gameplay abstraction (not per-province warehouses); manuscript image rights not cleared (link-out only); Crown L2 live playable deferred; PIE dual-pane not exercised.
 
+## 2026-11-08 — Map redesign continuation: hotspots, texture, fight-return
+- **Hotspots verified:** all 9 previously-draft UVs checked on JPG crops and moved off printed troops/camps/water onto the engraved town buildings/labels in [`decosta_locations.json`](unreal/PlayAmerica250/Content/Map/Boston1775/Raw/decosta_locations.json): concord (0.143,0.306), lincoln (0.195,0.238; no engraved town — open road midway), charlestown (0.568,0.398), medford (0.448,0.178), watertown (0.358,0.475), brookline (0.445,0.540), roxbury (0.535,0.592), dorchester (0.558,0.598), chelsea (0.678,0.343). All 13 now `verified: true`.
+- **Texture:** asset queried in-editor: 6761×5314, `TC_BC7`, `TMGS_SIMPLE_AVERAGE` (mips), never-stream, sRGB, no size clamp. Decision: keep full resolution (zoom legibility of engraved text); BC7+mips ≈ 48 MB GPU, not the ~1.2 GiB uncompressed estimate, which only applies to the JPEG fallback path if the asset is missing.
+- **Fight-return:** `-PA250Autoplay` run repeatedly passed "autoplay battle: BattleResult applied" and "aftermath: at least one battle recorded" (march to contact → battle → return to campaign). The later diplomacy leg fails with "service reachable (state became Unavailable)": with the negotiation service up (`/health` ok), session creation still hit the client's connect timeout, so the autoplay save/load leg after diplomacy was not reached. Sim save/load round-trip remains covered by `pa250sim_tests`.
+- **Screenshots:** before [`ScreenShot00000.png`](unreal/PlayAmerica250/Saved/Screenshots/MacEditor/ScreenShot00000.png) (1280×900, pre-redesign probe, Lexington selected) vs after [`ScreenShot00002.png`](unreal/PlayAmerica250/Saved/Screenshots/MacEditor/ScreenShot00002.png) (same viewport/state) and small-window [`ScreenShot00003.png`](unreal/PlayAmerica250/Saved/Screenshots/MacEditor/ScreenShot00003.png) (1280×720). A concurrent session's round-counter/legend work is also present in the current tree and preserved.
+- **Verified:** Editor build Succeeded; `PA250.Map.Framing`, `PA250.Map.Picking`, `PA250.Map.SingleLayer` passed; sim ctest passed.
+- **Texture-memory (completed):** working JPG padded 6761×5314 → 6768×5316 (multiple of 4, edge-pixel replication; UVs rescaled, `image_size` updated, note in JSON). Re-imported BC7. Runtime log confirms resident texture `6768x5316 format=PF_BC7 mips=13` (new `PA250 display texture resident` log in `PA250ProvinceMapActor`). BC7 vs BC1 compared on Mac: BC1 import logged `PF_DXT1 mips=13`; screenshot diff on a text-dense crop: mean max-channel diff 2.34/255, 0.38% of pixels differing by >16 — near-identical at opening framing. Decision: keep BC7 (≈48 MB GPU with mips vs ≈24 MB BC1) for fine engraved linework; BC7 restored and re-verified after the comparison.
+- **Fight-return save (completed):** in-game `-PA250Autoplay` passed ApplyBattleResult + aftermath + return (above). Headless sim check (`/tmp/save_after_battle.cpp`, scratch, not committed): march militia → contact at Cambridge → `begin_battle`/`finish_battle` → flow=campaign, battles_fought=1 → `save` → `load` → identical hash `b12344c06cc01faa`. `PA250.Battle` commandlet: 272 checks, 0 fails.
+
 ## 2026-11-08 — De Costa–Hall campaign overview
 - **Visual:** `L_Campaign` uses the July 1775 De Costa–Hall engraving as the sole overview (`T_DeCostaBostonConcord` / JPEG fallback). Stylized Boston1775 mapgen stays in-tree but is not the player-facing layer when de Costa loads.
 - **Source:** `Content/PA250/Source/M01-de-costa-boston-concord.jpg` — LOC IIIF full JPEG of the same plate (`6761×5314`). Planned NYPL download size `4920×3966` was not on disk; rights note in `decosta_locations.json` (US public domain; not worldwide clearance).
@@ -1310,3 +1319,41 @@ Context: Lexington Green was a British win (77 militia vs ~240 light infantry). 
 - Trackpad still too fast after that: default `pa250.LookSensitivity` 0.35 → 0.2 (horizontal stays ×0.6 on top). `[` / `]` still adjust and save it.
 - Verified: build Succeeded; `-run=PA250Visuals` failures=0 (new: left arm solved, every body bone finite with unit rotation); `-run=PA250Battle` checks=272 fails=0.
 - Not verified in PIE: that the crash is gone during real play, or the look feel on a trackpad. The commandlets run with `-nullrhi`, so GPU skinning (where the assert fires) never runs there.
+
+## 2026-11-08 — Envoy voice end to end (Stage 1 done); talking portrait blocked on FAL_KEY
+
+### What was broken
+- **Every ElevenLabs request failed with HTTP 402.** `.env` `ELEVENLABS_VOICE_ID` is a *library* voice; this key's tier returns `paid_plan_required` for library voices via the API (Nigel `YHKw1MKBPnTTjuO4M0S4` also 402; premade Daniel/George 200). The `.env` value was left unchanged.
+- **The failure was invisible.** `ElevenLabsProvider` swallowed errors and yielded a synthesized sine "fallback" as if it were speech. Its SDK call was synchronous (blocked the event loop), and its MP3 → PCM decode ran on top. The Nov 7 `pa250_*.wav` files are 22,050 Hz: the `say` path, not ElevenLabs.
+- **Speech jobs died with the socket.** TTS ran inside the reply task in `provider_tasks`, which the control socket cancels on close (the room closes it on Accept/Leave). `_run` then killed `say`. Nothing was logged.
+- **Unreal played WAVs through MediaPlayer** (`OpenFile` on a .wav). It had no open-failure handler, and `MediaSound` was attached to the GameMode, which has no scene root. Every automated run used `-nosound`, so playback was never exercised.
+- **Muted when unfocused:** engine default `[Audio] UnfocusedVolumeMultiplier=0.0`. A `-game` launched from Terminal is silent until its window is clicked; the mixer still consumes samples. Project config unchanged; the voice test overrides it on its command line.
+
+### What fixed it
+- `diplomacy/avatar.py`: ElevenLabs over async `httpx` with `output_format=pcm_24000`, written straight to a 24 kHz mono 16-bit WAV (no decode). Envoy → voice table `diplomacy/envoy_voices.yaml`: `british` = Daniel (premade, British, formal) + `say -v Daniel` backup. `ELEVENLABS_VOICE_ID` is only the default. Logs `TTS done` (tts_backend, audio_seconds, path, render_s) at INFO. Logs `ElevenLabs TTS failed` (http_status, body), `say TTS failed` / `afconvert failed` (exit_code, stderr) and `TTS produced no audio` at WARNING. The key is never logged.
+- `main.py`: the speech job is a detached task (`SPEECH_JOBS`) outside `provider_tasks`. The next utterance, the reply finishing or the socket closing cannot cancel it. It always logs `Speech job started` and then `Speech job finished` (delivered true/false) or a WARNING. `send_yaml` returns False for a closed socket.
+- `tts/elevenlabs.py` (legacy WebRTC paths): `pcm_24000`, `sample_rate=24000`, `_convert_mp3_to_pcm` removed.
+- `PA250DiplomacyGameMode`: `sadtalker_video_ready` without `video_file` → load WAV, parse with `FWaveModInfo`, queue into a `USoundWaveProcedural`, play via `SpawnSoundAtLocation` at the portrait. Logs `EnvoyVoice started <file> <seconds>` and `EnvoyVoice finished … played= wall= audible=`. "Finished" needs `GetAvailableAudioByteCount()` to reach 0, which only happens as the audio render thread pulls samples, so a `-nosound` run cannot fake it; a stall logs `EnvoyVoice stalled`. MediaPlayer is MP4 only (`OnMediaOpened` → `EnvoyVideo started`, `OnMediaOpenFailed` logs the path, `OnEndReached` → `EnvoyVideo finished`, swap back to `M_PortraitStill`). Each new line stops the previous WAV/MP4, so the two never play together.
+- `-PA250VoiceTest`: opens the room, sends "I propose a ceasefire.", and exits 0 only after `EnvoyVoice finished` in real time (wall ≥ 0.9 × length) and audible ≥ 90 %. Result in `Saved/PA250/voicetest_result.json`. `-PA250VoiceTestVideo=<mp4>` substitutes a clip to test the MP4 path.
+
+### Evidence (all run on this Mac, 2026-11-08)
+- `scripts/speak_test.py`: ElevenLabs 24000 Hz mono 16-bit, 6.36 s; afplay rc=0, 7.36 s wall.
+- `scripts/run_voice_test.sh` (real window, Metal, CoreAudio mixer, sound on): `EnvoyVoice started …wav 6.04 (24000 Hz, 1 ch, focus 0, unfocused volume 1.00)` → `EnvoyVoice finished … played=6.04s wall=6.29s audible=100%` → `PA250 voicetest PASSED`. Log shows **focus 0**: without the override this run would have been muted.
+- MP4 path (`EXTRA_ARGS=-PA250VoiceTestVideo=<still+ElevenLabs WAV, H.264/AAC>`): `EnvoyVideo started … 6.01`, `EnvoyVideo finished … wall=6.90s (portrait on video material 1, MP4 voice peak envelope 0.161, WAV voice component idle)`, still restored, PASSED. The clip was a still image, so **lip motion is not verified**. `screencapture` was refused (no Screen Recording permission), so there is no screenshot.
+- pytest `tests/diplomacy`: 108 passed (new `test_voice.py`: per-envoy voice, 24 kHz WAV, 402 → logged + `say`, `say` exit code logged, speech job survives socket close). `tests/test_tts.py`: same 3 pre-existing failures as before (they assert 16 kHz). ruff + mypy clean on `avatar.py`.
+- `scripts/run_slice_autoplay.sh`: PASSED (headless `-nosound`; built together with another session's uncommitted Campaign edits).
+- Not verified by ear: the run proves the mixer played the samples to CoreAudio in real time, not that a person heard them.
+
+### Render time / cost per line (test runs)
+- ElevenLabs TTS (Daniel, `eleven_multilingual_v2`): 0.73 s, 0.67 s, 0.81 s for 6.0–6.4 s lines (87 characters each). Average **0.74 s per line**. Cost: 87 characters of the plan's quota per line. The key lacks `user_read`, so remaining quota cannot be read.
+- fal video: not run (blocked). No fal cost incurred.
+
+### Stage 2 (talking portrait via fal): BLOCKED
+- `FAL_KEY` is not in `services/negotiation/.env` or the environment, and `fal-client` is not installed in the service venv. Nothing in fal_talking, the chain reorder, the D-ID `/audios` upload, or `/v1/avatar/health` was started. The Unreal MP4 side is already in place and verified above.
+- To unblock: add `FAL_KEY=…` to `services/negotiation/.env`, then resume Stage 2.
+
+### Commands
+- Service: `cd services/negotiation && .venv/bin/python -m uvicorn main:app --host 127.0.0.1 --port 8000` (`PA250_LLM=mock` for the scripted envoy; `PA250_AVATAR=none` for voice only).
+- Voice, service chain + afplay: `services/negotiation/.venv/bin/python scripts/speak_test.py` (or `--url http://127.0.0.1:8000` against a running service).
+- Voice in Unreal with sound (editor closed, no other game instance): `scripts/run_voice_test.sh`.
+- MP4 path: `EXTRA_ARGS="-PA250VoiceTestVideo=/abs/path/clip.mp4" scripts/run_voice_test.sh`.

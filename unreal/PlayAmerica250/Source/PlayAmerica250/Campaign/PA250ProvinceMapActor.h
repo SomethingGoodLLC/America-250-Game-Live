@@ -44,6 +44,9 @@ public:
 
 	FString ProvinceAtUV(FVector2D UV) const;
 	FString ProvinceAtWorld(const FVector& World) const;
+	/** Army whose round counter is under this world point, or empty. */
+	FString ArmyAtWorld(const FVector& World) const;
+	FString ProvinceForArmy(const FString& ArmyId) const;
 	bool WorldToUV(const FVector& World, FVector2D& OutUV) const;
 	FVector UVToWorld(FVector2D UV, float ZOffset = 2.f) const;
 

@@ -21,9 +21,8 @@ class ElevenLabsProvider(TTSProvider):
         self.api_key = config.get("api_key", "")
         self.voice_id = config.get("voice_id", "JBFqnCBsd6RMkjVDRZzb")  # George voice (from your example)
         self.model = config.get("model", "eleven_multilingual_v2")
-        # CRITICAL: Must match ElevenLabs API output format (mp3_44100_128)
-        # Using wrong sample rate causes audio to play slowed down and "creepy"
-        self.sample_rate = 44100  # Match ElevenLabs output format
+        # Must match the requested output_format (pcm_24000): raw 16-bit mono PCM, no decode step.
+        self.sample_rate = 24000
         self.channels = 1
 
         # Initialize ElevenLabs client
@@ -61,13 +60,12 @@ class ElevenLabsProvider(TTSProvider):
         try:
             logger.info("Starting ElevenLabs TTS synthesis", text_length=len(text))
 
-            # Use ElevenLabs SDK to generate audio
-            # Request MP3 format for better compatibility
+            # pcm_24000 is raw 16-bit little-endian mono PCM: usable as-is, no MP3 decode
             audio_generator = self.client.text_to_speech.convert(
                 text=text,
                 voice_id=self.voice_id,
                 model_id=self.model,
-                output_format="mp3_44100_128",  # MP3 at 44kHz, 128kbps (from your example)
+                output_format="pcm_24000",
             )
 
             # Convert the generator to bytes (it's a regular generator, not async)
@@ -83,13 +81,7 @@ class ElevenLabsProvider(TTSProvider):
             logger.info("ElevenLabs TTS synthesis completed", audio_size=len(audio_data))
 
             if audio_data:
-                # Convert MP3 to PCM for WebRTC
-                pcm_data = await self._convert_mp3_to_pcm(audio_data)
-                if pcm_data:
-                    yield pcm_data
-                else:
-                    logger.warning("Failed to convert MP3 to PCM")
-                    yield self._generate_fallback_audio(text)
+                yield audio_data[: len(audio_data) & ~1]
             else:
                 logger.error("No audio data received from ElevenLabs")
                 yield self._generate_fallback_audio(text)
@@ -99,48 +91,11 @@ class ElevenLabsProvider(TTSProvider):
             # Fallback to simple synthesis
             yield self._generate_fallback_audio(text)
 
-    async def _convert_mp3_to_pcm(self, mp3_data: bytes) -> bytes:
-        """Convert MP3 audio data to PCM format for WebRTC."""
-        import structlog
-        logger = structlog.get_logger(__name__)
-
-        try:
-            import io
-
-            import av
-
-            # Use PyAV to decode MP3 to PCM
-            with io.BytesIO(mp3_data) as mp3_buffer:
-                container = av.open(mp3_buffer)
-                pcm_frames = []
-
-                for frame in container.decode(audio=0):
-                    # Convert to PCM
-                    if hasattr(frame, 'to_ndarray'):
-                        import numpy as np
-                        frame_array = frame.to_ndarray()
-                        # Ensure 16-bit PCM format
-                        if frame_array.dtype != np.int16:
-                            frame_array = (frame_array * 32767).astype(np.int16)
-                        pcm_frames.append(frame_array.tobytes())
-
-                if pcm_frames:
-                    combined_pcm = b''.join(pcm_frames)
-                    logger.info("Successfully converted MP3 to PCM", size=len(combined_pcm))
-                    return combined_pcm
-                else:
-                    logger.warning("No audio frames found in MP3")
-                    return None
-
-        except Exception as e:
-            logger.warning("Failed to convert MP3 to PCM", error=str(e))
-            return None
-
     def _generate_fallback_audio(self, text: str) -> bytes:
         """Generate simple fallback audio if ElevenLabs fails."""
         # Simple waveform generation as fallback
         duration = len(text) * 0.1  # 100ms per character
-        sample_rate = self.sample_rate  # Use consistent sample rate (44100)
+        sample_rate = self.sample_rate  # provider rate (24000)
         frequency = 220
 
         samples_per_second = sample_rate
@@ -186,7 +141,7 @@ class ElevenLabsAudioTrack(AudioStreamTrack):
         self.tts_provider = tts_provider
         self.audio_data = None
         self.position = 0
-        self.sample_rate = tts_provider.sample_rate  # Use provider's sample rate (44100)
+        self.sample_rate = tts_provider.sample_rate  # provider rate (24000)
         self.frame_size = 1024
         self.frame_duration = 1.0 / 30.0
         self._generating = False

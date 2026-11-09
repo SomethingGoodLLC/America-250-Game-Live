@@ -149,6 +149,15 @@ cd services/negotiation
 
 **Voice Quality**: ElevenLabs provides natural, expressive speech with customizable voices and emotions.
 
+**Unreal envoy voice (`model: game` sessions)**: `diplomacy/avatar.py` requests `output_format=pcm_24000` and writes a
+24 kHz mono 16-bit WAV per line to `generated_audio/{job_id}.wav`. The voice comes from `diplomacy/envoy_voices.yaml`
+(envoy id = `DiplomacyContext.faction`; `british` = Daniel). `ELEVENLABS_VOICE_ID` is only the default for unlisted
+envoys. Use premade voices: on a free key, library voices return HTTP 402 `paid_plan_required`. `PA250_TTS` =
+`auto` (ElevenLabs, then macOS `say`) | `elevenlabs` | `say` | `off`. Look for `TTS done`, `ElevenLabs TTS failed`
+(http_status + body) and `Speech job finished` in the service log. Speech jobs run detached, so closing the
+control socket does not cancel them. Tests: `scripts/speak_test.py` (service chain + afplay) and
+`scripts/run_voice_test.sh` (Unreal room with sound).
+
 **Available Voices**:
 - `21m00Tcm4TlvDq8ikWAM` - Rachel (default, professional female)
 - `AZnzlk1XvdvUeBnXmlld` - Drew (male)

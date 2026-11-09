@@ -2,6 +2,9 @@
 
 TTS -> WAV on disk -> video: MuseTalk, else D-ID if keyed, else audio-only.
 Result is announced by the caller as a ``sadtalker_video_ready`` control event.
+
+Every outcome is logged: INFO for the backend, duration and path that were produced, WARNING for each
+failure with its reason (ElevenLabs HTTP status + body, ``say``/``afconvert`` exit code + stderr).
 """
 
 from __future__ import annotations
@@ -9,11 +12,15 @@ from __future__ import annotations
 import asyncio
 import os
 import shutil
+import time
 import wave
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
+import httpx
 import structlog
+from ruamel.yaml import YAML
 
 from providers.video_sources.musetalk_source import MuseTalkVideoSource
 
@@ -23,6 +30,16 @@ SERVICE_DIR = Path(__file__).resolve().parent.parent
 AUDIO_DIR = SERVICE_DIR / "generated_audio"
 VIDEO_DIR = SERVICE_DIR / "generated_video"
 DEFAULT_PORTRAIT = SERVICE_DIR / "assets" / "avatars" / "british_general_frame.jpg"
+VOICES_FILE = Path(__file__).resolve().parent / "envoy_voices.yaml"
+
+ELEVENLABS_URL = "https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
+ELEVENLABS_RATE = (
+    24000  # output_format=pcm_24000: raw 16-bit little-endian mono PCM at 24 kHz
+)
+DEFAULT_ELEVENLABS_VOICE = (
+    "JBFqnCBsd6RMkjVDRZzb"  # George (premade) when ELEVENLABS_VOICE_ID is unset
+)
+DEFAULT_ELEVENLABS_MODEL = "eleven_multilingual_v2"
 
 
 @dataclass
@@ -31,68 +48,191 @@ class AvatarLine:
     video_file: str | None
     backend: str  # "musetalk" | "did" | "audio_only" | "none"
     notes: list[str]
+    tts_backend: str = "none"  # "elevenlabs" | "say" | "none"
+    audio_seconds: float = 0.0
 
 
-async def _run(*cmd: str) -> bool:
-    proc = await asyncio.create_subprocess_exec(
-        *cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
+@dataclass
+class EnvoyVoice:
+    envoy_id: str
+    voice_id: str
+    model: str
+    settings: dict[str, Any] = field(default_factory=dict)
+    say_voice: str | None = None
+    source: str = "default"  # "table" | "default"
+
+
+def voice_for(envoy_id: str) -> EnvoyVoice:
+    """Envoy id -> voice from ``envoy_voices.yaml``; ELEVENLABS_VOICE_ID is only the default."""
+    default = EnvoyVoice(
+        envoy_id,
+        os.getenv("ELEVENLABS_VOICE_ID") or DEFAULT_ELEVENLABS_VOICE,
+        os.getenv("ELEVENLABS_MODEL") or DEFAULT_ELEVENLABS_MODEL,
     )
     try:
-        return (await proc.wait()) == 0
-    except asyncio.CancelledError:  # client went away mid-render: do not leave orphan children
+        table = YAML(typ="safe").load(VOICES_FILE.read_text()) or {}
+    except Exception as e:
+        logger.warning(
+            "Envoy voice table unreadable; using default voice",
+            path=str(VOICES_FILE),
+            error=str(e),
+        )
+        return default
+    row = (table.get("envoys") or {}).get(envoy_id)
+    if not isinstance(row, dict) or not row.get("voice_id"):
+        return default
+    return EnvoyVoice(
+        envoy_id,
+        str(row["voice_id"]),
+        str(row.get("model") or default.model),
+        dict(row.get("settings") or {}),
+        row.get("say_voice"),
+        "table",
+    )
+
+
+def wav_seconds(path: str | Path) -> float:
+    try:
+        with wave.open(str(path), "rb") as w:
+            return w.getnframes() / float(w.getframerate() or 1)
+    except Exception:
+        return 0.0
+
+
+async def _run(*cmd: str) -> tuple[int, str]:
+    """Run a child process; returns (exit code, stderr tail). Kills the child if cancelled."""
+    proc = await asyncio.create_subprocess_exec(
+        *cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE
+    )
+    try:
+        _, err = await proc.communicate()
+        return proc.returncode or 0, err.decode(errors="replace").strip()[-400:]
+    except (
+        asyncio.CancelledError
+    ):  # only at service shutdown: do not leave orphan children
         proc.kill()
         raise
 
 
-async def _tts_say(text: str, wav_path: Path) -> bool:
-    """Offline macOS TTS fallback: `say` -> AIFF -> `afconvert` -> 16-bit WAV."""
+async def _tts_say(text: str, wav_path: Path, voice: EnvoyVoice) -> bool:
+    """Offline macOS TTS backup: `say` -> AIFF -> `afconvert` -> 16-bit WAV."""
     if not shutil.which("say") or not shutil.which("afconvert"):
+        logger.warning("say TTS unavailable", reason="say or afconvert not on PATH")
         return False
     aiff = wav_path.with_suffix(".aiff")
     try:
-        if not await _run("say", "-o", str(aiff), text):
+        cmd = (
+            ["say", "-o", str(aiff)]
+            + (["-v", voice.say_voice] if voice.say_voice else [])
+            + [text]
+        )
+        rc, err = await _run(*cmd)
+        if rc != 0:
+            logger.warning(
+                "say TTS failed", exit_code=rc, stderr=err, say_voice=voice.say_voice
+            )
             return False
-        return await _run("afconvert", "-f", "WAVE", "-d", "LEI16@22050", str(aiff), str(wav_path))
+        rc, err = await _run(
+            "afconvert", "-f", "WAVE", "-d", "LEI16@22050", str(aiff), str(wav_path)
+        )
+        if rc != 0:
+            logger.warning("afconvert failed", exit_code=rc, stderr=err)
+            return False
+        return True
     finally:
         aiff.unlink(missing_ok=True)
 
 
-async def _tts_elevenlabs(text: str, wav_path: Path) -> bool:
+async def _tts_elevenlabs(text: str, wav_path: Path, voice: EnvoyVoice) -> bool:
+    """ElevenLabs REST, output_format=pcm_24000, written straight to a 24 kHz mono 16-bit WAV (no decode)."""
     key = os.getenv("ELEVENLABS_API_KEY", "")
     if not key:
+        logger.warning("ElevenLabs TTS skipped", reason="ELEVENLABS_API_KEY not set")
         return False
+    body: dict[str, Any] = {"text": text, "model_id": voice.model}
+    if voice.settings:
+        body["voice_settings"] = voice.settings
+    timeout = float(os.getenv("ELEVENLABS_TIMEOUT", "30"))
     try:
-        from tts.elevenlabs import ElevenLabsProvider
-
-        prov = ElevenLabsProvider({"api_key": key, "voice_id": os.getenv("ELEVENLABS_VOICE_ID", "JBFqnCBsd6RMkjVDRZzb"),
-                                   "model": os.getenv("ELEVENLABS_MODEL", "eleven_multilingual_v2")})
-        pcm = b""
-        async for chunk in prov.synthesize_speech(text):
-            pcm += chunk
-        if not pcm:
-            return False
-        with wave.open(str(wav_path), "wb") as w:
-            w.setnchannels(1)
-            w.setsampwidth(2)
-            w.setframerate(int(getattr(prov, "sample_rate", 44100)))
-            w.writeframes(pcm)
-        return True
-    except Exception as e:
-        logger.warning("ElevenLabs TTS failed", error=str(e))
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            r = await client.post(
+                ELEVENLABS_URL.format(voice_id=voice.voice_id),
+                params={"output_format": f"pcm_{ELEVENLABS_RATE}"},
+                headers={"xi-api-key": key},
+                json=body,
+            )
+    except httpx.HTTPError as e:
+        logger.warning(
+            "ElevenLabs TTS failed",
+            reason="request error",
+            error=f"{type(e).__name__}: {e}",
+            voice_id=voice.voice_id,
+            envoy=voice.envoy_id,
+        )
         return False
+    if r.status_code != 200:
+        logger.warning(
+            "ElevenLabs TTS failed",
+            http_status=r.status_code,
+            body=r.text[:600],
+            voice_id=voice.voice_id,
+            voice_source=voice.source,
+            envoy=voice.envoy_id,
+        )
+        return False
+    pcm = r.content
+    if len(pcm) < 2 or "json" in r.headers.get("content-type", ""):
+        logger.warning(
+            "ElevenLabs TTS failed",
+            reason="empty or non-audio body",
+            bytes=len(pcm),
+            content_type=r.headers.get("content-type"),
+            body=r.text[:300],
+        )
+        return False
+    with wave.open(str(wav_path), "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(ELEVENLABS_RATE)
+        w.writeframes(pcm[: len(pcm) & ~1])
+    return True
 
 
-async def synthesize_line_audio(text: str, job_id: str) -> str | None:
-    """PA250_TTS: 'auto' (ElevenLabs if keyed, else say), 'say', 'elevenlabs', 'off'."""
+async def synthesize_line_audio(
+    text: str, job_id: str, envoy_id: str = "default"
+) -> tuple[str, str] | None:
+    """PA250_TTS: 'auto' (ElevenLabs if keyed, else say), 'say', 'elevenlabs', 'off'.
+
+    Returns (wav path, backend) or None. Logs the backend, duration and path, or why nothing was made.
+    """
     mode = os.getenv("PA250_TTS", "auto").lower()
     if mode == "off" or not text.strip():
+        logger.info(
+            "TTS skipped",
+            job_id=job_id,
+            reason="PA250_TTS=off" if mode == "off" else "empty line",
+        )
         return None
     AUDIO_DIR.mkdir(parents=True, exist_ok=True)
     wav = AUDIO_DIR / f"{job_id}.wav"
-    if mode in ("auto", "elevenlabs") and await _tts_elevenlabs(text, wav):
-        return str(wav)
-    if mode in ("auto", "say") and await _tts_say(text, wav):
-        return str(wav)
+    voice = voice_for(envoy_id)
+    for backend, fn in (("elevenlabs", _tts_elevenlabs), ("say", _tts_say)):
+        if mode not in ("auto", backend):
+            continue
+        t0 = time.monotonic()
+        if await fn(text, wav, voice):
+            logger.info(
+                "TTS done",
+                job_id=job_id,
+                tts_backend=backend,
+                audio_seconds=round(wav_seconds(wav), 2),
+                path=str(wav),
+                render_s=round(time.monotonic() - t0, 2),
+                envoy=envoy_id,
+                voice_id=voice.voice_id if backend == "elevenlabs" else voice.say_voice,
+            )
+            return str(wav), backend
+    logger.warning("TTS produced no audio", job_id=job_id, mode=mode, envoy=envoy_id)
     return None
 
 
@@ -102,23 +242,32 @@ async def _did_video(text: str, portrait: Path, out_mp4: Path) -> str | None:
     try:
         from video_providers.did_video import DIDVideoProvider
 
-        path = await DIDVideoProvider().generate_video(text=text, image_url=str(portrait), output_path=out_mp4)
+        path = await DIDVideoProvider().generate_video(
+            text=text, image_url=str(portrait), output_path=out_mp4
+        )
         return str(path) if path else None
     except Exception as e:
         logger.warning("D-ID failed; falling back to audio-only", error=str(e))
         return None
 
 
-async def render_avatar_line(text: str, job_id: str, portrait: Path | None = None) -> AvatarLine:
+async def render_avatar_line(
+    text: str, job_id: str, portrait: Path | None = None, envoy_id: str = "default"
+) -> AvatarLine:
     """Run the preference chain. Never raises."""
     notes: list[str] = []
     portrait = portrait or DEFAULT_PORTRAIT
-    audio = await synthesize_line_audio(text, job_id)
-    if audio is None:
+    tts = await synthesize_line_audio(text, job_id, envoy_id=envoy_id)
+    if tts is None:
         notes.append("no audio (TTS off or unavailable)")
         return AvatarLine(None, None, "none", notes)
+    audio, tts_backend = tts
+    seconds = wav_seconds(audio)
     VIDEO_DIR.mkdir(parents=True, exist_ok=True)
     out_mp4 = VIDEO_DIR / f"{job_id}.mp4"
+
+    def done(video: str | None, backend: str) -> AvatarLine:
+        return AvatarLine(audio, video, backend, notes, tts_backend, seconds)
 
     if os.getenv("PA250_AVATAR", "auto").lower() in ("auto", "musetalk"):
         mt = MuseTalkVideoSource()
@@ -126,13 +275,13 @@ async def render_avatar_line(text: str, job_id: str, portrait: Path | None = Non
         if reason is None:
             video = await mt.render_line(audio, str(portrait), str(out_mp4))
             if video:
-                return AvatarLine(audio, video, "musetalk", notes)
+                return done(video, "musetalk")
             notes.append("MuseTalk render failed")
         else:
             notes.append(f"MuseTalk skipped: {reason}")
     if os.getenv("PA250_AVATAR", "auto").lower() in ("auto", "did"):
         video = await _did_video(text, portrait, out_mp4)
         if video:
-            return AvatarLine(audio, video, "did", notes)
+            return done(video, "did")
         notes.append("D-ID skipped or failed")
-    return AvatarLine(audio, None, "audio_only", notes)
+    return done(None, "audio_only")

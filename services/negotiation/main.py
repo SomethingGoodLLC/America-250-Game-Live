@@ -166,18 +166,52 @@ async def generate_game_response(sess: dict[str, Any], user_text: str, send_func
         })
 
         job_id = f"pa250_{sess.get('session_id', 'x')}_{int(time.time() * 1000)}"
-        line = await render_avatar_line(spoken, job_id)
-        if line.audio_file:
-            ready: dict[str, Any] = {"type": "sadtalker_video_ready", "audio_file": line.audio_file, "text": spoken,
-                                     "job_id": job_id, "backend": line.backend}
-            if line.video_file:
-                ready["video_file"] = line.video_file
-            await send_func(ready)
-        else:
-            await send_func({"type": "avatar_unavailable", "text": spoken, "job_id": job_id, "notes": line.notes})
+        # The speech job is detached from this reply task and from the socket's provider_tasks, so neither
+        # the next utterance, the reply finishing, nor the client closing the socket can cancel it.
+        job = asyncio.create_task(_speech_job(spoken, job_id, ctx.faction, send_func), name=job_id)
+        SPEECH_JOBS.add(job)
+        job.add_done_callback(SPEECH_JOBS.discard)
     except Exception as e:
         logger.error("Error generating game response", error=str(e))
         await send_func({"type": "representative_unavailable", "text": "The envoy cannot be reached."})
+
+
+# Strong references keep running speech jobs alive (asyncio holds tasks only weakly).
+SPEECH_JOBS: set[asyncio.Task[None]] = set()
+
+
+async def _speech_job(spoken: str, job_id: str, envoy_id: str, send_func: Any) -> None:
+    """TTS (+ optional video) for one envoy line. Always ends in a 'Speech job finished' or WARNING log line."""
+    t0 = time.monotonic()
+    logger.info("Speech job started", job_id=job_id, envoy=envoy_id, chars=len(spoken))
+    try:
+        line = await render_avatar_line(spoken, job_id, envoy_id=envoy_id)
+    except asyncio.CancelledError:
+        logger.warning("Speech job cancelled", job_id=job_id, reason="service shutting down")
+        raise
+    except Exception as e:  # render_avatar_line should never raise; record it if it does
+        logger.warning("Speech job failed", job_id=job_id, error=f"{type(e).__name__}: {e}")
+        return
+    if line.audio_file:
+        ready: dict[str, Any] = {"type": "sadtalker_video_ready", "audio_file": line.audio_file, "text": spoken,
+                                 "job_id": job_id, "backend": line.backend, "tts_backend": line.tts_backend,
+                                 "audio_seconds": round(line.audio_seconds, 3)}
+        if line.video_file:
+            ready["video_file"] = line.video_file
+    else:
+        ready = {"type": "avatar_unavailable", "text": spoken, "job_id": job_id, "notes": line.notes}
+        logger.warning("Speech job produced no audio", job_id=job_id, notes=line.notes)
+    try:
+        delivered = (await send_func(ready)) is not False
+        reason = "control socket closed"
+    except Exception as e:
+        delivered, reason = False, f"{type(e).__name__}: {e}"
+    if not delivered:  # client went away while we rendered: the files are still on disk
+        logger.warning("Speech line ready but not delivered", job_id=job_id, reason=reason)
+    logger.info("Speech job finished", job_id=job_id, tts_backend=line.tts_backend,
+                audio_seconds=round(line.audio_seconds, 2), audio_file=line.audio_file,
+                video_backend=line.backend, video_file=line.video_file, notes=line.notes,
+                delivered=delivered, elapsed_s=round(time.monotonic() - t0, 2))
 
 async def generate_ai_response(sess: dict, user_text: str, send_yaml_func):
     """Generate AI response to user input and trigger avatar generation."""
@@ -1140,9 +1174,12 @@ async def ws_control(ws: WebSocket, sid: str):
     sess["ws_clients"].add(ws)
     # Default stays YAML. ``?format=json`` is for clients (Unreal) without a YAML parser.
     fmt = ws.query_params.get("format", "yaml").lower()
-    async def send_yaml(ev: dict):
-        if ws.client_state == WebSocketState.CONNECTED:
-            await ws.send_text(json.dumps(ev) if fmt == "json" else _dump_yaml(ev))
+    async def send_yaml(ev: dict) -> bool:
+        """Returns False when the socket is already closed (event dropped)."""
+        if ws.client_state != WebSocketState.CONNECTED:
+            return False
+        await ws.send_text(json.dumps(ev) if fmt == "json" else _dump_yaml(ev))
+        return True
     async def pump_subtitles():
         if sess["listener"]:
             async for ev in sess["listener"].stream_events():

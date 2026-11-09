@@ -21,8 +21,8 @@ def _fake_audio(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     wav = tmp_path / "x.wav"
     wav.write_bytes(b"RIFF")
 
-    async def fake(text: str, job_id: str) -> str:
-        return str(wav)
+    async def fake(text: str, job_id: str, envoy_id: str = "default") -> tuple[str, str]:
+        return str(wav), "say"
 
     monkeypatch.setattr(avatar, "synthesize_line_audio", fake)
 

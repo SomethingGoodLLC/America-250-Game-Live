@@ -170,7 +170,11 @@ void APA250CampaignPlayerController::OnLeftReleased()
 	{
 		return;
 	}
-	const FString Pid = Map->ProvinceAtWorld(Hit.ImpactPoint);
+	// The round counter is the army. Prefer it over the town ring under the cursor
+	// so a click on your force selects it and the next town click is the march order.
+	const FString ArmyId = Map->ArmyAtWorld(Hit.ImpactPoint);
+	const FString ArmyProv = Map->ProvinceForArmy(ArmyId);
+	const FString Pid = !ArmyProv.IsEmpty() ? ArmyProv : Map->ProvinceAtWorld(Hit.ImpactPoint);
 	if (!Pid.IsEmpty())
 	{
 		Map->HandleProvinceClick(Pid);
@@ -236,7 +240,8 @@ void APA250CampaignPlayerController::ClickMapAtUV(float U, float V)
 		return;
 	}
 	const FVector World = Map->UVToWorld(FVector2D(U, V), 2.f);
-	const FString Pid = Map->ProvinceAtWorld(World);
+	const FString ArmyProv = Map->ProvinceForArmy(Map->ArmyAtWorld(World));
+	const FString Pid = !ArmyProv.IsEmpty() ? ArmyProv : Map->ProvinceAtWorld(World);
 	if (!Pid.IsEmpty())
 	{
 		Map->HandleProvinceClick(Pid);

@@ -143,8 +143,9 @@ FText UPA250MapWidget::AboutText() const
 		"copy of the same plate; planned source NYPL Digital Collections item 46abf040-c5ed-012f-b389-58d385a7bc34.\n\n"
 		"Historical-date caveat: this July 1775 engraving includes later siege information. Its printed soldiers, "
 		"camps and battle annotations are historical artwork — not live units and not verified April 19 positions. "
-		"A hollow ring marks who holds a town: blue Continentals (yours), red British. A solid flag is an army, "
-		"labeled Yours or British. The game date follows the campaign clock."));
+		"A hollow diamond marks who holds a town: blue Continentals (yours), red British. A round counter "
+		"with a bar is an army, labeled Yours or British — click it, then click a town to march. "
+		"The game date follows the campaign clock."));
 }
 
 FText UPA250MapWidget::DisclaimerText() const
@@ -876,7 +877,7 @@ TSharedRef<SWidget> UPA250MapWidget::RebuildWidget()
 								[SNew(STextBlock)
 									 .Font(BodyFont)
 									 .ColorAndOpacity(FLinearColor(0.15f, 0.1f, 0.05f))
-									 .Text(FText::FromString(TEXT("Your army")))] +
+									 .Text(FText::FromString(TEXT("Your army (round)")))] +
 							SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 6, 0)
 								[SNew(SBox).WidthOverride(16.f).HeightOverride(10.f)
 									 [SNew(SBorder)
@@ -886,7 +887,7 @@ TSharedRef<SWidget> UPA250MapWidget::RebuildWidget()
 								[SNew(STextBlock)
 									 .Font(BodyFont)
 									 .ColorAndOpacity(FLinearColor(0.15f, 0.1f, 0.05f))
-									 .Text(FText::FromString(TEXT("British army")))]]]
+									 .Text(FText::FromString(TEXT("British army (round)")))]]]
 		+ SOverlay::Slot().VAlign(VAlign_Bottom).HAlign(HAlign_Fill)
 			  [SNew(SBorder)
 				   .BorderImage(FAppStyle::GetBrush("WhiteBrush"))

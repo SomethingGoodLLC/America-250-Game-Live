@@ -85,7 +85,7 @@ int32 UPA250MapFramingCommandlet::Main(const FString& Params)
 							 ViewH * 0.5f + (((V - 0.5f) * MapH - CamY) / OH) * ViewH);
 		};
 		const TCHAR* Names[] = {TEXT("concord"), TEXT("lexington"), TEXT("boston")};
-		const FVector2D UVs[] = {FVector2D(0.108f, 0.235f), FVector2D(0.248f, 0.175f), FVector2D(0.565f, 0.49f)};
+		const FVector2D UVs[] = {FVector2D(0.143f, 0.306f), FVector2D(0.248f, 0.175f), FVector2D(0.564f, 0.49f)};
 		for (int32 i = 0; i < 3; ++i)
 		{
 			const FVector2D P = ProjectOverview(UVs[i].X, UVs[i].Y);
