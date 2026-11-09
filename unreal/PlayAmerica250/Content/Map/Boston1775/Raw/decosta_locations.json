@@ -9,7 +9,7 @@
     "nypl_item": "https://digitalcollections.nypl.org/items/46abf040-c5ed-012f-b389-58d385a7bc34",
     "loc_item": "https://www.loc.gov/item/gm71002447/",
     "file": "Content/PA250/Source/M01-de-costa-boston-concord.jpg",
-    "note": "Working source is the LOC IIIF full JPEG of the same July 1775 De Costa–Hall plate (6761x5314). The planned NYPL download size 4920x3966 was not available on this machine. Working copy padded from 6761x5314 to 6768x5316 (multiple of 4 for BC7 blocks) with edge-pixel replication; hotspot UVs rescaled by (0.998966, 0.999624)."
+    "note": "Working source is the LOC IIIF full JPEG of the same July 1775 De Costa–Hall plate (6761x5314). The planned NYPL download size 4920x3966 was not available on this machine. Working copy padded from 6761x5314 to 6768x5316 (multiple of 4 for BC7 blocks) with edge-pixel replication; hotspot UVs rescaled by (0.998966, 0.999624). Lexington hotspot moved 2026-11-08 from (0.2477,0.1749), which sat in blank ground NW of the town, onto the engraved Lexington buildings (cluster u 0.280-0.322, v 0.211-0.255); hit radius 120px to cover the cluster. Optional wash_radius_px sizes the ownership wash where the town is much larger than its click radius: Boston 300px (built-up blocks measured ~350x460px on the plate, 2026-11-09); others use 1.8x hit radius, capped at 0.75x the nearest other hotspot."
   },
   "rights": {
     "status_us": "public_domain_under_us_law",
@@ -55,10 +55,10 @@
       "id": "lexington",
       "map_index": 3,
       "marker_uv": [
-        0.247743,
-        0.174934
+        0.3,
+        0.23
       ],
-      "hit_radius_px": 90,
+      "hit_radius_px": 120,
       "label_offset_uv": [
         0.012,
         -0.012
@@ -175,7 +175,8 @@
         0.012,
         -0.012
       ],
-      "verified": true
+      "verified": true,
+      "wash_radius_px": 300
     },
     {
       "id": "dorchester",

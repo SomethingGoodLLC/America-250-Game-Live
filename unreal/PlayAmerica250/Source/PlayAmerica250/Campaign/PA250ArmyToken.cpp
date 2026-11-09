@@ -1,126 +1,329 @@
 #include "PA250ArmyToken.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/TextRenderComponent.h"
+#include "Engine/Texture2D.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
 #include "UObject/ConstructorHelpers.h"
+
+namespace
+{
+// Content rectangles and aspects come from tools/art/prepare_army_sprites.py (1024x512 canvases,
+// content top-left aligned). FigureFrac is hat-to-feet height / content height, measured on the
+// prepared sprites, so a provincial and a British regular are drawn at the same size.
+const FPA250ArmyArtSpec GArtSpecs[] = {
+	{},
+	{TEXT("/Game/PA250/Textures/Army/T_Army_ProvincialRegulars.T_Army_ProvincialRegulars"), 0.88379f, 1.00000f, 1.7676f, 0.70f},
+	{TEXT("/Game/PA250/Textures/Army/T_Army_BritishMarching.T_Army_BritishMarching"), 1.00000f, 0.84961f, 2.3540f, 0.64f},
+	{TEXT("/Game/PA250/Textures/Army/T_Army_BritishFiring.T_Army_BritishFiring"), 1.00000f, 0.73438f, 2.7234f, 0.77f},
+};
+
+constexpr float GlyphAdvance = 0.55f; // average TextRender glyph width / world size (engine Roboto)
+constexpr float PlateGapUU = 2.5f;	  // feet -> first text line
+constexpr float LineGapUU = 1.0f;
+
+// Muted faction inks: same hues as the town diamonds, and never colour alone (the plate names the side).
+const FColor BritInk(145, 24, 18);
+const FColor ContInk(16, 48, 130);
+const FLinearColor BritFill(0.66f, 0.13f, 0.10f);
+const FLinearColor ContFill(0.12f, 0.27f, 0.62f);
+const FLinearColor Gold(0.86f, 0.64f, 0.12f);
+const FLinearColor Parchment(0.93f, 0.88f, 0.74f);
+
+void Tint(UStaticMeshComponent* Mesh, const FLinearColor& C)
+{
+	if (!Mesh)
+	{
+		return;
+	}
+	UMaterialInstanceDynamic* MID = Cast<UMaterialInstanceDynamic>(Mesh->GetMaterial(0));
+	if (!MID)
+	{
+		MID = Mesh->CreateAndSetMaterialInstanceDynamic(0);
+	}
+	if (MID)
+	{
+		MID->SetVectorParameterValue(TEXT("Color"), C);
+		MID->SetVectorParameterValue(TEXT("BaseColor"), C);
+	}
+}
+
+void PlaceAbs(UStaticMeshComponent* Mesh, const FVector& Loc, const FVector& Scale)
+{
+	Mesh->SetAbsolute(true, true, true);
+	Mesh->SetWorldLocation(Loc);
+	Mesh->SetWorldRotation(FRotator::ZeroRotator);
+	Mesh->SetWorldScale3D(Scale);
+}
+
+UStaticMeshComponent* MakeMesh(AActor* Owner, USceneComponent* Parent, const TCHAR* Name, UStaticMesh* Mesh, UMaterialInterface* Mat)
+{
+	UStaticMeshComponent* C = Owner->CreateDefaultSubobject<UStaticMeshComponent>(Name);
+	C->SetupAttachment(Parent);
+	if (Mesh)
+	{
+		C->SetStaticMesh(Mesh);
+	}
+	if (Mat)
+	{
+		C->SetMaterial(0, Mat);
+	}
+	// No collision anywhere: the map plane receives the click and the map hit-tests the drawn rect.
+	C->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	C->SetCastShadow(false);
+	return C;
+}
+
+UTextRenderComponent* MakeText(AActor* Owner, USceneComponent* Parent, const TCHAR* Name)
+{
+	UTextRenderComponent* T = Owner->CreateDefaultSubobject<UTextRenderComponent>(Name);
+	T->SetupAttachment(Parent);
+	T->SetHorizontalAlignment(EHTA_Center);
+	T->SetVerticalAlignment(EVRTA_TextTop);
+	T->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	T->SetCastShadow(false);
+	return T;
+}
+} // namespace
+
+const FPA250ArmyArtSpec& APA250ArmyToken::ArtSpec(EPA250ArmyArt InArt)
+{
+	const int32 Idx = FMath::Clamp(static_cast<int32>(InArt), 0, static_cast<int32>(UE_ARRAY_COUNT(GArtSpecs)) - 1);
+	return GArtSpecs[Idx];
+}
+
+FVector2D APA250ArmyToken::ArtWorldSize(EPA250ArmyArt InArt)
+{
+	if (InArt == EPA250ArmyArt::None)
+	{
+		return FVector2D::ZeroVector;
+	}
+	const FPA250ArmyArtSpec& S = ArtSpec(InArt);
+	const float H = FigureHeightUU / FMath::Max(0.1f, S.FigureFrac);
+	return FVector2D(H * S.Aspect, H);
+}
+
+FVector2D APA250ArmyToken::FactionFootprintUU(const FString& Faction)
+{
+	// Slot = the largest thing this side can draw, so switching between its variants (or to the
+	// compact symbol) never moves the ground anchor.
+	if (Faction.Equals(TEXT("british"), ESearchCase::IgnoreCase))
+	{
+		const FVector2D M = ArtWorldSize(EPA250ArmyArt::BritishMarching);
+		const FVector2D F = ArtWorldSize(EPA250ArmyArt::BritishFiring);
+		return FVector2D(FMath::Max(M.X, F.X), FMath::Max(M.Y, F.Y));
+	}
+	return ArtWorldSize(EPA250ArmyArt::ProvincialRegulars);
+}
+
+FVector2D APA250ArmyToken::PlateSizeUU(const FString& DisplayName, const FString& SideWord)
+{
+	// Line 1: short name. Line 2: side word. Same text selected or not, so selection never moves anything.
+	const float NameW = DisplayName.Len() * NameSizeUU * GlyphAdvance;
+	const float SideW = SideWord.Len() * SideSizeUU * GlyphAdvance;
+	return FVector2D(FMath::Max(NameW, SideW), PlateGapUU + NameSizeUU + LineGapUU + SideSizeUU);
+}
 
 APA250ArmyToken::APA250ArmyToken()
 {
 	Root = CreateDefaultSubobject<USceneComponent>(TEXT("Root"));
 	SetRootComponent(Root);
 
-	FlagMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Flag"));
-	FlagMesh->SetupAttachment(Root);
-	MarkMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Mark"));
-	MarkMesh->SetupAttachment(Root);
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> Disc(TEXT("/Engine/BasicShapes/Cylinder"));
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> Bar(TEXT("/Engine/BasicShapes/Cube"));
-	static ConstructorHelpers::FObjectFinder<UMaterialInterface> FlagMat(
-		TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
-	if (Disc.Succeeded())
-	{
-		FlagMesh->SetStaticMesh(Disc.Object);
-		if (FlagMat.Succeeded())
-		{
-			FlagMesh->SetMaterial(0, FlagMat.Object);
-		}
-		// Round counter. Towns are diamond rings; this must not be another diamond
-		// or a flat rectangle. Cylinder stands in Z, so a top-down camera sees a circle.
-		// Scale stays large enough to pass the framing check (X >= 0.5, Y >= 0.35).
-		FlagMesh->SetRelativeScale3D(FVector(0.55f, 0.55f, 0.04f));
-		FlagMesh->SetRelativeLocation(FVector::ZeroVector);
-		FlagMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	}
-	if (Bar.Succeeded())
-	{
-		MarkMesh->SetStaticMesh(Bar.Object);
-		if (FlagMat.Succeeded())
-		{
-			MarkMesh->SetMaterial(0, FlagMat.Object);
-		}
-		MarkMesh->SetRelativeScale3D(FVector(0.32f, 0.08f, 0.04f));
-		MarkMesh->SetRelativeLocation(FVector(0.f, 0.f, 2.f));
-		MarkMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	}
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> Plane(TEXT("/Engine/BasicShapes/Plane"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> ShapeMat(TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> SpriteMat(TEXT("/Game/PA250/Materials/M_MapSprite.M_MapSprite"));
+	static ConstructorHelpers::FObjectFinder<UTexture2D> TexProvincial(GArtSpecs[1].TexturePath);
+	static ConstructorHelpers::FObjectFinder<UTexture2D> TexMarch(GArtSpecs[2].TexturePath);
+	static ConstructorHelpers::FObjectFinder<UTexture2D> TexFire(GArtSpecs[3].TexturePath);
+	static ConstructorHelpers::FObjectFinder<UTexture2D> TexGround(TEXT("/Game/PA250/Textures/Army/T_Army_GroundOval.T_Army_GroundOval"));
 
-	NameText = CreateDefaultSubobject<UTextRenderComponent>(TEXT("Name"));
-	NameText->SetupAttachment(Root);
-	NameText->SetRelativeLocation(FVector(0.f, 0.f, -34.f));
-	NameText->SetHorizontalAlignment(EHTA_Center);
-	NameText->SetVerticalAlignment(EVRTA_TextCenter);
-	NameText->SetWorldSize(24.f);
-	NameText->SetTextRenderColor(FColor(20, 12, 4));
-	NameText->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	UMaterialInterface* Shape = ShapeMat.Succeeded() ? ShapeMat.Object : nullptr;
+	FlagMesh = MakeMesh(this, Root, TEXT("Flag"), Disc.Succeeded() ? Disc.Object : nullptr, Shape);
+	MarkMesh = MakeMesh(this, Root, TEXT("Mark"), Bar.Succeeded() ? Bar.Object : nullptr, Shape);
+	SelectRing = MakeMesh(this, Root, TEXT("SelectRing"), Disc.Succeeded() ? Disc.Object : nullptr, Shape);
+	SpriteMesh = MakeMesh(this, Root, TEXT("Sprite"), Plane.Succeeded() ? Plane.Object : nullptr, nullptr);
+	GroundMesh = MakeMesh(this, Root, TEXT("Ground"), Plane.Succeeded() ? Plane.Object : nullptr, nullptr);
+	FactionBar = MakeMesh(this, Root, TEXT("FactionBar"), Bar.Succeeded() ? Bar.Object : nullptr, Shape);
+	SelectBar = MakeMesh(this, Root, TEXT("SelectBar"), Bar.Succeeded() ? Bar.Object : nullptr, Shape);
+	NameText = MakeText(this, Root, TEXT("Name"));
+	StrengthText = MakeText(this, Root, TEXT("Strength"));
 
-	StrengthText = CreateDefaultSubobject<UTextRenderComponent>(TEXT("Strength"));
-	StrengthText->SetupAttachment(Root);
-	StrengthText->SetRelativeLocation(FVector(0.f, 0.f, -58.f));
-	StrengthText->SetHorizontalAlignment(EHTA_Center);
-	StrengthText->SetVerticalAlignment(EVRTA_TextCenter);
-	StrengthText->SetWorldSize(16.f);
-	StrengthText->SetTextRenderColor(FColor(28, 20, 10));
-	StrengthText->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	SpriteMaterial = SpriteMat.Succeeded() ? SpriteMat.Object : nullptr;
+	ArtTextures[0] = nullptr;
+	ArtTextures[1] = TexProvincial.Succeeded() ? TexProvincial.Object : nullptr;
+	ArtTextures[2] = TexMarch.Succeeded() ? TexMarch.Object : nullptr;
+	ArtTextures[3] = TexFire.Succeeded() ? TexFire.Object : nullptr;
+	GroundTexture = TexGround.Succeeded() ? TexGround.Object : nullptr;
+	if (SpriteMaterial)
+	{
+		SpriteMesh->SetMaterial(0, SpriteMaterial);
+		GroundMesh->SetMaterial(0, SpriteMaterial);
+	}
+	SpriteMesh->SetVisibility(false);
+	GroundMesh->SetVisibility(false);
+	SelectRing->SetVisibility(false);
+	SelectBar->SetVisibility(false);
+	// Compact symbol default scale (also what the framing check reads on the CDO).
+	FlagMesh->SetRelativeScale3D(FVector(0.20f, 0.20f, 0.04f));
 }
 
-void APA250ArmyToken::Configure(const FString& InArmyId, const FString& Faction, const FString& DisplayName,
-								const FString& StrengthLabel, int32 StackIndex, bool bPlayerForce, bool bSelected)
+void APA250ArmyToken::Configure(const FString& InArmyId, const FString& Faction, const FString& DisplayName, const FString& SideWord,
+								bool bInSelected, EPA250ArmyArt InArt, bool bMirror)
 {
 	ArmyId = InArmyId;
-	// A round counter with a bar is an army. Towns stay hollow diamonds.
-	// The side word is always printed: colour is not the only cue.
-	// No collision: the map plane receives the click, and the map hit-tests this actor.
+	bSelected = bInSelected;
 	const bool bBrit = Faction.Equals(TEXT("british"), ESearchCase::IgnoreCase);
-	const FString Side = bPlayerForce ? TEXT("Yours") : (bBrit ? TEXT("British") : Faction);
-	const FColor Ink = bBrit ? FColor(145, 24, 18) : FColor(16, 48, 130);
-	NameText->SetText(FText::FromString(DisplayName));
-	NameText->SetTextRenderColor(Ink);
-	NameText->SetWorldSize(bSelected ? 24.f : 20.f);
-	const FString Plate = bSelected ? (Side + TEXT(" · ") + StrengthLabel) : Side;
-	StrengthText->SetText(FText::FromString(Plate));
-	StrengthText->SetTextRenderColor(Ink);
-	StrengthText->SetWorldSize(bSelected ? 16.f : 18.f);
-	StrengthText->SetVisibility(true);
-	NameText->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	StrengthText->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	// Absolute world transform: the token actor is pitched for its text, which
-	// would squash a relative cylinder into a sliver and move it off the click spot.
-	const FVector DiscScale = bSelected ? FVector(0.68f, 0.68f, 0.05f) : FVector(0.55f, 0.55f, 0.04f);
-	const FVector Here = GetActorLocation();
-	FlagMesh->SetAbsolute(true, true, true);
-	FlagMesh->SetWorldLocation(Here + FVector(0.f, 0.f, 1.f));
-	FlagMesh->SetWorldRotation(FRotator::ZeroRotator);
-	FlagMesh->SetWorldScale3D(DiscScale);
-	FlagMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	if (MarkMesh)
+	const FColor Ink = bBrit ? BritInk : ContInk;
+	const FLinearColor Fill = bBrit ? BritFill : ContFill;
+
+	// Fall back to the compact symbol when the art asset is missing (never draw an empty quad).
+	Art = InArt;
+	if (Art != EPA250ArmyArt::None && (!SpriteMaterial || !ArtTextures[static_cast<int32>(Art)]))
 	{
-		MarkMesh->SetAbsolute(true, true, true);
-		MarkMesh->SetWorldLocation(Here + FVector(0.f, 0.f, 3.f));
-		MarkMesh->SetWorldRotation(FRotator::ZeroRotator);
-		MarkMesh->SetWorldScale3D(bSelected ? FVector(0.40f, 0.09f, 0.05f) : FVector(0.32f, 0.08f, 0.04f));
-		MarkMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-		const FLinearColor Bar = FLinearColor(0.93f, 0.88f, 0.74f);
-		if (UMaterialInstanceDynamic* BarMid = MarkMesh->CreateAndSetMaterialInstanceDynamic(0))
-		{
-			BarMid->SetVectorParameterValue(TEXT("Color"), Bar);
-			BarMid->SetVectorParameterValue(TEXT("BaseColor"), Bar);
-		}
+		UE_LOG(LogTemp, Warning, TEXT("PA250 army art: %s missing texture/material for art %d; compact symbol only"), *ArmyId,
+			   static_cast<int32>(Art));
+		Art = EPA250ArmyArt::None;
 	}
+	ArtSizeUU = ArtWorldSize(Art);
+	const FVector A = GetActorLocation(); // ground anchor (feet, bottom-centre)
 	SetActorScale3D(FVector::OneVector);
 
-	// Bright faction colour on the disc. No flag or insignia is claimed as authentic.
-	const FLinearColor Color = bBrit ? FLinearColor(0.82f, 0.14f, 0.11f) : FLinearColor(0.12f, 0.34f, 0.82f);
-	if (UMaterialInterface* Base = FlagMesh->GetMaterial(0))
+	// Illustration quad: exactly the content rect, standing on the anchor.
+	if (Art != EPA250ArmyArt::None)
 	{
-		if (UMaterialInstanceDynamic* MID = FlagMesh->CreateAndSetMaterialInstanceDynamic(0))
+		const FPA250ArmyArtSpec& S = ArtSpec(Art);
+		PlaceAbs(SpriteMesh, A + FVector(0.f, -ArtSizeUU.Y * 0.5f, 1.f), FVector(ArtSizeUU.X / 100.f, ArtSizeUU.Y / 100.f, 1.f));
+		UMaterialInstanceDynamic* MID = Cast<UMaterialInstanceDynamic>(SpriteMesh->GetMaterial(0));
+		if (!MID)
 		{
-			MID->SetVectorParameterValue(TEXT("Color"), Color);
-			MID->SetVectorParameterValue(TEXT("BaseColor"), Color);
+			MID = SpriteMesh->CreateAndSetMaterialInstanceDynamic(0);
 		}
+		if (MID)
+		{
+			MID->SetTextureParameterValue(TEXT("Sprite"), ArtTextures[static_cast<int32>(Art)]);
+			// Mirroring flips U only; the anchor (bottom-centre) is unchanged by a flip.
+			MID->SetVectorParameterValue(TEXT("UVRect"), bMirror ? FLinearColor(S.UScale, 0.f, -S.UScale, S.VScale)
+															   : FLinearColor(0.f, 0.f, S.UScale, S.VScale));
+		}
+		// Translucent: keep a stable draw order between overlapping tokens (ground under figures).
+		SpriteMesh->SetTranslucentSortPriority(bSelected ? 3 : 2);
+		// Ground oval under the whole army (figures and name plate), so neither sits directly on printed
+		// soldiers or script. Opaque core covers the middle; the rim eases to nothing (no edge, no rectangle).
+		const FVector2D PlateUU = PlateSizeUU(DisplayName, SideWord);
+		const float Top = -ArtSizeUU.Y - 2.f;
+		const float Bottom = PlateUU.Y + 1.f;
+		PlaceAbs(GroundMesh, A + FVector(0.f, (Top + Bottom) * 0.5f, 0.3f),
+				 FVector(FMath::Max(ArtSizeUU.X, PlateUU.X) * 1.3f / 100.f, (Bottom - Top) * 1.2f / 100.f, 1.f));
+		GroundMesh->SetTranslucentSortPriority(1);
+		if (UMaterialInstanceDynamic* GMID = GroundMesh->CreateAndSetMaterialInstanceDynamic(0))
+		{
+			GMID->SetTextureParameterValue(TEXT("Sprite"), GroundTexture);
+			GMID->SetVectorParameterValue(TEXT("UVRect"), FLinearColor(0.f, 0.f, 1.f, 1.f));
+			GMID->SetScalarParameterValue(TEXT("Opacity"), GroundOpacity);
+		}
+		const float RuleW = ArtSizeUU.X * 0.72f;
+		PlaceAbs(FactionBar, A + FVector(0.f, 0.9f, 0.5f), FVector(RuleW / 100.f, 1.3f / 100.f, 0.01f));
+		PlaceAbs(SelectBar, A + FVector(0.f, 2.6f, 0.5f), FVector(ArtSizeUU.X * 0.86f / 100.f, 1.4f / 100.f, 0.01f));
+		Tint(FactionBar, Fill);
+		Tint(SelectBar, Gold);
 	}
-	else
+
+	// Compact symbol colours (layout depends on zoom; see ApplyLod).
+	Tint(FlagMesh, Fill);
+	Tint(MarkMesh, Parchment);
+	Tint(SelectRing, Gold);
+
+	// Name plate under the feet (PlateSizeUU reserves its room). Game-rendered text; never baked into the art.
+	const FRotator TextRot(90.f, 90.f, 0.f); // == APA250ProvinceMapActor::FlatMapTextRotation()
+	NameText->SetAbsolute(true, true, true);
+	NameText->SetWorldRotation(TextRot);
+	NameText->SetWorldScale3D(FVector::OneVector);
+	NameText->SetText(FText::FromString(DisplayName));
+	NameText->SetTextRenderColor(Ink);
+	StrengthText->SetAbsolute(true, true, true);
+	StrengthText->SetWorldRotation(TextRot);
+	StrengthText->SetWorldScale3D(FVector::OneVector);
+	StrengthText->SetText(FText::FromString(SideWord));
+	StrengthText->SetTextRenderColor(Ink);
+
+	bShowIllustration = false;
+	PlateScale = 0.f;
+	ApplyLod(0.f);
+}
+
+void APA250ArmyToken::LayoutPlate(float Scale)
+{
+	PlateScale = Scale;
+	const FVector A = GetActorLocation();
+	NameText->SetWorldSize(NameSizeUU * Scale);
+	NameText->SetWorldLocation(A + FVector(0.f, PlateGapUU, 6.f));
+	StrengthText->SetWorldSize(SideSizeUU * Scale);
+	StrengthText->SetWorldLocation(A + FVector(0.f, PlateGapUU + (NameSizeUU + LineGapUU) * Scale, 6.f));
+}
+
+void APA250ArmyToken::LayoutCompact(float DiameterUU)
+{
+	CompactDiameterUU = DiameterUU;
+	const FVector A = GetActorLocation();
+	// The disc stands on the ground line like the figures do, so switching LOD keeps the anchor.
+	const FVector C = A + FVector(0.f, -DiameterUU * 0.5f, 2.f);
+	PlaceAbs(FlagMesh, C, FVector(DiameterUU / 100.f, DiameterUU / 100.f, 0.04f));
+	PlaceAbs(MarkMesh, C + FVector(0.f, 0.f, 2.5f), FVector(DiameterUU * 0.58f / 100.f, DiameterUU * 0.15f / 100.f, 0.04f));
+	const float RingD = DiameterUU + 5.f;
+	PlaceAbs(SelectRing, C + FVector(0.f, 0.f, -1.5f), FVector(RingD / 100.f, RingD / 100.f, 0.03f));
+}
+
+void APA250ArmyToken::ApplyLod(float PxPerUU)
+{
+	bool bIllus = false;
+	if (Art != EPA250ArmyArt::None && PxPerUU > 0.f)
 	{
-		FlagMesh->SetVectorParameterValueOnMaterials(TEXT("Color"), FVector(Color));
+		const float FigurePx = FigureHeightUU * PxPerUU;
+		bIllus = bShowIllustration ? FigurePx >= HideFigurePx : FigurePx >= RevealFigurePx;
 	}
-	(void)StackIndex; // caller applies world stacking offset
+	bShowIllustration = bIllus;
+	const float D = PxPerUU > 0.f ? FMath::Clamp(CompactSymbolPx / PxPerUU, CompactMinUU, CompactMaxUU) : CompactMaxUU * 0.75f;
+	if (!FMath::IsNearlyEqual(D, CompactDiameterUU, 0.05f) || !FlagMesh->IsUsingAbsoluteLocation())
+	{
+		LayoutCompact(D);
+	}
+	// Plate: reserved size when the illustration shows; at wide zoom keep the name readable (capped growth).
+	const float Scale = (!bIllus && PxPerUU > 0.f) ? FMath::Clamp(MinNamePx / (NameSizeUU * PxPerUU), 1.f, PlateMaxGrow) : 1.f;
+	if (!FMath::IsNearlyEqual(Scale, PlateScale, 0.01f))
+	{
+		LayoutPlate(Scale);
+	}
+	SpriteMesh->SetVisibility(bIllus);
+	GroundMesh->SetVisibility(bIllus && GroundTexture != nullptr && GroundOpacity > 0.f);
+	FactionBar->SetVisibility(bIllus);
+	SelectBar->SetVisibility(bIllus && bSelected);
+	FlagMesh->SetVisibility(!bIllus);
+	MarkMesh->SetVisibility(!bIllus);
+	SelectRing->SetVisibility(!bIllus && bSelected);
+}
+
+FBox2D APA250ArmyToken::GetDrawnRect() const
+{
+	const FVector A = GetActorLocation();
+	if (bShowIllustration)
+	{
+		return FBox2D(FVector2D(A.X - ArtSizeUU.X * 0.5f, A.Y - ArtSizeUU.Y), FVector2D(A.X + ArtSizeUU.X * 0.5f, A.Y + 1.f));
+	}
+	const float R = CompactDiameterUU * 0.5f;
+	return FBox2D(FVector2D(A.X - R, A.Y - 2.f * R), FVector2D(A.X + R, A.Y));
+}
+
+bool APA250ArmyToken::HitTest(const FVector& World) const
+{
+	const FVector2D P(World.X, World.Y);
+	const FVector A = GetActorLocation();
+	if (bShowIllustration)
+	{
+		// Content rect only (padding was cropped at preparation) plus a 2 UU grace margin.
+		return GetDrawnRect().ExpandBy(2.f).IsInside(P);
+	}
+	const FVector2D C(A.X, A.Y - CompactDiameterUU * 0.5f);
+	return FVector2D::Distance(P, C) <= CompactDiameterUU * 0.5f + 2.f;
 }

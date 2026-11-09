@@ -143,8 +143,18 @@ FText UPA250MapWidget::AboutText() const
 		"copy of the same plate; planned source NYPL Digital Collections item 46abf040-c5ed-012f-b389-58d385a7bc34.\n\n"
 		"Historical-date caveat: this July 1775 engraving includes later siege information. Its printed soldiers, "
 		"camps and battle annotations are historical artwork — not live units and not verified April 19 positions. "
-		"A hollow diamond marks who holds a town: blue Continentals (yours), red British. A round counter "
-		"with a bar is an army, labeled Yours or British — click it, then click a town to march. "
+		"A hollow diamond and a soft colour wash mark who holds a town: blue Continentals (yours), red British. The "
+		"wash follows the period practice of hand-colouring and marks the town only; the 1775 plate shows no town "
+		"boundaries, so none are drawn. An army is a round "
+		"counter with a bar at wide zoom and, where artwork exists for it, a small illustration when zoomed in, "
+		"labeled Yours or British — "
+		"click it, then click a town to march.\n\n"
+		"Army illustrations are modern artistic reconstructions in an engraved style, not period images and not a "
+		"uniform reference for any particular unit; the number of figures drawn does not show strength. A British "
+		"column is drawn marching only while it is on the march, and firing only while a battle is pending; a British "
+		"force at rest keeps the counter. The provincial picture shows provincial regulars and is used only for a "
+		"Continental force made up mostly of line infantry; a militia force keeps the counter (there is no militia "
+		"illustration). "
 		"The game date follows the campaign clock."));
 }
 
@@ -157,7 +167,7 @@ FText UPA250MapWidget::StatusText() const
 {
 	const FString Line = !LastMessage.IsEmpty() ? LastMessage : Message;
 	return FText::FromString(Line.IsEmpty()
-								 ? TEXT("Select a town or army. Drag to pan, wheel to zoom, Space pauses, Esc clears.")
+								 ? TEXT("Select a town or army. Drag or arrow keys to pan, wheel to zoom, Space pauses, Esc clears.")
 								 : Line);
 }
 
@@ -419,6 +429,15 @@ FReply UPA250MapWidget::NativeOnKeyDown(const FGeometry& InGeometry, const FKeyE
 		return FReply::Unhandled();
 	}
 	const FKey Key = InKeyEvent.GetKey();
+	const FKey Arrows[] = {EKeys::Left, EKeys::Right, EKeys::Up, EKeys::Down};
+	for (int32 i = 0; i < 4; ++i)
+	{
+		if (Key == Arrows[i])
+		{
+			HeldArrows |= static_cast<uint8>(1 << i);
+			return FReply::Handled();
+		}
+	}
 	if (Key == EKeys::SpaceBar)
 	{
 		S->SetPaused(!S->IsPaused());
@@ -461,6 +480,27 @@ FReply UPA250MapWidget::NativeOnKeyDown(const FGeometry& InGeometry, const FKeyE
 		return FReply::Handled();
 	}
 	return Super::NativeOnKeyDown(InGeometry, InKeyEvent);
+}
+
+FReply UPA250MapWidget::NativeOnKeyUp(const FGeometry& InGeometry, const FKeyEvent& InKeyEvent)
+{
+	const FKey Key = InKeyEvent.GetKey();
+	const FKey Arrows[] = {EKeys::Left, EKeys::Right, EKeys::Up, EKeys::Down};
+	for (int32 i = 0; i < 4; ++i)
+	{
+		if (Key == Arrows[i])
+		{
+			HeldArrows &= static_cast<uint8>(~(1 << i));
+			return FReply::Handled();
+		}
+	}
+	return Super::NativeOnKeyUp(InGeometry, InKeyEvent);
+}
+
+void UPA250MapWidget::NativeOnFocusLost(const FFocusEvent& InFocusEvent)
+{
+	HeldArrows = 0; // a key released while unfocused must not leave the map scrolling
+	Super::NativeOnFocusLost(InFocusEvent);
 }
 
 FSlateRect UPA250MapWidget::GetTopStripScreenRect() const

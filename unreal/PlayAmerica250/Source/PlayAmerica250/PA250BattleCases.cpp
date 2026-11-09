@@ -1165,6 +1165,7 @@ void RunAudio(FLog& Log)
 
 	// Hit feedback: a tick for a hit and a thump for a kill (2D, for the shooter), and a marker where his ball landed.
 	Log.Check(FPA250BattleAudio::Pick(TEXT("hit_confirm")) && FPA250BattleAudio::Pick(TEXT("kill_confirm")), TEXT("audio: hit / kill confirmation sounds exist"));
+	Log.Check(FPA250BattleAudio::Pick(TEXT("battle_begins")) != nullptr, TEXT("audio: battle-begins stinger exists"));
 	{
 		AActor* Miss = AMusketProjectile::SpawnImpactMarker(W.World, FVector(1000.f, 0.f, 50.f), false);
 		AActor* HitM = AMusketProjectile::SpawnImpactMarker(W.World, FVector(1200.f, 0.f, 50.f), true);

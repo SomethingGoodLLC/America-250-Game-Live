@@ -537,6 +537,10 @@ void APA250BattleGameMode::BeginPlay()
 {
 	Super::BeginPlay();
 	EnsureInitialized();
+	if (!bAutoplayBots)
+	{
+		FPA250BattleAudio::PlayBattleBegins(this);
+	}
 	StartTime = GetWorld()->GetTimeSeconds();
 	Banner = FString::Printf(TEXT("Battle of %s"), UTF8_TO_TCHAR(Setup.province_name.c_str()));
 	if (ScenarioFight.bContestSingleCrossing)

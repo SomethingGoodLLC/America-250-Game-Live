@@ -2,6 +2,7 @@
 #include "Blueprint/UserWidget.h"
 #include "Campaign/PA250Autoplay.h"
 #include <map>
+#include "Battle/PA250BattleAudio.h"
 #include "Campaign/PA250Subsystem.h"
 #include "Engine/DirectionalLight.h"
 #include "Engine/SkyLight.h"
@@ -14,6 +15,14 @@
 #include "PA250MapWidget.h"
 #include "PA250ProvinceMapActor.h"
 #include "TimerManager.h"
+#include "Misc/Paths.h"
+#include "UnrealClient.h"
+#include "Framework/Application/SlateApplication.h"
+#include "Widgets/SViewport.h"
+#include "Engine/Engine.h"
+#include "Engine/GameViewportClient.h"
+#include "Engine/Texture2D.h"
+#include "PixelFormat.h"
 
 APA250CampaignGameMode::APA250CampaignGameMode()
 {
@@ -32,6 +41,7 @@ void APA250CampaignGameMode::BeginPlay()
 	}
 	Sub->EnsureCampaign();
 	Sub->SetCampaignActive(true);
+	FPA250BattleAudio::StartCampaignMusic(this);
 
 	if (UWorld* World = GetWorld())
 	{
@@ -67,7 +77,14 @@ void APA250CampaignGameMode::BeginPlay()
 	{
 		PC->bShowMouseCursor = true;
 		PC->bAutoManageActiveCameraTarget = false;
-		PC->SetInputMode(FInputModeGameAndUI());
+		if (APA250CampaignPlayerController* CampaignPC = Cast<APA250CampaignPlayerController>(PC))
+		{
+			CampaignPC->ApplyCampaignInputMode();
+		}
+		else
+		{
+			PC->SetInputMode(FInputModeGameAndUI());
+		}
 		MapWidget = CreateWidget<UPA250MapWidget>(PC, UPA250MapWidget::StaticClass());
 		if (MapWidget)
 		{
@@ -90,6 +107,15 @@ void APA250CampaignGameMode::BeginPlay()
 									   0.05f, false);
 	}
 
+	if (FParse::Value(FCommandLine::Get(), TEXT("PA250ArtProbe="), ArtProbeLabel) && !ArtProbeLabel.IsEmpty())
+	{
+		// First capture after 12 s (never at frame 5), then one step every 3 s.
+		Sub->SetPaused(true);
+		ArtProbeStep = 0;
+		GetWorldTimerManager().SetTimer(ArtProbeTimer, FTimerDelegate::CreateUObject(this, &APA250CampaignGameMode::RunArtProbeStep),
+										3.f, true, 12.f);
+	}
+
 	if (FParse::Param(FCommandLine::Get(), TEXT("PA250DecostaProbe")))
 	{
 		FTimerHandle ProbeHandle;
@@ -106,7 +132,7 @@ void APA250CampaignGameMode::BeginPlay()
 				if (APA250CampaignPlayerController* CPC =
 						Cast<APA250CampaignPlayerController>(GetWorld()->GetFirstPlayerController()))
 				{
-					CPC->ClickMapAtUV(0.248f, 0.175f); // lexington draft/verified UV
+					CPC->ClickMapAtUV(0.300f, 0.230f); // lexington hotspot (engraved town, decosta_locations.json)
 					UE_LOG(LogTemp, Display, TEXT("DECOSTA_PROBE: clicked lexington UV"));
 				}
 				if (APlayerController* PC = GetWorld()->GetFirstPlayerController())
@@ -162,6 +188,7 @@ void APA250CampaignGameMode::BeginPlay()
 
 void APA250CampaignGameMode::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	FPA250BattleAudio::StopCampaignMusic();
 	if (UPA250Subsystem* Sub = UPA250Subsystem::Get(this))
 	{
 		Sub->SetCampaignActive(false);
@@ -335,4 +362,321 @@ void APA250CampaignGameMode::RunAutoplayCampaign()
 		return;
 	}
 	Finish(Sub, TEXT("autoplay"));
+}
+
+void APA250CampaignGameMode::RunProbeDragFrame()
+{
+	APA250CampaignPlayerController* PC = Cast<APA250CampaignPlayerController>(GetWorld()->GetFirstPlayerController());
+	if (!PC || !MapActor)
+	{
+		GetWorldTimerManager().ClearTimer(DragTimer);
+		return;
+	}
+	++DragFrame;
+	const FVector2D Center = MapActor->GetZoomCenterUV();
+	const FVector2D Step = Center - DragLastCenter;
+	// A reversal = the view stepped against its previous direction (the shake).
+	if (!DragLastStep.IsNearlyZero(1e-6f) && !Step.IsNearlyZero(1e-6f) && FVector2D::DotProduct(Step, DragLastStep) < 0.f)
+	{
+		++DragReversals;
+	}
+	if (!Step.IsNearlyZero(1e-6f))
+	{
+		DragLastStep = Step;
+	}
+	DragLastCenter = Center;
+	const TSet<FKey> Lmb({EKeys::LeftMouseButton});
+	if (DragFrame <= 30)
+	{
+		// 8,4 viewport px per frame up-left (absolute units = local * geometry scale).
+		const FVector2D Prev = DragAbsStart - FVector2D(8.f, 4.f) * DragAbsPerLocal * static_cast<float>(DragFrame - 1);
+		const FVector2D Abs = DragAbsStart - FVector2D(8.f, 4.f) * DragAbsPerLocal * static_cast<float>(DragFrame);
+		FSlateApplication::Get().SetCursorPos(Abs);
+		FSlateApplication::Get().ProcessMouseMoveEvent(FPointerEvent(0, Abs, Prev, Lmb, EKeys::Invalid, 0.f, FModifierKeysState()));
+		return;
+	}
+	if (DragFrame <= 36)
+	{
+		return; // cursor held still: the view must settle, not keep moving
+	}
+	FVector2D Under;
+	PC->ProbeCursorUV(Under);
+	const float ErrPx = FVector2D::Distance(Under, DragGrabUV) * static_cast<float>(MapActor->GetImageWidthPx());
+	const FVector2D Abs = DragAbsStart - FVector2D(8.f, 4.f) * DragAbsPerLocal * 30.f;
+	FSlateApplication::Get().ProcessMouseButtonUpEvent(
+		FPointerEvent(0, Abs, Abs, TSet<FKey>(), EKeys::LeftMouseButton, 0.f, FModifierKeysState()));
+	UE_LOG(LogTemp, Display,
+		   TEXT("ART_PROBE: drag end center=(%.4f,%.4f) under_cursor=(%.4f,%.4f) grab=(%.4f,%.4f) grab_error=%.0f image px reversals=%d"),
+		   Center.X, Center.Y, Under.X, Under.Y, DragGrabUV.X, DragGrabUV.Y, ErrPx, DragReversals);
+	GetWorldTimerManager().ClearTimer(DragTimer);
+}
+
+void APA250CampaignGameMode::RunArtProbeStep()
+{
+	// Scripted map-art check. Fixed views (same in every build) so before/after shots compare directly.
+	// It drives the clock only through AdvanceHours (the normal command path) and never saves.
+	UPA250Subsystem* Sub = UPA250Subsystem::Get(this);
+	APA250CampaignPlayerController* PC = Cast<APA250CampaignPlayerController>(GetWorld()->GetFirstPlayerController());
+	if (!Sub || !MapActor || !PC || !MapWidget)
+	{
+		UE_LOG(LogTemp, Error, TEXT("ART_PROBE: missing sub/map/pc/widget"));
+		GetWorldTimerManager().ClearTimer(ArtProbeTimer);
+		return;
+	}
+	const FString Dir = FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() / TEXT("Screenshots/ArtProbe") / ArtProbeLabel);
+	auto Shot = [this, Dir](const TCHAR* Name) {
+		FTimerHandle H;
+		const FString Path = Dir / FString(Name) + TEXT(".png");
+		APA250ProvinceMapActor* Map = MapActor;
+		GetWorldTimerManager().SetTimer(H, FTimerDelegate::CreateLambda([Path, Map]() {
+			FScreenshotRequest::RequestScreenshot(Path, true, false);
+			UE_LOG(LogTemp, Display, TEXT("ART_PROBE: shot %s"), *Path);
+			if (IsValid(Map))
+			{
+				// Logged at capture time (after the map has ticked), not when the step changed state.
+				UE_LOG(LogTemp, Display, TEXT("ART_PROBE: at shot zoom=%.2f tokens %s"), Map->GetZoomFactor(), *Map->DescribeArmyTokens());
+			}
+		}),
+										1.0f, false);
+	};
+	auto StateLine = [Sub]() {
+		const pa250::CampaignState& St = Sub->GetState();
+		FString Out = Sub->FormatDate();
+		for (const auto& Kv : St.armies)
+		{
+			Out += FString::Printf(TEXT(" | %s@%s path=%d"), UTF8_TO_TCHAR(Kv.first.c_str()), UTF8_TO_TCHAR(Kv.second.province.c_str()),
+								   static_cast<int32>(Kv.second.path.size()));
+		}
+		if (St.pending_battle.active)
+		{
+			Out += FString::Printf(TEXT(" | battle@%s"), UTF8_TO_TCHAR(St.pending_battle.province.c_str()));
+		}
+		return Out;
+	};
+	auto UVOf = [this](const FVector& W) {
+		FVector2D UV;
+		MapActor->WorldToUV(W, UV);
+		return UV;
+	};
+	const FVector2D LexView(0.29f, 0.215f);
+	const FVector2D BostonView(0.575f, 0.50f);
+	constexpr float CloseZoom = 4.5f;
+	const int32 Step = ArtProbeStep++;
+	UE_LOG(LogTemp, Display, TEXT("ART_PROBE: step %d state: %s"), Step, *StateLine());
+	switch (Step)
+	{
+	case 0:
+		for (const TCHAR* Path : {TEXT("/Game/PA250/Textures/Army/T_Army_ProvincialRegulars.T_Army_ProvincialRegulars"),
+								  TEXT("/Game/PA250/Textures/Army/T_Army_BritishMarching.T_Army_BritishMarching"),
+								  TEXT("/Game/PA250/Textures/Army/T_Army_BritishFiring.T_Army_BritishFiring"),
+								  TEXT("/Game/PA250/Textures/Army/T_Army_GroundOval.T_Army_GroundOval")})
+		{
+			if (const UTexture2D* T = LoadObject<UTexture2D>(nullptr, Path))
+			{
+				UE_LOG(LogTemp, Display, TEXT("ART_PROBE: texture %s %dx%d format=%s mips=%d srgb=%d"), *T->GetName(), T->GetSizeX(),
+					   T->GetSizeY(), GetPixelFormatString(T->GetPixelFormat()),
+					   T->GetPlatformData() ? T->GetPlatformData()->Mips.Num() : -1, T->SRGB ? 1 : 0);
+			}
+			else
+			{
+				UE_LOG(LogTemp, Error, TEXT("ART_PROBE: texture missing %s"), Path);
+			}
+		}
+		MapActor->ResetOverview();
+		Shot(TEXT("01_overview"));
+		break;
+	case 1:
+		MapActor->SetView(LexView, CloseZoom);
+		Shot(TEXT("02_lexington_close"));
+		break;
+	case 2:
+	{
+		FVector Tok;
+		if (MapActor->GetArmyTokenLocation(TEXT("continental_militia"), Tok))
+		{
+			// Click a point on the drawn army (a little above the anchor: the figures stand on it).
+			const FVector2D UV = UVOf(Tok + FVector(0.f, -6.f, 0.f));
+			PC->ClickMapAtUV(UV.X, UV.Y);
+		}
+		UE_LOG(LogTemp, Display, TEXT("ART_PROBE: select militia -> selected=%s province=%s msg=\"%s\""), *MapWidget->GetSelectedArmyId(),
+			   *MapWidget->GetSelectedProvinceId(), *MapWidget->GetLastMessage());
+		Shot(TEXT("03_lexington_selected"));
+		break;
+	}
+	case 3:
+	{
+		// Movement still works: with the militia selected, a town click queues a march; then cancel it.
+		const FVector Lincoln = MapActor->GetLabelWorld(TEXT("lincoln"));
+		const FVector2D UV = UVOf(Lincoln);
+		PC->ClickMapAtUV(UV.X, UV.Y);
+		UE_LOG(LogTemp, Display, TEXT("ART_PROBE: order lincoln -> msg=\"%s\" pending_commands=%d"), *MapWidget->GetLastMessage(),
+			   static_cast<int32>(Sub->GetState().pending_commands.size()));
+		Sub->ClearOrders();
+		MapWidget->ClearSelection();
+		UE_LOG(LogTemp, Display, TEXT("ART_PROBE: orders cleared pending_commands=%d selected=%s"),
+			   static_cast<int32>(Sub->GetState().pending_commands.size()), *MapWidget->GetSelectedArmyId());
+		break;
+	}
+	case 4:
+	{
+		// Hit tests: every town hotspot must resolve to its town, never to an army.
+		int32 Stolen = 0;
+		for (const FString& Id : MapActor->GetAllProvinceIds())
+		{
+			const FString A = MapActor->ArmyAtWorld(MapActor->GetLabelWorld(Id));
+			if (!A.IsEmpty())
+			{
+				++Stolen;
+				UE_LOG(LogTemp, Warning, TEXT("ART_PROBE: town %s hotspot centre hits army %s"), *Id, *A);
+			}
+		}
+		FVector Tok;
+		if (MapActor->GetArmyTokenLocation(TEXT("continental_militia"), Tok))
+		{
+			const FString OnArt = MapActor->ArmyAtWorld(Tok + FVector(0.f, -6.f, 0.f));
+			const FString FarRight = MapActor->ArmyAtWorld(Tok + FVector(40.f, -30.f, 0.f));
+			UE_LOG(LogTemp, Display, TEXT("ART_PROBE: hit on-art=%s off-art(+40,-30)=%s"), *OnArt, *FarRight);
+		}
+		UE_LOG(LogTemp, Display, TEXT("ART_PROBE: town hotspots stolen by army hit targets: %d"), Stolen);
+		UE_LOG(LogTemp, Display, TEXT("ART_PROBE: tokens %s"), *MapActor->DescribeArmyTokens());
+		MapActor->SetView(BostonView, CloseZoom);
+		Shot(TEXT("04_boston_close"));
+		break;
+	}
+	case 5:
+	{
+		FString Err;
+		for (int32 i = 0; i < 12 && Sub->GetState().armies.at("british_regulars").path.empty(); ++i)
+		{
+			Sub->AdvanceHours(1, Err);
+		}
+		const pa250::Army& B = Sub->GetState().armies.at("british_regulars");
+		UE_LOG(LogTemp, Display, TEXT("ART_PROBE: british marching=%d at %s; %s"), B.path.empty() ? 0 : 1, UTF8_TO_TCHAR(B.province.c_str()),
+			   *StateLine());
+		const FVector2D UV = UVOf(MapActor->GetLabelWorld(UTF8_TO_TCHAR(B.province.c_str())));
+		MapActor->SetView(UV + FVector2D(0.015f, 0.01f), CloseZoom);
+		UE_LOG(LogTemp, Display, TEXT("ART_PROBE: tokens %s"), *MapActor->DescribeArmyTokens());
+		Shot(TEXT("05_british_marching"));
+		break;
+	}
+	case 6:
+	{
+		FString Err;
+		for (int32 i = 0; i < 96 && !Sub->IsBattlePending(); ++i)
+		{
+			Sub->AdvanceHours(1, Err);
+		}
+		const FString Bp = UTF8_TO_TCHAR(Sub->GetState().pending_battle.province.c_str());
+		UE_LOG(LogTemp, Display, TEXT("ART_PROBE: battle pending=%d at %s; %s"), Sub->IsBattlePending() ? 1 : 0, *Bp, *StateLine());
+		const FVector2D UV = Bp == TEXT("lexington") ? LexView : UVOf(MapActor->GetLabelWorld(Bp));
+		MapActor->SetView(UV, CloseZoom);
+		UE_LOG(LogTemp, Display, TEXT("ART_PROBE: tokens %s"), *MapActor->DescribeArmyTokens());
+		Shot(TEXT("06_engaged"));
+		break;
+	}
+	case 7:
+		MapActor->ResetOverview();
+		Shot(TEXT("07_overview_engaged"));
+		break;
+	case 8:
+	{
+		// Existing save still loads (read only; nothing is written).
+		FString Err;
+		const bool bLoaded = Sub->LoadCampaign(Err);
+		UE_LOG(LogTemp, Display, TEXT("ART_PROBE: load existing save ok=%d err=\"%s\" hash=%s; %s"), bLoaded ? 1 : 0, *Err,
+			   *Sub->GetStateHash(), *StateLine());
+		MapActor->ResetOverview();
+		Shot(TEXT("08_loaded_save_overview"));
+		break;
+	}
+	case 9:
+		UE_LOG(LogTemp, Display, TEXT("ART_PROBE: tokens %s"), *MapActor->DescribeArmyTokens());
+		MapActor->SetView(LexView, 2.0f);
+		Shot(TEXT("09_mid_zoom"));
+		break;
+	case 10:
+		MapActor->SetView(LexView, CloseZoom);
+		break;
+	case 11:
+	{
+		// Drag through real Slate routing (capture/lock apply) with viewport focus, as in PIE after a click.
+		TSharedPtr<SViewport> VPW = GEngine && GEngine->GameViewport ? GEngine->GameViewport->GetGameViewportWidget() : nullptr;
+		if (!VPW.IsValid())
+		{
+			UE_LOG(LogTemp, Error, TEXT("ART_PROBE: drag: no viewport widget"));
+			break;
+		}
+		FSlateApplication::Get().SetAllUserFocusToGameViewport();
+		const FGeometry& Geo = VPW->GetCachedGeometry();
+		DragAbsStart = Geo.LocalToAbsolute(Geo.GetLocalSize() * 0.5f);
+		DragAbsPerLocal = Geo.Scale;
+		DragFrame = 0;
+		DragReversals = 0;
+		DragLastStep = FVector2D::ZeroVector;
+		DragLastCenter = MapActor->GetZoomCenterUV();
+		FSlateApplication::Get().SetCursorPos(DragAbsStart);
+		PC->ProbeCursorUV(DragGrabUV);
+		FSlateApplication::Get().ProcessMouseButtonDownEvent(
+			nullptr, FPointerEvent(0, DragAbsStart, DragAbsStart, TSet<FKey>({EKeys::LeftMouseButton}), EKeys::LeftMouseButton, 0.f,
+								   FModifierKeysState()));
+		UE_LOG(LogTemp, Display, TEXT("ART_PROBE: drag start abs=(%.0f,%.0f) grab_uv=(%.4f,%.4f) center=(%.4f,%.4f)"), DragAbsStart.X,
+			   DragAbsStart.Y, DragGrabUV.X, DragGrabUV.Y, DragLastCenter.X, DragLastCenter.Y);
+		GetWorldTimerManager().SetTimer(DragTimer, FTimerDelegate::CreateUObject(this, &APA250CampaignGameMode::RunProbeDragFrame), 0.05f,
+										true, 0.2f);
+		break;
+	}
+	case 12:
+	case 13:
+	{
+		// Arrow keys through real Slate routing: 12 = viewport focused (PIE after a click), 13 = HUD widget focused.
+		const bool bWidgetFocus = Step == 13;
+		if (bWidgetFocus)
+		{
+			MapWidget->SetKeyboardFocus();
+		}
+		else
+		{
+			FSlateApplication::Get().SetAllUserFocusToGameViewport();
+		}
+		MapActor->SetView(LexView, CloseZoom);
+		const FVector2D Start = MapActor->GetZoomCenterUV();
+		const float PxPerUU = MapActor->MeasurePxPerUU();
+		FSlateApplication::Get().ProcessKeyDownEvent(FKeyEvent(EKeys::Right, FModifierKeysState(), 0, false, 0, 0));
+		FSlateApplication::Get().ProcessKeyDownEvent(FKeyEvent(EKeys::Down, FModifierKeysState(), 0, false, 0, 0));
+		FTimerHandle H;
+		GetWorldTimerManager().SetTimer(H, FTimerDelegate::CreateLambda([this, Start, PxPerUU, bWidgetFocus]() {
+			FSlateApplication::Get().ProcessKeyUpEvent(FKeyEvent(EKeys::Right, FModifierKeysState(), 0, false, 0, 0));
+			FSlateApplication::Get().ProcessKeyUpEvent(FKeyEvent(EKeys::Down, FModifierKeysState(), 0, false, 0, 0));
+			const FVector2D End = MapActor->GetZoomCenterUV();
+			UE_LOG(LogTemp, Display, TEXT("ART_PROBE: arrows (%s focus) held 0.5s -> moved (%.0f, %.0f) screen px (expect about +450,+450)"),
+				   bWidgetFocus ? TEXT("widget") : TEXT("viewport"), (End.X - Start.X) * MapActor->MapWidthUU * PxPerUU,
+				   (End.Y - Start.Y) * MapActor->MapHeightUU * PxPerUU);
+			FTimerHandle H2;
+			GetWorldTimerManager().SetTimer(H2, FTimerDelegate::CreateLambda([this, End]() {
+				UE_LOG(LogTemp, Display, TEXT("ART_PROBE: arrows released -> drift %.6f UV (expect 0)"),
+					   FVector2D::Distance(MapActor->GetZoomCenterUV(), End));
+			}),
+											1.0f, false);
+		}),
+										0.5f, false);
+		break;
+	}
+	case 14:
+	{
+		// Dead zone: shove far past the west clamp, then pan back a little; the view must respond at once.
+		MapActor->SetView(LexView, 1.6f);
+		MapActor->PanByUV(FVector2D(-1.f, 0.f));
+		const FVector2D AtClamp = MapActor->GetZoomCenterUV();
+		MapActor->PanByUV(FVector2D(0.01f, 0.f));
+		const FVector2D Back = MapActor->GetZoomCenterUV();
+		UE_LOG(LogTemp, Display, TEXT("ART_PROBE: clamp centre.x=%.4f, after +0.01 pan %.4f (moved %.4f, expect 0.0100)"), AtClamp.X, Back.X,
+			   Back.X - AtClamp.X);
+		break;
+	}
+	default:
+		UE_LOG(LogTemp, Display, TEXT("ART_PROBE: done"));
+		GetWorldTimerManager().ClearTimer(ArtProbeTimer);
+		PC->ConsoleCommand(TEXT("QUIT"));
+		break;
+	}
 }

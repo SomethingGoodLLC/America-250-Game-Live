@@ -160,6 +160,23 @@ class DIDVideoProvider:
 
             raise TimeoutError(f"D-ID video generation timed out after {max_wait}s")
 
+    async def upload_audio(self, audio_path: Path) -> str:
+        """POST /audios (multipart field "audio", <= 6 MB); returns the temporary URL for script.audio_url."""
+        if not audio_path.exists():
+            raise FileNotFoundError(f"Audio not found: {audio_path}")
+        async with aiohttp.ClientSession() as session:
+            with open(audio_path, "rb") as f:
+                data = aiohttp.FormData()
+                data.add_field("audio", f, filename=audio_path.name, content_type="audio/wav")
+                async with session.post(
+                    f"{self.base_url}/audios", headers={"Authorization": f"Basic {self.api_key}"}, data=data
+                ) as response:
+                    if response.status not in (200, 201):
+                        raise RuntimeError(f"D-ID audio upload failed: {response.status} - {(await response.text())[:400]}")
+                    url = (await response.json())["url"]
+                    logger.info("Audio uploaded to D-ID", file=audio_path.name)
+                    return url
+
     async def _upload_image(self, image_path: Path) -> str:
         """Upload local image to D-ID and return URL"""
         logger.info("Uploading image to D-ID", path=str(image_path))

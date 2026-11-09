@@ -1,5 +1,6 @@
 #include "PA250BattleAudio.h"
 #include "Camera/PlayerCameraManager.h"
+#include "Components/AudioComponent.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
@@ -153,6 +154,42 @@ bool FPA250BattleAudio::Play2D(const UObject* Ctx, const FString& Bank, float Vo
 	if (!Sound || !Ctx || !Ctx->GetWorld()) return false;
 	UGameplayStatics::PlaySound2D(Ctx, Sound, Volume, FMath::FRandRange(0.97f, 1.03f));
 	return true;
+}
+
+bool FPA250BattleAudio::PlayBattleBegins(const UObject* Ctx)
+{
+	return Play2D(Ctx, TEXT("battle_begins"));
+}
+
+namespace
+{
+TStrongObjectPtr<UAudioComponent>& CampaignMusic()
+{
+	static TStrongObjectPtr<UAudioComponent> C;
+	return C;
+}
+} // namespace
+
+bool FPA250BattleAudio::StartCampaignMusic(const UObject* Ctx, float Volume)
+{
+	Counts().FindOrAdd(TEXT("campaign_music"))++;
+	if (CampaignMusic() && CampaignMusic()->IsPlaying()) return true;
+	USoundBase* Sound = LoadObject<USoundBase>(nullptr, TEXT("/Game/PA250/Audio/Music/campaign_theme.campaign_theme"), nullptr, LOAD_NoWarn | LOAD_Quiet);
+	if (!Sound || !Ctx || !Ctx->GetWorld()) return false;
+	UAudioComponent* Comp = UGameplayStatics::SpawnSound2D(Ctx, Sound, Volume, 1.f, 0.f, nullptr, false, true);
+	if (!Comp) return false;
+	Comp->FadeIn(2.f, Volume);
+	CampaignMusic() = TStrongObjectPtr<UAudioComponent>(Comp);
+	return true;
+}
+
+void FPA250BattleAudio::StopCampaignMusic()
+{
+	if (CampaignMusic())
+	{
+		CampaignMusic()->FadeOut(1.f, 0.f);
+		CampaignMusic().Reset();
+	}
 }
 
 int32 FPA250BattleAudio::GetPlayCount(const FString& BankOrKey)

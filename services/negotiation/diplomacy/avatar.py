@@ -236,25 +236,63 @@ async def synthesize_line_audio(
     return None
 
 
-async def _did_video(text: str, portrait: Path, out_mp4: Path) -> str | None:
-    if not os.getenv("DID_API_KEY") or os.getenv("PA250_DID", "1") == "0":
+def _did_unavailable_reason() -> str | None:
+    if os.getenv("PA250_DID", "1") == "0":
+        return "PA250_DID=0"
+    if not os.getenv("DID_API_KEY"):
+        return "DID_API_KEY not set"
+    return None
+
+
+async def _did_video(audio_file: str, portrait: Path, out_mp4: Path) -> str | None:
+    """D-ID lip-syncs OUR WAV (uploaded via POST /audios, script type "audio"); never D-ID's built-in voice."""
+    if _did_unavailable_reason():
         return None
     try:
         from video_providers.did_video import DIDVideoProvider
 
-        path = await DIDVideoProvider().generate_video(
-            text=text, image_url=str(portrait), output_path=out_mp4
-        )
+        prov = DIDVideoProvider()
+        audio_url = await prov.upload_audio(Path(audio_file))
+        path = await prov.generate_video(audio_url=audio_url, image_url=str(portrait), output_path=out_mp4)
         return str(path) if path else None
     except Exception as e:
-        logger.warning("D-ID failed; falling back to audio-only", error=str(e))
+        logger.warning("D-ID failed", error=f"{type(e).__name__}: {e}"[:600])
         return None
+
+
+def _musetalk_remote_reason() -> str:
+    return "not built yet" + (" (MUSETALK_REMOTE_URL is set but ignored)" if os.getenv("MUSETALK_REMOTE_URL") else "")
+
+
+def backend_status() -> list[dict[str, Any]]:
+    """Each video backend in chain order with availability and reason (no secrets)."""
+    from providers.video_sources.fal_talking_source import FalTalkingVideoSource
+
+    fal = FalTalkingVideoSource()
+    rows: list[dict[str, Any]] = [
+        {"name": "musetalk_local", "reason": MuseTalkVideoSource().unavailable_reason()},
+        {"name": "musetalk_remote", "reason": _musetalk_remote_reason()},
+        {"name": "fal_talking", "reason": fal.unavailable_reason(), "model": fal.model_id,
+         "resolution": fal.resolution or None},
+        {"name": "did", "reason": _did_unavailable_reason()},
+        {"name": "audio_only", "reason": None},
+    ]
+    mode = os.getenv("PA250_AVATAR", "auto").lower()
+    for r in rows:
+        r["available"] = r["reason"] is None
+        r["enabled"] = r["name"] == "audio_only" or mode == "auto" or r["name"].startswith(mode)
+    return rows
 
 
 async def render_avatar_line(
     text: str, job_id: str, portrait: Path | None = None, envoy_id: str = "default"
 ) -> AvatarLine:
-    """Run the preference chain. Never raises."""
+    """TTS, then video: musetalk_local -> musetalk_remote (not built) -> fal_talking -> did -> audio_only.
+
+    PA250_AVATAR selects one backend (musetalk | fal | did) or 'auto' for the chain; 'none' is voice only.
+    The whole video stage runs under PA250_AVATAR_TIMEOUT (default 90 s); when it runs out the line goes
+    out audio-only. Never raises (except CancelledError).
+    """
     notes: list[str] = []
     portrait = portrait or DEFAULT_PORTRAIT
     tts = await synthesize_line_audio(text, job_id, envoy_id=envoy_id)
@@ -265,23 +303,58 @@ async def render_avatar_line(
     seconds = wav_seconds(audio)
     VIDEO_DIR.mkdir(parents=True, exist_ok=True)
     out_mp4 = VIDEO_DIR / f"{job_id}.mp4"
+    mode = os.getenv("PA250_AVATAR", "auto").lower()
 
     def done(video: str | None, backend: str) -> AvatarLine:
         return AvatarLine(audio, video, backend, notes, tts_backend, seconds)
 
-    if os.getenv("PA250_AVATAR", "auto").lower() in ("auto", "musetalk"):
-        mt = MuseTalkVideoSource()
-        reason = mt.unavailable_reason()
-        if reason is None:
-            video = await mt.render_line(audio, str(portrait), str(out_mp4))
-            if video:
-                return done(video, "musetalk")
-            notes.append("MuseTalk render failed")
-        else:
-            notes.append(f"MuseTalk skipped: {reason}")
-    if os.getenv("PA250_AVATAR", "auto").lower() in ("auto", "did"):
-        video = await _did_video(text, portrait, out_mp4)
-        if video:
-            return done(video, "did")
-        notes.append("D-ID skipped or failed")
-    return done(None, "audio_only")
+    async def chain() -> AvatarLine:
+        if mode in ("auto", "musetalk"):
+            mt = MuseTalkVideoSource()
+            reason = mt.unavailable_reason()
+            if reason is None:
+                video = await mt.render_line(audio, str(portrait), str(out_mp4))
+                if video:
+                    return done(video, "musetalk")
+                notes.append("musetalk_local render failed")
+            else:
+                notes.append(f"musetalk_local skipped: {reason}")
+            notes.append(f"musetalk_remote skipped: {_musetalk_remote_reason()}")
+        if mode in ("auto", "fal"):
+            from providers.video_sources.fal_talking_source import FalTalkingVideoSource
+
+            fal = FalTalkingVideoSource()
+            reason = fal.unavailable_reason()
+            if reason is None:
+                r = await fal.render(audio, str(portrait), str(out_mp4))
+                if r.path:
+                    notes.append(f"fal_talking {r.model}: {r.seconds:.2f}s video, est ${r.est_cost_usd:.2f}, "
+                                 f"render {r.render_s:.1f}s{' (cache hit)' if r.cache_hit else ''}")
+                    return done(r.path, "fal_talking")
+                notes.append(f"fal_talking failed: {r.error}")
+            else:
+                notes.append(f"fal_talking skipped: {reason}")
+        if mode in ("auto", "did"):
+            reason = _did_unavailable_reason()
+            if reason is None:
+                video = await _did_video(audio, portrait, out_mp4)
+                if video:
+                    return done(video, "did")
+                notes.append("did failed")
+            else:
+                notes.append(f"did skipped: {reason}")
+        return done(None, "audio_only")
+
+    if mode in ("none", "off", "audio_only"):
+        return done(None, "audio_only")
+    budget = float(os.getenv("PA250_AVATAR_TIMEOUT", "90"))
+    t0 = time.monotonic()
+    try:
+        line = await asyncio.wait_for(chain(), timeout=budget)
+    except TimeoutError:
+        notes.append(f"video timed out after {budget:.0f}s (PA250_AVATAR_TIMEOUT)")
+        logger.warning("Avatar video timed out; sending audio-only", job_id=job_id, timeout_s=budget, notes=notes)
+        return done(None, "audio_only")
+    logger.info("Avatar video", job_id=job_id, backend=line.backend, video_file=line.video_file,
+                elapsed_s=round(time.monotonic() - t0, 2), notes=notes)
+    return line

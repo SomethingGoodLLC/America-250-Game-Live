@@ -3,6 +3,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/PlayerController.h"
+#include "Engine/EngineBaseTypes.h"
 #include "PA250CampaignPlayerController.generated.h"
 
 class APA250ProvinceMapActor;
@@ -20,8 +21,22 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "PA250")
 	void ClickMapAtUV(float U, float V);
 
+	/**
+	 * Campaign input: cursor visible and unlocked while a button is held, captured only during the press.
+	 * The project defaults (CapturePermanently_IncludingInitialMouseDown + LockOnCapture, cursor hidden
+	 * during capture) suit the battle's mouse look but froze the cursor here, so drag-to-pan never
+	 * tracked. The previous viewport capture/lock modes are restored in EndPlay.
+	 */
+	void ApplyCampaignInputMode();
+
+	/** Probe/tests: left press/release through the real handlers; the caller places the cursor. */
+	void ProbeLeftPress() { OnLeftPressed(); }
+	void ProbeLeftRelease() { OnLeftReleased(); }
+	bool ProbeCursorUV(FVector2D& OutUV) const { return CursorMapUV(OutUV); }
+
 protected:
 	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual void SetupInputComponent() override;
 	virtual void PlayerTick(float DeltaTime) override;
 
@@ -42,4 +57,14 @@ protected:
 	FVector2D LastCursorScreen = FVector2D::ZeroVector;
 	FVector2D LastCursorUV = FVector2D(0.5f, 0.5f);
 	static constexpr float DragThresholdPx = 5.f;
+	static constexpr float ArrowPanPxPerSecond = 900.f;
+	/** Screen-space drag anchor: press position, view centre and scale at the start of the drag. */
+	bool bDragAnchored = false;
+	FVector2D DragAnchorScreen = FVector2D::ZeroVector;
+	FVector2D DragAnchorCenterUV = FVector2D::ZeroVector;
+	float DragAnchorPxPerUU = 0.f;
+	float DragAnchorZoom = 0.f;
+	bool bSavedViewportInput = false;
+	EMouseCaptureMode SavedCaptureMode = EMouseCaptureMode::CapturePermanently_IncludingInitialMouseDown;
+	EMouseLockMode SavedLockMode = EMouseLockMode::LockOnCapture;
 };

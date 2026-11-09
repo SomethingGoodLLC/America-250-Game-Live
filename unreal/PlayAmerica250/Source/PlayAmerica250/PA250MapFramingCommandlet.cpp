@@ -3,10 +3,14 @@
 #include "Campaign/PA250ProvinceMapActor.h"
 #include "Campaign/PA250ArmyToken.h"
 #include "Components/StaticMeshComponent.h"
+#include "Components/TextRenderComponent.h"
+#include "Engine/Texture2D.h"
+#include "Materials/MaterialInterface.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
+#include "pa250/sim.hpp"
 
 int32 UPA250MapFramingCommandlet::Main(const FString& Params)
 {
@@ -85,7 +89,7 @@ int32 UPA250MapFramingCommandlet::Main(const FString& Params)
 							 ViewH * 0.5f + (((V - 0.5f) * MapH - CamY) / OH) * ViewH);
 		};
 		const TCHAR* Names[] = {TEXT("concord"), TEXT("lexington"), TEXT("boston")};
-		const FVector2D UVs[] = {FVector2D(0.143f, 0.306f), FVector2D(0.248f, 0.175f), FVector2D(0.564f, 0.49f)};
+		const FVector2D UVs[] = {FVector2D(0.143f, 0.306f), FVector2D(0.300f, 0.230f), FVector2D(0.564f, 0.49f)};
 		for (int32 i = 0; i < 3; ++i)
 		{
 			const FVector2D P = ProjectOverview(UVs[i].X, UVs[i].Y);
@@ -180,15 +184,217 @@ int32 UPA250MapFramingCommandlet::Main(const FString& Params)
 			++Failures;
 		}
 	}
-	// Army tokens must be findable at full-map zoom: a large flag, not a 22uu sliver.
+	// Army tokens: compact symbol at wide zoom (constant screen size, a disc — towns are diamonds),
+	// illustration only when a figure is readable, and every art asset present.
 	{
 		const APA250ArmyToken* TokenCDO = GetDefault<APA250ArmyToken>();
-		const FVector FlagScale = TokenCDO && TokenCDO->FlagMesh ? TokenCDO->FlagMesh->GetRelativeScale3D() : FVector::ZeroVector;
-		if (FlagScale.X < 0.5f || FlagScale.Y < 0.35f || !TokenCDO->NameText)
+		if (!TokenCDO || !TokenCDO->FlagMesh || !TokenCDO->SpriteMesh || !TokenCDO->NameText || !TokenCDO->StrengthText)
 		{
-			UE_LOG(LogTemp, Error, TEXT("Framing: army token flag too small or name plate missing (scale %s)"),
-				*FlagScale.ToCompactString());
+			UE_LOG(LogTemp, Error, TEXT("Framing: army token components missing"));
 			++Failures;
+		}
+		if (APA250ArmyToken::CompactSymbolPx < 20.f || APA250ArmyToken::CompactSymbolPx > 44.f ||
+			APA250ArmyToken::RevealFigurePx <= APA250ArmyToken::HideFigurePx)
+		{
+			UE_LOG(LogTemp, Error, TEXT("Framing: army LOD thresholds out of range (symbol %.0fpx, reveal %.0f / hide %.0f)"),
+				   APA250ArmyToken::CompactSymbolPx, APA250ArmyToken::RevealFigurePx, APA250ArmyToken::HideFigurePx);
+			++Failures;
+		}
+		for (const EPA250ArmyArt Art : {EPA250ArmyArt::ProvincialRegulars, EPA250ArmyArt::BritishMarching, EPA250ArmyArt::BritishFiring})
+		{
+			const FPA250ArmyArtSpec& Spec = APA250ArmyToken::ArtSpec(Art);
+			const UTexture2D* Tex = LoadObject<UTexture2D>(nullptr, Spec.TexturePath);
+			const FVector2D Size = APA250ArmyToken::ArtWorldSize(Art);
+			int32 TexW = 0;
+			int32 TexH = 0;
+#if WITH_EDITORONLY_DATA
+			if (Tex)
+			{
+				// -nullrhi has no GPU resource; the imported source keeps the real size.
+				TexW = static_cast<int32>(Tex->Source.GetSizeX());
+				TexH = static_cast<int32>(Tex->Source.GetSizeY());
+			}
+#endif
+			if (!Tex || TexW <= 0 || TexH <= 0 || Size.X <= 0.f || Size.Y <= 0.f || Spec.UScale <= 0.f || Spec.VScale <= 0.f)
+			{
+				UE_LOG(LogTemp, Error, TEXT("Framing: army art %d missing or empty (%s)"), static_cast<int32>(Art), Spec.TexturePath);
+				++Failures;
+				continue;
+			}
+			// Content rect must match the texture's content aspect (prepare_army_sprites.py output).
+			const float TexAspect = TexW * Spec.UScale / FMath::Max(1.f, TexH * Spec.VScale);
+			if (!FMath::IsNearlyEqual(TexAspect, Spec.Aspect, 0.02f))
+			{
+				UE_LOG(LogTemp, Error, TEXT("Framing: army art %d aspect %.3f != spec %.3f"), static_cast<int32>(Art), TexAspect, Spec.Aspect);
+				++Failures;
+			}
+			UE_LOG(LogTemp, Display, TEXT("Framing: army art %d %dx%d world %.1fx%.1f UU"), static_cast<int32>(Art), TexW, TexH, Size.X,
+				   Size.Y);
+		}
+		if (!LoadObject<UMaterialInterface>(nullptr, TEXT("/Game/PA250/Materials/M_MapSprite.M_MapSprite")))
+		{
+			UE_LOG(LogTemp, Error, TEXT("Framing: M_MapSprite missing"));
+			++Failures;
+		}
+	}
+	// Art follows state and troop role only: provincial regulars art never stands for a militia force.
+	{
+		pa250::CampaignState St;
+		auto Make = [](const char* Id, const char* Faction, int Line, int Militia) {
+			pa250::Army A;
+			A.id = Id;
+			A.faction = Faction;
+			A.province = "boston";
+			A.units = {{"line_infantry", Line}, {"militia", Militia}};
+			return A;
+		};
+		struct FCase
+		{
+			const TCHAR* Name;
+			pa250::Army Army;
+			bool bMarching;
+			bool bEngaged;
+			EPA250ArmyArt Want;
+		};
+		const FCase Cases[] = {
+			{TEXT("continental militia-majority (slice opening army 4+18)"), Make("c1", "continental", 4, 18), false, false, EPA250ArmyArt::None},
+			{TEXT("continental regular-majority"), Make("c2", "continental", 12, 4), false, false, EPA250ArmyArt::ProvincialRegulars},
+			{TEXT("continental regulars marching (no variant)"), Make("c3", "continental", 12, 0), true, false, EPA250ArmyArt::ProvincialRegulars},
+			{TEXT("british at rest"), Make("b1", "british", 24, 0), false, false, EPA250ArmyArt::None},
+			{TEXT("british marching"), Make("b2", "british", 24, 0), true, false, EPA250ArmyArt::BritishMarching},
+			{TEXT("british engaged"), Make("b3", "british", 24, 0), true, true, EPA250ArmyArt::BritishFiring},
+			{TEXT("british militia-majority"), Make("b4", "british", 2, 10), true, false, EPA250ArmyArt::None},
+		};
+		for (const FCase& C : Cases)
+		{
+			pa250::Army A = C.Army;
+			if (C.bMarching)
+			{
+				A.path = {"some_edge"};
+			}
+			St.pending_battle = pa250::PendingBattle();
+			if (C.bEngaged)
+			{
+				St.pending_battle.active = true;
+				St.pending_battle.attacker_army = A.id;
+			}
+			const EPA250ArmyArt Got = APA250ProvinceMapActor::ArtForArmy(St, A);
+			if (Got != C.Want)
+			{
+				UE_LOG(LogTemp, Error, TEXT("Framing: art rule %s -> %d, want %d"), C.Name, static_cast<int32>(Got), static_cast<int32>(C.Want));
+				++Failures;
+			}
+		}
+		UE_LOG(LogTemp, Display, TEXT("Framing: art rule cases checked %d"), static_cast<int32>(UE_ARRAY_COUNT(Cases)));
+	}
+	// Army slots on the de Costa sheet: for every town and both sides, alone and with an enemy
+	// in the same town, the slot covers no town hotspot (click radius) and no caption.
+	{
+		const FString LocPath = FPaths::ProjectContentDir() / TEXT("Map/Boston1775/Raw/decosta_locations.json");
+		FString LocText;
+		TSharedPtr<FJsonObject> Loc;
+		if (!FFileHelper::LoadFileToString(LocText, *LocPath) || !FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(LocText), Loc) ||
+			!Loc.IsValid())
+		{
+			UE_LOG(LogTemp, Error, TEXT("Framing: cannot read decosta_locations.json"));
+			++Failures;
+		}
+		else
+		{
+			FString ScenText;
+			FFileHelper::LoadFileToString(ScenText, *FPaths::ConvertRelativePathToFull(
+														FPaths::Combine(FPaths::ProjectDir(), TEXT("../PA250Sim/data/boston1775.json"))));
+			const pa250::CampaignState Scenario = pa250::load_scenario(TCHAR_TO_UTF8(*ScenText));
+			if (Scenario.provinces.size() != 13)
+			{
+				UE_LOG(LogTemp, Error, TEXT("Framing: scenario provinces %d != 13"), static_cast<int32>(Scenario.provinces.size()));
+				++Failures;
+			}
+			const float ImgW = Loc->GetObjectField(TEXT("image_size"))->GetNumberField(TEXT("width"));
+			const float ImgH = Loc->GetObjectField(TEXT("image_size"))->GetNumberField(TEXT("height"));
+			const float DW = CDO ? CDO->MapWidthUU : 1600.f;
+			const float DH = DW * ImgH / FMath::Max(1.f, ImgW);
+			TMap<FString, FVector2D> UVs;
+			TMap<FString, float> Radii;
+			TMap<FString, FString> Names;
+			for (const TSharedPtr<FJsonValue>& V : Loc->GetArrayField(TEXT("provinces")))
+			{
+				const TSharedPtr<FJsonObject> P = V->AsObject();
+				const FString Id = P->GetStringField(TEXT("id"));
+				const TArray<TSharedPtr<FJsonValue>>& M = P->GetArrayField(TEXT("marker_uv"));
+				UVs.Add(Id, FVector2D(M[0]->AsNumber(), M[1]->AsNumber()));
+				Radii.Add(Id, P->GetNumberField(TEXT("hit_radius_px")));
+				// Caption text = scenario display name, exactly as the runtime lays it out.
+				const auto It = Scenario.provinces.find(TCHAR_TO_UTF8(*Id));
+				Names.Add(Id, It != Scenario.provinces.end() ? FString(UTF8_TO_TCHAR(It->second.name.c_str())) : Id);
+			}
+			const APA250ProvinceMapActor::FTownObstacles Towns =
+				APA250ProvinceMapActor::BuildTownObstacles(UVs, Radii, Names, ImgW, DW, DH);
+			const FVector2D ContFoot = APA250ArmyToken::FactionFootprintUU(TEXT("continental"));
+			const FVector2D BritFoot = APA250ArmyToken::FactionFootprintUU(TEXT("british"));
+			const FVector2D ContPlate = APA250ArmyToken::PlateSizeUU(TEXT("Militia"), TEXT("Yours"));
+			const FVector2D BritPlate = APA250ArmyToken::PlateSizeUU(TEXT("Reprisal"), TEXT("British"));
+			int32 Checked = 0;
+			for (const FString& Id : Towns.Ids)
+			{
+				// Player's militia first (it keeps its slot), then the British arriving in the same town.
+				TArray<FBox2D> Placed;
+				float Ov = 0.f;
+				int32 Cand = 0;
+				for (int32 Side = 0; Side < 2; ++Side)
+				{
+					const FVector2D& Foot = Side == 0 ? ContFoot : BritFoot;
+					const FVector2D& Plate = Side == 0 ? ContPlate : BritPlate;
+					const FVector2D A = APA250ProvinceMapActor::ChooseArmyAnchor(Id, Towns, Placed, Foot, Plate, Ov, Cand);
+					++Checked;
+					if (Ov > 0.f)
+					{
+						UE_LOG(LogTemp, Error, TEXT("Framing: army slot at %s (army %d) overlaps towns/captions/armies by %.1f UU^2"), *Id,
+							   Placed.Num() / 2, Ov);
+						++Failures;
+					}
+					FBox2D ArtBox, PlateBox;
+					APA250ProvinceMapActor::ArmySlotBoxes(A, Foot, Plate, ArtBox, PlateBox);
+					Placed.Add(ArtBox);
+					Placed.Add(PlateBox);
+				}
+			}
+			UE_LOG(LogTemp, Display, TEXT("Framing: army slots checked %d (13 towns x militia + regulars together)"), Checked);
+
+			// Ownership wash: asset present; every town washed; no wash reaches past 75% of the way to a neighbour.
+			if (!LoadObject<UTexture2D>(nullptr, TEXT("/Game/PA250/Textures/Army/T_Map_TownWash.T_Map_TownWash")))
+			{
+				UE_LOG(LogTemp, Error, TEXT("Framing: T_Map_TownWash missing"));
+				++Failures;
+			}
+			TMap<FString, float> WashOverride;
+			for (const TSharedPtr<FJsonValue>& V : Loc->GetArrayField(TEXT("provinces")))
+			{
+				double W = 0.0;
+				if (V->AsObject()->TryGetNumberField(TEXT("wash_radius_px"), W))
+				{
+					WashOverride.Add(V->AsObject()->GetStringField(TEXT("id")), static_cast<float>(W));
+				}
+			}
+			for (const TPair<FString, FVector2D>& Kv : UVs)
+			{
+				const float R = APA250ProvinceMapActor::TownWashRadiusPx(Kv.Key, UVs, Radii, WashOverride, ImgW, ImgH);
+				float Nearest = TNumericLimits<float>::Max();
+				for (const TPair<FString, FVector2D>& O : UVs)
+				{
+					if (O.Key != Kv.Key)
+					{
+						Nearest = FMath::Min(Nearest, FVector2D::Distance(FVector2D(Kv.Value.X * ImgW, Kv.Value.Y * ImgH),
+																		  FVector2D(O.Value.X * ImgW, O.Value.Y * ImgH)));
+					}
+				}
+				if (R <= 0.f || R > Nearest * APA250ProvinceMapActor::TownWashNeighbourCap + 0.5f)
+				{
+					UE_LOG(LogTemp, Error, TEXT("Framing: town wash %s radius %.0fpx (nearest town %.0fpx)"), *Kv.Key, R, Nearest);
+					++Failures;
+				}
+			}
+			UE_LOG(LogTemp, Display, TEXT("Framing: town washes checked %d"), UVs.Num());
 		}
 	}
 

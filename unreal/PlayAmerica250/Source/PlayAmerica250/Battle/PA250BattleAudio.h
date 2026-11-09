@@ -35,6 +35,12 @@ struct PLAYAMERICA250_API FPA250BattleAudio
 	/** Non-positional UI sound for the local player (hit / kill confirmation). */
 	static bool Play2D(const UObject* Ctx, const FString& Bank, float Volume = 1.f);
 
+	/** Battle-begins stinger (SFX bank "battle_begins"). Silent if the asset is missing. */
+	static bool PlayBattleBegins(const UObject* Ctx);
+	/** Looping campaign music (/Game/PA250/Audio/Music/campaign_theme). Silent if missing. */
+	static bool StartCampaignMusic(const UObject* Ctx, float Volume = 0.4f);
+	static void StopCampaignMusic();
+
 	/** Where the local player hears from (camera), if any. */
 	static bool GetListener(const UObject* Ctx, FVector& Out);
 

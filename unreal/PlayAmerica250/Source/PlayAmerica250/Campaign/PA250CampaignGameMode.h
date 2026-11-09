@@ -29,4 +29,19 @@ protected:
 private:
 	void RunCampaignSelftest();
 	void RunAutoplayCampaign();
+	/** -PA250ArtProbe=<label>: fixed views + scripted clicks + screenshots for map art checks. Never saves. */
+	void RunArtProbeStep();
+	FString ArtProbeLabel;
+	int32 ArtProbeStep = 0;
+	FTimerHandle ArtProbeTimer;
+	/** Scripted left-drag (real handlers, real cursor): checks the grabbed map point stays under the cursor. */
+	void RunProbeDragFrame();
+	FTimerHandle DragTimer;
+	int32 DragFrame = 0;
+	FVector2D DragGrabUV = FVector2D::ZeroVector;
+	FVector2D DragLastCenter = FVector2D::ZeroVector;
+	FVector2D DragLastStep = FVector2D::ZeroVector;
+	int32 DragReversals = 0;
+	FVector2D DragAbsStart = FVector2D::ZeroVector;
+	float DragAbsPerLocal = 1.f;
 };

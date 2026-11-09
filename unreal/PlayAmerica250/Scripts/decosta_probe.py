@@ -21,7 +21,7 @@ def main() -> None:
     pcs = unreal.GameplayStatics.get_all_actors_of_class(world, unreal.PA250CampaignPlayerController)
     _log(f"controllers={len(pcs)}")
     if pcs and hasattr(pcs[0], "click_map_at_uv"):
-        pcs[0].click_map_at_uv(0.248, 0.175)
+        pcs[0].click_map_at_uv(0.300, 0.230)
         _log("clicked lexington UV")
     unreal.SystemLibrary.execute_console_command(world, "Shot showui", None)
     _log("Shot showui issued")

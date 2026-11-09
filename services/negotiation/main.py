@@ -23,7 +23,7 @@ from ruamel.yaml import YAML
 from starlette.websockets import WebSocketState
 
 from core.logging_config import setup_logging
-from diplomacy.avatar import render_avatar_line
+from diplomacy.avatar import backend_status, render_avatar_line
 from diplomacy.models import DiplomacyContext
 from diplomacy.service import (
     finalize_proposal,
@@ -1016,6 +1016,17 @@ async def sdp_offer(sid: str, sdp_in: SDPIn):
 async def health_check():
     """Health check endpoint."""
     return {"status": "ok", "service": "negotiation", "version": "1.0.0"}
+
+
+@app.get("/v1/avatar/health")
+async def avatar_health() -> dict[str, Any]:
+    """Each video backend in chain order: available + reason (configuration only, never key values)."""
+    return {
+        "mode": os.getenv("PA250_AVATAR", "auto"),
+        "timeout_s": float(os.getenv("PA250_AVATAR_TIMEOUT", "90")),
+        "tts": os.getenv("PA250_TTS", "auto"),
+        "backends": backend_status(),
+    }
 
 @app.post("/test-session-sadtalker")
 async def test_session_sadtalker():

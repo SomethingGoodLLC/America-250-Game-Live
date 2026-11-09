@@ -48,6 +48,11 @@ public:
 	FString GetSelectedProvinceId() const { return SelectedProvinceId; }
 	FString GetMessage() const { return Message; }
 	FString GetLastMessage() const { return LastMessage; }
+	/** Arrow-key pan direction: X east (+) / west (-), Y south (+) / north (-). */
+	FVector2D GetArrowPanAxis() const
+	{
+		return FVector2D(((HeldArrows >> 1) & 1) - (HeldArrows & 1), ((HeldArrows >> 3) & 1) - ((HeldArrows >> 2) & 1));
+	}
 
 	/** True only if a legacy SPA250Map canvas were still mounted (always false after M10-1). */
 	bool HasLegacyMapCanvas() const { return false; }
@@ -63,6 +68,8 @@ public:
 protected:
 	virtual TSharedRef<SWidget> RebuildWidget() override;
 	virtual FReply NativeOnKeyDown(const FGeometry& InGeometry, const FKeyEvent& InKeyEvent) override;
+	virtual FReply NativeOnKeyUp(const FGeometry& InGeometry, const FKeyEvent& InKeyEvent) override;
+	virtual void NativeOnFocusLost(const FFocusEvent& InFocusEvent) override;
 	virtual bool NativeSupportsKeyboardFocus() const override { return true; }
 
 private:
@@ -86,6 +93,8 @@ private:
 	FString SelectedArmyId;
 	FString SelectedProvinceId;
 	bool bShowAbout = false;
+	/** Held arrow keys (bit 0 left, 1 right, 2 up, 3 down); the controller pans while held. */
+	uint8 HeldArrows = 0;
 	bool bShowDev = false;
 	TWeakObjectPtr<APA250ProvinceMapActor> MapActor;
 };

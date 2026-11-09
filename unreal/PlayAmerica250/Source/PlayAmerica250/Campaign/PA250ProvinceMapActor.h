@@ -3,6 +3,8 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "PA250ArmyToken.h"
+#include "pa250/types.hpp"
 #include "PA250ProvinceMapActor.generated.h"
 
 class UStaticMeshComponent;
@@ -60,7 +62,17 @@ public:
 	float GetZoomFactor() const { return ZoomFactor; }
 	FVector2D GetZoomCenterUV() const { return ZoomCenterUV; }
 	void ResetOverview();
+	/** Set an explicit view (probe/tests): centre UV and zoom, clamped like the interactive paths. */
+	void SetView(FVector2D CenterUV, float Zoom);
+	/** World location of the army's token actor (its ground anchor), if one is spawned. */
+	bool GetArmyTokenLocation(const FString& ArmyId, FVector& OutWorld) const;
+	/** One line per army token: id, anchor, representation (for probe logs). */
+	FString DescribeArmyTokens() const;
 	void PanByUV(FVector2D DeltaUV);
+	/** Absolute pan target (screen-space drag); clamped to what the camera can show. */
+	void SetCenterUV(FVector2D CenterUV);
+	/** Screen pixels per world unit, measured from the real projection (0 if no view yet). */
+	float MeasurePxPerUU() const;
 	void HandleProvinceClick(const FString& ProvinceId);
 	void HandleRightClick();
 	void FrameCamera();
@@ -80,6 +92,38 @@ public:
 
 	/** Rotation that lays TextRender flat and reads left-to-right, north up. */
 	static FRotator FlatMapTextRotation();
+
+	/** Hand-colour wash around a held town (marks the town, not a territory boundary). */
+	static constexpr float TownWashOpacity = 0.30f;
+	/** Default wash radius = this x hotspot click radius, capped at TownWashNeighbourCap x the nearest other hotspot. */
+	static constexpr float TownWashRadiusScale = 1.8f;
+	static constexpr float TownWashNeighbourCap = 0.75f;
+	/** Wash radius in image pixels for one town (override from decosta_locations.json wash_radius_px, then the cap). */
+	static float TownWashRadiusPx(const FString& Id, const TMap<FString, FVector2D>& HotspotUV, const TMap<FString, float>& HitRadiusPx,
+								  const TMap<FString, float>& OverridePx, float ImageW, float ImageH);
+
+	/** Town geometry an army slot must not cover (world XY, UU). */
+	struct FTownObstacles
+	{
+		TArray<FString> Ids;
+		TArray<FVector2D> Centers;	 // hotspot centres
+		TArray<float> Radii;		 // hotspot click radius
+		TArray<FBox2D> Captions;	 // caption text boxes (selected size, always reserved)
+	};
+	/** Builds obstacles from hotspot UVs/radii/names exactly as SpawnHotspotMarkers lays them out. */
+	static FTownObstacles BuildTownObstacles(const TMap<FString, FVector2D>& HotspotUV, const TMap<FString, float>& RadiusPx,
+											 const TMap<FString, FString>& Names, float ImageWidthPx, float MapW, float MapH);
+	/** Footprint of an army slot: art standing on the anchor plus the name plate below it. */
+	static void ArmySlotBoxes(const FVector2D& Anchor, const FVector2D& ArtSize, const FVector2D& PlateSize, FBox2D& OutArt, FBox2D& OutPlate);
+	/**
+	 * Deterministic slot choice beside the home town: first candidate (E, W, S, SE, SW, N, then a wider ring)
+	 * that covers no town hotspot, caption or already-placed army. Returns the anchor; OutOverlap is the
+	 * residual overlap area (0 when a clean slot exists).
+	 */
+	/** Illustration for an army from campaign state only (tests call this; see ChooseArmyArt in the .cpp). */
+	static EPA250ArmyArt ArtForArmy(const pa250::CampaignState& St, const pa250::Army& A);
+	static FVector2D ChooseArmyAnchor(const FString& HomeId, const FTownObstacles& Towns, const TArray<FBox2D>& Placed,
+									  const FVector2D& ArtSize, const FVector2D& PlateSize, float& OutOverlap, int32& OutCandidate);
 	/** Centre of the opening campaign view: Boston–Cambridge–Lexington–Concord. */
 	static FVector2D CampaignOverviewCenterUV() { return FVector2D(0.337f, 0.333f); }
 	/** Zoom at which that relationship fills the usable viewport without excessive magnification. */
@@ -103,7 +147,10 @@ protected:
 	void SpawnHotspotMarkers();
 	void RefreshHotspotVisibility();
 	void RefreshTownOwnership();
+	void ApplyTownWash(UStaticMeshComponent* Wash, const std::string& Owner) const;
 	void RefreshArmyTokens();
+	/** Per frame: measured pixels per UU drives illustration vs compact symbol. */
+	void UpdateArmyLod();
 	void RefreshBattleMarker();
 	void RefreshRoutes();
 	void ApplyCameraPostProcess();
@@ -147,6 +194,10 @@ protected:
 	UPROPERTY()
 	TObjectPtr<UStaticMeshComponent> SelectionHalo;
 	TMap<FString, UTextRenderComponent*> CaptionById;
+	UPROPERTY()
+	TArray<TObjectPtr<UStaticMeshComponent>> TownWashes;
+	TMap<FString, UStaticMeshComponent*> WashById;
+	TMap<FString, float> WashRadiusOverridePx;
 
 	TMap<FString, FVector2D> LabelUV;
 	TMap<FString, FVector2D> TokenUV;
@@ -179,4 +230,6 @@ protected:
 	bool bPresentationLoaded = false;
 	bool bDeCostaMode = false;
 	FString LastTokenSig;
+	/** Last logged representation per army (log only on change). */
+	TMap<FString, bool> LoggedIllustrationById;
 };

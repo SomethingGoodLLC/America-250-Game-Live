@@ -2,10 +2,12 @@
 
   sfx/*.wav              -> /Game/PA250/Audio/SFX/<name>
   voice/<side>/*.wav     -> /Game/PA250/Audio/Voice/<side>/VO_<key>
+  music/*.wav            -> /Game/PA250/Audio/Music/<name> (looping)
 
 Generate the WAVs first:
   services/negotiation/.venv/bin/python tools/audio/synth_sfx.py        (original synthesized SFX)
   services/negotiation/.venv/bin/python tools/audio/gen_voice_lines.py  (ElevenLabs shouted lines)
+  services/negotiation/.venv/bin/python tools/audio/gen_music.py       (ElevenLabs music + battle stinger)
 Run:
   UnrealEditor-Cmd PlayAmerica250.uproject -run=pythonscript -script=Scripts/import_audio.py -unattended -nullrhi
 """
@@ -35,6 +37,15 @@ def import_dir(src_dir, dest_path, prefix=""):
 
 
 import_dir(os.path.join(ROOT, "sfx"), "/Game/PA250/Audio/SFX")
+music = os.path.join(ROOT, "music")
+if os.path.isdir(music):
+    import_dir(music, "/Game/PA250/Audio/Music")
+    for name in sorted(os.listdir(music)):
+        if name.lower().endswith(".wav"):
+            asset = unreal.load_asset("/Game/PA250/Audio/Music/" + os.path.splitext(name)[0])
+            if asset:
+                asset.set_editor_property("looping", True)
+                unreal.EditorAssetLibrary.save_loaded_asset(asset)
 voice = os.path.join(ROOT, "voice")
 for side in sorted(os.listdir(voice)):
     if os.path.isdir(os.path.join(voice, side)):

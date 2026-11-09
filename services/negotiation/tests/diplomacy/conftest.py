@@ -17,3 +17,5 @@ def _offline_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("PA250_TTS", "off")
     monkeypatch.setenv("PA250_LLM", "mock")
     monkeypatch.setenv("PA250_AVATAR", "none")
+    monkeypatch.setenv("PA250_FAL", "0")  # never a paid fal render from a unit test
+    monkeypatch.setenv("PA250_DID", "0")

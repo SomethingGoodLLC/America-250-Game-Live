@@ -45,10 +45,12 @@ def test_musetalk_preferred_then_did(monkeypatch: pytest.MonkeyPatch, tmp_path: 
         calls.append("musetalk")
         return out
 
-    async def did_ok(text: str, portrait: Path, out: Path):
+    async def did_ok(audio: str, portrait: Path, out: Path):
         calls.append("did")
         return str(out)
 
+    monkeypatch.setenv("DID_API_KEY", "test")
+    monkeypatch.setenv("PA250_DID", "1")
     monkeypatch.setattr(MuseTalkVideoSource, "unavailable_reason", lambda self: None)
     monkeypatch.setattr(MuseTalkVideoSource, "render_line", mt_ok)
     monkeypatch.setattr(avatar, "_did_video", did_ok)
