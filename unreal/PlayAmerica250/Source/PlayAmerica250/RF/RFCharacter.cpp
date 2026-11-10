@@ -323,11 +323,22 @@ void ARFCharacter::ApplyThirdPartySoldierMesh()
 void ARFCharacter::UpdateSoldierAnimation()
 {
 	if (!bUsesPeriodSoldier || bIsDead) return;
-	const float Speed = GetVelocity().Size2D();
-	UAnimSequence* Animation = Speed > 300.f ? SoldierRun.Get() : Speed > 5.f ? SoldierWalk.Get() : SoldierIdle.Get();
+	// A lunge is carried by the melee pose layer (feet placed by IK), not by the run cycle.
+	const float Speed = MeleeComponent && MeleeComponent->IsPlantingFeet() ? 0.f : GetVelocity().Size2D();
+	UAnimSequence* Animation = Speed > 280.f ? SoldierRun.Get() : Speed > 5.f ? SoldierWalk.Get() : SoldierIdle.Get();
+	float PlayRate = 1.f;
+	if (Speed > 280.f)
+	{
+		PlayRate = FMath::Clamp(Speed / 380.f, 0.85f, 1.35f);
+	}
+	else if (Speed > 5.f)
+	{
+		PlayRate = FMath::Clamp(Speed / 220.f, 0.7f, 1.25f);
+	}
 	if (UPA250SoldierAnimInstance* Instance = Cast<UPA250SoldierAnimInstance>(GetMesh()->GetAnimInstance()))
 	{
 		if (Animation && Instance->GetLocomotion() != Animation) Instance->SetLocomotion(Animation);
+		Instance->SetPlayRate(PlayRate);
 	}
 }
 
@@ -435,7 +446,8 @@ void ARFCharacter::ApplyCameraPose(float DeltaTime)
 		: 1.f;
 	CurrentArmLength = FMath::Lerp(CurrentArmLength, TargetArm, Alpha);
 	CurrentSocketOffset = FMath::Lerp(CurrentSocketOffset, TargetSocket, Alpha);
-	CurrentFOV = FMath::Lerp(CurrentFOV, TargetFOV, Alpha);
+	const float WantedFOV = TargetFOV + (MeleeComponent && MeleeComponent->IsCharging() ? ChargeFOVBoost : 0.f);
+	CurrentFOV = FMath::Lerp(CurrentFOV, WantedFOV, Alpha);
 	SpringArm->TargetArmLength = CurrentArmLength;
 	SpringArm->SocketOffset = CurrentSocketOffset;
 	Camera->SetFieldOfView(CurrentFOV);
@@ -880,17 +892,46 @@ void ARFCharacter::OnDeath(AActor* Victim)
 		return;
 	}
 	bIsDead = true;
+	UE_LOG(LogTemp, Display, TEXT("PA250 TEMPDEATH %s faction=%s player=%d at %s t=%.2f killer=%s from %s"), *GetName(), *FactionId.ToString(), IsPlayerControlled() ? 1 : 0,
+		*GetActorLocation().ToCompactString(), GetWorld()->GetTimeSeconds(), *GetNameSafe(HealthComponent->LastInstigator ? HealthComponent->LastInstigator->GetPawn() : nullptr), *HealthComponent->LastDamageLocation.ToCompactString());
 
 	if (APlayerController* PC = Cast<APlayerController>(GetController()))
 	{
 		DisableInput(PC);
 	}
+	// Drop the capsule before the mesh simulates, or the ragdoll collides with it and falls through.
+	GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	if (USkeletalMeshComponent* MeshComp = GetMesh())
 	{
+		FHitResult Hit;
+		const FVector Start = GetActorLocation() + FVector(0.f, 0.f, 40.f);
+		const FVector End = Start - FVector(0.f, 0.f, 400.f);
+		FCollisionQueryParams Params(SCENE_QUERY_STAT(PA250RagdollSettle), false, this);
+		if (GetWorld()->LineTraceSingleByChannel(Hit, Start, End, ECC_WorldStatic, Params) && Hit.bBlockingHit)
+		{
+			// Standing height is about 90 cm above the feet. Lift only when already below the floor.
+			if (GetActorLocation().Z < Hit.ImpactPoint.Z + 40.f)
+			{
+				FVector Loc = GetActorLocation();
+				Loc.Z = Hit.ImpactPoint.Z + 90.f;
+				SetActorLocation(Loc, false, nullptr, ETeleportType::TeleportPhysics);
+			}
+		}
 		MeshComp->SetCollisionProfileName(TEXT("Ragdoll"));
+		MeshComp->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+		MeshComp->SetCollisionResponseToChannel(ECC_WorldStatic, ECR_Block);
+		MeshComp->SetCollisionResponseToChannel(ECC_WorldDynamic, ECR_Block);
 		MeshComp->SetSimulatePhysics(true);
+		MeshComp->WakeAllRigidBodies();
+		MeshComp->SetEnableGravity(true);
+		if (HealthComponent && HealthComponent->bHasLastDamageLocation)
+		{
+			const FVector ImpulseDir =
+				(GetActorLocation() - HealthComponent->LastDamageLocation).GetSafeNormal();
+			MeshComp->AddImpulseAtLocation(ImpulseDir * 420.f + FVector(0.f, 0.f, 180.f),
+										   HealthComponent->LastDamageLocation);
+		}
 	}
-	GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	GetCharacterMovement()->DisableMovement();
 	GetCharacterMovement()->StopMovementImmediately();
 	SetLifeSpan(3.f);

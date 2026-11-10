@@ -166,6 +166,23 @@ Lines over `FAL_MAX_CLIP_SECONDS` (30) are split at pauses and joined. The voice
 WAV (POST `/audios`, script type `audio`), never its own voice. `GET /v1/avatar/health` lists each backend's
 availability and reason. Test: `scripts/test_talking_portrait.py` (run twice: the second run makes no fal call).
 
+**Fast replies (Unreal room)**: Claude streams its reply (`eager_input_streaming` on the envoy tool) and each finished
+sentence of `spoken_line` goes straight to ElevenLabs `/with-timestamps` (with `previous_text` for continuity), so the
+envoy starts speaking before the reply is complete. Every speech event carries `reply_id`, `chunk`, `timing`
+(recv / sentence_ready_s / tts_s / sent) and `visemes` (30 Hz jaw/wide/round/press curves from the character timings,
+`diplomacy/visemes.py`); `envoy_speech_end` closes a reply. Settings: `PA250_STREAM=0` (whole reply, then TTS),
+`PA250_LLM_MODEL` (default `claude-sonnet-5-5`), `PA250_LLM_EFFORT` (default `low`), `PA250_LLM_THINKING`
+(`adaptive` default; `between_tools` turns thinking off on Sonnet 5.5), `PA250_LLM_MAX_TOKENS` (default 4000; thinking
+counts against it). The system prompt (rules + world state) is prompt-cached per session. Sonnet 5.5 calls use the
+server-side refusal fallback (`fallbacks: "default"`). No content filter on the envoy's lines (user decision).
+Measure: `scripts/latency_test.py` (and `PA250_STREAM=0` for the baseline).
+
+**Stock clips**: `scripts/render_stock_lines.py` pre-renders greeting / consider / acceptance / refusal as 720p fal
+video in `generated_video/stock/`; the service offers them on connect (`envoy_stock`).
+
+**Player mic**: `POST /v1/stt` (16-bit WAV body) → local faster-whisper `base.en` (`PA250_STT_MODEL`), prewarmed at
+startup (`PA250_STT_PREWARM=0` to skip). Start for play with `scripts/start_service.sh`.
+
 **Available Voices**:
 - `21m00Tcm4TlvDq8ikWAM` - Rachel (default, professional female)
 - `AZnzlk1XvdvUeBnXmlld` - Drew (male)

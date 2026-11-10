@@ -157,6 +157,10 @@ public:
 	const pa250::CampaignController& GetController() const { return Controller; }
 	pa250::CampaignController& GetControllerMutable() { return Controller; }
 
+	/** Bumped after any state mutation so Slate Text_Lambdas refresh treasury/support/stores. */
+	void BumpHudEpoch() { ++HudEpoch; }
+	int32 GetHudEpoch() const { return HudEpoch; }
+
 	FString AutoplayStage;
 	bool WriteTrace(const FString& Extra = FString()) const;
 
@@ -175,4 +179,5 @@ private:
 	int32 SpeedIndex = FPA250CampaignSpeed::DefaultIndex;
 	float HourAccumulator = 0.f;
 	TArray<FString> AutosavePaths;
+	int32 HudEpoch = 0;
 };

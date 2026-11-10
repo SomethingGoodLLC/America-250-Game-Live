@@ -14,6 +14,7 @@
 #include "StaticMeshCompiler.h"
 #endif
 #include "MusketWeapon.h"
+#include "MusketTuning.h"
 #include "MusketProjectile.h"
 #include "PA250AimComponent.h"
 #include "PA250BotSpacingTest.h"
@@ -23,6 +24,7 @@
 #include "PA250FactionVisuals.h"
 #include "PA250MeleeComponent.h"
 #include "PA250MeleeTuning.h"
+#include "PA250SoldierAnimInstance.h"
 #include "PA250TicketLedger.h"
 #include "PA250AIReload.h"
 #include "PA250CombatProfiles.h"
@@ -428,6 +430,52 @@ void RunMelee(FLog& Log)
 		}
 	}
 
+	// Lunge timing: coil first, full extension exactly when the hit is resolved, then hold and recover.
+	{
+		using C = UPA250MeleeComponent;
+		const float Wu = V.ThrustWindupSeconds;
+		const FPA250MeleePose Coiled = C::ThrustPose(C::CoilFraction * Wu - 0.001f, Wu, 0.1f);
+		const FPA250MeleePose Landed = C::ThrustPose(Wu, Wu, 0.1f);
+		const FPA250MeleePose Held = C::ThrustPose(Wu + 0.09f, Wu, 0.1f);
+		const FPA250MeleePose Done = C::ThrustPose(Wu + 0.1f + C::ThrustRecoverSeconds + 0.01f, Wu, 0.1f);
+		Log.Check(!C::ThrustPose(0.f, Wu, 0.1f).IsActive() && Coiled.Coil > 0.95f && Coiled.Lunge == 0.f, TEXT("melee: a thrust starts from rest and coils first"));
+		Log.Check(Landed.Lunge == 1.f && Landed.Coil == 0.f && Held.Lunge == 1.f, TEXT("melee: the lunge is at full extension when the hit lands, and holds"));
+		Log.Check(!Done.IsActive(), TEXT("melee: the lunge recovers to rest"));
+		Log.Check(C::ButtPose(0.1f).Butt == 1.f && !C::ButtPose(C::ButtSeconds).IsActive(), TEXT("melee: butt-stroke snaps out and comes back"));
+		Log.Check(C::ChargePose(0.3f).Level == 1.f && C::StrikePose(C::StrikeDriveSeconds, 0.2f).Lunge == 1.f
+			&& !C::StrikePose(C::StrikeDriveSeconds + 0.2f + C::StrikeRecoverSeconds, 0.2f).IsActive(), TEXT("melee: charge carries the bayonet levelled, drives it home on contact, recovers"));
+		Log.Check(C::WhiffPose(0.25f, 0.5f).Lunge > 0.5f && !C::WhiffPose(0.5f, 0.5f).IsActive(), TEXT("melee: a missed charge stumbles on and recovers"));
+		Log.Check(C::FlinchWeight(0.05f, 0.6f) == 1.f && C::FlinchWeight(0.3f, 0.6f) < 0.5f && C::FlinchWeight(0.6f, 0.6f) == 0.f, TEXT("melee: flinch snaps on and eases out"));
+	}
+
+	// Thrust assist and hit reaction on real soldiers.
+	{
+		ARFCharacter* Me = W.World->SpawnActor<ARFCharacter>(FVector(0.f, 3000.f, 100.f), FRotator::ZeroRotator);
+		ARFCharacter* Foe = W.World->SpawnActor<ARFCharacter>(FVector(300.f, 3100.f, 100.f), FRotator(0.f, 180.f, 0.f));
+		Log.Check(Me && Foe && Me->MeleeComponent && Foe->MeleeComponent, TEXT("melee: spawn thrust pair"));
+		if (Me && Foe && Me->MeleeComponent && Foe->MeleeComponent)
+		{
+			Me->FactionId = TEXT("continental");
+			Foe->FactionId = TEXT("british");
+			Me->MeleeComponent->Tuning = T;
+			Foe->MeleeComponent->Tuning = T;
+			Log.Check(Me->MeleeComponent->FindThrustTarget() == Foe, TEXT("melee: thrust assist finds the man in front within 3.8 m"));
+			Log.Check(Me->MeleeComponent->DoThrust() && Me->MeleeComponent->GetVisual() == EPA250MeleeVisual::Thrust, TEXT("melee: thrust starts the lunge"));
+			const float Want = FMath::RadiansToDegrees(FMath::Atan2(100.f, 300.f));
+			Log.Check(FMath::Abs(Me->GetActorRotation().Yaw - Want) < 2.f, TEXT("melee: the lunge turns onto its man"));
+
+			// The first point home wins: a blow breaks the other man's wind-up and rocks him.
+			Log.Check(Foe->MeleeComponent->DoThrust(), TEXT("melee: foe winds up"));
+			Foe->MeleeComponent->ReceiveHit(Me->GetActorForwardVector(), 0.8f, V.ThrustHitStaggerSeconds);
+			Log.Check(Foe->MeleeComponent->IsFlinching() && Foe->MeleeComponent->GetVisual() == EPA250MeleeVisual::None && Foe->MeleeComponent->IsBusy(),
+				TEXT("melee: a blow that lands breaks the victim's wind-up and makes him flinch"));
+			Log.Check(Foe->IsMovementLocked() && FMath::IsNearlyEqual(Foe->GetMovementLockRemaining(), V.ThrustHitStaggerSeconds),
+				TEXT("melee: a bayoneted man is stopped for 0.35 s"));
+			Me->Destroy();
+			Foe->Destroy();
+		}
+	}
+
 	// Squad charge orders: the same rules for every side (no faction input).
 	{
 		const float R = 3500.f;
@@ -495,6 +543,24 @@ void RunConquest(FLog& Log)
 	Log.Check(FPA250TicketLedger::LossesInUnits(9, 4, 5) == 2, TEXT("conquest: 9 deaths / 4 per unit -> 2 units"));
 	Log.Check(FPA250TicketLedger::LossesInUnits(100, 4, 5) == 5, TEXT("conquest: losses capped at starting units"));
 	Log.Check(FPA250TicketLedger::LossesInUnits(1, 4, 5) == 0, TEXT("conquest: one death rounds to 0 units"));
+	// 5.f above is the ledger's interval argument, not the shipped bleed. Exhaustion waits on elapsed time.
+	Log.Check(!APA250BattleGameMode::TicketsMayExhaust(119.f, 120.f) &&
+			  APA250BattleGameMode::TicketsMayExhaust(120.f, 120.f),
+		TEXT("conquest: ticket exhaustion waits until MinSecondsBeforeExhaustion"));
+	Log.Check(GetDefault<APA250BattleGameMode>()->BleedIntervalSeconds == 12.f &&
+			  GetDefault<APA250BattleGameMode>()->MinSecondsBeforeExhaustion == 120.f,
+		TEXT("conquest: C++ defaults are 12s bleed and a 120s exhaustion gate"));
+	if (UMusketTuning* DA = LoadObject<UMusketTuning>(nullptr, TEXT("/Game/PA250/Data/DA_MusketTuning.DA_MusketTuning")))
+	{
+		Log.Check(FMath::IsNearlyEqual(DA->Values.Conquest.BleedIntervalSeconds, 12.f),
+			TEXT("conquest: DA_MusketTuning bleed interval is 12s, not the retired 5s"));
+		Log.Check(DA->Values.Conquest.MinSecondsBeforeExhaustion >= 120.f,
+			TEXT("conquest: DA_MusketTuning exhaustion gate is at least 120s"));
+	}
+	else
+	{
+		Log.Check(false, TEXT("conquest: DA_MusketTuning loads"));
+	}
 
 	const float R1 = APA250ControlPoint::CaptureRate(1, 0, 0.35f, 0.35f);
 	const float R3 = APA250ControlPoint::CaptureRate(3, 0, 0.35f, 0.35f);

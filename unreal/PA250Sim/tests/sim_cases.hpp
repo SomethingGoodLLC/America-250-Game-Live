@@ -906,6 +906,62 @@ static void test_logistics_loop() {
     req = choose_logistics(req, req.staff.queue.back().id, "requisition");
     CHECK(cont_depot_c(req).powder > powder0);
     CHECK(req.local_support < support0);
+    const CorrespondenceItem* follow = nullptr;
+    for (const auto& c : req.staff.queue)
+        if (c.kind == "requisition_aftermath") follow = &c;
+    CHECK(follow != nullptr);
+    CHECK(follow->powder == 0);
+    CHECK(follow->committed_powder == 0);
+    CHECK(follow->status == "pending");
+    CHECK(follow->decision_id == std::to_string(support0));
+    CHECK(follow->resolve_on_hour == req.now.hour_index + 24);
+    const int powder_levied = cont_depot_c(req).powder;
+    const int support_levied = req.local_support;
+    for (int i = 0; i < 24; ++i) {
+        req = advance_hour(req).state;
+        if (req.pending_battle.active) req.pending_battle = {};
+    }
+    CHECK(req.local_support == support_levied + 4);
+    CHECK(cont_depot_c(req).powder == powder_levied);
+    int aftermath_open = 0;
+    bool aftermath_reason = false;
+    for (const auto& c : req.staff.queue) {
+        if (c.kind != "requisition_aftermath") continue;
+        if (c.status != "delivered") ++aftermath_open;
+        if (c.reason.find("+4 Support") != std::string::npos) aftermath_reason = true;
+    }
+    CHECK(aftermath_open == 0);
+    CHECK(aftermath_reason);
+    const int support_once = req.local_support;
+    for (int i = 0; i < 24; ++i) {
+        req = advance_hour(req).state;
+        if (req.pending_battle.active) req.pending_battle = {};
+    }
+    CHECK(req.local_support == support_once);
+    // Support already <= 40 at the levy: attitude −5, no +4, still no powder credit.
+    CampaignState low = fresh();
+    ensure_logistics_defaults(low);
+    low.local_support = 30;
+    low.progress.aftermath_pending = true;
+    std::vector<Interrupt> i_low;
+    tick_logistics(low, i_low);
+    const int attitude0 = low.relations["british"];
+    low = choose_logistics(low, low.staff.queue.back().id, "requisition");
+    CHECK(low.local_support == 18);
+    const int powder_low = cont_depot_c(low).powder;
+    for (int i = 0; i < 24; ++i) {
+        low = advance_hour(low).state;
+        if (low.pending_battle.active) low.pending_battle = {};
+    }
+    CHECK(low.local_support == 18);
+    CHECK(low.relations["british"] == attitude0 - 5);
+    CHECK(cont_depot_c(low).powder == powder_low);
+    bool attitude_reason = false;
+    for (const auto& c : low.staff.queue)
+        if (c.kind == "requisition_aftermath" && c.status == "delivered" &&
+            c.reason.find("attitude") != std::string::npos)
+            attitude_reason = true;
+    CHECK(attitude_reason);
     // Capacity investment vs immediate resupply: takes time, no mid-fight bonus.
     CampaignState cap = fresh();
     ensure_logistics_defaults(cap);
@@ -1169,9 +1225,12 @@ static void test_province_supply_and_battle_ledger() {
         CampaignState after = apply_battle_result(s, r);
         CHECK(after.province_stores.at("concord").cartridges == 0);
         CHECK(after.province_stores.at("concord").cartridges == before - before);
-        CHECK(after.local_support == support0);
+        // Defender win awards +5 Support (continental_militia is the defender).
+        CHECK(after.local_support == support0 + 5);
         CHECK(after.provinces.at("concord").owner == "continental");
-        CHECK(after.progress.last_battle_report.local_support_after == support0);
+        CHECK(after.progress.last_battle_report.local_support_after == support0 + 5);
+        CHECK(after.progress.last_battle_report.defender_reward_support == 5);
+        CHECK(after.progress.last_battle_report.gold_after == after.player_gold);
     }
     // 4) Assigned workers unavailable during cartridge job.
     {
@@ -1217,6 +1276,66 @@ static void test_province_supply_and_battle_ledger() {
         CampaignState after = apply_battle_result(s, r);
         CHECK(after.provinces.at("concord").owner == "british");
         CHECK(after.local_support == 55);
+        CHECK(after.player_gold == s.player_gold);
+        bool held_line = false;
+        for (const auto& line : after.progress.last_battle_report.change_reasons)
+            if (line.find("Held the posts") != std::string::npos) held_line = true;
+        CHECK(held_line);
+    }
+    // Player wins as the attacker: no defender Support reward. Gold stays put.
+    {
+        CampaignState s = fresh();
+        ensure_logistics_defaults(s);
+        s.local_support = 55;
+        const int gold0 = s.player_gold;
+        s.pending_battle = {true, "concord", "continental_militia", "british_regulars"};
+        s.armies.at("british_regulars").province = "concord";
+        s.armies.at("continental_militia").province = "concord";
+        BattleResult r;
+        r.province_id = "concord";
+        r.winner = "continental";
+        r.objective_holder = "continental";
+        CampaignState after = apply_battle_result(s, r);
+        CHECK(after.local_support == 55);
+        CHECK(after.player_gold == gold0);
+        CHECK(after.progress.last_battle_report.defender_reward_support == 0);
+        CHECK(after.progress.last_battle_report.gold_after == gold0);
+    }
+    // Fort: the defender who owns the province starts on green, and the note says so.
+    {
+        CampaignState s = fresh();
+        ensure_logistics_defaults(s);
+        s.provinces.at("lexington").fort_level = 1;
+        s.pending_battle = {true, "lexington", "british_regulars", "continental_militia"};
+        s.armies.at("british_regulars").province = "lexington";
+        s.armies.at("continental_militia").province = "lexington";
+        BattleSetup b = build_battle_setup(s, "lexington");
+        CHECK(b.initial_post_holders.at("green") == "continental");
+        bool fort_note = false;
+        for (const auto& n : b.modifier_notes)
+            if (n.find("Fort L1") != std::string::npos && n.find("green") != std::string::npos) fort_note = true;
+        CHECK(fort_note);
+    }
+    // Workshop bonus raises the owner's militia tickets only. Physical cartridges stay the spend cap.
+    // Concord bridge still caps the British company, and an empty magazine still fields one ticket.
+    {
+        CampaignState s = fresh();
+        ensure_logistics_defaults(s);
+        s.province_stores["concord"].cartridges = 0;
+        s.province_stores["concord"].muskets = 40;
+        s.pending_battle = {true, "concord", "british_regulars", "continental_militia"};
+        s.armies.at("british_regulars").province = "concord";
+        s.armies.at("continental_militia").province = "concord";
+        BattleSetup b = build_battle_setup(s, "concord");
+        CHECK(b.province_cartridges == 0);
+        CHECK(b.sides.at("continental").cartridge_budget == 8);
+        CHECK(b.sides.at("british").cartridge_budget == 0);
+        const int prov = ticket_sum(b.sides.at("continental").tickets);
+        const int brit = b.sides.at("british").tickets.at("line_infantry");
+        CHECK(prov > 1);
+        CHECK(brit <= 6);
+        CHECK(brit <= prov);
+        CHECK(b.sides.at("continental").tickets.at("militia") == 8);
     }
     // 6) Save/load keeps in-transit shipments and ledgers.
     {

@@ -191,6 +191,8 @@ async def generate_game_response(sess: dict[str, Any], user_text: str, send_func
         await send_func({"type": "representative_unavailable", "text": "The envoy cannot be reached."})
 
 
+VIDEO_STOCK_DIR = Path(__file__).resolve().parent / "generated_video" / "stock"
+
 # Strong references keep running speech jobs alive (asyncio holds tasks only weakly).
 SPEECH_JOBS: set[asyncio.Task[None]] = set()
 
@@ -1304,6 +1306,16 @@ async def ws_control(ws: WebSocket, sid: str):
                         sess["provider_tasks"].append(task)
     subtitle_task = asyncio.create_task(pump_subtitles())
     sess["provider_tasks"].append(subtitle_task)
+
+    if sess.get("model") == "game":
+        # Pre-rendered lip-synced lines (scripts/render_stock_lines.py) the room plays as video.
+        faction = sess["diplomacy_context"].faction
+        stock = VIDEO_STOCK_DIR
+        clips = {p.stem.split("_", 1)[1]: str(p) for p in sorted(stock.glob(f"{faction}_*.mp4"))} if stock.is_dir() else {}
+        texts = {name: (stock / f"{faction}_{name}.txt").read_text().strip() for name in clips
+                 if (stock / f"{faction}_{name}.txt").exists()}
+        await send_yaml({"type": "envoy_stock", "clips": clips, "texts": texts})
+        logger.info("Envoy stock clips offered", session_id=sid, clips=sorted(clips))
 
     # Remove old demo provider loop; real-time responses now handled via listener trigger
 

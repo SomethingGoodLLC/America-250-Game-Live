@@ -1634,7 +1634,10 @@ def make_portrait_assets():
     # Idle and live speech share one material: cell 0 at rest, cells 1..15 driven by the voice (PollVoice).
     still_mat = painting_material("M_PortraitStill", atlas, atlas_grid=4) if atlas else painting_material("M_PortraitStill", still)
     video_mat = painting_material("M_PortraitVideo", mt)
-    return still_mat, video_mat
+    # Live speech deforms the painting itself (M_PortraitWarp); M_PortraitStill (16-cell atlas) is the
+    # fallback behind pa250.LipSync 0. The room shows the warp material at rest.
+    warp_mat = make_envoy_face(still)
+    return warp_mat, video_mat
 
 
 PARLOUR_DIR = "/Game/PA250/Materials/Parlour"
@@ -1643,6 +1646,189 @@ PORTRAIT_BRIGHTNESS = 0.35  # emissive share of the lit painting (face stays rea
 PORTRAIT_CROP = 0.42  # width share of the 1.77-1.8:1 still/video shown: a 3:4 oil portrait
 # Manual exposure with physical-camera exposure off: the bias is a compensation (+1 = 2x brighter), not EV100.
 PARLOUR_EXPOSURE_COMP = 0.0
+
+
+PORTRAIT_WARP_HLSL = r"""
+// Painting UV -> pixels of the still (3:4 crop), then life and speech warps (backward mapping).
+float W = ImageSize.x, H = ImageSize.y;
+float2 P = float2((0.5 + (UV.x - 0.5) * ImageSize.z) * W, UV.y * H);
+// breathing: a slow scale about the bottom centre
+float bs = 1.0 + 0.004 * Breath;
+P = float2(W * 0.5 + (P.x - W * 0.5) / bs, H + (P.y - H) / bs);
+// head drift and nod: the head region moves as one, fading out at its edge
+float2 hd = (P - Head.xy) / Head.zw;
+float hw = saturate(1.0 - dot(hd, hd)); hw = hw * hw * (3.0 - 2.0 * hw);
+P -= hw * float2(HeadX, HeadY + Nod * 7.0);
+// eyes: a small look shift inside each eye opening
+float2 el = (P - EyeL.xy) / EyeL.zw;
+float2 er = (P - EyeR.xy) / EyeR.zw;
+float ew = saturate(1.6 * (saturate(1.0 - dot(el, el)) + saturate(1.0 - dot(er, er))));
+P -= ew * float2(EyeX * EyeL.z * 0.16, EyeY * EyeL.w * 0.22);
+// mouth: spread (ee) / purse (oo) horizontally around the mouth centre
+float hm = Mouth.z;
+float2 d = P - Mouth.xy;
+float mw = exp(-((d.x * d.x) / (hm * hm * 2.25) + (d.y * d.y) / (hm * hm * 0.8)));
+float sx = 1.0 + 0.22 * LipsWide - 0.30 * LipsRound;
+P.x = Mouth.x + d.x / lerp(1.0, sx, mw);
+d = P - Mouth.xy;
+// pressed (m, b, p, f, v): lips thinner around the seam
+float pw = exp(-((d.x * d.x) / (hm * hm) + (d.y * d.y) / (Lips.y * Lips.y * 4.0)));
+P.y = Mouth.y + d.y * (1.0 + 0.35 * LipsPressed * pw);
+d = P - Mouth.xy;
+// jaw: the lower lip and chin drop; where they leave a gap, the mouth is open
+float open = saturate(JawOpen + 0.25 * LipsRound) * (1.0 - 0.9 * LipsPressed);
+float drop = open * Mouth.w;
+float ho = hm * 0.88;                                         // the opening stops short of the corners
+float fx = sqrt(saturate(1.0 - (d.x * d.x) / (ho * ho)));     // oval opening
+float jx = saturate(1.0 - (d.x * d.x) / (Jaw.z * Jaw.z));
+float chinD = max(Jaw.y - Mouth.y, 1.0);
+float jy = saturate(1.0 - saturate((d.y - chinD) / (chinD * 0.6)));
+float cav = 0.0;
+float3 cavCol = float3(0.0, 0.0, 0.0);
+if (d.y > 0.0)
+{
+    float nearSeam = saturate(d.y / (Lips.y * 2.0));
+    float s = drop * jx * jy * lerp(fx, 1.0, nearSeam);
+    cav = saturate((s - d.y) / 1.5) * step(abs(d.x), ho);
+    float t = d.y / max(s, 1e-3);
+    // upper teeth under the upper lip, then the mouth's dark interior (red at the edges, near black inside)
+    float edge = saturate(abs(d.x) / ho);
+    float teeth = saturate((JawOpen - 0.3) * 3.3) * (1.0 - smoothstep(0.10, 0.20, t)) * saturate(1.0 - edge * edge * 1.4);
+    float3 inner = lerp(float3(0.03, 0.008, 0.006), float3(0.22, 0.06, 0.05), edge * edge);
+    cavCol = lerp(inner, float3(0.50, 0.45, 0.39) * (0.8 + 0.2 * (1.0 - t * 5.0)), teeth);
+    P.y -= s;
+}
+else
+{
+    P.y += 0.12 * drop * fx * saturate(1.0 + d.y / (Lips.x * 2.0));  // upper lip lifts a little
+}
+float2 Q = P / float2(W, H);
+float3 c = lerp(Texture2DSample(Still, StillSampler, Q).rgb, Texture2DSample(BlinkTex, BlinkTexSampler, Q).rgb, saturate(BlinkAmt));
+return lerp(c, cavCol, cav);
+"""
+
+WARP_SCALARS = ("JawOpen", "LipsWide", "LipsRound", "LipsPressed", "BlinkAmt", "Breath", "HeadX", "HeadY", "Nod", "EyeX", "EyeY")
+WARP_VECTORS = ("ImageSize", "Mouth", "Lips", "Jaw", "EyeL", "EyeR", "Head")
+
+
+def warp_painting_material(still, blink, face):
+    """M_PortraitWarp: the painting's own pixels deformed for speech, breathing, drift, eyes and blinks.
+
+    The game drives the scalar parameters; the vector parameters come from the envoy's face data asset
+    (defaults here = DA_EnvoyFace_british). Canvas, varnish and vignette as on the other portrait materials.
+    """
+    name = "M_PortraitWarp"
+    path = "/Game/PA250/Materials/" + name
+    if unreal.EditorAssetLibrary.does_asset_exist(path):
+        unreal.EditorAssetLibrary.delete_asset(path)
+    mat = tools().create_asset(name, "/Game/PA250/Materials", unreal.Material, unreal.MaterialFactoryNew())
+    mat.set_editor_property("two_sided", True)
+    mel = unreal.MaterialEditingLibrary
+    X = unreal
+
+    def node(cls, x, y, **props):
+        n = mel.create_material_expression(mat, cls, x, y)
+        for k, v in props.items():
+            n.set_editor_property(k, v)
+        return n
+
+    custom = node(X.MaterialExpressionCustom, -700, 0, code=PORTRAIT_WARP_HLSL,
+                  output_type=X.CustomMaterialOutputType.CMOT_FLOAT3, description="PortraitWarp")
+    names = ["UV", "Still", "BlinkTex", *WARP_VECTORS, *WARP_SCALARS]
+    inputs = []
+    for n in names:
+        ci = X.CustomInput()
+        ci.set_editor_property("input_name", n)
+        inputs.append(ci)
+    custom.set_editor_property("inputs", inputs)
+    uv = node(X.MaterialExpressionTextureCoordinate, -1500, -400)
+    mel.connect_material_expressions(uv, "", custom, "UV")
+    t_still = node(X.MaterialExpressionTextureObjectParameter, -1500, -300, parameter_name="Still", texture=still)
+    t_blink = node(X.MaterialExpressionTextureObjectParameter, -1500, -200, parameter_name="BlinkTex", texture=blink)
+    mel.connect_material_expressions(t_still, "", custom, "Still")
+    mel.connect_material_expressions(t_blink, "", custom, "BlinkTex")
+    y = -100
+    for vname in WARP_VECTORS:
+        v = face[vname]
+        p = node(X.MaterialExpressionVectorParameter, -1700, y, parameter_name=vname,
+                 default_value=X.LinearColor(v[0], v[1], v[2], v[3]))
+        rgba = node(X.MaterialExpressionAppendVector, -1500, y)  # the default pin is RGB only: add A -> float4
+        mel.connect_material_expressions(p, "", rgba, "A")
+        mel.connect_material_expressions(p, "A", rgba, "B")
+        mel.connect_material_expressions(rgba, "", custom, vname)
+        y += 90
+    for sname in WARP_SCALARS:
+        p = node(X.MaterialExpressionScalarParameter, -1300, y, parameter_name=sname, default_value=0.0)
+        mel.connect_material_expressions(p, "", custom, sname)
+        y += 70
+
+    canvas_uv = node(X.MaterialExpressionMultiply, -950, 450, const_b=3.0)
+    mel.connect_material_expressions(uv, "", canvas_uv, "A")
+    canvas = node(X.MaterialExpressionTextureSampleParameter2D, -750, 400, parameter_name="Canvas",
+                  texture=import_texture_mipped("canvas"))
+    mel.connect_material_expressions(canvas_uv, "", canvas, "UVs")
+    centre = node(X.MaterialExpressionConstant2Vector, -1100, 650, r=0.5, g=0.5)
+    dist = node(X.MaterialExpressionDistance, -950, 650)
+    mel.connect_material_expressions(uv, "", dist, "A"); mel.connect_material_expressions(centre, "", dist, "B")
+    d0 = node(X.MaterialExpressionSubtract, -800, 650, const_b=0.3); mel.connect_material_expressions(dist, "", d0, "A")
+    d1 = node(X.MaterialExpressionMultiply, -650, 650, const_b=1.6); mel.connect_material_expressions(d0, "", d1, "A")
+    d2 = node(X.MaterialExpressionSaturate, -500, 650); mel.connect_material_expressions(d1, "", d2, "")
+    d3 = node(X.MaterialExpressionMultiply, -350, 650, const_b=0.65); mel.connect_material_expressions(d2, "", d3, "A")
+    vignette = node(X.MaterialExpressionOneMinus, -200, 650); mel.connect_material_expressions(d3, "", vignette, "")
+    varnish = node(X.MaterialExpressionVectorParameter, -750, 250, parameter_name="Varnish",
+                   default_value=X.LinearColor(1.0, 0.86, 0.66, 1.0))
+    c1 = node(X.MaterialExpressionMultiply, -450, 0)
+    mel.connect_material_expressions(custom, "", c1, "A"); mel.connect_material_expressions(canvas, "RGB", c1, "B")
+    c2 = node(X.MaterialExpressionMultiply, -300, 0)
+    mel.connect_material_expressions(c1, "", c2, "A"); mel.connect_material_expressions(varnish, "", c2, "B")
+    color = node(X.MaterialExpressionMultiply, -150, 0)
+    mel.connect_material_expressions(c2, "", color, "A"); mel.connect_material_expressions(vignette, "", color, "B")
+    mel.connect_material_property(color, "", X.MaterialProperty.MP_BASE_COLOR)
+    glow = node(X.MaterialExpressionScalarParameter, -300, 250, parameter_name="Brightness", default_value=PORTRAIT_BRIGHTNESS)
+    emissive = node(X.MaterialExpressionMultiply, -150, 250)
+    mel.connect_material_expressions(color, "", emissive, "A"); mel.connect_material_expressions(glow, "", emissive, "B")
+    mel.connect_material_property(emissive, "", X.MaterialProperty.MP_EMISSIVE_COLOR)
+    rough = node(X.MaterialExpressionScalarParameter, -150, 400, parameter_name="Roughness", default_value=0.42)
+    mel.connect_material_property(rough, "", X.MaterialProperty.MP_ROUGHNESS)
+    mel.recompile_material(mat)
+    unreal.EditorAssetLibrary.save_loaded_asset(mat)
+    return mat
+
+
+# Measured on british_general_frame.jpg (1920x1088): see PROGRESS.md "warp lip-sync".
+FACE_BRITISH = {
+    "ImageSize": (1920.0, 1088.0, PORTRAIT_CROP, 0.0),
+    "Mouth": (970.0, 628.0, 89.0, 40.0),   # x, y, half width, max jaw drop (px)
+    "Lips": (16.0, 22.0, 0.0, 0.0),        # upper, lower lip thickness
+    "Jaw": (970.0, 765.0, 130.0, 0.0),     # chin x, y, jaw half width
+    "EyeL": (877.0, 424.0, 40.0, 22.0),
+    "EyeR": (1065.0, 417.0, 40.0, 22.0),
+    "Head": (970.0, 520.0, 230.0, 400.0),
+}
+
+
+def make_envoy_face(still, faction="british", face=FACE_BRITISH):
+    """Closed-eyes texture + DA_EnvoyFace_<faction> (UPA250EnvoyFaceData) + M_PortraitWarp."""
+    blink_src = os.path.join(PARLOUR_TEX_SRC, "envoy_blink_aligned.png")
+    blink = import_texture(blink_src, "/Game/PA250/Textures", "T_EnvoyPortraitBlink") if os.path.exists(blink_src) else still
+    path = "/Game/PA250/Data/DA_EnvoyFace_" + faction
+    if unreal.EditorAssetLibrary.does_asset_exist(path):
+        da = unreal.EditorAssetLibrary.load_asset(path)
+    else:
+        da = tools().create_asset("DA_EnvoyFace_" + faction, "/Game/PA250/Data", unreal.PA250EnvoyFaceData, unreal.DataAssetFactory())
+    V2 = lambda x, y: unreal.Vector2D(x, y)  # noqa: E731
+    for k, v in (("still", still), ("blink", blink), ("image_size", V2(face["ImageSize"][0], face["ImageSize"][1])),
+                 ("crop_width", face["ImageSize"][2]), ("mouth_center", V2(face["Mouth"][0], face["Mouth"][1])),
+                 ("mouth_half_width", face["Mouth"][2]), ("max_jaw_drop", face["Mouth"][3]),
+                 ("upper_lip", face["Lips"][0]), ("lower_lip", face["Lips"][1]),
+                 ("chin", V2(face["Jaw"][0], face["Jaw"][1])), ("jaw_half_width", face["Jaw"][2]),
+                 ("eye_left", V2(face["EyeL"][0], face["EyeL"][1])), ("eye_right", V2(face["EyeR"][0], face["EyeR"][1])),
+                 ("eye_radius", V2(face["EyeL"][2], face["EyeL"][3])),
+                 ("head_center", V2(face["Head"][0], face["Head"][1])), ("head_radius", V2(face["Head"][2], face["Head"][3]))):
+        da.set_editor_property(k, v)
+    unreal.EditorAssetLibrary.save_loaded_asset(da)
+    LOG("PA250: face data %s (blink %s)" % (path, "yes" if blink is not still else "MISSING: eyes will not close"))
+    return warp_painting_material(still, blink, face)
 
 
 def import_lipsync_atlas():

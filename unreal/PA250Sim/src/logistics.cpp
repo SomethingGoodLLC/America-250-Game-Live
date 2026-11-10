@@ -1,5 +1,6 @@
 #include "internal.hpp"
 
+#include <cctype>
 #include <nlohmann/json.hpp>
 #include <sstream>
 
@@ -39,6 +40,9 @@ struct LogisticsTuning {
     int dev_cost_growth = 20;
     int dev_max_level = 3;
     int farm_provisions_per_month = 3;
+    int workshop_cartridges_per_level = 8;
+    int farm_readiness_per_level = 2;
+    int depot_readiness_per_level = 2;
 };
 
 LogisticsTuning g_tuning;
@@ -181,6 +185,8 @@ std::string roll_assistance(const CampaignState& s, CorrespondenceItem& letter) 
 
 void deliver_committed(CampaignState& s, CorrespondenceItem& letter) {
     if (letter.status == "delivered" || letter.status == "refused" || letter.status == "dismissed") return;
+    // requisition_aftermath stores a support snapshot, never a powder shipment.
+    if (letter.kind == "requisition_aftermath") return;
     if (letter.committed_powder <= 0 && letter.committed_arms <= 0 && letter.committed_provisions <= 0 &&
         letter.kind != "capacity_investment" && letter.kind != "knox_support") {
         letter.status = "delivered";
@@ -217,9 +223,21 @@ void deliver_committed(CampaignState& s, CorrespondenceItem& letter) {
     }
     letter.status = "delivered";
     letter.awaiting_choice = false;
-    detail::add_log(s, "delivery received for " + letter.id + " powder+" + std::to_string(std::max(0, add_p)) +
-                           " arms+" + std::to_string(std::max(0, add_a)) + " prov+" +
-                           std::to_string(std::max(0, add_v)));
+    if (add_p || add_a || add_v) {
+        ResourceChange ch;
+        ch.reason = "Delivered (" + letter.kind + "): +" + std::to_string(std::max(0, add_p)) + " powder, +" +
+                    std::to_string(std::max(0, add_a)) + " muskets, +" + std::to_string(std::max(0, add_v)) +
+                    " provisions";
+        ch.powder = std::max(0, add_p);
+        ch.muskets = std::max(0, add_a);
+        ch.provisions = std::max(0, add_v);
+        ch.province_id = default_depot_province(s, s.player_faction);
+        detail::record_resource_change(s, ch);
+    } else {
+        detail::add_log(s, "delivery received for " + letter.id + " powder+" + std::to_string(std::max(0, add_p)) +
+                               " arms+" + std::to_string(std::max(0, add_a)) + " prov+" +
+                               std::to_string(std::max(0, add_v)));
+    }
 }
 
 void seed_aftermath_letter(CampaignState& s, std::vector<Interrupt>* interrupts) {
@@ -377,6 +395,44 @@ void resolve_due_letters(CampaignState& s, std::vector<Interrupt>* interrupts) {
             continue;
         if (letter.status == "needs_approval" || letter.awaiting_choice) continue;
         if (letter.resolve_on_hour > 0 && s.now.hour_index >= letter.resolve_on_hour) {
+            if (letter.kind == "requisition_aftermath") {
+                // Follow-up after emergency levy: cool townsfolk, or sour British attitude if
+                // support was already low when the levy hit. The snapshot lives in decision_id.
+                // letter.powder stays 0 so this cannot be delivered as powder.
+                int support_at_levy = letter.powder;
+                if (!letter.decision_id.empty()) {
+                    bool digits = true;
+                    int parsed = 0;
+                    for (char ch : letter.decision_id) {
+                        if (ch < '0' || ch > '9') {
+                            digits = false;
+                            break;
+                        }
+                        parsed = parsed * 10 + (ch - '0');
+                    }
+                    if (digits) support_at_levy = parsed;
+                }
+                if (support_at_levy <= 40) {
+                    auto rit = s.relations.find(kBritish);
+                    if (rit != s.relations.end()) rit->second = detail::clamp_int(rit->second - 5, -100, 100);
+                    ResourceChange ch;
+                    ch.reason = "Requisition fallout: British attitude −5 (towns already strained)";
+                    detail::record_resource_change(s, ch);
+                    letter.reason = ch.reason;
+                } else {
+                    const int before = s.local_support;
+                    s.local_support = detail::clamp_int(s.local_support + 4, 0, 100);
+                    ResourceChange ch;
+                    ch.reason = "Townsfolk cool after the levy: +4 Support";
+                    ch.local_support = s.local_support - before;
+                    detail::record_resource_change(s, ch);
+                    letter.reason = ch.reason;
+                }
+                letter.status = "delivered";
+                letter.awaiting_choice = false;
+                push_event(s, interrupts, letter.id);
+                continue;
+            }
             if (letter.status == "delayed") {
                 // Delayed shipments convert to pending delivery a few hours later once.
                 letter.status = "approved";
@@ -488,6 +544,12 @@ void load_logistics_tuning(const std::string& json_text) {
             t.dev_max_level = d.value("max_level", t.dev_max_level);
             t.farm_provisions_per_month =
                 d.value("farm_provisions_per_month", t.farm_provisions_per_month);
+            t.workshop_cartridges_per_level =
+                d.value("workshop_cartridges_per_level", t.workshop_cartridges_per_level);
+            t.farm_readiness_per_level =
+                d.value("farm_readiness_per_level", t.farm_readiness_per_level);
+            t.depot_readiness_per_level =
+                d.value("depot_readiness_per_level", t.depot_readiness_per_level);
         }
         if (j.contains("hq_province")) {
             const json& h = j.at("hq_province");
@@ -503,6 +565,9 @@ void load_logistics_tuning(const std::string& json_text) {
 }
 
 bool logistics_tuning_loaded() { return g_tuning_loaded; }
+int workshop_cartridges_per_level() { return std::max(0, tuning().workshop_cartridges_per_level); }
+int farm_readiness_per_level() { return std::max(0, tuning().farm_readiness_per_level); }
+int depot_readiness_per_level() { return std::max(0, tuning().depot_readiness_per_level); }
 
 ProvinceStores& province_ledger(CampaignState& s, const std::string& province_id) {
     return s.province_stores[province_id];
@@ -594,9 +659,71 @@ CampaignState develop_province(const CampaignState& state, const std::string& pr
     }
     s.player_gold -= cost;
     ++(*level);
-    detail::add_log(s, "developed " + province_id + " " + track + " to " +
-                           std::to_string(*level) + " for " + std::to_string(cost) + " gold");
+    {
+        std::string track_label = track;
+        if (!track_label.empty()) track_label[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(track_label[0])));
+        ResourceChange ch;
+        ch.reason = track_label + ", " + pit->second.name + ": -" + std::to_string(cost) + " gold";
+        ch.gold = -cost;
+        ch.province_id = province_id;
+        detail::record_resource_change(s, ch);
+    }
     return s;
+}
+
+std::string development_preview(const CampaignState& state, const std::string& province_id,
+                                const std::string& track) {
+    auto pit = state.provinces.find(province_id);
+    if (pit == state.provinces.end()) return "Unknown province.";
+    int level = 0;
+    if (track == "farm") level = pit->second.farm_level;
+    else if (track == "workshop") level = pit->second.workshop_level;
+    else if (track == "depot") level = pit->second.depot_level;
+    else if (track == "fort") level = pit->second.fort_level;
+    else return "Unknown track.";
+    if (level >= development_max_level()) return "Already at maximum level.";
+    const int cost = development_cost(track, level);
+    std::ostringstream oss;
+    oss << "Cost " << cost << " gold (treasury " << state.player_gold << "). ";
+    if (track == "farm")
+        oss << "Effect: +" << tuning().farm_provisions_per_month
+            << " provisions/month; +supply income; battle readiness +"
+            << tuning().farm_readiness_per_level << "/level; faster reinforcement.";
+    else if (track == "workshop")
+        oss << "Effect: faster cartridge craft; battle +"
+            << tuning().workshop_cartridges_per_level << " cartridge budget/level (raises militia tickets).";
+    else if (track == "depot")
+        oss << "Effect: shorter shipment transit; battle readiness +"
+            << tuning().depot_readiness_per_level << "/level; faster reinforcement.";
+    else if (track == "fort")
+        oss << "Effect: defender +3 morale/+2 readiness per level; starts holding a capture point + extra cover.";
+    return oss.str();
+}
+
+std::string aftermath_choice_preview(const CampaignState& state, const std::string& choice) {
+    std::ostringstream oss;
+    if (choice == "purchase") {
+        const int hours = tuning().aftermath_transit;
+        oss << "Cost " << tuning().aftermath_gold << " gold now. "
+            << "In " << hours << "h: +" << tuning().aftermath_powder << " powder, +"
+            << tuning().aftermath_muskets << " muskets at the depot"
+            << (state.progress.capacity_level >= 1
+                    ? " (+" + std::to_string(tuning().aftermath_capacity_bonus_muskets) + " from capacity)."
+                    : ".");
+    } else if (choice == "request_assistance" || choice == "request") {
+        oss << "No gold cost. Risk: refused / delayed / partial. "
+            << "On success: up to +12 powder / +6 muskets after 6–24h (local support only affects odds).";
+    } else if (choice == "requisition") {
+        oss << "Immediate: powder and +2 muskets from town stocks; provisions spent. "
+            << "Cost: Support −12. In 24h: townsfolk cool (+4 Support) or attitude −5 if Support was already low.";
+    } else if (choice == "capacity_investment" || choice == "capacity") {
+        oss << "Cost 60 gold and 6 provisions now. In 48h: capacity level 1 and +4 muskets; later purchases gain +2 muskets.";
+    } else if (choice == "dismiss") {
+        oss << "No stores change. Follow-up marches toward Concord still fire.";
+    } else {
+        oss << "Staff action.";
+    }
+    return oss.str();
 }
 
 CampaignState approve_purchase(const CampaignState& state, const std::string& dest_province,
@@ -658,8 +785,14 @@ CampaignState approve_purchase(const CampaignState& state, const std::string& de
         error = "purchase_mutated_destination";
         return state;
     }
-    detail::add_log(s, "purchase approved: " + sh.id + " to " + dest_province + " in " +
-                           std::to_string(tuning().purchase_transit_hours) + "h");
+    {
+        ResourceChange ch;
+        ch.reason = "Purchase order " + sh.id + ": -" + std::to_string(cost) + " gold (in transit to " +
+                    dest_province + ")";
+        ch.gold = -cost;
+        ch.province_id = dest_province;
+        detail::record_resource_change(s, ch);
+    }
     return s;
 }
 
@@ -725,7 +858,16 @@ CampaignState approve_transfer(const CampaignState& state, const std::string& so
         error = "transfer_credited_early";
         return state;
     }
-    detail::add_log(s, "transfer departed: " + sh.id + " " + source_province + "->" + dest_province);
+    {
+        ResourceChange ch;
+        ch.reason = "Transfer departed " + sh.id + ": " + source_province + " → " + dest_province;
+        ch.powder = -powder;
+        ch.cartridges = -cartridges;
+        ch.muskets = -muskets;
+        ch.provisions = -provisions;
+        ch.province_id = source_province;
+        detail::record_resource_change(s, ch);
+    }
     return s;
 }
 
@@ -810,10 +952,14 @@ void tick_cartridge_jobs(CampaignState& s) {
     for (auto& job : s.progress.cartridge_jobs) {
         if (job.status != "underway") continue;
         if (job.complete_on_hour > 0 && s.now.hour_index >= job.complete_on_hour) {
-            province_ledger(s, job.province_id).cartridges += std::max(0, job.cartridges_out);
+            const int made = std::max(0, job.cartridges_out);
+            province_ledger(s, job.province_id).cartridges += made;
             job.status = "complete";
-            detail::add_log(s, "cartridge job complete: " + job.id + " +" +
-                                   std::to_string(job.cartridges_out));
+            ResourceChange ch;
+            ch.reason = "Cartridge job complete " + job.id + ": +" + std::to_string(made) + " cartridges";
+            ch.cartridges = made;
+            ch.province_id = job.province_id;
+            detail::record_resource_change(s, ch);
         }
     }
 }
@@ -902,7 +1048,10 @@ CampaignState choose_logistics(const CampaignState& in, const std::string& lette
                 s.progress.knox.start_hour = s.now.hour_index;
                 s.progress.knox.ready_hour = letter->resolve_on_hour;
                 s.progress.knox.transport_committed = letter->gold_cost;
-                detail::add_log(s, "knox project underway");
+                ResourceChange ch;
+                ch.reason = "Support Knox: -" + std::to_string(letter->gold_cost) + " gold";
+                ch.gold = -letter->gold_cost;
+                detail::record_resource_change(s, ch);
             }
         } else {
             letter->status = "dismissed";
@@ -935,7 +1084,11 @@ CampaignState choose_logistics(const CampaignState& in, const std::string& lette
             s.now.hour_index + tuning().aftermath_transit + (clerk_backlogged ? 24 : 0);
         letter->reason = clerk_backlogged ? "Clerk's desk is full; the merchant wagon slips a day."
                                           : "Merchant wagon hired; goods in transit.";
-        detail::add_log(s, "purchase committed: -" + std::to_string(cost) + " gold");
+        ResourceChange ch;
+        ch.reason = "Purchase (aftermath): -" + std::to_string(cost) + " gold; delivery in " +
+                    std::to_string(letter->resolve_on_hour - s.now.hour_index) + "h";
+        ch.gold = -cost;
+        detail::record_resource_change(s, ch);
     } else if (choice == "request_assistance" || choice == "request") {
         letter->kind = "request_assistance";
         letter->recipient = "committee_of_safety";
@@ -949,16 +1102,23 @@ CampaignState choose_logistics(const CampaignState& in, const std::string& lette
                    letter->status != "approved") {
             letter->status = "pending";
         }
-        detail::add_log(s, "assistance request: " + letter->status);
+        detail::add_log(s, "assistance request: " + letter->status +
+                               (letter->resolve_on_hour > 0
+                                    ? (" — reply in " +
+                                       std::to_string(std::max<int64_t>(0, letter->resolve_on_hour - s.now.hour_index)) +
+                                       "h")
+                                    : ""));
     } else if (choice == "requisition") {
         letter->kind = "requisition";
         letter->recipient = "town_selectmen";
         ProvinceStores& st = faction_depot(s, s.player_faction);
         // Immediate relief; exhausts local stocks and risks cooperation.
         const int take_p = std::min(8, std::max(2, st.provisions / 2));
+        const int prov_spent = take_p + 4;
+        const int support_before = s.local_support;
         st.powder += take_p;
         st.muskets += 2;
-        st.provisions = std::max(0, st.provisions - take_p - 4);
+        st.provisions = std::max(0, st.provisions - prov_spent);
         s.local_support = detail::clamp_int(s.local_support - 12, 0, 100);
         letter->status = "delivered";
         letter->received_powder = take_p;
@@ -966,8 +1126,38 @@ CampaignState choose_logistics(const CampaignState& in, const std::string& lette
         letter->committed_powder = take_p;
         letter->committed_arms = 2;
         letter->reason = "Emergency requisition filled from town stocks; local support falls.";
-        detail::add_log(s, "requisition: powder+" + std::to_string(take_p) + " support=" +
-                               std::to_string(s.local_support));
+        {
+            ResourceChange ch;
+            ch.reason = "Requisition: +" + std::to_string(take_p) + " powder, +2 muskets, −" +
+                        std::to_string(prov_spent) + " provisions, Support −12";
+            ch.powder = take_p;
+            ch.muskets = 2;
+            ch.provisions = -prov_spent;
+            ch.local_support = s.local_support - support_before;
+            ch.province_id = default_depot_province(s, s.player_faction);
+            detail::record_resource_change(s, ch);
+        }
+        // Tracked 24h follow-up (cool townsfolk, or attitude risk if support was already low).
+        {
+            CorrespondenceItem follow;
+            follow.id = next_letter_id(s, "req_follow");
+            follow.created_hour = s.now.hour_index;
+            follow.resolve_on_hour = s.now.hour_index + 24;
+            follow.recipient = "town_selectmen";
+            follow.kind = "requisition_aftermath";
+            follow.status = "pending";
+            follow.awaiting_choice = false;
+            follow.fictionalized = true;
+            follow.subject = "Townsfolk after the levy";
+            follow.body = "[FICTIONALIZED] The selectmen report how the emergency levy settled overnight.";
+            follow.reason = "In 24h: +4 Support, or British attitude −5 if Support was already ≤40.";
+            // decision_id holds the support snapshot. powder stays 0 so delivery paths cannot
+            // credit it as a powder shipment.
+            follow.powder = 0;
+            follow.committed_powder = 0;
+            follow.decision_id = std::to_string(support_before);
+            s.staff.queue.push_back(follow);
+        }
     } else if (choice == "capacity_investment" || choice == "capacity") {
         const int cost = 60;
         if (s.player_gold < cost) {
@@ -1003,7 +1193,12 @@ CampaignState choose_logistics(const CampaignState& in, const std::string& lette
         letter->resolve_on_hour = s.now.hour_index + 48;  // two days of work — not during a fight
         letter->reason = "Repair contact and procurement channel begun; no instant weapon upgrade.";
         s.progress.capacity_ready_hour = letter->resolve_on_hour;
-        detail::add_log(s, "capacity investment started");
+        ResourceChange ch;
+        ch.reason = "Invest capacity: -60 gold, -6 provisions; ready in 48h";
+        ch.gold = -cost;
+        ch.provisions = -6;
+        ch.province_id = default_depot_province(s, s.player_faction);
+        detail::record_resource_change(s, ch);
     } else {
         letter->awaiting_choice = true;
         letter->status = "needs_approval";
@@ -1054,7 +1249,14 @@ CampaignState resolve_commander_request(const CampaignState& in, const std::stri
     } else if (action == "escalate") {
         cmd.objective = "hold_stores";
         cmd.risk = "aggressive";
+        const int support_before = s.local_support;
         s.local_support = detail::clamp_int(s.local_support - 5, 0, 100);
+        {
+            ResourceChange ch;
+            ch.reason = "Escalate: Support " + std::to_string(s.local_support - support_before);
+            ch.local_support = s.local_support - support_before;
+            detail::record_resource_change(s, ch);
+        }
         letter->status = "approved";
         letter->reason =
             "Political escalation through town authorities. If this company loses the field, the town "

@@ -36,7 +36,11 @@ struct PLAYAMERICA250_API FConquestTuning
 
 	/** Seconds between ticket bleeds for the side holding fewer posts. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Conquest")
-	float BleedIntervalSeconds = 8.f;
+	float BleedIntervalSeconds = 12.f;
+
+	/** Ticket exhaustion cannot end the battle before this many seconds (default ~2 minutes). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Conquest", meta = (ClampMin = "0"))
+	float MinSecondsBeforeExhaustion = 120.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Conquest")
 	float PostRadius = 1200.f;

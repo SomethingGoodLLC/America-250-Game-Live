@@ -34,6 +34,16 @@ void URFHealthComponent::OnTakeAnyDamage(AActor* DamagedActor, float Damage, con
 			Applied *= FMath::Max(1.f, Vuln);
 		}
 	}
+	if (DamageCauser)
+	{
+		LastDamageLocation = DamageCauser->GetActorLocation();
+		bHasLastDamageLocation = true;
+	}
+	else if (InstigatedBy && InstigatedBy->GetPawn())
+	{
+		LastDamageLocation = InstigatedBy->GetPawn()->GetActorLocation();
+		bHasLastDamageLocation = true;
+	}
 	CurrentHealth = FMath::Clamp(CurrentHealth - Applied, 0.f, MaxHealth);
 	if (CurrentHealth <= 0.f)
 	{

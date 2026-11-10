@@ -2,6 +2,26 @@
 
 **Vertical slice M0–M8 complete. Battle Feel B1–B4 complete.** Nothing committed or stashed; all changes are uncommitted in the working tree.
 
+## 2026-11-09 — Campaign choices review (seams)
+- Pre-battle broadside now calls `build_battle_setup` while the battle is still pending. `GetBattleSetup()` stays empty until To arms.
+- Map HUD invalidates when `HudEpoch` changes (`NativeTick`). Pause, speed, and commander orders bump the epoch. Reading the epoch inside a text lambda does not subscribe Slate.
+- Requisition follow-up stores the support snapshot in `decision_id`. `powder` stays 0, and `deliver_committed` ignores `requisition_aftermath`.
+- Workshop cartridge bonus applies only to the province owner’s militia tickets. `province_cartridges` is the physical magazine, so the fight cannot spend the bonus.
+- `DA_MusketTuning` bleed was the retired 5s (file offset `0x5bd`); patched to 12. A loaded 5 is still replaced with 12 and logged. Exhaustion gate test: `TicketsMayExhaust`.
+- Ledger now also records transfer departure, shipment delivery, cartridge completion, L3/L5/L7 spends, escalate Support, vassalage gold, and defect gold.
+- Ragdoll disables the capsule before physics and lifts a body that is already below the floor. Fort cover logs a missing cube and sits walls on the ground trace.
+- **Verified:** `pa250sim_tests` **9197 checks, 0 failed**. Clock golden still `19616930d31958dc` (idle 1440h does not take these paths). UE editor was open (`UnrealEditor` pid 18499) plus a warhorse import commandlet, so the editor module was not rebuilt and PIE / `-run=PA250Battle` / a rendered death were **not** run.
+
+## 2026-11-09 — Campaign choices matter (resources, buildings→battle, events, battle length/feel)
+- **A — Resource ledger:** `CampaignState.resource_changes` (cap 64, schema 2 soft-default) with `detail::record_resource_change` on develop / purchase / aftermath / capacity / Knox / deliver / monthly supply / battle ammo / defender reward. HUD Ledger shows treasury + recent reasons; `HudEpoch` + `InvalidateLayoutAndVolatility` keep top bar / support / stores in sync.
+- **B — Tooltips:** `development_preview` / `aftermath_choice_preview`; Farm/Workshop/Depot/Fort and aftermath buttons expose exact cost/effect/delay.
+- **C — Buildings→battle:** Fort seeds `initial_post_holders` + cover walls; workshop adds cartridge budget/militia tickets; farm/depot raise owner readiness and `reinforcement_scale` (bot respawn). `modifier_notes` feed the pre-battle screen.
+- **D — Events:** Requisition records Support −12 immediately and schedules 24h `requisition_aftermath` (+4 Support or attitude −5). Pending list in Ledger; staff status uses the last reason line.
+- **E/F — Pre/post battle:** Battle broadside lists tickets + modifiers; after-battle report lists ownership reason, gold, Support (incl. defender +5), and change_reasons.
+- **G — Length:** Removed hard-coded 5s bleed; DA/default `BleedIntervalSeconds=12`, `MinSecondsBeforeExhaustion=120`.
+- **H — Feel:** Ragdoll impulse + WorldStatic collision; walk/run play-rate from speed; damage-direction wedge; spawn screen “Killed by …”.
+- **Verified:** `pa250sim_tests` **9166 checks, 0 failed**; clock golden regenerated (`19616930d31958dc`). UE editor build / PIE **not re-run** this pass (editor may be open — restart after building).
+
 ## 2026-11-09 — Rifle aim pitch unstuck
 - The musket barrel was clamped to ±45°, so looking up past that left the rifle behind the view. The limit is now ±85°, in line with the camera.
 - Shoulder-camera rotation lag is off. Its substepped blend was stalling pitch (yaw still moved), which is the same "can't aim higher" report that previously cleared only after an editor restart. `FrameHumanCamera` also resets the arm's relative pitch and the view pitch range to ±89 on spawn.
@@ -1470,3 +1490,24 @@ With `fal` in the chain, the reply text appears at once, but voice and video com
 - Blocked: ElevenLabs Voice Design via API returns 403 `feature_not_available` ("only available on a paid plan"), so the three Gage voice candidates cannot be generated on this key.
 - Note: root `.gitignore` ignores `*.mp3` and `*.mp4`, so files in `docs/preview/voices/` and `docs/preview/*.mp4` would not be committed.
 - Not started: TTS via `/with-timestamps` + curves in the speech event; latency logging (service + room) and baseline; streaming Claude sentences -> TTS with a chunk queue in the room; considering idle; warp material (Custom HLSL) + per-envoy face data asset + breathing/drift/eye shifts/blink (closed-eyes image via a fal edit model); 16-shape atlas behind a flag; 4 pre-rendered 720p fal lines (greeting, refusal, acceptance, consider); side-by-side capture; before/after latency numbers.
+
+## 2026-11-09/10 — Warp lip-sync, life, streaming, voice design, stock clips (in progress)
+
+Measured / verified:
+- **Latency** (`scripts/latency_test.py`, service-side: player line received → first audio sent; Claude + ElevenLabs live, 3-line conversation):
+  - before (whole reply, then TTS; Sonnet 5.5, max_tokens 600): median 4.88 s, max 5.90 s, and line 3 came back **empty** (`{}`: thinking used the 600-token budget).
+  - Sonnet 5.5, effort low, streaming sentences: median 4.88 → **3.34 s** with prompt caching (max 5.02 s), no empty replies; first sentence 1.9–4.3 s of that is Claude, TTS 0.4–0.7 s.
+  - Haiku 5.5, effort low: median 2.72–4.13 s (noisy), weaker on the rules (refused a defection that meets the sim's price; misstated who holds Charlestown); one plain-text reply. Sonnet kept.
+  - Sonnet with thinking off (`between_tools`): not faster (3.5–5.4 s) and one reply without the tool call. Rejected.
+  - In the room (Unreal `EnvoyLatency`, mock brain): 1.31 s player line → first sound (TTS 1.05 s, service→room 0.01 s, room start 0.03 s). With Claude: not yet measured in-room.
+- **Causes fixed**: `max_tokens` 600 → 4000 (thinking counts against it); `anthropic` SDK 0.68 → 0.125.0 (venv + pyproject; `uv.lock` not updated: re-lock builds numpy 2.0.2 from source and fails); `eager_input_streaming` on the envoy tool; plain-text answers are spoken instead of falling back to mock; server-side refusal fallback (`fallbacks: "default"`) on Sonnet 5.5.
+- **No content filter** on the envoy's lines (user decision); CLAUDE.md updated.
+- **Voice**: George interim (`envoy_voices.yaml`). ElevenLabs Voice Design (paid plan): 3 Gage candidates in `docs/preview/voices/gage_candidate_{1,2,3}.mp3` (git-ignored: root `.gitignore` has `*.mp3`), ids in `candidates.txt`. Not yet chosen/saved.
+- **Stock clips** (`scripts/render_stock_lines.py`, Fabric 1.0 720p, George): greeting 4.74 s, consider 2.51 s, acceptance 4.74 s, refusal 4.64 s; est $2.48 total; renders 34–41 s each. Offered to the room on connect (`envoy_stock`).
+- **Visemes**: `diplomacy/visemes.py` (6 shapes → jaw/wide/round/press, Gaussian coarticulation, closures by max) from ElevenLabs `/with-timestamps`; tests in `test_visemes_streaming.py`. 128 service tests pass.
+- **Warp portrait**: `M_PortraitWarp` (Custom HLSL in `build_levels.py`), face data `DA_EnvoyFace_british` (`UPA250EnvoyFaceData`, landmarks measured on the still: mouth (970,628) half-width 89, chin (970,765), eyes (877,424)/(1065,417)), closed-eyes texture from fal `flux-pro/kontext` registered per eye (`SourceArt/parlour/envoy_blink_aligned.png`). Offline NumPy port of the HLSL previews ah/ee/oo/m/eh correctly. Compiles on Metal after feeding float4 (RGB+A) vectors to the Custom node.
+- Fixed the other session's `PA250MapWidget.cpp:1336` (one missing `)`); module builds.
+
+Open:
+- Eye-warp blowup seen in-game (eyes filled with flat colour) under heavy swap: the spring used explicit Euler and diverged at Omega·Dt > 1. Replaced with the exact critically damped step (verified numerically, stable at 0.5 s frames). **Not yet rebuilt** (editor was open).
+- Side-by-side capture (`scripts/lipsync_compare.sh` → `docs/preview/lipsync_compare.mp4`, git-ignored `*.mp4`) and in-room latency with Claude: not yet run.

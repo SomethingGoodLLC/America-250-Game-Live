@@ -71,11 +71,13 @@ void UPA250Subsystem::SetPaused(bool bInPaused)
 	{
 		HourAccumulator = 0.f;
 	}
+	BumpHudEpoch();
 }
 
 void UPA250Subsystem::SetSpeedIndex(int32 Idx)
 {
 	SpeedIndex = FPA250CampaignSpeed::Clamp(Idx);
+	BumpHudEpoch();
 }
 
 bool UPA250Subsystem::IsTickable() const
@@ -102,6 +104,7 @@ void UPA250Subsystem::Tick(float DeltaTime)
 		++Steps;
 		const pa250::CampaignState Before = Controller.state();
 		pa250::TickOutput Out = Controller.advance_one_hour();
+		BumpHudEpoch();
 		MaybeAutosave(Before, Out.state);
 		if (!Out.interrupts.empty())
 		{
@@ -317,6 +320,7 @@ bool UPA250Subsystem::AdvanceHours(int32 Hours, FString& OutError)
 		return false;
 	}
 	Controller.advance_hours(Hours, true);
+	BumpHudEpoch();
 	return true;
 }
 
@@ -338,7 +342,15 @@ bool UPA250Subsystem::PrepareDebugBattle(FString& OutError)
 
 bool UPA250Subsystem::ApplyBattleResult(const pa250::BattleResult& Result, FString& OutError)
 {
-	PA250_FORWARD(Controller.finish_battle(Result, Err))
+	std::string Err;
+	const bool bOk = Controller.finish_battle(Result, Err);
+	if (!bOk)
+	{
+		OutError = ToFStr(Err);
+		return false;
+	}
+	BumpHudEpoch();
+	return true;
 }
 
 bool UPA250Subsystem::ChooseLogistics(const FString& LetterId, const FString& Choice, FString& OutError)
@@ -349,6 +361,7 @@ bool UPA250Subsystem::ChooseLogistics(const FString& LetterId, const FString& Ch
 		OutError = ToFStr(Errs.front());
 		return false;
 	}
+	BumpHudEpoch();
 	return true;
 }
 
@@ -360,6 +373,7 @@ bool UPA250Subsystem::ResolveCommander(const FString& Action, FString& OutError)
 		OutError = ToFStr(Errs.front());
 		return false;
 	}
+	BumpHudEpoch();
 	return true;
 }
 
@@ -374,6 +388,7 @@ bool UPA250Subsystem::ApprovePurchaseOrder(const FString& DestProvince, int32 Po
 		OutError = ToFStr(Errs.front());
 		return false;
 	}
+	BumpHudEpoch();
 	return true;
 }
 
@@ -388,6 +403,7 @@ bool UPA250Subsystem::ApproveTransferOrder(const FString& SourceProvince, const 
 		OutError = ToFStr(Errs.front());
 		return false;
 	}
+	BumpHudEpoch();
 	return true;
 }
 
@@ -399,6 +415,7 @@ bool UPA250Subsystem::DevelopProvince(const FString& ProvinceId, const FString& 
 		OutError = ToFStr(Errs.front());
 		return false;
 	}
+	BumpHudEpoch();
 	return true;
 }
 
@@ -588,7 +605,15 @@ bool UPA250Subsystem::LoadCampaign(FString& OutError)
 	{
 		return false;
 	}
-	PA250_FORWARD(Controller.load(ToStd(SavePath()), Err))
+	std::string Err;
+	const bool bOk = Controller.load(ToStd(SavePath()), Err);
+	if (!bOk)
+	{
+		OutError = ToFStr(Err);
+		return false;
+	}
+	BumpHudEpoch();
+	return true;
 }
 
 FString UPA250Subsystem::GetBattleSetupJson() const { return ToFStr(pa250::setup_to_json(Controller.battle_setup())); }

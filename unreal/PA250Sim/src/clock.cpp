@@ -213,9 +213,29 @@ void monthly_supply(CampaignState& s) {
         if (pk.second.farm_level > 0) province_ledger(s, pk.first).provisions += pk.second.farm_level * 3;
     }
     // Treasury income: uncapped, grows with the provinces the player holds.
-    for (const auto& pk : s.provinces)
-        if (pk.second.owner == s.player_faction) s.player_gold += 15 * effective_supply_value(pk.second);
-    detail::add_log(s, "monthly supply accrual");
+    int gold_gain = 0;
+    for (const auto& pk : s.provinces) {
+        if (pk.second.owner != s.player_faction) continue;
+        const int add = 15 * effective_supply_value(pk.second);
+        s.player_gold += add;
+        gold_gain += add;
+        if (pk.second.farm_level > 0) {
+            ResourceChange ch;
+            ch.reason = "Farm harvest, " + pk.second.name + ": +" +
+                        std::to_string(pk.second.farm_level * 3) + " provisions";
+            ch.provisions = pk.second.farm_level * 3;
+            ch.province_id = pk.first;
+            detail::record_resource_change(s, ch);
+        }
+    }
+    if (gold_gain > 0) {
+        ResourceChange ch;
+        ch.reason = "Monthly supply accrual: +" + std::to_string(gold_gain) + " gold";
+        ch.gold = gold_gain;
+        detail::record_resource_change(s, ch);
+    } else {
+        detail::add_log(s, "monthly supply accrual");
+    }
 }
 
 void decay_grievance(CampaignState& s) {

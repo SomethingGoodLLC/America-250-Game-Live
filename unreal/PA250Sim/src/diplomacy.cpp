@@ -277,6 +277,12 @@ CampaignState apply_diplomacy(const CampaignState& in, const DiplomacyResult& r)
             s.player_vassal = true;
             s.player_title = cl.title;
             s.player_gold += cl.gold;
+            if (cl.gold != 0) {
+                ResourceChange ch;
+                ch.reason = "Vassalage: +" + std::to_string(cl.gold) + " gold";
+                ch.gold = cl.gold;
+                detail::record_resource_change(s, ch);
+            }
             for (const auto& p : cl.provinces) s.provinces.at(p).owner = ctx.counterpart;
             s.treaties.push_back({"vassalage", 24 * 365 * 100, "", ""});  // the Crown's peace; ends only by treachery
             s.relations[r.faction] = std::max(s.relations[r.faction], 60);
@@ -312,6 +318,12 @@ CampaignState apply_diplomacy(const CampaignState& in, const DiplomacyResult& r)
             fi.envoy_defected = true;
             fi.envoy_title_granted = cl.title;
             s.player_gold -= cl.gold;
+            if (cl.gold != 0) {
+                ResourceChange ch;
+                ch.reason = "Defect: -" + std::to_string(cl.gold) + " gold";
+                ch.gold = -cl.gold;
+                detail::record_resource_change(s, ch);
+            }
             for (const auto& p : cl.provinces) s.fiefs[p] = fi.envoy_name;
             // He brings his command over; as Mayor of Boston he opens the gates.
             for (auto& kv : s.armies)

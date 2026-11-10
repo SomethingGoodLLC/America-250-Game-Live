@@ -17,6 +17,8 @@ public:
 
 	/** Local player's hit: X on the crosshair (white hit / red kill) + "HIT -78" / "KILL  68 m". */
 	void ShowHitmarker(bool bKill, float Damage = 0.f, float DistanceM = 0.f);
+	/** Victim-facing damage direction (world hit location → screen edge wedge). */
+	void ShowDamageDirection(const FVector& WorldHitLocation);
 	bool IsReticleHostile() const;
 	bool IsReticleBlocked() const;
 	float GetReticleSpreadPx() const;
@@ -41,8 +43,11 @@ private:
 	float HitTextTimer = 0.f;
 	bool bHitmarkerKill = false;
 	FString HitText;
+	float DamageDirTimer = 0.f;
+	FVector2D DamageDirScreen = FVector2D::ZeroVector;
 public:
 	static constexpr float HitmarkerSeconds = 0.45f;
+	static constexpr float DamageDirSeconds = 0.7f;
 	FString GetHitText() const { return HitTextTimer > 0.f ? HitText : FString(); }
 	float GetHitTextTimer() const { return HitTextTimer; }
 };

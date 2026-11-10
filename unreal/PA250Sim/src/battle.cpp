@@ -10,7 +10,8 @@ int ticket_total(const std::map<std::string, int>& tickets) {
 }
 
 std::map<std::string, int> gate_tickets_by_stores(const CampaignState& state, const Army& army,
-                                                  const std::string& battle_province) {
+                                                  const std::string& battle_province,
+                                                  int extra_cartridges = 0) {
     std::map<std::string, int> tickets = army.units;  // fit only
     const ProvinceStores& st = province_ledger(state, battle_province);
 
@@ -28,9 +29,10 @@ std::map<std::string, int> gate_tickets_by_stores(const CampaignState& state, co
     }
 
     // Cartridges (not powder) cap how many militia can be fielded with ammunition.
+    // Workshop development adds virtual cartridge budget for this fight only.
     auto mit = tickets.find("militia");
     if (mit != tickets.end() && mit->second > 0) {
-        const int cart_cap = std::max(0, st.cartridges);
+        const int cart_cap = std::max(0, st.cartridges + std::max(0, extra_cartridges));
         if (cart_cap < mit->second) mit->second = cart_cap;
     }
 
@@ -117,7 +119,16 @@ BattleSetup build_battle_setup(const CampaignState& state, const std::string& pr
     b.defender_faction = dit->second.faction;
     b.seed = detail::mix64(state.seed ^ detail::mix64(static_cast<uint64_t>(state.now.hour_index)) ^
                            detail::fnv1a(province));
-    b.province_cartridges = province_ledger(state, province).cartridges;
+    b.farm_level = pit->second.farm_level;
+    b.workshop_level = pit->second.workshop_level;
+    b.depot_level = pit->second.depot_level;
+    b.fort_level = pit->second.fort_level;
+    const int workshop_bonus =
+        std::max(0, pit->second.workshop_level) * workshop_cartridges_per_level();
+    // Physical magazine only. The workshop bonus raises the owner's militia tickets;
+    // it is not extra cartridges the fight can spend past what the province holds.
+    const int stored_cartridges = province_ledger(state, province).cartridges;
+    b.province_cartridges = stored_cartridges;
     b.force_notes = "sourced approximation — not a precise muster roll";
     for (const auto& tag : pit->second.terrain) b.terrain_tags.push_back(tag);
     // The clock pauses on contact, so the attacker's previous province is the edge just marched.
@@ -135,11 +146,18 @@ BattleSetup build_battle_setup(const CampaignState& state, const std::string& pr
     if (b.scenario_preset == "battle_road") b.terrain_tags.push_back("return_march");
     std::sort(b.terrain_tags.begin(), b.terrain_tags.end());
     b.terrain_tags.erase(std::unique(b.terrain_tags.begin(), b.terrain_tags.end()), b.terrain_tags.end());
+    const int farm_ready = std::max(0, pit->second.farm_level) * farm_readiness_per_level();
+    const int depot_ready = std::max(0, pit->second.depot_level) * depot_readiness_per_level();
+    const int logistics_ready = farm_ready + depot_ready;
+    const float reinforce =
+        1.f - 0.05f * static_cast<float>(std::min(5, pit->second.farm_level + pit->second.depot_level));
     for (const Army* a : {&ait->second, &dit->second}) {
         SideSetup s;
         s.faction = a->faction;
         s.army_id = a->id;
-        s.tickets = gate_tickets_by_stores(state, *a, province);
+        const bool owns_ground = a->faction == pit->second.owner;
+        const int extra_cart = owns_ground ? workshop_bonus : 0;
+        s.tickets = gate_tickets_by_stores(state, *a, province, extra_cart);
         s.morale = a->morale;
         s.readiness = a->readiness;
         // Fortifications help whoever holds the province defend it.
@@ -147,13 +165,37 @@ BattleSetup build_battle_setup(const CampaignState& state, const std::string& pr
             s.morale = detail::clamp_int(s.morale + 3 * pit->second.fort_level, 0, 100);
             s.readiness = detail::clamp_int(s.readiness + 2 * pit->second.fort_level, 0, 100);
         }
-        s.cartridge_budget = b.province_cartridges;
+        // Farms/depots stock the magazine and steady the force that fights here.
+        if (a->faction == pit->second.owner && logistics_ready > 0) {
+            s.readiness = detail::clamp_int(s.readiness + logistics_ready, 0, 100);
+            s.reinforcement_scale = std::max(0.75f, reinforce);
+        }
+        s.cartridge_budget = stored_cartridges + extra_cart;
         s.retreat_province = choose_retreat(state, province, a->faction);
         b.sides[a->faction] = s;
     }
     if (b.scenario_preset == "concord_bridge") {
         const int prov = b.sides.count(kContinental) ? ticket_total(b.sides.at(kContinental).tickets) : 0;
         if (b.sides.count(kBritish)) limit_bridge_company(b.sides.at(kBritish).tickets, prov);
+    }
+    // Fort: defender who owns the ground starts holding the primary post + cover note.
+    if (pit->second.fort_level > 0 && b.defender_faction == pit->second.owner) {
+        const std::string post = "green";
+        b.initial_post_holders[post] = b.defender_faction;
+        b.modifier_notes.push_back("Fort L" + std::to_string(pit->second.fort_level) + " " +
+                                   pit->second.name + ": defender holds " + post +
+                                   " at start; +3 morale/+2 readiness per level; extra cover");
+    }
+    if (pit->second.workshop_level > 0) {
+        b.modifier_notes.push_back(
+            "Workshop L" + std::to_string(pit->second.workshop_level) + " " + pit->second.name +
+            ": +" + std::to_string(workshop_bonus) + " cartridge budget (militia tickets)");
+    }
+    if (pit->second.farm_level > 0 || pit->second.depot_level > 0) {
+        b.modifier_notes.push_back(
+            "Farm L" + std::to_string(pit->second.farm_level) + "/Depot L" +
+            std::to_string(pit->second.depot_level) + " " + pit->second.name +
+            ": owner readiness +" + std::to_string(logistics_ready) + "; faster reinforcement");
     }
     return b;
 }
@@ -167,14 +209,26 @@ CampaignState apply_battle_result(const CampaignState& in, const BattleResult& r
     ensure_logistics_defaults(s);
     const std::string loser = detail::other_faction(r.winner);
     const int support_before = s.local_support;
+    const int gold_before = s.player_gold;
     const std::string owner_before = s.provinces.at(r.province_id).owner;
 
     std::map<std::string, int> fielded_by_army;
     std::map<std::string, std::map<std::string, int>> gated_by_army;
+    int workshop_bonus_apply = 0;
+    std::string province_owner;
+    {
+        auto pit = in.provinces.find(r.province_id);
+        if (pit != in.provinces.end()) {
+            workshop_bonus_apply =
+                std::max(0, pit->second.workshop_level) * workshop_cartridges_per_level();
+            province_owner = pit->second.owner;
+        }
+    }
     for (const std::string& aid : {pb.attacker_army, pb.defender_army}) {
         auto it = in.armies.find(aid);
         if (it == in.armies.end()) continue;
-        gated_by_army[aid] = gate_tickets_by_stores(in, it->second, r.province_id);
+        const int extra = it->second.faction == province_owner ? workshop_bonus_apply : 0;
+        gated_by_army[aid] = gate_tickets_by_stores(in, it->second, r.province_id, extra);
     }
     if (scenario_preset_for_province(r.province_id) == "concord_bridge") {
         int prov = 0;
@@ -299,7 +353,6 @@ CampaignState apply_battle_result(const CampaignState& in, const BattleResult& r
     }
 
     // Ownership: the winner takes the ground when they held the objective.
-    // Capturing ground never raises local_support by itself.
     bool stores_forfeit = false;
     const DetachedCommander& cmd = s.progress.commander;
     if (cmd.objective == "hold_stores" && r.winner != s.player_faction && r.objective_holder != r.winner &&
@@ -309,13 +362,54 @@ CampaignState apply_battle_result(const CampaignState& in, const BattleResult& r
             if (detail::contains(fk.second.protected_provinces, r.province_id)) protected_ground = true;
         stores_forfeit = !protected_ground;
     }
+    std::string ownership_reason = "unchanged";
     if (r.objective_holder == r.winner || stores_forfeit) {
         s.provinces.at(r.province_id).owner = r.winner;
+        ownership_reason = stores_forfeit ? "stores_forfeit" : "held_objective";
         if (stores_forfeit)
             detail::add_log(s, "stores exposed: " + r.province_id + " forfeited when the field was lost");
     }
-    // Stores stay in the province on capture (magazine capture). local_support unchanged.
+    // Capture itself never changes local_support; defender win reward may raise it below.
     if (s.local_support != support_before) s.local_support = support_before;
+
+    // Player defender who wins the field earns a visible Support reward.
+    int defender_reward = 0;
+    {
+        auto dit = in.armies.find(pb.defender_army);
+        if (dit != in.armies.end() && dit->second.faction == r.winner &&
+            dit->second.faction == s.player_faction) {
+            defender_reward = 5;
+            s.local_support = detail::clamp_int(s.local_support + defender_reward, 0, 100);
+            ResourceChange ch;
+            ch.reason = "Defended " + s.provinces.at(r.province_id).name + ": +5 Support";
+            ch.local_support = defender_reward;
+            ch.province_id = r.province_id;
+            detail::record_resource_change(s, ch);
+        }
+    }
+
+    if (total_cart_spent > 0 || total_powder_spent > 0 || muskets_lost > 0) {
+        ResourceChange ch;
+        ch.reason = "Battle ammo at " + r.province_id + ": -" + std::to_string(total_cart_spent) +
+                    " cartridges, -" + std::to_string(total_powder_spent) + " powder, -" +
+                    std::to_string(muskets_lost) + " muskets";
+        ch.cartridges = -total_cart_spent;
+        ch.powder = -total_powder_spent;
+        ch.muskets = -muskets_lost;
+        ch.province_id = r.province_id;
+        detail::record_resource_change(s, ch);
+    }
+
+    std::string ownership_line;
+    if (ownership_reason == "held_objective") {
+        ownership_line = "Held the posts: " + s.provinces.at(r.province_id).name + " now " + r.winner;
+        detail::add_log(s, ownership_line);
+    } else if (ownership_reason == "stores_forfeit") {
+        ownership_line = "Stores exposed after field lost: " + s.provinces.at(r.province_id).name +
+                         " now " + r.winner;
+    } else {
+        ownership_line = "Ownership unchanged at " + s.provinces.at(r.province_id).name;
+    }
 
     BattleReport report;
     report.province_id = r.province_id;
@@ -324,10 +418,24 @@ CampaignState apply_battle_result(const CampaignState& in, const BattleResult& r
     report.province_owner_after = s.provinces.at(r.province_id).owner;
     report.local_support_before = support_before;
     report.local_support_after = s.local_support;
+    report.gold_before = gold_before;
+    report.gold_after = s.player_gold;
     report.objective_holder = r.objective_holder;
     report.objectives_held = r.objectives_held;
     report.losses = r.losses;
     report.wounded = r.wounded;
+    report.ownership_reason = ownership_reason;
+    report.defender_reward_support = defender_reward;
+    if (defender_reward > 0)
+        report.change_reasons.push_back("Defended " + s.provinces.at(r.province_id).name + ": +5 Support");
+    report.change_reasons.push_back(ownership_line);
+    if (total_cart_spent || total_powder_spent || muskets_lost) {
+        report.change_reasons.push_back("Battle ammo at " + r.province_id + ": -" +
+                                        std::to_string(total_cart_spent) + " cart, -" +
+                                        std::to_string(total_powder_spent) + " powder, -" +
+                                        std::to_string(muskets_lost) + " muskets");
+    }
+    report.change_reasons.push_back("Gold unchanged by battle (" + std::to_string(gold_before) + ")");
     // Split spent across sides for the report (proportional to fielded, clamped total).
     int fielded_all = 0;
     for (const auto& fk : fielded_by_army) fielded_all += fk.second;

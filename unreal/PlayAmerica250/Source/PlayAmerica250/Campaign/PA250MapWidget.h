@@ -75,6 +75,7 @@ public:
 
 protected:
 	virtual TSharedRef<SWidget> RebuildWidget() override;
+	virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
 	virtual FReply NativeOnKeyDown(const FGeometry& InGeometry, const FKeyEvent& InKeyEvent) override;
 	virtual FReply NativeOnKeyUp(const FGeometry& InGeometry, const FKeyEvent& InKeyEvent) override;
 	virtual void NativeOnFocusLost(const FFocusEvent& InFocusEvent) override;
@@ -100,6 +101,9 @@ private:
 	FText DevelopmentText() const;
 	FText BattleReportText() const;
 	FText LedgerText() const;
+	FText PendingText() const;
+	FText DevelopTip(const FString& Track) const;
+	FText AftermathTip(const FString& Choice) const;
 	bool CanEnterBattleAtSelection() const;
 	void NotifyMapSelectionChanged();
 
@@ -112,5 +116,7 @@ private:
 	uint8 HeldArrows = 0;
 	bool bShowDev = false;
 	bool bShowLedger = false;
+	/** Last HudEpoch painted. Slate does not subscribe to the epoch; NativeTick invalidates when it changes. */
+	int32 PaintedHudEpoch = -1;
 	TWeakObjectPtr<APA250ProvinceMapActor> MapActor;
 };

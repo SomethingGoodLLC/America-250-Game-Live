@@ -37,6 +37,37 @@ inline void add_log(CampaignState& s, const std::string& line) {
     if (s.log.size() > kMaxLog) s.log.erase(s.log.begin(), s.log.begin() + (s.log.size() - kMaxLog));
 }
 
+inline std::string format_delta_part(const char* label, int delta) {
+    if (delta == 0) return {};
+    return std::string(label) + (delta > 0 ? "+" : "") + std::to_string(delta);
+}
+
+// Records an attributed resource delta and mirrors a short line into CampaignState.log.
+inline void record_resource_change(CampaignState& s, ResourceChange c) {
+    c.hour_index = s.now.hour_index;
+    if (c.reason.empty()) {
+        std::string parts;
+        auto append = [&](const std::string& p) {
+            if (p.empty()) return;
+            if (!parts.empty()) parts += ", ";
+            parts += p;
+        };
+        append(format_delta_part("gold ", c.gold));
+        append(format_delta_part("powder ", c.powder));
+        append(format_delta_part("cart ", c.cartridges));
+        append(format_delta_part("muskets ", c.muskets));
+        append(format_delta_part("prov ", c.provisions));
+        append(format_delta_part("support ", c.local_support));
+        c.reason = parts.empty() ? "resource change" : parts;
+    }
+    s.resource_changes.push_back(c);
+    constexpr size_t kMaxChanges = 64;
+    if (s.resource_changes.size() > kMaxChanges)
+        s.resource_changes.erase(s.resource_changes.begin(),
+                                 s.resource_changes.begin() + (s.resource_changes.size() - kMaxChanges));
+    add_log(s, c.reason);
+}
+
 template <typename V>
 inline V map_get(const std::map<std::string, V>& m, const std::string& k) {
     auto it = m.find(k);

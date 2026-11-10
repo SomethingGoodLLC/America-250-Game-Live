@@ -144,6 +144,59 @@ int32 UPA250VisualsCommandlet::Main(const FString& Params)
 			GunAnim = Gun->GetSingleNodeInstance();
 			Check(Weapon->IsReloading() && GunAnim && GunAnim->GetCurrentAsset() == Weapon->GetReloadAnim(), TEXT("reload poses the pack Reloading animation"));
 		}
+		// Melee pose layer on the real skeleton: a full lunge, then a blow from the front.
+		{
+			USkeletalMeshComponent* M = British->GetMesh();
+			UPA250SoldierAnimInstance* Anim = Cast<UPA250SoldierAnimInstance>(M->GetAnimInstance());
+			Check(Anim != nullptr, TEXT("melee pose: soldier runs the native body anim"));
+			if (Anim)
+			{
+				auto Refresh = [M]() { M->TickAnimation(1.f / 30.f, false); M->RefreshBoneTransforms(); M->FinalizeBoneTransform(); };
+				auto At = [British, M](const TCHAR* Bone) { return British->GetActorTransform().InverseTransformPosition(M->GetBoneLocation(Bone, EBoneSpaces::WorldSpace)); };
+				auto BonesValid = [M]() {
+					bool bOK = true;
+					for (const FTransform& B : M->GetComponentSpaceTransforms()) bOK &= !B.ContainsNaN() && B.IsRotationNormalized();
+					return bOK;
+				};
+				FPA250MeleePose Dirs;
+				Dirs.ForwardCS = M->GetComponentTransform().InverseTransformVectorNoScale(British->GetActorForwardVector());
+				Dirs.RightCS = M->GetComponentTransform().InverseTransformVectorNoScale(British->GetActorRightVector());
+				Anim->SetMeleePose(FPA250MeleePose());
+				Refresh();
+				const FVector Hand0 = At(TEXT("hand_r")), FootL0 = At(TEXT("foot_l")), FootR0 = At(TEXT("foot_r")), Pelvis0 = At(TEXT("pelvis")), Head0 = At(TEXT("head"));
+
+				FPA250MeleePose Lunge = Dirs;
+				Lunge.Lunge = 1.f;
+				Lunge.RearFootLagCm = 30.f;
+				Anim->SetMeleePose(Lunge);
+				Refresh();
+				const FVector Hand1 = At(TEXT("hand_r")), FootL1 = At(TEXT("foot_l")), FootR1 = At(TEXT("foot_r")), Pelvis1 = At(TEXT("pelvis")), Head1 = At(TEXT("head"));
+				UE_LOG(LogTemp, Display, TEXT("PA250.Visuals measure lunge (cm, actor space, vs idle): hand_r %s  foot_l %s  foot_r %s  pelvis %s  head %s"),
+					*(Hand1 - Hand0).ToCompactString(), *(FootL1 - FootL0).ToCompactString(), *(FootR1 - FootR0).ToCompactString(),
+					*(Pelvis1 - Pelvis0).ToCompactString(), *(Head1 - Head0).ToCompactString());
+				Check(Hand1.X - Hand0.X > 40.f, TEXT("lunge: the right hand (and the musket on it) is driven over 40 cm forward"));
+				Check(FootL1.X - FootL0.X > 30.f && FMath::Abs(FootL1.Z - FootL0.Z) < 4.f, TEXT("lunge: the front foot steps out and lands on the ground"));
+				// Asked to trail 30 cm; the straight rear leg only reaches so far with the hips this low, and the foot never lifts to cheat.
+				Check(FootR0.X - FootR1.X > 10.f && FMath::Abs(FootR1.Z - FootR0.Z) < 4.f, TEXT("lunge: the rear foot trails behind as far as the leg reaches and stays down"));
+				Check(Pelvis0.Z - Pelvis1.Z > 8.f && Pelvis1.X > Pelvis0.X, TEXT("lunge: hips drop and go forward"));
+				Check(BonesValid(), TEXT("lunge: every body bone is finite with a unit rotation"));
+
+				FPA250MeleePose Flinch = Dirs;
+				Flinch.FlinchCS = -Dirs.ForwardCS; // struck from the front
+				Anim->SetMeleePose(Flinch);
+				Refresh();
+				const FVector Head2 = At(TEXT("head")), FootL2 = At(TEXT("foot_l")), FootR2 = At(TEXT("foot_r"));
+				UE_LOG(LogTemp, Display, TEXT("PA250.Visuals measure flinch (cm, vs idle): head %s  foot_l %s  foot_r %s"),
+					*(Head2 - Head0).ToCompactString(), *(FootL2 - FootL0).ToCompactString(), *(FootR2 - FootR0).ToCompactString());
+				Check(Head0.X - Head2.X > 15.f && FVector::Dist(FootL2, FootL0) < 4.f && FVector::Dist(FootR2, FootR0) < 4.f,
+					TEXT("hit reaction: struck from the front, the body rocks back over planted feet"));
+				Check(BonesValid(), TEXT("hit reaction: every body bone is finite with a unit rotation"));
+
+				Anim->SetMeleePose(FPA250MeleePose());
+				Refresh();
+				Check(FVector::Dist(At(TEXT("hand_r")), Hand0) < 3.f && FVector::Dist(At(TEXT("pelvis")), Pelvis0) < 3.f, TEXT("melee pose: no weights leaves the clip pose alone"));
+			}
+		}
 		{
 			using P = EActiveReloadPhase;
 			const float A0 = AMusketWeapon::ReloadAnimAlpha(P::PrimePan, 0.f), A1 = AMusketWeapon::ReloadAnimAlpha(P::PrimePan, 1.f);

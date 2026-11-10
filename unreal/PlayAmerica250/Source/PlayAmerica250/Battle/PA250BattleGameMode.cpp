@@ -138,6 +138,10 @@ void APA250BattleGameMode::NotifyProjectileHit(ARFCharacter* Shooter, ARFCharact
 		// Confirmation you hear even when the target is 80 m away: a tick for a hit, a thump for a kill.
 		FPA250BattleAudio::Play2D(this, bKill ? TEXT("kill_confirm") : TEXT("hit_confirm"));
 	}
+	if (Hud && PC && Victim == PC->GetPawn() && Shooter)
+	{
+		Hud->ShowDamageDirection(Shooter->GetActorLocation());
+	}
 }
 
 FVector APA250BattleGameMode::GetRearPoint(FName Faction, const FVector& Fallback) const
@@ -376,6 +380,25 @@ void APA250BattleGameMode::ApplyScenarioPreset()
 	{
 		ConfigurePostForScenario(WP.Get(), ScenarioFight);
 	}
+	// Fort / sim-authored holders override scenario defaults (defender starts holding a post).
+	for (const auto& Kv : Setup.initial_post_holders)
+	{
+		const FName PostId = UTF8_TO_TCHAR(Kv.first.c_str());
+		const FName Holder = UTF8_TO_TCHAR(Kv.second.c_str());
+		for (const TWeakObjectPtr<APA250ControlPoint>& WP : Posts)
+		{
+			APA250ControlPoint* P = WP.Get();
+			if (!P || P->PostId != PostId) continue;
+			P->DebugSetHolder(Holder);
+			P->MarkHoldersAssigned();
+			UE_LOG(LogTemp, Display, TEXT("PA250 fort/setup: post %s starts held by %s"), *PostId.ToString(),
+				   *Holder.ToString());
+		}
+	}
+	if (Setup.fort_level > 0)
+	{
+		SpawnFortCoverNearHeldPosts();
+	}
 	if (ScenarioFight.bContestSingleCrossing)
 	{
 		if (APA250ControlPoint* Green = FindGreenPost())
@@ -392,9 +415,9 @@ void APA250BattleGameMode::ApplyScenarioPreset()
 			WP->ConsumeFlipFlag();
 		}
 	}
-	UE_LOG(LogTemp, Display, TEXT("PA250 battle scenario_preset=%s province=%s crossing=%d preserve=%d tags=%d"),
+	UE_LOG(LogTemp, Display, TEXT("PA250 battle scenario_preset=%s province=%s crossing=%d preserve=%d tags=%d fort=%d"),
 		*Preset, UTF8_TO_TCHAR(Setup.province_id.c_str()), ScenarioFight.bContestSingleCrossing ? 1 : 0,
-		ScenarioFight.bRewardForcePreservation ? 1 : 0, Tags.Num());
+		ScenarioFight.bRewardForcePreservation ? 1 : 0, Tags.Num(), Setup.fort_level);
 }
 
 float APA250BattleGameMode::GetCampaignConfidencePressure(FName Faction) const
@@ -409,6 +432,68 @@ float APA250BattleGameMode::GetCampaignConfidencePressure(FName Faction) const
 	const float Morale01 = FMath::Clamp(It->second.morale / 100.f, 0.f, 1.f);
 	const float Ready01 = FMath::Clamp(It->second.readiness / 100.f, 0.f, 1.f);
 	return FMath::Clamp((1.f - Morale01) * 0.2f + (1.f - Ready01) * 0.1f, 0.f, 0.35f);
+}
+
+void APA250BattleGameMode::SpawnFortCoverNearHeldPosts()
+{
+	UWorld* World = GetWorld();
+	if (!World || Setup.fort_level <= 0) return;
+	UStaticMesh* Cube = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube"));
+	if (!Cube)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("PA250 fort cover: /Engine/BasicShapes/Cube.Cube failed to load; no cover spawned"));
+		return;
+	}
+	int32 Spawned = 0;
+	for (const auto& Kv : Setup.initial_post_holders)
+	{
+		const FName PostId = UTF8_TO_TCHAR(Kv.first.c_str());
+		APA250ControlPoint* Post = nullptr;
+		for (const TWeakObjectPtr<APA250ControlPoint>& WP : Posts)
+		{
+			if (WP.IsValid() && WP->PostId == PostId)
+			{
+				Post = WP.Get();
+				break;
+			}
+		}
+		if (!Post) continue;
+		FVector Ground = Post->GetActorLocation();
+		FHitResult Hit;
+		FCollisionQueryParams TraceParams(SCENE_QUERY_STAT(PA250FortCover), false, Post);
+		const FVector TraceStart = Ground + FVector(0.f, 0.f, 400.f);
+		const FVector TraceEnd = Ground - FVector(0.f, 0.f, 1200.f);
+		if (World->LineTraceSingleByChannel(Hit, TraceStart, TraceEnd, ECC_WorldStatic, TraceParams) && Hit.bBlockingHit)
+		{
+			Ground = Hit.ImpactPoint;
+		}
+		else
+		{
+			Ground.Z -= 120.f;
+			UE_LOG(LogTemp, Warning, TEXT("PA250 fort cover: no ground under post %s; using a fixed drop"),
+				*Post->PostId.ToString());
+		}
+		// 100 cm engine cube, scale Z 1.2 → 120 cm tall. Center sits half that above the ground.
+		const float HalfHeight = 60.f;
+		const FVector Offsets[] = {FVector(220.f, 0.f, HalfHeight), FVector(-220.f, 0.f, HalfHeight),
+								   FVector(0.f, 220.f, HalfHeight)};
+		for (const FVector& Off : Offsets)
+		{
+			FActorSpawnParameters Params;
+			Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+			AStaticMeshActor* Wall =
+				World->SpawnActor<AStaticMeshActor>(Ground + Off, FRotator::ZeroRotator, Params);
+			if (!Wall) continue;
+			Wall->GetStaticMeshComponent()->SetStaticMesh(Cube);
+			Wall->SetActorScale3D(FVector(3.5f, 0.4f, 1.2f));
+			Wall->GetStaticMeshComponent()->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+			Wall->GetStaticMeshComponent()->SetCollisionProfileName(TEXT("BlockAll"));
+			Wall->Tags.Add(TEXT("PA250Cover"));
+			++Spawned;
+		}
+	}
+	UE_LOG(LogTemp, Display, TEXT("PA250 fort cover: spawned %d cover walls (fort_level=%d)"), Spawned,
+		   Setup.fort_level);
 }
 
 void APA250BattleGameMode::EnsureInitialized()
@@ -458,9 +543,23 @@ void APA250BattleGameMode::EnsureInitialized()
 		BotsPerSide = Tuning->Values.Conquest.BotsPerSide;
 		TimeLimitSeconds = Tuning->Values.Conquest.TimeLimitSeconds;
 		BleedIntervalSeconds = Tuning->Values.Conquest.BleedIntervalSeconds;
+		MinSecondsBeforeExhaustion = Tuning->Values.Conquest.MinSecondsBeforeExhaustion;
 		SoldiersPerUnit = Tuning->Values.Conquest.SoldiersPerUnit;
+		// DA_MusketTuning was saved while the game mode forced a 5s bleed. That cooked
+		// 5 overrides the C++ default of 12. Treat exactly 5 as the retired hard-code.
+		if (FMath::IsNearlyEqual(BleedIntervalSeconds, 5.f, 0.05f))
+		{
+			UE_LOG(LogTemp, Warning,
+				TEXT("PA250 bleed: DA_MusketTuning BleedIntervalSeconds is 5 (retired hard-code); using 12s"));
+			BleedIntervalSeconds = 12.f;
+		}
+		if (MinSecondsBeforeExhaustion <= 0.f)
+		{
+			MinSecondsBeforeExhaustion = 120.f;
+		}
 	}
-	BleedIntervalSeconds = 5.f; // M6 BF2 bleed cadence
+	UE_LOG(LogTemp, Display, TEXT("PA250 bleed: interval %.1fs, exhaustion gate %.0fs%s"), BleedIntervalSeconds,
+		MinSecondsBeforeExhaustion, Tuning ? TEXT(" (DA_MusketTuning)") : TEXT(" (C++ defaults, DA missing)"));
 
 	int32 Cli = 0;
 	if (FParse::Value(FCommandLine::Get(), TEXT("PA250Bots="), Cli) && Cli >= 0) BotsPerSide = Cli;
@@ -585,6 +684,7 @@ void APA250BattleGameMode::BeginPlay()
 	GetWorldTimerManager().SetTimer(H, FTimerDelegate::CreateLambda([this]() { if (!bBattleOver) Banner.Reset(); }), 4.f, false);
 	MaybeStartPreviewCapture();
 	MaybeStartFpsSample();
+	MaybeStartMeleeProbe();
 }
 
 APA250ControlPoint* APA250BattleGameMode::FindGreenPost() const
@@ -1500,6 +1600,12 @@ void APA250BattleGameMode::BleedTickets(float DeltaSeconds)
 
 void APA250BattleGameMode::CheckTicketExhaustion()
 {
+	// Keep early fights from ending on bleed alone (default MinSecondsBeforeExhaustion ≈ 2 min).
+	const float Elapsed = GetWorld() ? (GetWorld()->GetTimeSeconds() - StartTime) : 0.f;
+	if (!TicketsMayExhaust(Elapsed, MinSecondsBeforeExhaustion))
+	{
+		return;
+	}
 	// Conquest: a side at 0 tickets loses at once, even with soldiers still standing.
 	// A side that started with no reinforcement tickets only loses after it has fielded at
 	// least once and been wiped — never on the first Tick before spawn (stores gating used
@@ -1580,7 +1686,15 @@ void APA250BattleGameMode::OnCharacterDied(ARFCharacter* Victim, AController* Vi
 				PushKillFeed(FString::Printf(TEXT("%s  x  %s"),
 					*Label(KillerChar, Killer->IsLocalPlayerController()),
 					*Label(Victim, VictimController && VictimController->IsLocalPlayerController())));
+				if (VictimController && VictimController->IsLocalPlayerController())
+				{
+					LastKillerLabel = Label(KillerChar, false);
+				}
 			}
+		}
+		else if (VictimController && VictimController->IsLocalPlayerController())
+		{
+			LastKillerLabel = TEXT("Unknown");
 		}
 	}
 	CheckTicketExhaustion();
@@ -1611,6 +1725,14 @@ void APA250BattleGameMode::OnCharacterDied(ARFCharacter* Victim, AController* Vi
 	TWeakObjectPtr<AController> OldCtl = VictimController;
 	const FName Cls = Victim->UnitClass;
 	const uint32 Clothes = Victim->GetClothingSeed();
+	float Delay = RespawnDelay;
+	{
+		const auto Sit = Setup.sides.find(TCHAR_TO_UTF8(*F.ToString()));
+		if (Sit != Setup.sides.end() && Sit->second.reinforcement_scale > 0.f)
+		{
+			Delay = FMath::Max(3.f, RespawnDelay * Sit->second.reinforcement_scale);
+		}
+	}
 	FTimerHandle H;
 	GetWorldTimerManager().SetTimer(H, FTimerDelegate::CreateWeakLambda(this, [this, OldCtl, F, Cls, Clothes]() {
 		if (bBattleOver) return;
@@ -1622,7 +1744,7 @@ void APA250BattleGameMode::OnCharacterDied(ARFCharacter* Victim, AController* Vi
 		}
 		SpawnBot(F, ChooseClassFor(F, Cls), nullptr, Clothes);
 		CheckTicketExhaustion();
-	}), RespawnDelay, false);
+	}), Delay, false);
 }
 
 float APA250BattleGameMode::TimeRemaining() const

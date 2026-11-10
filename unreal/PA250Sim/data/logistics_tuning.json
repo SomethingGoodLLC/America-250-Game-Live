@@ -39,7 +39,10 @@
     "fort_gold": 45,
     "cost_growth_per_level": 20,
     "max_level": 3,
-    "farm_provisions_per_month": 3
+    "farm_provisions_per_month": 3,
+    "workshop_cartridges_per_level": 8,
+    "farm_readiness_per_level": 2,
+    "depot_readiness_per_level": 2
   },
   "hq_province": {
     "continental": "cambridge",

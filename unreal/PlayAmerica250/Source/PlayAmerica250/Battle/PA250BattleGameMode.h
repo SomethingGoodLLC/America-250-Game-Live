@@ -64,7 +64,11 @@ public:
 	float AutoplayTimeDilation = 10.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle")
-	float BleedIntervalSeconds = 5.f;
+	float BleedIntervalSeconds = 12.f;
+
+	/** Ticket exhaustion is ignored until this many seconds have elapsed. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle")
+	float MinSecondsBeforeExhaustion = 120.f;
 
 	/** Battle respawns per campaign unit (see FConquestTuning::SoldiersPerUnit). */
 	UPROPERTY(EditAnywhere, Category = "PA250|Battle")
@@ -123,11 +127,18 @@ public:
 	static FName PreservationWinner(int32 RemainingA, int32 InitialA, int32 RemainingB, int32 InitialB, FName SideA,
 		FName SideB, FName DefenderOnTie);
 	static bool UsesPostBleed(const FPA250ScenarioFight& Fight) { return !Fight.bRewardForcePreservation; }
+	/** Ticket exhaustion is ignored until ElapsedSeconds reaches MinSeconds (default 120). */
+	static bool TicketsMayExhaust(float ElapsedSeconds, float MinSecondsBeforeExhaustion)
+	{
+		return ElapsedSeconds >= MinSecondsBeforeExhaustion;
+	}
 	/** Creek and plank span centered on a ground point. The deck reaches both banks. */
 	static FPA250CreekBridge PlanCreekBridge(const FVector& GroundPoint);
 	/** Spawns the creek, the banks, and the deck. Returns how many pieces were placed. */
 	static int32 SpawnCreekBridge(UWorld* World, const FVector& GroundPoint);
 	const TArray<FString>& GetKillFeed() const { return KillFeed; }
+	/** Last killer label for the local player's death (spawn screen "Killed by"). */
+	FString GetLastKillerLabel() const { return LastKillerLabel; }
 	int32 GetBattleResultEmitCount() const { return BattleResultEmitCount; }
 	/** Deaths so far, both sides (FTEST_BotSpacing kill criterion). */
 	int32 GetTotalDeaths() const
@@ -162,9 +173,13 @@ private:
 	void PollPreviewFile(const FString& SavedPath, const FString& Dest, int32 Index, int32 Total, int32 Attempt);
 	void MaybeStartPreviewCapture();
 	void MaybeStartFpsSample();
+	/** -PA250MeleeProbe: stage the player against one enemy, run every melee move, save stills (PA250MeleeProbe.cpp). */
+	void MaybeStartMeleeProbe();
 	void GatherPosts();
 	/** Post ownership, which posts can be taken, and how the clock is won, from the BattleSetup. */
 	void ApplyScenarioPreset();
+	/** Fort bonus: simple PA250Cover walls near posts the defender starts holding. */
+	void SpawnFortCoverNearHeldPosts();
 	int32 InitialSoldiers(FName Faction) const;
 	void CapturePreviewShot(const FString& Tag, const FString& OutStem, int32 Index, int32 Total);
 
@@ -225,6 +240,7 @@ private:
 	TMap<TWeakObjectPtr<AController>, FName> ControllerClass;
 	TArray<TWeakObjectPtr<APA250ControlPoint>> Posts;
 	TArray<FString> KillFeed;
+	FString LastKillerLabel;
 	int32 BattleResultEmitCount = 0;
 	UPROPERTY(Transient)
 	TObjectPtr<UMusketTuning> Tuning;

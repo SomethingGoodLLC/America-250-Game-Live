@@ -156,6 +156,8 @@ struct BattleReport {
     std::string province_owner_after;
     int local_support_before = 0;
     int local_support_after = 0;
+    int gold_before = 0;
+    int gold_after = 0;
     std::string objective_holder;
     std::map<std::string, std::string> objectives_held;
     std::map<std::string, std::map<std::string, int>> losses;
@@ -163,6 +165,22 @@ struct BattleReport {
     std::map<std::string, int> cartridges_spent;
     std::map<std::string, int> powder_spent;
     std::map<std::string, int> morale_delta;  // army_id -> delta
+    std::string ownership_reason;            // held_objective | stores_forfeit | unchanged
+    std::vector<std::string> change_reasons; // player-facing attributed deltas
+    int defender_reward_support = 0;
+};
+
+// One attributed treasury/stores/support delta (soft-default empty on old saves).
+struct ResourceChange {
+    int64_t hour_index = 0;
+    std::string reason;  // e.g. "Fort, Lexington: -45 gold"
+    int gold = 0;
+    int powder = 0;
+    int cartridges = 0;
+    int muskets = 0;
+    int provisions = 0;
+    int local_support = 0;
+    std::string province_id;
 };
 
 // Structured staff letter. Flavor text is display-only and never parsed for state.
@@ -341,6 +359,7 @@ struct CampaignState {
     std::vector<Command> pending_commands;
     uint64_t next_command_seq = 1;
     std::vector<std::string> log;
+    std::vector<ResourceChange> resource_changes;  // attributed treasury/stores/support history
 };
 
 // Immutable catalog entry (opening-war correspondence registry). Never mutated by choices.
@@ -401,6 +420,7 @@ struct SideSetup {
     int morale = 0;                     // campaign confidence (feeds UE pressure bias)
     int readiness = 100;
     int cartridge_budget = 0;           // cartridges available to this side from the province
+    float reinforcement_scale = 1.f;    // farm/depot: shortens bot respawn (UE)
     std::string retreat_province;
 };
 struct BattleSetup {
@@ -417,6 +437,13 @@ struct BattleSetup {
     std::map<std::string, SideSetup> sides;  // keyed by faction
     int province_cartridges = 0;            // stock at fight start (authoritative cap)
     std::string force_notes = "sourced approximation — not a precise muster roll";
+    // Contested-province development (0 when absent / old saves).
+    int farm_level = 0;
+    int workshop_level = 0;
+    int depot_level = 0;
+    int fort_level = 0;
+    std::map<std::string, std::string> initial_post_holders;  // post_id -> faction
+    std::vector<std::string> modifier_notes;                 // sourced lines for pre-battle UI
 };
 struct BattleResult {
     std::string province_id;

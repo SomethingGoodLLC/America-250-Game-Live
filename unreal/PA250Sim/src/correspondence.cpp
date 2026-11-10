@@ -205,16 +205,28 @@ void deliver_due_shipments(CampaignState& s, std::vector<Interrupt>* interrupts)
                 sh.dest_province = dest;
             }
             ProvinceStores& st = province_ledger(s, dest);
-            st.powder += std::max(0, sh.powder);
-            st.cartridges += std::max(0, sh.cartridges);
-            st.muskets += std::max(0, sh.muskets) + std::max(0, sh.arms);
+            const int add_p = std::max(0, sh.powder);
+            const int add_c = std::max(0, sh.cartridges);
+            const int add_m = std::max(0, sh.muskets) + std::max(0, sh.arms);
+            const int add_v = std::max(0, sh.provisions);
+            st.powder += add_p;
+            st.cartridges += add_c;
+            st.muskets += add_m;
             st.bayonets += std::max(0, sh.bayonets);
-            st.provisions += std::max(0, sh.provisions);
+            st.provisions += add_v;
             st.lead += std::max(0, sh.lead);
             st.paper += std::max(0, sh.paper);
             sh.status = "delivered";
-            detail::add_log(s, "shipment delivered: " + sh.id + " to " + dest + " powder+" +
-                                   std::to_string(sh.powder) + " cart+" + std::to_string(sh.cartridges));
+            ResourceChange ch;
+            ch.reason = "Shipment delivered " + sh.id + " to " + dest + ": powder+" + std::to_string(add_p) +
+                        " cart+" + std::to_string(add_c) + " muskets+" + std::to_string(add_m) + " prov+" +
+                        std::to_string(add_v);
+            ch.powder = add_p;
+            ch.cartridges = add_c;
+            ch.muskets = add_m;
+            ch.provisions = add_v;
+            ch.province_id = dest;
+            detail::record_resource_change(s, ch);
             if (interrupts) {
                 (void)interrupts;
             }
@@ -362,7 +374,12 @@ CampaignState apply_source_decision(const CampaignState& in, const std::string& 
             letter->reason =
                 "Gold committed. Provisions deliver in 8 hours (gameplay tuning). "
                 "No automatic local-support or recruitment bonus.";
-            detail::add_log(s, "L3 purchase_provisions committed");
+            {
+                ResourceChange ch;
+                ch.reason = "L3 purchase provisions: -" + std::to_string(cost) + " gold (delivery in 8h)";
+                ch.gold = -cost;
+                detail::record_resource_change(s, ch);
+            }
         } else if (choice == "shared_lodging") {
             ++s.staff.letters_processed_today;
             letter->status = "delivered";
@@ -396,7 +413,15 @@ CampaignState apply_source_decision(const CampaignState& in, const std::string& 
             pc.release_on_hour = s.now.hour_index + 48;
             s.progress.personnel_commitments.push_back(pc);
             ProvinceStores& st = province_ledger(s, default_depot_province(s, s.player_faction));
+            const int prov_before = st.provisions;
             st.provisions = std::max(0, st.provisions - 4);
+            {
+                ResourceChange ch;
+                ch.reason = "L5 guarded removal: provisions " + std::to_string(st.provisions - prov_before);
+                ch.provisions = st.provisions - prov_before;
+                ch.province_id = default_depot_province(s, s.player_faction);
+                detail::record_resource_change(s, ch);
+            }
             letter->status = "delivered";
             letter->reason =
                 "Guarded removal underway: 2 militia committed 48h; −4 provisions if boats delayed "
@@ -415,9 +440,23 @@ CampaignState apply_source_decision(const CampaignState& in, const std::string& 
             letter->committed_provisions = 4;
             letter->resolve_on_hour = s.now.hour_index + 8;
             letter->reason = "Negotiation paid; provisions arrive in 8 hours if consent holds (gameplay tuning).";
+            {
+                ResourceChange ch;
+                ch.reason = "L5 negotiate local: -" + std::to_string(cost) + " gold (provisions in 8h)";
+                ch.gold = -cost;
+                detail::record_resource_change(s, ch);
+            }
         } else if (choice == "evacuate_preserve_boats") {
             ProvinceStores& st = province_ledger(s, default_depot_province(s, s.player_faction));
+            const int prov_before = st.provisions;
             st.provisions = std::max(0, st.provisions - 6);
+            {
+                ResourceChange ch;
+                ch.reason = "L5 evacuate: provisions " + std::to_string(st.provisions - prov_before);
+                ch.provisions = st.provisions - prov_before;
+                ch.province_id = default_depot_province(s, s.player_faction);
+                detail::record_resource_change(s, ch);
+            }
             letter->status = "delivered";
             letter->reason =
                 "Evacuation covered; boats preserved; forage exposed (−6 provisions, gameplay tuning).";
@@ -478,7 +517,12 @@ CampaignState apply_source_decision(const CampaignState& in, const std::string& 
             letter->reason =
                 "Merchant procurement paid separately from the donor reserve. "
                 "6 powder arrives in 16 hours if the wagon holds (gameplay tuning).";
-            detail::add_log(s, "L7 fund_procurement committed");
+            {
+                ResourceChange ch;
+                ch.reason = "L7 fund procurement: -" + std::to_string(cost) + " gold (powder in 16h)";
+                ch.gold = -cost;
+                detail::record_resource_change(s, ch);
+            }
         } else if (choice == "conserve_ammunition") {
             s.progress.offensive_postponed = true;
             letter->status = "delivered";

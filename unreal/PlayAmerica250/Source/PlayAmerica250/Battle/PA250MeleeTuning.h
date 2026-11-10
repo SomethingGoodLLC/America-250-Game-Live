@@ -28,6 +28,34 @@ struct PLAYAMERICA250_API FPA250MeleeTuningValues
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Thrust")
 	float BackstabOrReloadMultiplier = 2.f;
 
+	/** The strike carries the soldier this far toward his man (less if he is already close). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Thrust")
+	float ThrustStepCm = 110.f;
+
+	/** Thrust assist: the lunge turns onto an enemy within this range... */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Thrust")
+	float ThrustAssistRangeCm = 380.f;
+
+	/** ...and within this angle of where you face (and in sight). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Thrust")
+	float ThrustAssistConeDegrees = 50.f;
+
+	/** The step stops with this much ground between the two men, so the point lands in him, not past him. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Thrust")
+	float ThrustStandoffCm = 185.f;
+
+	/** A man who survives a thrust is rocked back and cannot walk this long. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Thrust")
+	float ThrustHitStaggerSeconds = 0.35f;
+
+	/** Hit reaction (flinch) length for any melee blow that does not kill. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Feel")
+	float FlinchSeconds = 0.6f;
+
+	/** Both men freeze this long (real time) when a blow lands in a fight the player is part of. 0 = off. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Feel")
+	float HitStopSeconds = 0.07f;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "ButtStroke")
 	float ButtStrokeDamage = 35.f;
 

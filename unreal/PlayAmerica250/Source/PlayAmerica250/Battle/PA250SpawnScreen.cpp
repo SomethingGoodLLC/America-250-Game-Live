@@ -134,6 +134,13 @@ TSharedRef<SWidget> UPA250SpawnScreen::RebuildWidget()
 				const int32 Tickets = GM ? GM->TicketsRemaining(GM->GetPlayerFaction()) : 0;
 				return FText::FromString(FString::Printf(TEXT("RESPAWN    tickets %d"), Tickets));
 			})]
+			+ SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 8)
+			[SNew(STextBlock).Font(Small).ColorAndOpacity(FLinearColor(1.f, 0.55f, 0.35f)).Text_Lambda([WeakThis]() {
+				const APA250BattleGameMode* GM = WeakThis.IsValid() ? WeakThis->GameMode.Get() : nullptr;
+				const FString Killer = GM ? GM->GetLastKillerLabel() : FString();
+				return FText::FromString(Killer.IsEmpty() ? TEXT("Killed in action")
+														 : FString::Printf(TEXT("Killed by %s"), *Killer));
+			})]
 			+ SVerticalBox::Slot().AutoHeight().Padding(0, 4)
 			[SNew(STextBlock).Font(Small).ColorAndOpacity(FLinearColor(0.9f, 0.9f, 0.7f)).Text(FText::FromString(TEXT("Class")))]
 			+ SVerticalBox::Slot().AutoHeight()

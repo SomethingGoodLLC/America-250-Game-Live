@@ -315,6 +315,30 @@ CartridgeJob cartridge_job_from_json(const json& j) {
     job.status = j.value("status", "");
     return job;
 }
+json resource_change_to_json(const ResourceChange& c) {
+    return {{"hour_index", c.hour_index},
+            {"reason", c.reason},
+            {"gold", c.gold},
+            {"powder", c.powder},
+            {"cartridges", c.cartridges},
+            {"muskets", c.muskets},
+            {"provisions", c.provisions},
+            {"local_support", c.local_support},
+            {"province_id", c.province_id}};
+}
+ResourceChange resource_change_from_json(const json& j) {
+    ResourceChange c;
+    c.hour_index = j.value("hour_index", int64_t{0});
+    c.reason = j.value("reason", "");
+    c.gold = j.value("gold", 0);
+    c.powder = j.value("powder", 0);
+    c.cartridges = j.value("cartridges", 0);
+    c.muskets = j.value("muskets", 0);
+    c.provisions = j.value("provisions", 0);
+    c.local_support = j.value("local_support", 0);
+    c.province_id = j.value("province_id", "");
+    return c;
+}
 json battle_report_to_json(const BattleReport& r) {
     return {{"province_id", r.province_id},
             {"winner", r.winner},
@@ -322,13 +346,18 @@ json battle_report_to_json(const BattleReport& r) {
             {"province_owner_after", r.province_owner_after},
             {"local_support_before", r.local_support_before},
             {"local_support_after", r.local_support_after},
+            {"gold_before", r.gold_before},
+            {"gold_after", r.gold_after},
             {"objective_holder", r.objective_holder},
             {"objectives_held", r.objectives_held},
             {"losses", r.losses},
             {"wounded", r.wounded},
             {"cartridges_spent", r.cartridges_spent},
             {"powder_spent", r.powder_spent},
-            {"morale_delta", r.morale_delta}};
+            {"morale_delta", r.morale_delta},
+            {"ownership_reason", r.ownership_reason},
+            {"change_reasons", r.change_reasons},
+            {"defender_reward_support", r.defender_reward_support}};
 }
 BattleReport battle_report_from_json(const json& j) {
     BattleReport r;
@@ -338,6 +367,8 @@ BattleReport battle_report_from_json(const json& j) {
     r.province_owner_after = j.value("province_owner_after", "");
     r.local_support_before = j.value("local_support_before", 0);
     r.local_support_after = j.value("local_support_after", 0);
+    r.gold_before = j.value("gold_before", 0);
+    r.gold_after = j.value("gold_after", 0);
     r.objective_holder = j.value("objective_holder", "");
     r.objectives_held = j.value("objectives_held", std::map<std::string, std::string>{});
     r.losses = j.value("losses", std::map<std::string, std::map<std::string, int>>{});
@@ -345,6 +376,9 @@ BattleReport battle_report_from_json(const json& j) {
     r.cartridges_spent = j.value("cartridges_spent", std::map<std::string, int>{});
     r.powder_spent = j.value("powder_spent", std::map<std::string, int>{});
     r.morale_delta = j.value("morale_delta", std::map<std::string, int>{});
+    r.ownership_reason = j.value("ownership_reason", "");
+    r.change_reasons = j.value("change_reasons", std::vector<std::string>{});
+    r.defender_reward_support = j.value("defender_reward_support", 0);
     return r;
 }
 json staff_to_json(const StaffState& st) {
@@ -630,6 +664,8 @@ CampaignState state_from_json(const json& j, bool is_save) {
         s.next_command_seq = j.value("next_command_seq", 1);
         if (j.contains("pending_commands"))
             for (const auto& c : j.at("pending_commands")) s.pending_commands.push_back(command_from_json(c));
+        if (j.contains("resource_changes"))
+            for (const auto& c : j.at("resource_changes")) s.resource_changes.push_back(resource_change_from_json(c));
     }
     for (const auto& kv : s.armies)
         if (!s.provinces.count(kv.second.province)) throw std::runtime_error("army in unknown province: " + kv.first);
@@ -712,6 +748,8 @@ std::string serialize(const CampaignState& s) {
     for (const auto& c : s.pending_commands) j["pending_commands"].push_back(command_to_json(c));
     j["next_command_seq"] = s.next_command_seq;
     j["log"] = s.log;
+    j["resource_changes"] = json::array();
+    for (const auto& c : s.resource_changes) j["resource_changes"].push_back(resource_change_to_json(c));
     return j.dump();
 }
 
@@ -970,6 +1008,12 @@ std::string setup_to_json(const BattleSetup& b) {
     j["terrain_tags"] = b.terrain_tags;
     j["province_cartridges"] = b.province_cartridges;
     j["force_notes"] = b.force_notes;
+    j["farm_level"] = b.farm_level;
+    j["workshop_level"] = b.workshop_level;
+    j["depot_level"] = b.depot_level;
+    j["fort_level"] = b.fort_level;
+    j["initial_post_holders"] = b.initial_post_holders;
+    j["modifier_notes"] = b.modifier_notes;
     j["sides"] = json::object();
     for (const auto& kv : b.sides)
         j["sides"][kv.first] = {{"faction", kv.second.faction},
@@ -978,6 +1022,7 @@ std::string setup_to_json(const BattleSetup& b) {
                                 {"morale", kv.second.morale},
                                 {"readiness", kv.second.readiness},
                                 {"cartridge_budget", kv.second.cartridge_budget},
+                                {"reinforcement_scale", kv.second.reinforcement_scale},
                                 {"retreat_province", kv.second.retreat_province}};
     return j.dump();
 }
@@ -998,6 +1043,12 @@ BattleSetup setup_from_json(const std::string& text) {
         b.terrain_tags = j.value("terrain_tags", std::vector<std::string>{});
         b.province_cartridges = j.value("province_cartridges", 0);
         b.force_notes = j.value("force_notes", std::string("sourced approximation — not a precise muster roll"));
+        b.farm_level = j.value("farm_level", 0);
+        b.workshop_level = j.value("workshop_level", 0);
+        b.depot_level = j.value("depot_level", 0);
+        b.fort_level = j.value("fort_level", 0);
+        b.initial_post_holders = j.value("initial_post_holders", std::map<std::string, std::string>{});
+        b.modifier_notes = j.value("modifier_notes", std::vector<std::string>{});
         for (auto it = j.at("sides").begin(); it != j.at("sides").end(); ++it) {
             SideSetup s;
             s.faction = it.value().at("faction").get<std::string>();
@@ -1006,6 +1057,7 @@ BattleSetup setup_from_json(const std::string& text) {
             s.morale = it.value().at("morale").get<int>();
             s.readiness = it.value().value("readiness", 100);
             s.cartridge_budget = it.value().value("cartridge_budget", b.province_cartridges);
+            s.reinforcement_scale = it.value().value("reinforcement_scale", 1.f);
             s.retreat_province = it.value().at("retreat_province").get<std::string>();
             b.sides[it.key()] = s;
         }

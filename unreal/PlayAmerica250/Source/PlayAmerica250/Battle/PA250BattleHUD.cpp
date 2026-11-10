@@ -31,6 +31,32 @@ void UPA250BattleHUD::ShowHitmarker(bool bKill, float Damage, float DistanceM)
 	HitTextTimer = bKill ? 1.6f : 0.9f;
 }
 
+void UPA250BattleHUD::ShowDamageDirection(const FVector& WorldHitLocation)
+{
+	APlayerController* PC = GetOwningPlayer();
+	if (!PC) return;
+	FVector2D Screen;
+	if (!UGameplayStatics::ProjectWorldToScreen(PC, WorldHitLocation, Screen, true))
+	{
+		// Behind the camera: place the wedge on the opposite screen edge from the projected ray.
+		FVector CamLoc;
+		FRotator CamRot;
+		PC->GetPlayerViewPoint(CamLoc, CamRot);
+		const FVector ToHit = (WorldHitLocation - CamLoc).GetSafeNormal();
+		const FVector Right = FRotationMatrix(CamRot).GetScaledAxis(EAxis::Y);
+		const FVector2D View = UWidgetLayoutLibrary::GetViewportSize(this);
+		const float Scale = FMath::Max(0.1f, UWidgetLayoutLibrary::GetViewportScale(this));
+		DamageDirScreen = FVector2D(View.X * 0.5f / Scale, View.Y * 0.5f / Scale);
+		DamageDirScreen.X += FVector::DotProduct(ToHit, Right) >= 0.f ? View.X * 0.45f / Scale : -View.X * 0.45f / Scale;
+	}
+	else
+	{
+		const float Scale = FMath::Max(0.1f, UWidgetLayoutLibrary::GetViewportScale(this));
+		DamageDirScreen = Screen / Scale;
+	}
+	DamageDirTimer = DamageDirSeconds;
+}
+
 bool UPA250BattleHUD::IsReticleHostile() const
 {
 	const APlayerController* PC = GetOwningPlayer();
@@ -190,6 +216,22 @@ int32 UPA250BattleHUD::NativePaint(const FPaintArgs& Args, const FGeometry& G, c
 		const FString Sub = bInside ? FString(TEXT("IN ZONE")) : FString::Printf(TEXT("%.0f m"), Meters);
 		DrawCenteredText(Out, Layer + 3, G, Sub, S + FVector2D(0, 0.5f * Box + (bWorking ? 18.f : 11.f)), Small, FLinearColor(1, 1, 1, 0.8f * A));
 	}
+	if (DamageDirTimer > 0.f)
+	{
+		const float A = FMath::Clamp(DamageDirTimer / DamageDirSeconds, 0.f, 1.f);
+		const FVector2D Center = View * 0.5f;
+		FVector2D Dir = DamageDirScreen - Center;
+		if (Dir.IsNearlyZero()) Dir = FVector2D(1.f, 0.f);
+		Dir.Normalize();
+		const FVector2D Edge = Center + Dir * FMath::Min(View.X, View.Y) * 0.42f;
+		const FVector2D Perp(-Dir.Y, Dir.X);
+		const FVector2D Tip = Edge;
+		const FVector2D Left = Edge - Dir * 18.f + Perp * 12.f;
+		const FVector2D Right = Edge - Dir * 18.f - Perp * 12.f;
+		TArray<FVector2D> Tri = {Tip, Left, Right};
+		FSlateDrawElement::MakeLines(Out, Layer + 2, G.ToPaintGeometry(), Tri, ESlateDrawEffect::None, FLinearColor(1.f, 0.2f, 0.1f, A), true, 3.f);
+		DrawRect(Out, Layer + 2, G, Edge - FVector2D(6.f, 6.f), FVector2D(12.f, 12.f), FLinearColor(1.f, 0.25f, 0.1f, A));
+	}
 	return Layer + 4;
 }
 
@@ -198,6 +240,7 @@ void UPA250BattleHUD::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 	Super::NativeTick(MyGeometry, InDeltaTime);
 	HitmarkerTimer = FMath::Max(0.f, HitmarkerTimer - InDeltaTime);
 	HitTextTimer = FMath::Max(0.f, HitTextTimer - InDeltaTime);
+	DamageDirTimer = FMath::Max(0.f, DamageDirTimer - InDeltaTime);
 }
 
 TSharedRef<SWidget> UPA250BattleHUD::RebuildWidget()
@@ -457,7 +500,7 @@ TSharedRef<SWidget> UPA250BattleHUD::RebuildWidget()
 		// Controls legend.
 		+ SOverlay::Slot().VAlign(VAlign_Bottom).HAlign(HAlign_Left).Padding(20, 0, 0, 20)
 		[SNew(STextBlock).Font(FCoreStyle::GetDefaultFontStyle("Regular", 11)).ColorAndOpacity(FLinearColor(1.f, 1.f, 1.f, 0.6f)).ShadowOffset(FVector2D(1, 1))
-			.Text(FText::FromString(TEXT("LMB  fire (you stop to shoot)\nRMB  aim down sights     V  swap shoulder\nR  reload - tap in the gold zone, hold to clear a jam\nE  bayonet thrust     Q  butt-stroke (works mid-reload)\nG (or Shift + E)  bayonet charge - 6 m dash toward the enemy in front, first man hit takes 100\n[ / ]  look sensitivity slower / faster")))]
+			.Text(FText::FromString(TEXT("LMB  fire (you stop to shoot)\nRMB  aim down sights     V  swap shoulder\nR  reload - tap in the gold zone, hold to clear a jam\nE  bayonet lunge - steps onto the man in front     Q  butt-stroke (works mid-reload)\nG (or Shift + E)  bayonet charge - 6 m dash toward the enemy in front, first man hit takes 100\n[ / ]  look sensitivity slower / faster")))]
 		+ SOverlay::Slot().VAlign(VAlign_Center).HAlign(HAlign_Center)
 		[SNew(STextBlock).Font(Big).ColorAndOpacity(FLinearColor(1.f, 0.9f, 0.3f)).ShadowOffset(FVector2D(2, 2)).Text_Lambda(Banner)];
 }

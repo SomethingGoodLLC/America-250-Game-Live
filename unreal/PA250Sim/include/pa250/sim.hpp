@@ -45,6 +45,9 @@ void migrate_campaign_state(CampaignState& s);
 // Gameplay-tuning file (not historical fact). Optional; defaults apply if unloaded.
 void load_logistics_tuning(const std::string& json_text);
 bool logistics_tuning_loaded();
+int workshop_cartridges_per_level();
+int farm_readiness_per_level();
+int depot_readiness_per_level();
 
 // Province ledger helpers.
 ProvinceStores& province_ledger(CampaignState& s, const std::string& province_id);
@@ -68,6 +71,10 @@ int development_cost(const std::string& track, int current_level);  // gold, -1 
 int development_max_level();
 CampaignState develop_province(const CampaignState& state, const std::string& province_id,
                                const std::string& track, std::string& error);
+// Player-facing preview strings (costs/effects) for HUD tooltips — never mutate state.
+std::string development_preview(const CampaignState& state, const std::string& province_id,
+                                const std::string& track);
+std::string aftermath_choice_preview(const CampaignState& state, const std::string& choice);
 
 // Start a cartridge job: reserves powder/lead/paper and commits workers until complete_on_hour.
 CampaignState start_cartridge_job(const CampaignState& state, const std::string& province_id,

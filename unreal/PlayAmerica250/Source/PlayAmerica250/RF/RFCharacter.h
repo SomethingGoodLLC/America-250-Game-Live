@@ -173,6 +173,11 @@ public:
 	void ApplySuppression(float Seconds, float SwayDegrees);
 	void NotifyFired();
 	void ApplyCameraKick(float PitchDeg, float YawDeg);
+	/** Momentary FOV change (deg, - = punch in); the camera blend eases it back. */
+	void PunchFOV(float Degrees) { CurrentFOV = FMath::Clamp(CurrentFOV + Degrees, 30.f, 110.f); }
+	/** Extra FOV while a bayonet charge is running. */
+	UPROPERTY(EditAnywhere, Category = "Camera")
+	float ChargeFOVBoost = 7.f;
 
 	UPROPERTY(EditAnywhere, Category = "Camera")
 	float DefaultFOV = 80.f;

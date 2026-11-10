@@ -112,6 +112,8 @@ public:
 	/** Barrel pitch limit (deg), up or down. Kept near the view limit so a high aim still raises the musket. */
 	static constexpr float MaxBarrelPitch = 85.f;
 	USceneComponent* GetMuzzleLocation() const { return MuzzleLocation; }
+	/** Visual only: extra barrel pitch (deg, + = muzzle up) on top of the aim, set by the melee component (butt-stroke). */
+	float MeleePitchOffset = 0.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weapon")
 	TObjectPtr<UMusketTuning> Tuning;

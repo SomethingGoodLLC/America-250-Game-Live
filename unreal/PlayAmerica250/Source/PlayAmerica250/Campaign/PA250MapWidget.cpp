@@ -137,6 +137,7 @@ FText UPA250MapWidget::StoresText() const
 	{
 		return FText::GetEmpty();
 	}
+	(void)S->GetHudEpoch();
 	const pa250::CampaignState& St = S->GetState();
 	// Compact faction totals for the top bar (detail lives in the province window / ledger).
 	int32 Powder = 0, Cart = 0, Muskets = 0, Prov = 0, InTransit = 0;
@@ -332,6 +333,7 @@ FText UPA250MapWidget::BattleReportText() const
 	{
 		return FText::GetEmpty();
 	}
+	(void)S->GetHudEpoch();
 	const pa250::BattleReport& Br = S->GetState().progress.last_battle_report;
 	if (Br.province_id.empty())
 	{
@@ -350,16 +352,27 @@ FText UPA250MapWidget::BattleReportText() const
 	};
 	int32 Morale = 0;
 	for (const auto& Kv : Br.morale_delta) Morale += Kv.second;
+	FString Reasons;
+	for (const std::string& Line : Br.change_reasons)
+	{
+		Reasons += TEXT("\n  · ") + ToFStr(Line);
+	}
 	return FText::FromString(FString::Printf(
-		TEXT("After-battle report — %s\nGround: %s → %s (support %d → %d, unchanged by capture)\n"
+		TEXT("After-battle report — %s won\nGround: %s → %s (%s)\n"
+			 "Support %d → %d · Gold %d → %d%s\n"
 			 "Losses: yours %d killed / %d wounded · British %d / %d\n"
-			 "Ammunition: cartridges spent yours %d · British %d · powder %d\nMorale: net %+d · Held by %s"),
-		*ToFStr(Br.province_id), *ToFStr(Br.province_owner_before), *ToFStr(Br.province_owner_after),
-		Br.local_support_before, Br.local_support_after, Count(Br.losses, "continental"),
-		Count(Br.wounded, "continental"), Count(Br.losses, "british"), Count(Br.wounded, "british"),
-		Spent(Br.cartridges_spent, "continental"), Spent(Br.cartridges_spent, "british"),
+			 "Ammunition: cartridges yours %d · British %d · powder %d\nMorale: net %+d · Posts held by %s%s"),
+		*ToFStr(Br.winner), *ToFStr(Br.province_owner_before), *ToFStr(Br.province_owner_after),
+		Br.ownership_reason.empty() ? TEXT("unchanged") : *ToFStr(Br.ownership_reason),
+		Br.local_support_before, Br.local_support_after, Br.gold_before, Br.gold_after,
+		Br.defender_reward_support > 0
+			? *FString::Printf(TEXT(" · defender reward +%d Support"), Br.defender_reward_support)
+			: TEXT(""),
+		Count(Br.losses, "continental"), Count(Br.wounded, "continental"), Count(Br.losses, "british"),
+		Count(Br.wounded, "british"), Spent(Br.cartridges_spent, "continental"),
+		Spent(Br.cartridges_spent, "british"),
 		Spent(Br.powder_spent, "continental") + Spent(Br.powder_spent, "british"), Morale,
-		Br.objective_holder.empty() ? TEXT("—") : *ToFStr(Br.objective_holder)));
+		Br.objective_holder.empty() ? TEXT("—") : *ToFStr(Br.objective_holder), *Reasons));
 }
 
 FText UPA250MapWidget::LedgerText() const
@@ -369,8 +382,18 @@ FText UPA250MapWidget::LedgerText() const
 	{
 		return FText::GetEmpty();
 	}
+	(void)S->GetHudEpoch();
 	const pa250::CampaignState& St = S->GetState();
-	FString Lines = TEXT("Ledger — province · dev · cart/musk/prov\n");
+	FString Lines = FString::Printf(TEXT("Treasury 🪙 %d · Support %d\n"), St.player_gold, St.local_support);
+	Lines += TEXT("Recent changes:\n");
+	const int32 Start = FMath::Max(0, static_cast<int32>(St.resource_changes.size()) - 12);
+	for (int32 i = Start; i < static_cast<int32>(St.resource_changes.size()); ++i)
+	{
+		Lines += TEXT("  ") + ToFStr(St.resource_changes[static_cast<size_t>(i)].reason) + TEXT("\n");
+	}
+	if (St.resource_changes.empty()) Lines += TEXT("  (none yet)\n");
+	Lines += PendingText().ToString();
+	Lines += TEXT("\nProvinces · dev · cart/musk/prov\n");
 	for (const auto& Kv : St.provinces)
 	{
 		if (Kv.second.owner != St.player_faction) continue;
@@ -378,7 +401,6 @@ FText UPA250MapWidget::LedgerText() const
 		Lines += FString::Printf(TEXT("%s · %d · %d/%d/%d\n"), *ToFStr(Kv.second.name),
 								 pa250::province_development(Kv.second), Ps.cartridges, Ps.muskets, Ps.provisions);
 	}
-	Lines += TEXT("■ yours  ■ British  ● your army  ● British army");
 	bool bAny = false;
 	for (const auto& Sh : St.shipments)
 	{
@@ -399,6 +421,59 @@ FText UPA250MapWidget::LedgerText() const
 	return FText::FromString(Lines);
 }
 
+FText UPA250MapWidget::PendingText() const
+{
+	UPA250Subsystem* S = Sub();
+	if (!S || !S->GetController().has_campaign())
+	{
+		return FText::GetEmpty();
+	}
+	const pa250::CampaignState& St = S->GetState();
+	FString Lines = TEXT("Pending:\n");
+	bool bAny = false;
+	for (const auto& Letter : St.staff.queue)
+	{
+		if (Letter.resolve_on_hour <= 0) continue;
+		if (Letter.status == "delivered" || Letter.status == "refused" || Letter.status == "dismissed") continue;
+		if (Letter.awaiting_choice || Letter.status == "needs_approval") continue;
+		if (Letter.resolve_on_hour <= St.now.hour_index) continue;
+		const int64 HoursLeft = Letter.resolve_on_hour - St.now.hour_index;
+		Lines += FString::Printf(TEXT("  %s (%s) — %lldh · %s\n"), *ToFStr(Letter.subject), *ToFStr(Letter.kind),
+								 static_cast<long long>(HoursLeft), *ToFStr(Letter.reason));
+		bAny = true;
+	}
+	for (const auto& Sh : St.shipments)
+	{
+		if (Sh.status != "in_transit" && Sh.status != "committed") continue;
+		if (Sh.deliver_on_hour <= St.now.hour_index) continue;
+		Lines += FString::Printf(TEXT("  Shipment %s → %s — %lldh\n"), *ToFStr(Sh.id), *ToFStr(Sh.dest_province),
+								 static_cast<long long>(Sh.deliver_on_hour - St.now.hour_index));
+		bAny = true;
+	}
+	if (!bAny) Lines += TEXT("  (none)\n");
+	return FText::FromString(Lines);
+}
+
+FText UPA250MapWidget::DevelopTip(const FString& Track) const
+{
+	UPA250Subsystem* S = Sub();
+	if (!S || SelectedProvinceId.IsEmpty() || !S->GetController().has_campaign())
+	{
+		return FText::FromString(TEXT("Select a province you hold."));
+	}
+	return FText::FromString(ToFStr(pa250::development_preview(S->GetState(), ToStd(SelectedProvinceId), ToStd(Track))));
+}
+
+FText UPA250MapWidget::AftermathTip(const FString& Choice) const
+{
+	UPA250Subsystem* S = Sub();
+	if (!S || !S->GetController().has_campaign())
+	{
+		return FText::GetEmpty();
+	}
+	return FText::FromString(ToFStr(pa250::aftermath_choice_preview(S->GetState(), ToStd(Choice))));
+}
+
 FText UPA250MapWidget::SupportText() const
 {
 	UPA250Subsystem* S = Sub();
@@ -406,6 +481,7 @@ FText UPA250MapWidget::SupportText() const
 	{
 		return FText::GetEmpty();
 	}
+	(void)S->GetHudEpoch();
 	const pa250::CampaignState& St = S->GetState();
 	auto Get = [](const std::map<std::string, int>& M, const char* K) {
 		auto It = M.find(K);
@@ -608,24 +684,42 @@ FText UPA250MapWidget::BattleText() const
 	if (S && S->IsBattlePending())
 	{
 		const auto& St = S->GetState();
+		// begin_battle fills the controller cache only when the player clicks To arms.
+		// The broadside is on screen while the battle is still pending, so build the
+		// read-only setup here or tickets and modifier notes stay empty.
+		const pa250::BattleSetup Setup =
+			pa250::build_battle_setup(St, St.pending_battle.province);
 		auto It = St.provinces.find(St.pending_battle.province);
-		const FString Preset = ToFStr(pa250::scenario_preset_for_province(St.pending_battle.province));
-		FString Rule = Preset;
-		if (Preset == TEXT("concord_bridge"))
+		const FString Name =
+			It == St.provinces.end() ? TEXT("?") : UTF8_TO_TCHAR(It->second.name.c_str());
+		FString Lines = FString::Printf(TEXT("Battle of %s\n"), *Name);
+		auto SideBlock = [&](const char* Faction, const TCHAR* Label) {
+			auto Sit = Setup.sides.find(Faction);
+			if (Sit == Setup.sides.end()) return;
+			int32 Total = 0;
+			FString Classes;
+			for (const auto& Kv : Sit->second.tickets)
+			{
+				if (Kv.second <= 0) continue;
+				Total += Kv.second;
+				Classes += FString::Printf(TEXT("%s %d · "), *ToFStr(Kv.first), Kv.second);
+			}
+			Lines += FString::Printf(TEXT("%s: %d tickets (%scart %d, morale %d, ready %d)\n"), Label, Total,
+									 *Classes, Sit->second.cartridge_budget, Sit->second.morale,
+									 Sit->second.readiness);
+		};
+		SideBlock(pa250::kContinental, TEXT("Continental"));
+		SideBlock(pa250::kBritish, TEXT("British"));
+		if (!Setup.modifier_notes.empty())
 		{
-			Rule = TEXT("Concord — three posts: Muster Ground · North Bridge · Far Bridgehead");
+			Lines += TEXT("Modifiers:\n");
+			for (const std::string& Note : Setup.modifier_notes) Lines += TEXT("  · ") + ToFStr(Note) + TEXT("\n");
 		}
-		else if (Preset == TEXT("battle_road"))
+		else
 		{
-			Rule = TEXT("Battle Road — preserve the force");
+			Lines += TEXT("No building/event modifiers.\n");
 		}
-		else if (Preset == TEXT("lexington_common"))
-		{
-			Rule = TEXT("Lexington Green");
-		}
-		return FText::FromString(FString::Printf(TEXT("Battle of %s\n%s"),
-		                                         It == St.provinces.end() ? TEXT("?") : UTF8_TO_TCHAR(It->second.name.c_str()),
-		                                         *Rule));
+		return FText::FromString(Lines);
 	}
 	return FText::GetEmpty();
 }
@@ -642,6 +736,23 @@ FText UPA250MapWidget::StaffPanelText() const
 	const FString Clerk = ToFStr(S->GetState().staff.clerk_name);
 	return FText::FromString(FString::Printf(
 		TEXT("%s — correspondence\n\n%s\n\n%s"), *Clerk, *Subject, *Body));
+}
+
+void UPA250MapWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
+{
+	Super::NativeTick(MyGeometry, InDeltaTime);
+	UPA250Subsystem* S = Sub();
+	if (!S)
+	{
+		return;
+	}
+	const int32 Epoch = S->GetHudEpoch();
+	if (Epoch == PaintedHudEpoch)
+	{
+		return;
+	}
+	PaintedHudEpoch = Epoch;
+	InvalidateLayoutAndVolatility();
 }
 
 void UPA250MapWidget::NotifyMapSelectionChanged()
@@ -664,6 +775,7 @@ void UPA250MapWidget::SetStatusMessage(const FString& Msg)
 {
 	LastMessage = Msg;
 	Message = Msg;
+	InvalidateLayoutAndVolatility();
 }
 
 FString UPA250MapWidget::ClickProvince(const FString& ProvinceId)
@@ -860,10 +972,12 @@ TSharedRef<SWidget> UPA250MapWidget::RebuildWidget()
 	const FSlateFontInfo BroadsideFont = FCoreStyle::GetDefaultFontStyle("Bold", 26);
 
 	auto MakeButton = [this, &BodyFont](const TCHAR* Label, TFunction<void()> Fn,
-	                                    TAttribute<EVisibility> Vis = EVisibility::Visible) {
+	                                    TAttribute<EVisibility> Vis = EVisibility::Visible,
+	                                    TAttribute<FText> Tip = TAttribute<FText>()) {
 		return SNew(SButton)
 			.Visibility(Vis)
 			.IsFocusable(false)
+			.ToolTipText(Tip)
 			.OnClicked_Lambda([Fn]() {
 				Fn();
 				return FReply::Handled();
@@ -1139,15 +1253,27 @@ TSharedRef<SWidget> UPA250MapWidget::RebuildWidget()
 								 SVerticalBox::Slot().AutoHeight().Padding(0, 6, 0, 0)
 									 [SNew(SHorizontalBox) +
 									  SHorizontalBox::Slot().FillWidth(0.5f).Padding(0, 0, 6, 0)
-										  [MakeButton(TEXT("🌾 Farm"), [this]() { PressDevelop(TEXT("farm")); })] +
+										  [MakeButton(TEXT("🌾 Farm"), [this]() { PressDevelop(TEXT("farm")); },
+													  EVisibility::Visible,
+													  TAttribute<FText>::CreateLambda(
+														  [this]() { return DevelopTip(TEXT("farm")); }))] +
 									  SHorizontalBox::Slot().FillWidth(0.5f)
-										  [MakeButton(TEXT("⚒ Workshop"), [this]() { PressDevelop(TEXT("workshop")); })]] +
+										  [MakeButton(TEXT("⚒ Workshop"), [this]() { PressDevelop(TEXT("workshop")); },
+													  EVisibility::Visible,
+													  TAttribute<FText>::CreateLambda(
+														  [this]() { return DevelopTip(TEXT("workshop")); }))]] +
 								 SVerticalBox::Slot().AutoHeight().Padding(0, 6, 0, 0)
 									 [SNew(SHorizontalBox) +
 									  SHorizontalBox::Slot().FillWidth(0.5f).Padding(0, 0, 6, 0)
-										  [MakeButton(TEXT("⛟ Depot"), [this]() { PressDevelop(TEXT("depot")); })] +
+										  [MakeButton(TEXT("⛟ Depot"), [this]() { PressDevelop(TEXT("depot")); },
+													  EVisibility::Visible,
+													  TAttribute<FText>::CreateLambda(
+														  [this]() { return DevelopTip(TEXT("depot")); }))] +
 									  SHorizontalBox::Slot().FillWidth(0.5f)
-										  [MakeButton(TEXT("🏰 Fort"), [this]() { PressDevelop(TEXT("fort")); })]] +
+										  [MakeButton(TEXT("🏰 Fort"), [this]() { PressDevelop(TEXT("fort")); },
+													  EVisibility::Visible,
+													  TAttribute<FText>::CreateLambda(
+														  [this]() { return DevelopTip(TEXT("fort")); }))]] +
 								 SVerticalBox::Slot().AutoHeight().Padding(0, 10, 0, 0)
 									 [SNew(SHorizontalBox) +
 									  SHorizontalBox::Slot().FillWidth(0.5f).Padding(0, 0, 6, 0)
@@ -1199,18 +1325,35 @@ TSharedRef<SWidget> UPA250MapWidget::RebuildWidget()
 								 SVerticalBox::Slot().AutoHeight().Padding(0, 10, 0, 0)
 									 [SNew(SHorizontalBox).Visibility(AftermathChoicesVis) +
 									  SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 6, 0)
-										  [MakeButton(TEXT("Purchase"), [this]() { PressLogistics(TEXT("purchase")); })] +
+										  [MakeButton(TEXT("Purchase"), [this]() { PressLogistics(TEXT("purchase")); },
+													  EVisibility::Visible,
+													  TAttribute<FText>::CreateLambda(
+														  [this]() { return AftermathTip(TEXT("purchase")); }))] +
 									  SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 6, 0)
 										  [MakeButton(TEXT("Request aid"),
-													  [this]() { PressLogistics(TEXT("request_assistance")); })] +
+													  [this]() { PressLogistics(TEXT("request_assistance")); },
+													  EVisibility::Visible,
+													  TAttribute<FText>::CreateLambda([this]() {
+														  return AftermathTip(TEXT("request_assistance"));
+													  }))] +
 									  SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 6, 0)
 										  [MakeButton(TEXT("Requisition"),
-													  [this]() { PressLogistics(TEXT("requisition")); })] +
+													  [this]() { PressLogistics(TEXT("requisition")); },
+													  EVisibility::Visible,
+													  TAttribute<FText>::CreateLambda(
+														  [this]() { return AftermathTip(TEXT("requisition")); }))] +
 									  SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 6, 0)
 										  [MakeButton(TEXT("Invest capacity"),
-													  [this]() { PressLogistics(TEXT("capacity_investment")); })] +
+													  [this]() { PressLogistics(TEXT("capacity_investment")); },
+													  EVisibility::Visible,
+													  TAttribute<FText>::CreateLambda([this]() {
+														  return AftermathTip(TEXT("capacity_investment"));
+													  }))] +
 									  SHorizontalBox::Slot().AutoWidth()
-										  [MakeButton(TEXT("Dismiss"), [this]() { PressLogistics(TEXT("dismiss")); })]] +
+										  [MakeButton(TEXT("Dismiss"), [this]() { PressLogistics(TEXT("dismiss")); },
+													  EVisibility::Visible,
+													  TAttribute<FText>::CreateLambda(
+														  [this]() { return AftermathTip(TEXT("dismiss")); }))]] +
 								 SVerticalBox::Slot().AutoHeight().Padding(0, 10, 0, 0)
 									 [SNew(SHorizontalBox).Visibility(CommanderChoicesVis) +
 									  SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 6, 0)
@@ -1584,8 +1727,10 @@ void UPA250MapWidget::PressDevelop(const FString& Track)
 		const pa250::CampaignState& St = S->GetState();
 		auto Pit = St.provinces.find(ToStd(SelectedProvinceId));
 		const int32 Dev = Pit == St.provinces.end() ? 0 : pa250::province_development(Pit->second);
-		SetStatusMessage(FString::Printf(TEXT("Developed %s (%s) — development now %d. Gold %d."), *SelectedProvinceId,
-										 *Track, Dev, St.player_gold));
+		FString Reason = St.resource_changes.empty()
+							 ? FString::Printf(TEXT("Developed %s (%s)"), *SelectedProvinceId, *Track)
+							 : ToFStr(St.resource_changes.back().reason);
+		SetStatusMessage(FString::Printf(TEXT("%s — development now %d. Gold %d."), *Reason, Dev, St.player_gold));
 	}
 	else if (Err == TEXT("not_your_province"))
 	{
@@ -1652,7 +1797,12 @@ void UPA250MapWidget::PressLogistics(const FString& Choice)
 	const FString LetterId = S->GetPendingLetterId();
 	if (S->ChooseLogistics(LetterId, Choice, Err))
 	{
-		SetStatusMessage(FString::Printf(TEXT("Staff action: %s. Advance time for replies and deliveries."), *Choice));
+		const pa250::CampaignState& St = S->GetState();
+		FString Msg = St.resource_changes.empty()
+						  ? FString::Printf(TEXT("Staff action: %s."), *Choice)
+						  : ToFStr(St.resource_changes.back().reason);
+		Msg += TEXT(" Check Pending in the Ledger for timed follow-ups.");
+		SetStatusMessage(Msg);
 	}
 	else
 	{

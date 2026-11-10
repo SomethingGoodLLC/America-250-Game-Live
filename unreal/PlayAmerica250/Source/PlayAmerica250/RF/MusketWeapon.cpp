@@ -437,7 +437,7 @@ void AMusketWeapon::UpdateVisuals(float DeltaSeconds)
 		Aim.Pitch = FMath::Clamp(FRotator::NormalizeAxis(Aim.Pitch), -MaxBarrelPitch, MaxBarrelPitch);
 		Aim.Roll = 0.f;
 		if (!RootComponent->IsUsingAbsoluteRotation()) RootComponent->SetUsingAbsoluteRotation(true);
-		RootComponent->SetWorldRotation(Aim);
+		RootComponent->SetWorldRotation(Aim.Quaternion() * FRotator(MeleePitchOffset, 0.f, 0.f).Quaternion());
 	}
 	if (!AnimatedMesh)
 	{

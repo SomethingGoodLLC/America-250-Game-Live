@@ -13,6 +13,7 @@ class UMediaPlayer;
 class UMediaSoundComponent;
 class UMaterialInterface;
 class UMaterialInstanceDynamic;
+class UPA250EnvoyFaceData;
 class UPA250DiplomacyWidget;
 class UStaticMeshComponent;
 class USoundWaveProcedural;
@@ -24,6 +25,7 @@ class PLAYAMERICA250_API APA250DiplomacyGameMode : public AGameModeBase
 
 public:
 	APA250DiplomacyGameMode();
+	virtual void Tick(float DeltaSeconds) override;
 
 	// ---- view model (read by the widget) ----
 	FString EnvoyName;
@@ -105,6 +107,74 @@ private:
 	bool bMicTest = false;
 	FString MicTestWav;
 
+	// ---- talking painting (M_PortraitWarp): speech from viseme curves, plus breathing, drift, eyes, blinks ----
+	// pa250.LipSync 1 (default) warps the painting; 0 uses the 16-cell flipbook (M_PortraitStill) instead.
+	struct FSpring
+	{
+		float X = 0.f, V = 0.f;
+		// Critically damped (no overshoot, no flicker), solved exactly: stable at any frame time. A simple
+		// Euler step diverges once Omega * Dt > 1 (a slow frame), which threw the eye warp off the image.
+		void Step(float Target, float Omega, float Dt)
+		{
+			const float D = X - Target;
+			const float C = V + Omega * D;
+			const float E = FMath::Exp(-Omega * Dt);
+			X = Target + (D + C * Dt) * E;
+			V = (V - Omega * C * Dt) * E;
+		}
+	};
+	struct FVisemeTrack
+	{
+		float Fps = 30.f;
+		TArray<float> Jaw, Wide, Round, Press;
+		bool IsValid() const { return Jaw.Num() > 0; }
+		float At(const TArray<float>& C, float T) const;
+	};
+	void UpdateFace(float Dt);
+	void SetupFace();
+	float VoicePlaybackSeconds() const;
+	bool bWarp = false;
+	FVisemeTrack CurrentVisemes;
+	FSpring SJaw, SWide, SRound, SPress, SNod, SEyeX, SEyeY;
+	float LifeTime = 0.f;
+	float NextBlinkAt = 2.5f, BlinkStart = -10.f, NextSaccadeAt = 1.5f, SaccadeX = 0.f, SaccadeY = 0.f;
+	int32 WarpMovedTicks = 0;  // ticks with the jaw visibly open during speech (the voice test checks it)
+
+	// ---- one reply = several sentence chunks, played back to back ----
+	struct FPendingChunk
+	{
+		FString Audio, Video, ReplyId;
+		int32 Chunk = 0;
+		TSharedPtr<FJsonObject> Visemes, Timing;
+	};
+	void StartChunk(const FPendingChunk& C);
+	bool PlayNextQueued();
+	TArray<FPendingChunk> PendingChunks;
+	FString CurrentReplyId;
+	TSharedPtr<FJsonObject> CurrentTiming;
+	bool bLatencyLogged = true;
+	double ChunkReceivedEpoch = 0.0;
+
+	// ---- waiting for a reply: considering idle; stock lip-synced clips (greeting, consider, acceptance, refusal) ----
+	bool PlayStock(const FString& Name);
+	bool IsWaitingForReply() const;
+	double WaitStart = 0.0;
+	int32 RepliesSinceConsider = 99;
+	bool bConsiderThisReply = false;
+	bool bGreeted = false;
+	bool bLeaveAfterStock = false;
+	FString StockPlaying;
+	TMap<FString, FString> StockClips, StockTexts;
+	FTimerHandle LeaveTimer;
+
+	// ---- -PA250LipCompare=<wav>: the same line twice, flipbook then warp, frames captured for a side-by-side video ----
+	void LipCompareStep();
+	FString LipCompareWav;
+	int32 LipComparePass = 0;  // 0 waiting, 1 flipbook, 2 warp, 3 done
+	double LipCompareLastShot = 0.0;
+	int32 LipCompareFrame = 0;
+	FString LipCompareTimes;
+
 	// ---- fire and candle flicker (lights tagged FireLight / CandleLight) ----
 	void Flicker();
 	FTimerHandle FlickerTimer;
@@ -143,6 +213,10 @@ private:
 	TObjectPtr<UMaterialInterface> StillMaterial;
 	UPROPERTY(Transient)
 	TObjectPtr<UMaterialInstanceDynamic> TalkMID;
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInstanceDynamic> WarpMID;
+	UPROPERTY(Transient)
+	TObjectPtr<UPA250EnvoyFaceData> Face;
 	UPROPERTY(Transient)
 	TObjectPtr<UMaterialInterface> VideoMaterial;
 	UPROPERTY(Transient)

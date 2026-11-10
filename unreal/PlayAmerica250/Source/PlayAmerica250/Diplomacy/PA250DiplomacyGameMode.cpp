@@ -24,6 +24,10 @@
 #include "MediaSoundComponent.h"
 #include "Materials/MaterialInterface.h"
 #include "Materials/MaterialInstanceDynamic.h"
+#include "HAL/IConsoleManager.h"
+#include "PA250EnvoyFaceData.h"
+#include "UnrealClient.h"
+#include "Engine/Texture2D.h"
 #include "Misc/CommandLine.h"
 #include "Misc/Parse.h"
 #include "PA250DiplomacyWidget.h"
@@ -39,11 +43,43 @@ const TCHAR* VoiceTestLine = TEXT("I propose a ceasefire.");
 // Audible right now? The engine multiplies by [Audio] UnfocusedVolumeMultiplier (default 0) while unfocused.
 bool AudibleNow() { return FApp::HasFocus() || FApp::GetUnfocusedVolumeMultiplier() > 0.f; }
 int32 VoiceTicks = 0, VoiceAudibleTicks = 0;
+TAutoConsoleVariable<int32> CVarLipSync(TEXT("pa250.LipSync"), 1,
+	TEXT("Envoy portrait lip-sync: 1 = warp the painting from viseme curves (default), 0 = 16-cell flipbook driven by loudness."));
+double EpochNow() { return (FDateTime::UtcNow() - FDateTime(1970, 1, 1)).GetTotalSeconds(); }
+void ReadCurve(const TSharedPtr<FJsonObject>& O, const TCHAR* Name, TArray<float>& Out)
+{
+	Out.Reset();
+	const TArray<TSharedPtr<FJsonValue>>* A = nullptr;
+	if (O.IsValid() && O->TryGetArrayField(Name, A) && A)
+	{
+		for (const TSharedPtr<FJsonValue>& V : *A)
+		{
+			Out.Add((float)V->AsNumber());
+		}
+	}
+}
+}
+
+float APA250DiplomacyGameMode::FVisemeTrack::At(const TArray<float>& C, float T) const
+{
+	if (C.Num() == 0 || T < 0.f)
+	{
+		return 0.f;
+	}
+	const float F = T * Fps;
+	const int32 I = FMath::FloorToInt(F);
+	if (I >= C.Num() - 1)
+	{
+		return I >= C.Num() ? 0.f : C.Last();
+	}
+	return FMath::Lerp(C[I], C[I + 1], F - (float)I);
 }
 
 APA250DiplomacyGameMode::APA250DiplomacyGameMode()
 {
 	DefaultPawnClass = nullptr;
+	PrimaryActorTick.bCanEverTick = true;  // the talking painting updates every frame
+	PrimaryActorTick.bStartWithTickEnabled = true;
 }
 
 void APA250DiplomacyGameMode::BeginPlay()
@@ -94,6 +130,12 @@ void APA250DiplomacyGameMode::BeginPlay()
 		}
 	}
 	SetupMedia();
+	SetupFace();
+	if (FParse::Value(FCommandLine::Get(), TEXT("PA250LipCompare="), LipCompareWav) && !LipCompareWav.IsEmpty())
+	{
+		FTimerHandle H;
+		GetWorldTimerManager().SetTimer(H, FTimerDelegate::CreateUObject(this, &APA250DiplomacyGameMode::LipCompareStep), 4.f, false);
+	}
 
 	for (TActorIterator<AActor> It(GetWorld()); It; ++It)
 	{
@@ -255,6 +297,14 @@ void APA250DiplomacyGameMode::OnMediaOpenFailed(FString FailedUrl)
 	{
 		VoiceTestFinish(false, TEXT("EnvoyVideo open failed: ") + FailedUrl);
 	}
+	const FString Failed = StockPlaying;
+	StockPlaying.Reset();
+	if (bLeaveAfterStock && Failed == TEXT("acceptance"))
+	{
+		ReturnToCampaign();
+		return;
+	}
+	PlayNextQueued();
 }
 
 void APA250DiplomacyGameMode::OnMediaEnded()
@@ -285,6 +335,14 @@ void APA250DiplomacyGameMode::OnMediaEnded()
 	{
 		PortraitMesh->SetMaterial(0, StillMaterial);
 	}
+	const FString Ended = StockPlaying;
+	StockPlaying.Reset();
+	if (bLeaveAfterStock && Ended == TEXT("acceptance"))
+	{
+		ReturnToCampaign();
+		return;
+	}
+	PlayNextQueued();  // a reply that arrived while a stock clip played
 }
 
 void APA250DiplomacyGameMode::StopVideo()
@@ -408,6 +466,7 @@ bool APA250DiplomacyGameMode::PlayVoiceWav(const FString& File)
 	LipOpen = 0.f;
 	LipChanges = 0;
 	LipCellsUsed = 0;
+	WarpMovedTicks = 0;
 
 	VoiceWave = NewObject<USoundWaveProcedural>(this);
 	VoiceWave->SetSampleRate(Rate);
@@ -464,6 +523,21 @@ void APA250DiplomacyGameMode::PollVoice()
 	++VoiceTicks;
 	VoiceAudibleTicks += AudibleNow() ? 1 : 0;
 	UpdateLipSync(Left);
+	if (!bLatencyLogged && VoiceBytes - Left > 0)
+	{
+		bLatencyLogged = true;  // sound has started: the mixer is pulling the first chunk
+		const double NowE = EpochNow();
+		double Recv = 0.0, Sent = 0.0, Sentence = 0.0, Tts = 0.0;
+		if (CurrentTiming.IsValid())
+		{
+			CurrentTiming->TryGetNumberField(TEXT("recv"), Recv);
+			CurrentTiming->TryGetNumberField(TEXT("sent"), Sent);
+			CurrentTiming->TryGetNumberField(TEXT("sentence_ready_s"), Sentence);
+			CurrentTiming->TryGetNumberField(TEXT("tts_s"), Tts);
+		}
+		UE_LOG(LogTemp, Display, TEXT("EnvoyLatency: player line -> first audio %.2fs (claude first sentence %.2fs, tts %.2fs, service->room %.2fs, room start %.2fs) reply %s"),
+			Recv > 0.0 ? NowE - Recv : -1.0, Sentence, Tts, Sent > 0.0 ? ChunkReceivedEpoch - Sent : -1.0, NowE - ChunkReceivedEpoch, *CurrentReplyId);
+	}
 	if (Left <= 0 && VoiceDrainedTime == 0.0)
 	{
 		VoiceDrainedTime = Now;
@@ -475,11 +549,23 @@ void APA250DiplomacyGameMode::PollVoice()
 		UE_LOG(LogTemp, Display, TEXT("EnvoyVoice finished %s played=%.2fs wall=%.2fs audible=%.0f%%"), *VoiceFile, VoiceSeconds, Wall, Audible * 100.f);
 		UE_LOG(LogTemp, Display, TEXT("EnvoyLipSync: %d frame changes, %d distinct cells over %.2fs"), LipChanges, FMath::CountBits(LipCellsUsed), VoiceSeconds);
 		const FString Done = VoiceFile;
+		const int32 Moved = WarpMovedTicks;
 		StopVoice(nullptr);
+		if (LipComparePass == 1 || LipComparePass == 2)
+		{
+			LipCompareStep();
+			return;
+		}
+		if (PlayNextQueued())
+		{
+			return;  // the next sentence of the same reply
+		}
 		if (bVoiceTest || bMicTest)
 		{
 			const bool bRealTime = Wall >= VoiceSeconds * 0.9;
-			const bool bLips = !TalkMID || LipChanges >= (int32)VoiceSeconds * 3;  // the painting's mouth must have moved
+			// the painting's mouth must have moved: warp = ticks with the jaw open, flipbook = cell changes
+			const bool bLips = bWarp ? Moved >= (int32)(VoiceSeconds * 5.f) : (!TalkMID || LipChanges >= (int32)VoiceSeconds * 3);
+			UE_LOG(LogTemp, Display, TEXT("EnvoyFace: %s, jaw open on %d ticks over %.2fs"), bWarp ? TEXT("warp") : TEXT("flipbook"), Moved, VoiceSeconds);
 			VoiceTestFinish(bRealTime && Audible >= 0.9f && bLips, FString::Printf(TEXT("%s: %.2fs in %.2fs wall, audible %.0f%%, lip-sync %d changes%s"), *Done,
 				VoiceSeconds, Wall, Audible * 100.f, LipChanges,
 				Audible < 0.9f ? TEXT(" (window lost focus and UnfocusedVolumeMultiplier is 0: muted)") : TEXT("")));
@@ -500,7 +586,7 @@ void APA250DiplomacyGameMode::PollVoice()
 
 void APA250DiplomacyGameMode::UpdateLipSync(int32 BytesLeft)
 {
-	if (!TalkMID || VoiceEnvelope.Num() == 0)
+	if (bWarp || !TalkMID || VoiceEnvelope.Num() == 0)
 	{
 		return;
 	}
@@ -712,6 +798,264 @@ void APA250DiplomacyGameMode::SendMicClip(const TArray<uint8>& Wav, float Second
 	Req->ProcessRequest();
 }
 
+void APA250DiplomacyGameMode::SetupFace()
+{
+	int32 Mode = CVarLipSync.GetValueOnGameThread();
+	FParse::Value(FCommandLine::Get(), TEXT("PA250LipSync="), Mode);
+	UMaterialInterface* Warp = LoadObject<UMaterialInterface>(nullptr, TEXT("/Game/PA250/Materials/M_PortraitWarp.M_PortraitWarp"));
+	Face = LoadObject<UPA250EnvoyFaceData>(nullptr, TEXT("/Game/PA250/Data/DA_EnvoyFace_british.DA_EnvoyFace_british"));
+	if (Warp)
+	{
+		WarpMID = UMaterialInstanceDynamic::Create(Warp, this);
+	}
+	if (WarpMID && Face)
+	{
+		const UPA250EnvoyFaceData& F = *Face;
+		WarpMID->SetVectorParameterValue(TEXT("ImageSize"), FLinearColor(F.ImageSize.X, F.ImageSize.Y, F.CropWidth, 0.f));
+		WarpMID->SetVectorParameterValue(TEXT("Mouth"), FLinearColor(F.MouthCenter.X, F.MouthCenter.Y, F.MouthHalfWidth, F.MaxJawDrop));
+		WarpMID->SetVectorParameterValue(TEXT("Lips"), FLinearColor(F.UpperLip, F.LowerLip, 0.f, 0.f));
+		WarpMID->SetVectorParameterValue(TEXT("Jaw"), FLinearColor(F.Chin.X, F.Chin.Y, F.JawHalfWidth, 0.f));
+		WarpMID->SetVectorParameterValue(TEXT("EyeL"), FLinearColor(F.EyeLeft.X, F.EyeLeft.Y, F.EyeRadius.X, F.EyeRadius.Y));
+		WarpMID->SetVectorParameterValue(TEXT("EyeR"), FLinearColor(F.EyeRight.X, F.EyeRight.Y, F.EyeRadius.X, F.EyeRadius.Y));
+		WarpMID->SetVectorParameterValue(TEXT("Head"), FLinearColor(F.HeadCenter.X, F.HeadCenter.Y, F.HeadRadius.X, F.HeadRadius.Y));
+		if (F.Still)
+		{
+			WarpMID->SetTextureParameterValue(TEXT("Still"), F.Still);
+		}
+		if (F.Blink)
+		{
+			WarpMID->SetTextureParameterValue(TEXT("BlinkTex"), F.Blink);
+		}
+	}
+	bWarp = Mode != 0 && WarpMID != nullptr;
+	if (bWarp)
+	{
+		StillMaterial = WarpMID;
+		if (PortraitMesh)
+		{
+			PortraitMesh->SetMaterial(0, WarpMID);
+		}
+	}
+	UE_LOG(LogTemp, Display, TEXT("EnvoyFace: %s (pa250.LipSync %d, face data %s, warp material %s)"),
+		bWarp ? TEXT("warp") : (TalkMID ? TEXT("flipbook") : TEXT("still")), Mode, Face ? TEXT("loaded") : TEXT("MISSING"),
+		WarpMID ? TEXT("loaded") : TEXT("MISSING"));
+}
+
+float APA250DiplomacyGameMode::VoicePlaybackSeconds() const
+{
+	if (!VoiceWave || !VoiceComponent)
+	{
+		return -1.f;
+	}
+	// Bytes the mixer has pulled, less ~60 ms it buffers ahead of the speakers.
+	const int32 Left = VoiceWave->GetAvailableAudioByteCount();
+	return (float)(VoiceBytes - Left) / VoiceBytesPerSecond - 0.06f;
+}
+
+bool APA250DiplomacyGameMode::IsWaitingForReply() const
+{
+	return bBusy && !VoiceComponent && StockPlaying.IsEmpty() && PendingChunks.Num() == 0;
+}
+
+void APA250DiplomacyGameMode::Tick(float DeltaSeconds)
+{
+	Super::Tick(DeltaSeconds);
+	LifeTime += DeltaSeconds;
+	UpdateFace(FMath::Min(DeltaSeconds, 0.05f));
+	if (IsWaitingForReply() && bConsiderThisReply && FPlatformTime::Seconds() - WaitStart > 2.2)
+	{
+		bConsiderThisReply = false;
+		if (PlayStock(TEXT("consider")))
+		{
+			RepliesSinceConsider = 0;
+		}
+	}
+	if ((LipComparePass == 1 || LipComparePass == 2) && VoiceComponent && FPlatformTime::Seconds() - LipCompareLastShot >= 1.0 / 15.0)
+	{
+		LipCompareLastShot = FPlatformTime::Seconds();
+		const FString Name = FString::Printf(TEXT("%s_%04d.png"), LipComparePass == 1 ? TEXT("flipbook") : TEXT("warp"), LipCompareFrame++);
+		const FString Path = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("PA250"), TEXT("lipcompare"), Name);
+		FScreenshotRequest::RequestScreenshot(Path, false, false);
+		LipCompareTimes += FString::Printf(TEXT("%s %.4f\n"), *Name, FMath::Max(0.f, VoicePlaybackSeconds()));
+	}
+}
+
+void APA250DiplomacyGameMode::UpdateFace(float Dt)
+{
+	if (!WarpMID || !bWarp)
+	{
+		return;
+	}
+	// Speech: the current sentence's viseme curves at the playback position, then a critically damped spring.
+	float TJaw = 0.f, TWide = 0.f, TRound = 0.f, TPress = 0.f;
+	const float T = VoicePlaybackSeconds();
+	if (T >= 0.f && CurrentVisemes.IsValid())
+	{
+		TJaw = CurrentVisemes.At(CurrentVisemes.Jaw, T);
+		TWide = CurrentVisemes.At(CurrentVisemes.Wide, T);
+		TRound = CurrentVisemes.At(CurrentVisemes.Round, T);
+		TPress = CurrentVisemes.At(CurrentVisemes.Press, T);
+	}
+	constexpr float MouthOmega = 34.f;  // ~0.06 s settle: fast enough for syllables, never flickers
+	SJaw.Step(TJaw, MouthOmega, Dt);
+	SWide.Step(TWide, MouthOmega, Dt);
+	SRound.Step(TRound, MouthOmega, Dt);
+	SPress.Step(TPress, MouthOmega * 1.3f, Dt);  // closures land a little quicker (m, b, p)
+	if (VoiceComponent && SJaw.X > 0.12f)
+	{
+		++WarpMovedTicks;
+	}
+
+	// Life: breathing, slow head drift, eye shifts, blinks; while waiting, a slight nod and a glance down.
+	const bool bWait = IsWaitingForReply();
+	SNod.Step(bWait ? 1.f : 0.f, 3.5f, Dt);
+	if (LifeTime >= NextSaccadeAt)
+	{
+		const bool bCentre = FMath::FRand() < 0.4f;
+		SaccadeX = bCentre ? 0.f : FMath::FRandRange(-0.7f, 0.7f);
+		SaccadeY = bCentre ? 0.f : FMath::FRandRange(-0.3f, 0.3f);
+		NextSaccadeAt = LifeTime + FMath::FRandRange(1.5f, 4.5f);
+	}
+	SEyeX.Step(bWait ? SaccadeX * 0.3f : SaccadeX, 22.f, Dt);
+	SEyeY.Step(bWait ? 0.9f : SaccadeY, 22.f, Dt);
+	if (LifeTime >= NextBlinkAt)
+	{
+		BlinkStart = LifeTime;
+		NextBlinkAt = LifeTime + FMath::FRandRange(3.f, 6.f);
+	}
+	const float BT = (LifeTime - BlinkStart) / 0.17f;
+	const float Blink = (BT >= 0.f && BT <= 1.f) ? FMath::Sin(PI * BT) : 0.f;
+
+	WarpMID->SetScalarParameterValue(TEXT("JawOpen"), FMath::Max(0.f, SJaw.X));
+	WarpMID->SetScalarParameterValue(TEXT("LipsWide"), FMath::Max(0.f, SWide.X));
+	WarpMID->SetScalarParameterValue(TEXT("LipsRound"), FMath::Max(0.f, SRound.X));
+	WarpMID->SetScalarParameterValue(TEXT("LipsPressed"), FMath::Clamp(SPress.X, 0.f, 1.f));
+	WarpMID->SetScalarParameterValue(TEXT("BlinkAmt"), Blink);
+	WarpMID->SetScalarParameterValue(TEXT("Breath"), FMath::Sin(2.f * PI * LifeTime / 4.6f));
+	WarpMID->SetScalarParameterValue(TEXT("HeadX"), 2.0f * FMath::PerlinNoise1D(LifeTime * 0.21f));
+	WarpMID->SetScalarParameterValue(TEXT("HeadY"), 1.5f * FMath::PerlinNoise1D(LifeTime * 0.17f + 19.f));
+	WarpMID->SetScalarParameterValue(TEXT("Nod"), FMath::Max(0.f, SNod.X));
+	WarpMID->SetScalarParameterValue(TEXT("EyeX"), SEyeX.X);
+	WarpMID->SetScalarParameterValue(TEXT("EyeY"), SEyeY.X);
+}
+
+void APA250DiplomacyGameMode::StartChunk(const FPendingChunk& C)
+{
+	CurrentVisemes = FVisemeTrack();
+	if (C.Visemes.IsValid())
+	{
+		double Fps = 30.0;
+		C.Visemes->TryGetNumberField(TEXT("fps"), Fps);
+		CurrentVisemes.Fps = (float)Fps;
+		ReadCurve(C.Visemes, TEXT("jaw"), CurrentVisemes.Jaw);
+		ReadCurve(C.Visemes, TEXT("wide"), CurrentVisemes.Wide);
+		ReadCurve(C.Visemes, TEXT("round"), CurrentVisemes.Round);
+		ReadCurve(C.Visemes, TEXT("press"), CurrentVisemes.Press);
+	}
+	CurrentTiming = C.Timing;
+	ChunkReceivedEpoch = EpochNow();
+	bLatencyLogged = C.Chunk != 0;  // latency is measured to the first sound of a reply
+	PlayLine(C.Audio, C.Video);
+}
+
+bool APA250DiplomacyGameMode::PlayNextQueued()
+{
+	if (PendingChunks.Num() == 0 || VoiceComponent || !StockPlaying.IsEmpty())
+	{
+		return false;
+	}
+	const FPendingChunk Next = PendingChunks[0];
+	PendingChunks.RemoveAt(0);
+	StartChunk(Next);
+	return true;
+}
+
+bool APA250DiplomacyGameMode::PlayStock(const FString& Name)
+{
+	const FString* Path = StockClips.Find(Name);
+	if (!Path || !MediaPlayer || !FPaths::FileExists(*Path))
+	{
+		return false;
+	}
+	StopVoice(TEXT("stock clip"));
+	StopVideo();
+	StockPlaying = Name;
+	VideoFilePlaying = *Path;
+	if (PortraitMesh && VideoMaterial)
+	{
+		PortraitMesh->SetMaterial(0, VideoMaterial);
+	}
+	if (const FString* Text = StockTexts.Find(Name))
+	{
+		Transcript.Add(EnvoyName + TEXT(": ") + *Text);
+	}
+	UE_LOG(LogTemp, Display, TEXT("EnvoyStock playing %s %s"), *Name, **Path);
+	if (!MediaPlayer->OpenFile(*Path))
+	{
+		StockPlaying.Reset();
+		StopVideo();
+		return false;
+	}
+	return true;
+}
+
+void APA250DiplomacyGameMode::LipCompareStep()
+{
+	const FString Dir = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("PA250"), TEXT("lipcompare"));
+	if (LipComparePass == 1 || LipComparePass == 2)
+	{
+		FFileHelper::SaveStringToFile(LipCompareTimes, *FPaths::Combine(Dir, LipComparePass == 1 ? TEXT("flipbook_times.txt") : TEXT("warp_times.txt")));
+	}
+	LipCompareTimes.Reset();
+	LipCompareFrame = 0;
+	if (LipComparePass == 0)
+	{
+		LipComparePass = 1;  // the 16-cell flipbook driven by loudness
+		bWarp = false;
+		StillMaterial = TalkMID;
+		if (PortraitMesh && TalkMID)
+		{
+			PortraitMesh->SetMaterial(0, TalkMID);
+		}
+		CurrentVisemes = FVisemeTrack();
+		UE_LOG(LogTemp, Display, TEXT("LipCompare: pass 1 flipbook %s"), *LipCompareWav);
+		PlayVoiceWav(LipCompareWav);
+		return;
+	}
+	if (LipComparePass == 1)
+	{
+		LipComparePass = 2;  // the warp driven by viseme curves
+		bWarp = WarpMID != nullptr;
+		StillMaterial = WarpMID;
+		if (PortraitMesh && WarpMID)
+		{
+			PortraitMesh->SetMaterial(0, WarpMID);
+		}
+		FString Json;
+		FPendingChunk C;
+		TSharedPtr<FJsonObject> V;
+		if (FFileHelper::LoadFileToString(Json, *(LipCompareWav + TEXT(".visemes.json"))) &&
+			FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(Json), V) && V.IsValid())
+		{
+			C.Visemes = V;
+		}
+		CurrentVisemes = FVisemeTrack();
+		if (C.Visemes.IsValid())
+		{
+			ReadCurve(C.Visemes, TEXT("jaw"), CurrentVisemes.Jaw);
+			ReadCurve(C.Visemes, TEXT("wide"), CurrentVisemes.Wide);
+			ReadCurve(C.Visemes, TEXT("round"), CurrentVisemes.Round);
+			ReadCurve(C.Visemes, TEXT("press"), CurrentVisemes.Press);
+		}
+		UE_LOG(LogTemp, Display, TEXT("LipCompare: pass 2 warp, visemes %d frames"), CurrentVisemes.Jaw.Num());
+		PlayVoiceWav(LipCompareWav);
+		return;
+	}
+	LipComparePass = 3;
+	UE_LOG(LogTemp, Display, TEXT("LipCompare: done, frames in %s"), *Dir);
+	PA250Autoplay::Finish(UPA250Subsystem::Get(this), TEXT("lipcompare"));
+}
+
 void APA250DiplomacyGameMode::HandleState(EPA250DiplomacyState NewState)
 {
 	if (NewState == EPA250DiplomacyState::Unavailable)
@@ -775,6 +1119,33 @@ void APA250DiplomacyGameMode::HandleServiceMessage(const TSharedPtr<FJsonObject>
 	if (Type == TEXT("ai_thinking"))
 	{
 		bBusy = true;
+		WaitStart = FPlatformTime::Seconds();
+		bConsiderThisReply = RepliesSinceConsider >= 3;  // "let me consider" at most once every few replies
+		++RepliesSinceConsider;
+	}
+	else if (Type == TEXT("envoy_stock"))
+	{
+		const TSharedPtr<FJsonObject>* Clips = nullptr;
+		const TSharedPtr<FJsonObject>* Texts = nullptr;
+		Msg->TryGetObjectField(TEXT("clips"), Clips);
+		Msg->TryGetObjectField(TEXT("texts"), Texts);
+		for (const TCHAR* Name : {TEXT("greeting"), TEXT("consider"), TEXT("acceptance"), TEXT("refusal")})
+		{
+			FString Value;
+			if (Clips && (*Clips)->TryGetStringField(Name, Value))
+			{
+				StockClips.Add(Name, Value);
+			}
+			if (Texts && (*Texts)->TryGetStringField(Name, Value))
+			{
+				StockTexts.Add(Name, Value);
+			}
+		}
+		UE_LOG(LogTemp, Display, TEXT("EnvoyStock: %d clips offered"), StockClips.Num());
+		if (!bGreeted && !bScripted && !bVoiceTest && !bMicTest && LipCompareWav.IsEmpty())
+		{
+			bGreeted = PlayStock(TEXT("greeting"));
+		}
 	}
 	else if (Type == TEXT("ai_response"))
 	{
@@ -804,8 +1175,39 @@ void APA250DiplomacyGameMode::HandleServiceMessage(const TSharedPtr<FJsonObject>
 		{
 			Video = VoiceTestVideo;
 		}
-		UE_LOG(LogTemp, Display, TEXT("EnvoyVoice line ready: tts=%s video=%s audio_file=%s video_file=%s"), *Tts, *Backend, *Audio, *Video);
-		PlayLine(Audio, Video);
+		FPendingChunk C;
+		C.Audio = Audio;
+		C.Video = Video;
+		Msg->TryGetStringField(TEXT("reply_id"), C.ReplyId);
+		double ChunkNum = 0.0;
+		Msg->TryGetNumberField(TEXT("chunk"), ChunkNum);
+		C.Chunk = (int32)ChunkNum;
+		const TSharedPtr<FJsonObject>* V = nullptr;
+		if (Msg->TryGetObjectField(TEXT("visemes"), V) && V)
+		{
+			C.Visemes = *V;
+		}
+		const TSharedPtr<FJsonObject>* Tm = nullptr;
+		if (Msg->TryGetObjectField(TEXT("timing"), Tm) && Tm)
+		{
+			C.Timing = *Tm;
+		}
+		UE_LOG(LogTemp, Display, TEXT("EnvoyVoice line ready: tts=%s video=%s reply=%s chunk=%d visemes=%d audio_file=%s video_file=%s"), *Tts, *Backend,
+			*C.ReplyId, C.Chunk, C.Visemes.IsValid() ? 1 : 0, *Audio, *Video);
+		const bool bNewReply = C.ReplyId.IsEmpty() || C.ReplyId != CurrentReplyId;
+		if (bNewReply)
+		{
+			PendingChunks.Reset();
+			CurrentReplyId = C.ReplyId;
+		}
+		if (!StockPlaying.IsEmpty() || (!bNewReply && VoiceComponent))
+		{
+			PendingChunks.Add(C);  // after the stock clip / the sentence playing now
+		}
+		else
+		{
+			StartChunk(C);
+		}
 	}
 	else if (Type == TEXT("avatar_unavailable"))
 	{
@@ -972,6 +1374,14 @@ void APA250DiplomacyGameMode::Accept()
 	{
 		TermLines.Reset();
 		PendingProposalJson.Reset();
+		if (!bScripted && PlayStock(TEXT("acceptance")))
+		{
+			// "Then we are agreed, sir." Leave when it ends (or after 9 s if the clip never reports its end).
+			bLeaveAfterStock = true;
+			StatusLine = TEXT("Agreed.");
+			GetWorldTimerManager().SetTimer(LeaveTimer, FTimerDelegate::CreateWeakLambda(this, [this]() { ReturnToCampaign(); }), 9.f, false);
+			return;
+		}
 		ReturnToCampaign();
 	}
 	else
@@ -986,6 +1396,10 @@ void APA250DiplomacyGameMode::Reject()
 	PendingProposalJson.Reset();
 	StatusLine = TEXT("You decline the terms.");
 	Transcript.Add(TEXT("You decline the terms."));
+	if (!bScripted)
+	{
+		PlayStock(TEXT("refusal"));
+	}
 }
 
 void APA250DiplomacyGameMode::Leave()
