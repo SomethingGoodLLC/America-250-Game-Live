@@ -6,7 +6,9 @@
 # .env ELEVENLABS_VOICE_ID both 402; Daniel 200).
 envoys:
   british:
-    voice_id: onwK4e9ZLuTAKqWW03F9   # Daniel - Steady Broadcaster (premade; British, middle-aged, formal)
+    # Interim (user choice 2026-11-09): George. Gage's own designed voice needs a paid plan: Voice Design via
+    # the API returns 403 feature_not_available on this key. Daniel: onwK4e9ZLuTAKqWW03F9.
+    voice_id: JBFqnCBsd6RMkjVDRZzb   # George - Warm, Captivating Storyteller (premade; British, middle-aged)
     model: eleven_multilingual_v2
-    settings: {stability: 0.55, similarity_boost: 0.8, style: 0.2, use_speaker_boost: true}
+    settings: {stability: 0.45, similarity_boost: 0.8, style: 0.35, use_speaker_boost: true}
     say_voice: Daniel                # macOS backup voice (en_GB)

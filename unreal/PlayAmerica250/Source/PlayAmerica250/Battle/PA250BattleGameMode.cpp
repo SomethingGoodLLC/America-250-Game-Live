@@ -1,6 +1,7 @@
 #include "PA250BattleGameMode.h"
 #include "Camera/CameraActor.h"
 #include "Camera/CameraComponent.h"
+#include "Camera/PlayerCameraManager.h"
 #include "GameFramework/SpringArmComponent.h"
 #include "Campaign/PA250Autoplay.h"
 #include "Campaign/PA250Subsystem.h"
@@ -653,6 +654,9 @@ void APA250BattleGameMode::FrameHumanCamera(APlayerController* PC, APawn* P)
 		if (USpringArmComponent* Arm = C->SpringArm)
 		{
 			Arm->bUsePawnControlRotation = true;
+			Arm->bInheritPitch = true;
+			Arm->SetRelativeRotation(FRotator::ZeroRotator);
+			Arm->bEnableCameraRotationLag = false;
 			Arm->TargetArmLength = C->HipArmLength;
 			Arm->SocketOffset = FVector(0.f, C->GetShoulderSign() * C->HipSocketOffset.Y, C->HipSocketOffset.Z);
 			Arm->bEnableCameraLag = true;
@@ -663,10 +667,18 @@ void APA250BattleGameMode::FrameHumanCamera(APlayerController* PC, APawn* P)
 	else if (USpringArmComponent* Arm = P->FindComponentByClass<USpringArmComponent>())
 	{
 		Arm->bUsePawnControlRotation = true;
+		Arm->bInheritPitch = true;
+		Arm->SetRelativeRotation(FRotator::ZeroRotator);
+		Arm->bEnableCameraRotationLag = false;
 		Arm->TargetArmLength = 220.f;
 		Arm->SocketOffset = FVector(0.f, 60.f, 70.f);
 		Arm->bEnableCameraLag = true;
 		Arm->CameraLagSpeed = 10.f;
+	}
+	if (PC->PlayerCameraManager)
+	{
+		PC->PlayerCameraManager->ViewPitchMin = -89.f;
+		PC->PlayerCameraManager->ViewPitchMax = 89.f;
 	}
 	FVector LookAt = P->GetActorLocation() + P->GetActorForwardVector() * 2000.f;
 	if (const APA250ControlPoint* Green = FindGreenPost())

@@ -25,7 +25,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 SVC = ROOT / "services" / "negotiation"
 CTX = ROOT / "protocol" / "test_vectors" / "clauses" / "_context.json"
-WAIT_TYPES = ("sadtalker_video_ready", "avatar_unavailable", "representative_unavailable")
+WAIT_TYPES = ("envoy_speech_end", "representative_unavailable")  # speech streams sentence by sentence
 
 
 def _session_body() -> dict[str, Any]:
@@ -90,7 +90,7 @@ def main() -> int:
     t0 = time.monotonic()
     msgs = asyncio.run(via_url(a.url.rstrip("/"), a.text, a.timeout)) if a.url else via_testclient(a.text, a.timeout)
     spoken = next((m.get("text") for m in msgs if m.get("type") == "ai_response" and m.get("final")), None)
-    ready = msgs[-1] if msgs else {}
+    ready = next((m for m in msgs if m.get("type") in ("sadtalker_video_ready", "avatar_unavailable")), {})
     print(f"envoy said: {spoken!r}")
     print(f"event: {ready.get('type')}  tts_backend={ready.get('tts_backend')}  backend={ready.get('backend')}  "
           f"render_wall={time.monotonic() - t0:.2f}s")

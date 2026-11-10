@@ -109,8 +109,8 @@ public:
 	/** Pure: 0..1 position in the pack's reload animation for a sequencer phase and its progress.
 	 *  Returns a negative value for phases that hold the current pose (miss delay, jam). */
 	static float ReloadAnimAlpha(EActiveReloadPhase Phase, float PhaseProgress);
-	/** Max barrel pitch (deg) up or down; the soldier has no aiming body pose to go further. */
-	static constexpr float MaxBarrelPitch = 45.f;
+	/** Barrel pitch limit (deg), up or down. Kept near the view limit so a high aim still raises the musket. */
+	static constexpr float MaxBarrelPitch = 85.f;
 	USceneComponent* GetMuzzleLocation() const { return MuzzleLocation; }
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weapon")

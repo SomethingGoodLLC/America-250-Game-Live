@@ -108,51 +108,67 @@ def _decode_control(msg: str, fmt: str) -> dict[str, Any]:
     return obj if isinstance(obj, dict) else {}
 
 
-async def _screen_spoken_line(text: str) -> str:
-    """Content-safety filter on provider output. Only high-severity flags block (war talk is on-topic)."""
-    try:
-        from core.content_safety import ContentSafetyFilter
-
-        verdict = await ContentSafetyFilter({}).check_content(text)
-        if getattr(verdict, "severity", "low") == "high":
-            logger.warning("Spoken line blocked by content safety", flags=getattr(verdict, "flags", None))
-            return "I would rather not say more on that, sir."
-    except Exception as e:  # filter failure must not take the negotiation down
-        logger.warning("Content safety check failed", error=str(e))
-    return text
-
-
 async def generate_game_response(sess: dict[str, Any], user_text: str, send_func: Any) -> None:
-    """Unreal-client path: provider -> validated proposal -> avatar file. WebRTC is not involved."""
+    """Unreal-client path: provider -> validated proposal -> envoy speech. WebRTC is not involved.
+
+    With Claude and PA250_STREAM != "0", each sentence of the spoken line goes to TTS as soon as Claude has
+    written it, so the envoy starts speaking before the reply is complete. The clauses are still validated
+    only once the whole reply is in. No content filter on the envoy's words (user decision 2026-11-09).
+    """
     ctx: DiplomacyContext = sess["diplomacy_context"]
+    t_recv = time.time()
+    reply_id = f"pa250_{sess.get('session_id', 'x')}_{int(t_recv * 1000)}"
     try:
-        await send_func({"type": "ai_thinking", "text": "..."})
+        await send_func({"type": "ai_thinking", "text": "...", "reply_id": reply_id})
         wc_dict = sess["world_context"]
         world_context = WorldContextModel(**wc_dict)
         turns = [t if isinstance(t, SpeakerTurnModel) else SpeakerTurnModel(**t) for t in sess["turns"][-8:]]
+        speech = _SpeechStream(reply_id, ctx.faction, send_func, t_recv)
 
         spoken, raw, provider_name = "", None, "mock"
-        order = ["claude", "mock"] if llm_provider_name() == "claude" else ["mock"]
-        for name in order:
-            provider = ClaudeProvider({}) if name == "claude" else MockLocalProvider(
-                {"strict": False, "compromised": bool(sess.get("compromised"))})
+        streamed = False
+        use_claude = llm_provider_name() == "claude"
+        if use_claude and os.getenv("PA250_STREAM", "1") != "0":
+            provider = ClaudeProvider({})
+            info = (world_context.current_state or {}).get("envoy", {})
             try:
-                spoken, raw = "", None
-                async for ev in provider.stream_dialogue(turns=turns, world_context=world_context):
-                    if ev.type == "subtitle" and ev.is_final:
-                        spoken = str(ev.payload.get("text", ""))
-                    elif ev.type == "diplomacy_proposal":
-                        raw = ev.payload.get("proposal")
-                provider_name = name
-                break
+                raw = await provider.propose_streaming(
+                    turns, ctx, str(info.get("name", "")), str(info.get("title", "")),
+                    world_context.initiator_faction.get("id", ""), speech.say)
+                provider_name, streamed = "claude", True
             except Exception as e:
-                logger.error("Diplomacy provider failed; falling back", provider=name, error=str(e))
+                logger.error("Streaming reply failed", error=str(e), sentences_spoken=speech.count)
+                if speech.count:  # already speaking: keep what was said, no clauses
+                    raw, provider_name, streamed = {"spoken_line": speech.text, "clauses": []}, "claude", True
             finally:
-                if isinstance(provider, ClaudeProvider):
-                    await provider.close()  # one client per reply; do not leak its connection pool
-        if raw is None:
-            raw = {"spoken_line": spoken, "clauses": []}
-        spoken = await _screen_spoken_line(str(raw.get("spoken_line", spoken)) if isinstance(raw, dict) else spoken)
+                await provider.close()
+        if not streamed:
+            order = ["claude", "mock"] if use_claude else ["mock"]
+            for name in order:
+                provider = ClaudeProvider({}) if name == "claude" else MockLocalProvider(
+                    {"strict": False, "compromised": bool(sess.get("compromised"))})
+                try:
+                    spoken, raw = "", None
+                    async for ev in provider.stream_dialogue(turns=turns, world_context=world_context):
+                        if ev.type == "subtitle" and ev.is_final:
+                            spoken = str(ev.payload.get("text", ""))
+                        elif ev.type == "diplomacy_proposal":
+                            raw = ev.payload.get("proposal")
+                    provider_name = name
+                    break
+                except Exception as e:
+                    logger.error("Diplomacy provider failed; falling back", provider=name, error=str(e))
+                finally:
+                    if isinstance(provider, ClaudeProvider):
+                        await provider.close()  # one client per reply; do not leak its connection pool
+            if raw is None:
+                raw = {"spoken_line": spoken, "clauses": []}
+            spoken = str(raw.get("spoken_line", spoken)) if isinstance(raw, dict) else spoken
+            speech.t_llm_done = time.time()
+            await speech.say(spoken)  # one chunk
+        else:
+            spoken = speech.text  # exactly what was spoken
+        speech.close()
 
         if isinstance(raw, dict):
             raw = dict(raw, spoken_line=spoken)
@@ -161,19 +177,15 @@ async def generate_game_response(sess: dict[str, Any], user_text: str, send_func
             "speaker": "AI", "text": spoken, "speaker_id": wc_dict["counterpart_faction"]["id"],
             "timestamp": datetime.utcnow().isoformat(),
         })
-        logger.info("Diplomacy reply", provider=provider_name, spoken=spoken, clauses=len(wire["clauses"]), rejected=errors)
-        await send_func({"type": "ai_response", "text": spoken, "final": True})
+        logger.info("Diplomacy reply", provider=provider_name, streamed=streamed, spoken=spoken,
+                    clauses=len(wire["clauses"]), rejected=errors,
+                    llm_s=round((speech.t_llm_done or time.time()) - t_recv, 2),
+                    first_sentence_s=round(speech.t_first - t_recv, 2) if speech.t_first else None)
+        await send_func({"type": "ai_response", "text": spoken, "final": True, "reply_id": reply_id})
         await send_func({
             "type": "diplomacy_proposal", "spoken_line": spoken, "clauses": wire["clauses"],
-            "rejected": errors, "provider": provider_name,
+            "rejected": errors, "provider": provider_name, "reply_id": reply_id,
         })
-
-        job_id = f"pa250_{sess.get('session_id', 'x')}_{int(time.time() * 1000)}"
-        # The speech job is detached from this reply task and from the socket's provider_tasks, so neither
-        # the next utterance, the reply finishing, nor the client closing the socket can cancel it.
-        job = asyncio.create_task(_speech_job(spoken, job_id, ctx.faction, send_func), name=job_id)
-        SPEECH_JOBS.add(job)
-        job.add_done_callback(SPEECH_JOBS.discard)
     except Exception as e:
         logger.error("Error generating game response", error=str(e))
         await send_func({"type": "representative_unavailable", "text": "The envoy cannot be reached."})
@@ -183,38 +195,95 @@ async def generate_game_response(sess: dict[str, Any], user_text: str, send_func
 SPEECH_JOBS: set[asyncio.Task[None]] = set()
 
 
-async def _speech_job(spoken: str, job_id: str, envoy_id: str, send_func: Any) -> None:
-    """TTS (+ optional video) for one envoy line. Always ends in a 'Speech job finished' or WARNING log line."""
-    t0 = time.monotonic()
-    logger.info("Speech job started", job_id=job_id, envoy=envoy_id, chars=len(spoken))
-    try:
-        line = await render_avatar_line(spoken, job_id, envoy_id=envoy_id)
-    except asyncio.CancelledError:
-        logger.warning("Speech job cancelled", job_id=job_id, reason="service shutting down")
-        raise
-    except Exception as e:  # render_avatar_line should never raise; record it if it does
-        logger.warning("Speech job failed", job_id=job_id, error=f"{type(e).__name__}: {e}")
-        return
-    if line.audio_file:
-        ready: dict[str, Any] = {"type": "sadtalker_video_ready", "audio_file": line.audio_file, "text": spoken,
-                                 "job_id": job_id, "backend": line.backend, "tts_backend": line.tts_backend,
-                                 "audio_seconds": round(line.audio_seconds, 3)}
-        if line.video_file:
-            ready["video_file"] = line.video_file
-    else:
-        ready = {"type": "avatar_unavailable", "text": spoken, "job_id": job_id, "notes": line.notes}
-        logger.warning("Speech job produced no audio", job_id=job_id, notes=line.notes)
-    try:
-        delivered = (await send_func(ready)) is not False
-        reason = "control socket closed"
-    except Exception as e:
-        delivered, reason = False, f"{type(e).__name__}: {e}"
-    if not delivered:  # client went away while we rendered: the files are still on disk
-        logger.warning("Speech line ready but not delivered", job_id=job_id, reason=reason)
-    logger.info("Speech job finished", job_id=job_id, tts_backend=line.tts_backend,
-                audio_seconds=round(line.audio_seconds, 2), audio_file=line.audio_file,
-                video_backend=line.backend, video_file=line.video_file, notes=line.notes,
-                delivered=delivered, elapsed_s=round(time.monotonic() - t0, 2))
+class _SpeechStream:
+    """One reply's speech: sentences go to TTS as they arrive; a detached sender delivers them in order.
+
+    The sender task lives in SPEECH_JOBS, so neither the next utterance, the reply finishing, nor the client
+    closing the socket cancels it. Every chunk ends in a 'Speech chunk sent' log line or a WARNING.
+    """
+
+    def __init__(self, reply_id: str, envoy_id: str, send_func: Any, t_recv: float) -> None:
+        self.reply_id, self.envoy_id, self.send_func, self.t_recv = reply_id, envoy_id, send_func, t_recv
+        self.parts: list[str] = []
+        self.queue: asyncio.Queue[tuple[int, str, asyncio.Task[Any], float] | None] = asyncio.Queue()
+        self.t_first: float | None = None
+        self.t_llm_done: float | None = None
+        job = asyncio.create_task(self._sender(), name=reply_id)
+        SPEECH_JOBS.add(job)
+        job.add_done_callback(SPEECH_JOBS.discard)
+
+    @property
+    def count(self) -> int:
+        return len(self.parts)
+
+    @property
+    def text(self) -> str:
+        return " ".join(self.parts)
+
+    async def say(self, sentence: str) -> None:
+        sentence = sentence.strip()
+        if not sentence:
+            return
+        now = time.time()
+        if self.t_first is None:
+            self.t_first = now
+        previous = self.text or None
+        self.parts.append(sentence)
+        idx = len(self.parts) - 1
+        task = asyncio.create_task(render_avatar_line(sentence, f"{self.reply_id}_{idx}", envoy_id=self.envoy_id,
+                                                      previous_text=previous))
+        self.queue.put_nowait((idx, sentence, task, now))
+
+    def close(self) -> None:
+        if self.t_llm_done is None:
+            self.t_llm_done = time.time()
+        self.queue.put_nowait(None)
+
+    async def _sender(self) -> None:
+        while True:
+            item = await self.queue.get()
+            if item is None:
+                break
+            idx, text, task, t_sentence = item
+            try:
+                line = await task
+            except asyncio.CancelledError:
+                logger.warning("Speech chunk cancelled", reply_id=self.reply_id, chunk=idx, reason="service shutting down")
+                raise
+            except Exception as e:
+                logger.warning("Speech chunk failed", reply_id=self.reply_id, chunk=idx, error=f"{type(e).__name__}: {e}")
+                continue
+            t_sent = time.time()
+            timing = {"recv": round(self.t_recv, 3), "sentence_ready_s": round(t_sentence - self.t_recv, 3),
+                      "tts_s": round(t_sent - t_sentence, 3), "sent": round(t_sent, 3)}
+            if line.audio_file:
+                ev: dict[str, Any] = {"type": "sadtalker_video_ready", "audio_file": line.audio_file, "text": text,
+                                      "job_id": f"{self.reply_id}_{idx}", "reply_id": self.reply_id, "chunk": idx,
+                                      "backend": line.backend, "tts_backend": line.tts_backend,
+                                      "audio_seconds": round(line.audio_seconds, 3), "timing": timing}
+                if line.video_file:
+                    ev["video_file"] = line.video_file
+                if line.visemes:
+                    ev["visemes"] = line.visemes
+            else:
+                ev = {"type": "avatar_unavailable", "text": text, "job_id": f"{self.reply_id}_{idx}",
+                      "reply_id": self.reply_id, "notes": line.notes}
+            try:
+                delivered = (await self.send_func(ev)) is not False
+            except Exception:
+                delivered = False
+            log = logger.info if delivered else logger.warning
+            log("Speech chunk sent" if delivered else "Speech chunk not delivered", reply_id=self.reply_id, chunk=idx,
+                tts_backend=line.tts_backend, audio_seconds=round(line.audio_seconds, 2), audio_file=line.audio_file,
+                video_backend=line.backend, sentence_ready_s=timing["sentence_ready_s"], tts_s=timing["tts_s"],
+                recv_to_sent_s=round(t_sent - self.t_recv, 3), visemes=bool(line.visemes))
+        try:
+            await self.send_func({"type": "envoy_speech_end", "reply_id": self.reply_id, "chunks": len(self.parts)})
+        except Exception:
+            pass
+        logger.info("Speech job finished", reply_id=self.reply_id, chunks=len(self.parts),
+                    elapsed_s=round(time.time() - self.t_recv, 2))
+
 
 async def generate_ai_response(sess: dict, user_text: str, send_yaml_func):
     """Generate AI response to user input and trigger avatar generation."""

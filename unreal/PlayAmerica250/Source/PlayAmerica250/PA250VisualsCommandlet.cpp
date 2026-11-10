@@ -87,6 +87,20 @@ int32 UPA250VisualsCommandlet::Main(const FString& Params)
 			Check(Along > 0.97f, TEXT("barrel points where the soldier faces (not the hand bone axis)"));
 			Check(Muzzle.X > 50.f && MuzzleHeight > 60.f && MuzzleHeight < 170.f, TEXT("muzzle is in front of the body at a carrying height"));
 
+			// A steep upward aim must raise the barrel with the view. The old ±45° clamp left it short.
+			{
+				const FRotator Level = Soldier->GetActorRotation();
+				Soldier->SetActorRotation(FRotator(-70.f, Level.Yaw, 0.f));
+				Weapon->UpdateVisuals(0.f);
+				const float UpDot = FVector::DotProduct(Weapon->GetActorForwardVector(), Soldier->GetActorForwardVector());
+				const float Raised = Weapon->GetMuzzleLocation()->GetComponentLocation().Z - Soldier->GetActorLocation().Z;
+				UE_LOG(LogTemp, Display, TEXT("PA250.Visuals measure %s: upward aim barrel.forward=%.3f muzzle above actor=%.0f cm"),
+					*Soldier->FactionId.ToString(), UpDot, Raised);
+				Check(UpDot > 0.97f, TEXT("barrel follows a 70 degree upward aim"));
+				Soldier->SetActorRotation(Level);
+				Weapon->UpdateVisuals(0.f);
+			}
+
 			// Left hand solved onto the stock inside pose evaluation (the wrist sits 10 cm behind the spot).
 			if (USkeletalMeshComponent* GunMesh = Weapon->GetAnimatedMesh(); GunMesh && GunMesh->GetBoneIndex(TEXT("b_gun_LeftHandSpot")) != INDEX_NONE)
 			{

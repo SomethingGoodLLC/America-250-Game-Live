@@ -51,8 +51,9 @@ ARFCharacter::ARFCharacter()
 	SpringArm->SocketOffset = HipSocketOffset;
 	SpringArm->bEnableCameraLag = true;
 	SpringArm->CameraLagSpeed = 10.f;
-	SpringArm->bEnableCameraRotationLag = true;
-	SpringArm->CameraRotationLagSpeed = 10.f;
+	// Rotation lag is off: its substepped quaternion blend stalls pitch, so the view (and the
+	// musket, which follows the view) stops rising while yaw still works.
+	SpringArm->bEnableCameraRotationLag = false;
 
 	Camera = CreateDefaultSubobject<UCameraComponent>(TEXT("Camera"));
 	Camera->SetupAttachment(SpringArm);

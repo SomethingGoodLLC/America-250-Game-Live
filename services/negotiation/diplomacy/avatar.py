@@ -10,6 +10,7 @@ failure with its reason (ElevenLabs HTTP status + body, ``say``/``afconvert`` ex
 from __future__ import annotations
 
 import asyncio
+import base64
 import os
 import shutil
 import time
@@ -22,6 +23,7 @@ import httpx
 import structlog
 from ruamel.yaml import YAML
 
+from diplomacy.visemes import approximate_alignment, curves_from_alignment
 from providers.video_sources.musetalk_source import MuseTalkVideoSource
 
 logger = structlog.get_logger(__name__)
@@ -32,7 +34,7 @@ VIDEO_DIR = SERVICE_DIR / "generated_video"
 DEFAULT_PORTRAIT = SERVICE_DIR / "assets" / "avatars" / "british_general_frame.jpg"
 VOICES_FILE = Path(__file__).resolve().parent / "envoy_voices.yaml"
 
-ELEVENLABS_URL = "https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
+ELEVENLABS_URL = "https://api.elevenlabs.io/v1/text-to-speech/{voice_id}/with-timestamps"  # JSON: audio + per-character times
 ELEVENLABS_RATE = (
     24000  # output_format=pcm_24000: raw 16-bit little-endian mono PCM at 24 kHz
 )
@@ -50,6 +52,7 @@ class AvatarLine:
     notes: list[str]
     tts_backend: str = "none"  # "elevenlabs" | "say" | "none"
     audio_seconds: float = 0.0
+    visemes: dict[str, Any] | None = None  # 30 Hz jaw/wide/round/press curves for the painting (display only)
 
 
 @dataclass
@@ -114,11 +117,11 @@ async def _run(*cmd: str) -> tuple[int, str]:
         raise
 
 
-async def _tts_say(text: str, wav_path: Path, voice: EnvoyVoice) -> bool:
+async def _tts_say(text: str, wav_path: Path, voice: EnvoyVoice, previous_text: str | None = None) -> dict[str, Any] | None:
     """Offline macOS TTS backup: `say` -> AIFF -> `afconvert` -> 16-bit WAV."""
     if not shutil.which("say") or not shutil.which("afconvert"):
         logger.warning("say TTS unavailable", reason="say or afconvert not on PATH")
-        return False
+        return None
     aiff = wav_path.with_suffix(".aiff")
     try:
         cmd = (
@@ -131,27 +134,33 @@ async def _tts_say(text: str, wav_path: Path, voice: EnvoyVoice) -> bool:
             logger.warning(
                 "say TTS failed", exit_code=rc, stderr=err, say_voice=voice.say_voice
             )
-            return False
+            return None
         rc, err = await _run(
             "afconvert", "-f", "WAVE", "-d", "LEI16@22050", str(aiff), str(wav_path)
         )
         if rc != 0:
             logger.warning("afconvert failed", exit_code=rc, stderr=err)
-            return False
-        return True
+            return None
+        return {}
     finally:
         aiff.unlink(missing_ok=True)
 
 
-async def _tts_elevenlabs(text: str, wav_path: Path, voice: EnvoyVoice) -> bool:
-    """ElevenLabs REST, output_format=pcm_24000, written straight to a 24 kHz mono 16-bit WAV (no decode)."""
+async def _tts_elevenlabs(text: str, wav_path: Path, voice: EnvoyVoice, previous_text: str | None = None) -> dict[str, Any] | None:
+    """ElevenLabs `/with-timestamps`, output_format=pcm_24000 -> 24 kHz mono 16-bit WAV (no decode).
+
+    Returns {"alignment": ...} (per-character start/end times for lip-sync) or None on failure.
+    `previous_text` keeps the intonation continuous when a reply is spoken sentence by sentence.
+    """
     key = os.getenv("ELEVENLABS_API_KEY", "")
     if not key:
         logger.warning("ElevenLabs TTS skipped", reason="ELEVENLABS_API_KEY not set")
-        return False
+        return None
     body: dict[str, Any] = {"text": text, "model_id": voice.model}
     if voice.settings:
         body["voice_settings"] = voice.settings
+    if previous_text:
+        body["previous_text"] = previous_text
     timeout = float(os.getenv("ELEVENLABS_TIMEOUT", "30"))
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:
@@ -169,7 +178,7 @@ async def _tts_elevenlabs(text: str, wav_path: Path, voice: EnvoyVoice) -> bool:
             voice_id=voice.voice_id,
             envoy=voice.envoy_id,
         )
-        return False
+        return None
     if r.status_code != 200:
         logger.warning(
             "ElevenLabs TTS failed",
@@ -179,31 +188,31 @@ async def _tts_elevenlabs(text: str, wav_path: Path, voice: EnvoyVoice) -> bool:
             voice_source=voice.source,
             envoy=voice.envoy_id,
         )
-        return False
-    pcm = r.content
-    if len(pcm) < 2 or "json" in r.headers.get("content-type", ""):
-        logger.warning(
-            "ElevenLabs TTS failed",
-            reason="empty or non-audio body",
-            bytes=len(pcm),
-            content_type=r.headers.get("content-type"),
-            body=r.text[:300],
-        )
-        return False
+        return None
+    try:
+        data = r.json()
+        pcm = base64.b64decode(data.get("audio_base64") or "")
+    except (ValueError, TypeError) as e:
+        logger.warning("ElevenLabs TTS failed", reason="unreadable with-timestamps body", error=str(e), body=r.text[:300])
+        return None
+    if len(pcm) < 2:
+        logger.warning("ElevenLabs TTS failed", reason="empty audio", body=r.text[:300])
+        return None
     with wave.open(str(wav_path), "wb") as w:
         w.setnchannels(1)
         w.setsampwidth(2)
         w.setframerate(ELEVENLABS_RATE)
         w.writeframes(pcm[: len(pcm) & ~1])
-    return True
+    return {"alignment": data.get("alignment")}
 
 
 async def synthesize_line_audio(
-    text: str, job_id: str, envoy_id: str = "default"
-) -> tuple[str, str] | None:
+    text: str, job_id: str, envoy_id: str = "default", previous_text: str | None = None
+) -> tuple[str, str, dict[str, Any] | None] | None:
     """PA250_TTS: 'auto' (ElevenLabs if keyed, else say), 'say', 'elevenlabs', 'off'.
 
-    Returns (wav path, backend) or None. Logs the backend, duration and path, or why nothing was made.
+    Returns (wav path, backend, ElevenLabs alignment or None) or None. Logs the backend, duration and path,
+    or why nothing was made.
     """
     mode = os.getenv("PA250_TTS", "auto").lower()
     if mode == "off" or not text.strip():
@@ -220,7 +229,8 @@ async def synthesize_line_audio(
         if mode not in ("auto", backend):
             continue
         t0 = time.monotonic()
-        if await fn(text, wav, voice):
+        meta = await fn(text, wav, voice, previous_text)
+        if meta is not None:
             logger.info(
                 "TTS done",
                 job_id=job_id,
@@ -231,7 +241,7 @@ async def synthesize_line_audio(
                 envoy=envoy_id,
                 voice_id=voice.voice_id if backend == "elevenlabs" else voice.say_voice,
             )
-            return str(wav), backend
+            return str(wav), backend, meta.get("alignment")
     logger.warning("TTS produced no audio", job_id=job_id, mode=mode, envoy=envoy_id)
     return None
 
@@ -300,7 +310,7 @@ def backend_status() -> list[dict[str, Any]]:
 
 
 async def render_avatar_line(
-    text: str, job_id: str, portrait: Path | None = None, envoy_id: str = "default"
+    text: str, job_id: str, portrait: Path | None = None, envoy_id: str = "default", previous_text: str | None = None
 ) -> AvatarLine:
     """TTS, then video: musetalk_local -> musetalk_remote (not built) -> fal_talking -> did -> audio_only.
 
@@ -310,18 +320,24 @@ async def render_avatar_line(
     """
     notes: list[str] = []
     portrait = portrait or DEFAULT_PORTRAIT
-    tts = await synthesize_line_audio(text, job_id, envoy_id=envoy_id)
+    tts = await synthesize_line_audio(text, job_id, envoy_id=envoy_id, previous_text=previous_text)
     if tts is None:
         notes.append("no audio (TTS off or unavailable)")
         return AvatarLine(None, None, "none", notes)
-    audio, tts_backend = tts
+    audio, tts_backend, *rest = tts
+    alignment = rest[0] if rest else None
     seconds = wav_seconds(audio)
+    visemes = curves_from_alignment(alignment, seconds)
+    if visemes is None:  # `say` backup or no timestamps: spread the letters over the clip
+        visemes = curves_from_alignment(approximate_alignment(text, seconds), seconds)
+        if visemes is not None:
+            visemes["approx"] = True
     VIDEO_DIR.mkdir(parents=True, exist_ok=True)
     out_mp4 = VIDEO_DIR / f"{job_id}.mp4"
     mode = os.getenv("PA250_AVATAR", "auto").lower()
 
     def done(video: str | None, backend: str) -> AvatarLine:
-        return AvatarLine(audio, video, backend, notes, tts_backend, seconds)
+        return AvatarLine(audio, video, backend, notes, tts_backend, seconds, visemes)
 
     async def chain() -> AvatarLine:
         if mode in ("auto", "musetalk"):

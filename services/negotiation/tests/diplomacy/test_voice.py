@@ -4,6 +4,7 @@ and speech jobs that survive the client closing the socket."""
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import time
 import wave
@@ -28,6 +29,9 @@ class _Resp:
     @property
     def text(self) -> str:
         return self.content.decode(errors="replace")
+
+    def json(self) -> Any:
+        return json.loads(self.content)
 
 
 def _fake_post(
@@ -60,12 +64,15 @@ def test_elevenlabs_writes_24k_mono_wav(
     monkeypatch.setenv("PA250_TTS", "elevenlabs")
     monkeypatch.setattr(avatar, "AUDIO_DIR", tmp_path)
     seen: list[dict[str, Any]] = []
-    _fake_post(monkeypatch, _Resp(200, b"\x01\x00" * 24000, "audio/pcm"), seen)
+    alignment = {"characters": list("Good day"), "character_start_times_seconds": [i * 0.1 for i in range(8)],
+                 "character_end_times_seconds": [i * 0.1 + 0.1 for i in range(8)]}
+    body = json.dumps({"audio_base64": base64.b64encode(b"\x01\x00" * 24000).decode(), "alignment": alignment})
+    _fake_post(monkeypatch, _Resp(200, body.encode(), "application/json"), seen)
     out = asyncio.run(
         avatar.synthesize_line_audio("Good day, sir.", "j1", envoy_id="british")
     )
-    assert out is not None and out[1] == "elevenlabs"
-    assert seen[0]["params"] == {"output_format": "pcm_24000"}
+    assert out is not None and out[1] == "elevenlabs" and out[2] == alignment
+    assert seen[0]["params"] == {"output_format": "pcm_24000"} and seen[0]["url"].endswith("/with-timestamps")
     assert avatar.voice_for("british").voice_id in seen[0]["url"]
     with wave.open(out[0], "rb") as w:
         assert (
@@ -88,7 +95,7 @@ def test_elevenlabs_failure_logs_status_and_falls_back_to_say(
         [],
     )
 
-    async def say_ok(text: str, wav: Path, voice: avatar.EnvoyVoice) -> bool:
+    async def say_ok(text: str, wav: Path, voice: avatar.EnvoyVoice, previous_text: str | None = None) -> dict:
         with wave.open(str(wav), "wb") as w:
             (
                 w.setnchannels(1),
@@ -96,7 +103,7 @@ def test_elevenlabs_failure_logs_status_and_falls_back_to_say(
                 w.setframerate(22050),
                 w.writeframes(b"\x00\x00" * 2205),
             )
-        return True
+        return {}
 
     monkeypatch.setattr(avatar, "_tts_say", say_ok)
     seen_logs: list[tuple[str, dict[str, Any]]] = []
@@ -128,7 +135,7 @@ def test_say_failure_logs_exit_code(
         avatar.logger, "warning", lambda msg, **kw: seen_logs.append((msg, kw))
     )
     v = avatar.EnvoyVoice("x", "v", "m", say_voice="Nobody")
-    assert not asyncio.run(avatar._tts_say("hi", tmp_path / "a.wav", v))
+    assert asyncio.run(avatar._tts_say("hi", tmp_path / "a.wav", v)) is None
     assert seen_logs[0][0] == "say TTS failed" and seen_logs[0][1]["exit_code"] == 1
 
 
@@ -141,7 +148,7 @@ def test_speech_job_survives_socket_close(
     finished: list[str] = []
 
     async def slow_render(
-        text: str, job_id: str, portrait: Path | None = None, envoy_id: str = "default"
+        text: str, job_id: str, portrait: Path | None = None, envoy_id: str = "default", previous_text: str | None = None
     ) -> avatar.AvatarLine:
         await asyncio.sleep(0.5)
         finished.append(envoy_id)

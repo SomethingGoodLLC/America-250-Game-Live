@@ -55,7 +55,8 @@ def test_turns_to_messages_alternates_and_ends_with_user() -> None:
 
 
 def test_stream_dialogue_uses_single_tool_and_emits_events(base_context: dict) -> None:
-    fake = SimpleNamespace(messages=FakeMessages({"spoken_line": "Done.", "clauses": [{"type": "ceasefire", "days": 2}]}))
+    msgs = FakeMessages({"spoken_line": "Done.", "clauses": [{"type": "ceasefire", "days": 2}]})
+    fake = SimpleNamespace(messages=msgs, beta=SimpleNamespace(messages=msgs))  # fallbacks go through client.beta
     prov = ClaudeProvider({"client": fake, "model": "test-model"})
 
     async def run() -> list[Any]:
@@ -67,7 +68,8 @@ def test_stream_dialogue_uses_single_tool_and_emits_events(base_context: dict) -
     assert call["tool_choice"] == {"type": "auto"}
     assert [tool["name"] for tool in call["tools"]] == ["respond_as_envoy"]
     assert call["model"] == "test-model"
-    assert "never cede boston" in call["system"].lower()
+    system_text = " ".join(b["text"] for b in call["system"])  # one cached text block
+    assert "never cede boston" in system_text.lower() and call["system"][-1]["cache_control"] == {"type": "ephemeral"}
     ctx = DiplomacyContext(**base_context)
     wire, errors = finalize_proposal(ctx, events[1].payload["proposal"])
     assert errors == [] and wire["clauses"] == [{"type": "ceasefire", "days": 2}]
@@ -82,7 +84,8 @@ def test_model_output_with_boston_cession_is_rejected_by_python(base_context: di
 
 
 def test_api_failure_propagates_so_caller_can_fall_back(base_context: dict) -> None:
-    prov = ClaudeProvider({"client": SimpleNamespace(messages=FakeMessages(error=RuntimeError("401")))})
+    failing = FakeMessages(error=RuntimeError("401"))
+    prov = ClaudeProvider({"client": SimpleNamespace(messages=failing, beta=SimpleNamespace(messages=failing))})
 
     async def run() -> None:
         async for _ in prov.stream_dialogue([_turn("player", "hi")], _wc(base_context)):

@@ -2,6 +2,17 @@
 
 **Vertical slice M0–M8 complete. Battle Feel B1–B4 complete.** Nothing committed or stashed; all changes are uncommitted in the working tree.
 
+## 2026-11-09 — Rifle aim pitch unstuck
+- The musket barrel was clamped to ±45°, so looking up past that left the rifle behind the view. The limit is now ±85°, in line with the camera.
+- Shoulder-camera rotation lag is off. Its substepped blend was stalling pitch (yaw still moved), which is the same "can't aim higher" report that previously cleared only after an editor restart. `FrameHumanCamera` also resets the arm's relative pitch and the view pitch range to ±89 on spawn.
+- Verified: editor build Succeeded; `-run=PA250Visuals` failures=0. Upward-aim measure: barrel.forward=1.000 at a 70° upward aim (both factions). PIE look is not re-checked this pass.
+
+## 2026-11-10 — Army counters redesigned for readability
+- **Problem (screenshot):** an army at wide zoom was a small pale-blue disc with a white bar — it read as a minus button, sat visually below the big town diamonds, and its plate ("Militia / Yours") said nothing about strength.
+- **New compact counter** ([PA250ArmyToken.cpp](/Users/leone/PycharmProjects/Samson/unreal/PlayAmerica250/Source/PlayAmerica250/Campaign/PA250ArmyToken.cpp:276)): a NATO-style infantry counter — parchment-framed rectangle (gold frame when selected), faction-coloured body, crossed parchment bars. Shape coding is now consistent: **towns are diamonds, armies are crossed rectangles**, at 38 px on screen (was a 30 px disc). `GetDrawnRect`/`HitTest` follow the rectangle, so clicking the counter still selects the army.
+- **Plate:** your armies now read `Militia / Yours · 22 fit` on the map itself; British plates still show no strength (unreported by design). Slot sizing uses the same plate string, so anchors don't move.
+- **Verified:** editor build **Succeeded**; `PA250MapFraming` passed (26 army slots, 13 town washes, Success 0 errors); `PA250Battle` checks=275 fails=0; sim 9164/0. Counter not yet seen in PIE — restart the editor (it was open during a previous build) and look at Concord at wide zoom.
+
 ## 2026-11-10 — Army selection/movement clarity + branding
 - **Branding:** the only player-visible "PA250" was the top-bar crest; it now reads **⚜ Play America 250**. Code/asset names keep the PA250 prefix (internal only).
 - **Your forces panel** (top-left, under the bar): one clickable button per player army — `⚔ Massachusetts Militia — Concord · 22 fit · holding` (or `→ Lexington` when marching, `▶` when selected). Clicking selects the army, focuses it, and the gold banner under the top bar states what to do next: "selected — at Concord · Click a town to march there · Esc / right-click cancels", with the route (`Concord → Lincoln → Lexington`) once marching. The panel hides while a staff letter or battle owns the screen (the correspondence panel in the screenshot sat where it would collide).
@@ -1452,3 +1463,10 @@ With `fal` in the chain, the reply text appears at once, but voice and video com
 - Evidence: `scripts/run_voice_test.sh` PASSED with sound: 6.32 s line, `lip-sync 130 changes`; second run `94 frame changes, 16 distinct cells over 6.08s`; four HighResShots mid-line (cells 0, 11, 10, 8) show the same head with different mouths. The test now fails if the mouth moved fewer than 3 times per second of speech.
 - No added latency or cost. Not phoneme-accurate (loudness-driven), and middle cells mix shapes (aperture metric).
 - The user's running service (PID 88592) still has `PA250_LLM=mock PA250_TTS=say`; restart it with `scripts/start_service.sh`.
+
+## 2026-11-09 — Lip warp / streaming / life: started, paused at usage limit
+
+- Done: envoy voice switched to George (interim; `diplomacy/envoy_voices.yaml`). `diplomacy/visemes.py`: ElevenLabs character timings -> 30 Hz JawOpen/LipsWide/LipsRound/LipsPressed curves with coarticulation (Gaussian blend; closures by max); `approximate_alignment` for the `say` backup. Standalone check ran; not yet wired in.
+- Blocked: ElevenLabs Voice Design via API returns 403 `feature_not_available` ("only available on a paid plan"), so the three Gage voice candidates cannot be generated on this key.
+- Note: root `.gitignore` ignores `*.mp3` and `*.mp4`, so files in `docs/preview/voices/` and `docs/preview/*.mp4` would not be committed.
+- Not started: TTS via `/with-timestamps` + curves in the speech event; latency logging (service + room) and baseline; streaming Claude sentences -> TTS with a chunk queue in the room; considering idle; warp material (Custom HLSL) + per-envoy face data asset + breathing/drift/eye shifts/blink (closed-eyes image via a fal edit model); 16-shape atlas behind a flag; 4 pre-rendered 720p fal lines (greeting, refusal, acceptance, consider); side-by-side capture; before/after latency numbers.

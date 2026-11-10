@@ -22,7 +22,7 @@ def _fake_audio(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     wav.write_bytes(b"RIFF")
 
     async def fake(
-        text: str, job_id: str, envoy_id: str = "default"
+        text: str, job_id: str, envoy_id: str = "default", previous_text: str | None = None
     ) -> tuple[str, str]:
         return str(wav), "say"
 

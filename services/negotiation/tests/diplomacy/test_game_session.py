@@ -23,14 +23,16 @@ def _session(client: TestClient, ctx: dict, **extra: Any) -> str:
 
 
 def _converse(client: TestClient, sid: str, text: str, fmt: str = "json") -> list[dict[str, Any]]:
-    """Send one utterance; collect messages through diplomacy_proposal and the avatar event."""
+    """Send one utterance; collect messages until both diplomacy_proposal and envoy_speech_end have arrived."""
     out: list[dict[str, Any]] = []
     with client.websocket_connect(f"/v1/session/{sid}/control?format={fmt}") as ws:
         ws.send_text(json.dumps({"type": "player_utterance", "text": text}))
         for _ in range(40):
             msg = json.loads(ws.receive_text())
             out.append(msg)
-            if msg.get("type") in ("avatar_unavailable", "sadtalker_video_ready", "representative_unavailable"):
+            types = {m.get("type") for m in out}
+            # speech may arrive before the proposal (it streams); stop once both are in
+            if "representative_unavailable" in types or {"diplomacy_proposal", "envoy_speech_end"} <= types:
                 break
     return out
 

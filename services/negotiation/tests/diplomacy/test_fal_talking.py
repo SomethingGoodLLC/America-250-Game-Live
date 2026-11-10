@@ -177,7 +177,7 @@ def test_timeout_goes_audio_only_and_cancels_fal(
     wav = _wav(tmp_path / "line.wav", _speech([2.0]))
 
     async def fake_tts(
-        text: str, job_id: str, envoy_id: str = "default"
+        text: str, job_id: str, envoy_id: str = "default", previous_text: str | None = None
     ) -> tuple[str, str]:
         return str(wav), "elevenlabs"
 
@@ -247,7 +247,7 @@ def test_voice_first_uses_only_cached_video(
     portrait.write_bytes(b"jpeg")
 
     async def fake_tts(
-        text: str, job_id: str, envoy_id: str = "default"
+        text: str, job_id: str, envoy_id: str = "default", previous_text: str | None = None
     ) -> tuple[str, str]:
         return str(wav), "elevenlabs"
 

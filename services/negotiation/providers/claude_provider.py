@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from typing import Any
 
 import structlog
@@ -27,6 +27,8 @@ logger = structlog.get_logger(__name__)
 
 DEFAULT_MODEL = "claude-sonnet-5-5"
 TOOL_NAME = "respond_as_envoy"
+# Models that take the server-side refusal fallback (`fallbacks: "default"`, beta server-side-fallback-2026-07-01).
+FALLBACK_MODELS = {"claude-sonnet-5-5", "claude-opus-5-5", "claude-opus-5", "claude-fable-5-1", "claude-fable-5-2"}
 
 
 def build_tool_schema(allowed_types: list[str]) -> dict[str, Any]:
@@ -218,7 +220,12 @@ class ClaudeProvider(Provider):
         self.model: str = (
             config.get("model") or os.getenv("PA250_LLM_MODEL") or DEFAULT_MODEL
         )
-        self.max_tokens: int = int(config.get("max_tokens") or 600)
+        # Thinking tokens count against max_tokens: 600 left nothing for the reply on longer talks (empty `{}`).
+        self.max_tokens: int = int(config.get("max_tokens") or os.getenv("PA250_LLM_MAX_TOKENS") or 4000)
+        # Spoken negotiation is chat: low effort answers fast. PA250_LLM_THINKING=between_tools turns thinking
+        # off on Sonnet 5.5 (accepted at effort high or below); "adaptive" leaves it to the model.
+        self.effort: str = os.getenv("PA250_LLM_EFFORT", "low")
+        self.thinking: str = os.getenv("PA250_LLM_THINKING", "adaptive")
         self.timeout: float = float(config.get("timeout", 20.0))
         self._client: Any = config.get("client")
 
@@ -238,27 +245,10 @@ class ClaudeProvider(Provider):
         player_id: str,
     ) -> dict[str, Any]:
         """Call Claude; return the raw (untrusted) tool input dict. Raises on API failure."""
-        messages = turns_to_messages(turns, player_id)
-        if not messages:
-            raise ValueError("no player turn to answer")
         client = self._get_client()
-        resp = await client.messages.create(
-            model=self.model,
-            max_tokens=self.max_tokens,
-            system=build_system_prompt(ctx, envoy_name, envoy_title),
-            messages=messages,
-            tools=[
-                {
-                    "name": TOOL_NAME,
-                    "description": "Reply to the player as the envoy, with optional binding clauses.",
-                    "input_schema": build_tool_schema(ctx.allowed_clause_types),
-                    "strict": True,  # schema-valid arguments; forced tool_choice is not available
-                }
-            ],
-            # Sonnet 5.5 rejects forced tool_choice: "auto" + one strict tool + the system prompt, and
-            # we raise if no tool_use block comes back (the caller then falls back to MockLocal).
-            tool_choice={"type": "auto"},
-        )
+        req = self._request(turns, ctx, envoy_name, envoy_title, player_id)
+        api = client.beta.messages if "betas" in req else client.messages
+        resp = await api.create(**req)
         if getattr(resp, "stop_reason", None) == "refusal":
             raise ValueError("model refused; falling back")
         for block in resp.content:
@@ -267,6 +257,90 @@ class ClaudeProvider(Provider):
                 if isinstance(data, dict):
                     logger.info("claude proposal (raw)", proposal=data)
                     return data
+        raise ValueError("model returned no tool_use block")
+
+    def _request(self, turns: list[SpeakerTurnModel], ctx: DiplomacyContext, envoy_name: str, envoy_title: str,
+                 player_id: str, stream: bool = False) -> dict[str, Any]:
+        messages = turns_to_messages(turns, player_id)
+        if not messages:
+            raise ValueError("no player turn to answer")
+        tool: dict[str, Any] = {
+            "name": TOOL_NAME,
+            "description": "Reply to the player as the envoy, with optional binding clauses.",
+            "input_schema": build_tool_schema(ctx.allowed_clause_types),
+            "strict": True,
+        }
+        if stream:
+            # Stream the tool arguments as they are written (spoken_line first). The API then stops validating
+            # them; finalize_proposal and the sim validate every clause anyway.
+            tool["eager_input_streaming"] = True
+        req: dict[str, Any] = {
+            "model": self.model,
+            "max_tokens": self.max_tokens,
+            # Tools + system (rules and the session's world state) are identical for every line of a session:
+            # cache them so later lines skip reprocessing (prefix match; nothing volatile before the breakpoint).
+            "system": [{"type": "text", "text": build_system_prompt(ctx, envoy_name, envoy_title),
+                        "cache_control": {"type": "ephemeral"}}],
+            "messages": messages,
+            "tools": [tool],
+            "tool_choice": {"type": "auto"},  # forced tool_choice is a 400 on Sonnet 5.5
+            "output_config": {"effort": self.effort},
+        }
+        if self.thinking != "adaptive":
+            req["thinking"] = {"type": self.thinking}
+        if self.model in FALLBACK_MODELS:
+            # A policy decline is re-run server-side on a model chosen by refusal category, not left silent.
+            req["betas"] = ["server-side-fallback-2026-07-01"]
+            req["fallbacks"] = "default"
+        return req
+
+    async def propose_streaming(
+        self, turns: list[SpeakerTurnModel], ctx: DiplomacyContext, envoy_name: str, envoy_title: str,
+        player_id: str, on_sentence: Callable[[str], Awaitable[None]],
+    ) -> dict[str, Any]:
+        """Like propose(), but hands each completed sentence of spoken_line to `on_sentence` while Claude is
+        still writing, so speech can start early. Returns the full raw (untrusted) tool input. Raises on failure
+        before the first sentence; the caller falls back to the non-streaming path."""
+        from diplomacy.streaming import SentenceStreamer
+
+        client = self._get_client()
+        streamer = SentenceStreamer()
+        text_streamer = SentenceStreamer()  # if the model answers in plain text instead of the tool
+        buf, plain = "", ""
+        req = self._request(turns, ctx, envoy_name, envoy_title, player_id, stream=True)
+        api = client.beta.messages if "betas" in req else client.messages
+        async with api.stream(**req) as stream:
+            async for event in stream:
+                if getattr(event, "type", "") != "content_block_delta":
+                    continue
+                kind = getattr(event.delta, "type", "")
+                if kind == "input_json_delta":
+                    buf += event.delta.partial_json
+                    for sentence in streamer.feed(buf):
+                        await on_sentence(sentence)
+                elif kind == "text_delta" and not buf:
+                    plain += event.delta.text
+                    for sentence in text_streamer.feed_text(plain):
+                        await on_sentence(sentence)
+            final = await stream.get_final_message()
+        for sentence in streamer.finish() if buf else text_streamer.finish():
+            await on_sentence(sentence)
+        stop = getattr(final, "stop_reason", None)
+        if stop == "refusal":
+            raise ValueError("model refused; falling back")
+        if stop == "max_tokens":
+            logger.warning("claude reply cut off at max_tokens", max_tokens=self.max_tokens)
+        for block in final.content:
+            if getattr(block, "type", "") == "tool_use" and getattr(block, "name", "") == TOOL_NAME and isinstance(block.input, dict):
+                usage = getattr(final, "usage", None)
+                logger.info("claude proposal (raw, streamed)", proposal=block.input, model=getattr(final, "model", self.model),
+                            stop_reason=stop, output_tokens=getattr(usage, "output_tokens", None),
+                            cache_read=getattr(usage, "cache_read_input_tokens", None),
+                            cache_write=getattr(usage, "cache_creation_input_tokens", None))
+                return block.input
+        if plain.strip():  # spoken already, sentence by sentence; no tool call means no clauses
+            logger.warning("claude answered without the tool; spoken text kept, no clauses", text=plain[:200])
+            return {"spoken_line": plain.strip(), "clauses": []}
         raise ValueError("model returned no tool_use block")
 
     async def stream_dialogue(  # type: ignore[override]
