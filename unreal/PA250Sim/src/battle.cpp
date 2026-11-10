@@ -9,30 +9,29 @@ int ticket_total(const std::map<std::string, int>& tickets) {
     return n;
 }
 
-std::map<std::string, int> gate_tickets_by_stores(const CampaignState& state, const Army& army) {
-    std::map<std::string, int> tickets = army.units;
-    const auto sit = state.stores.find(army.faction);
-    if (sit == state.stores.end()) return tickets;
-    const FactionStores& st = sit->second;
+std::map<std::string, int> gate_tickets_by_stores(const CampaignState& state, const Army& army,
+                                                  const std::string& battle_province) {
+    std::map<std::string, int> tickets = army.units;  // fit only
+    const ProvinceStores& st = province_ledger(state, battle_province);
 
     int total = 0;
     for (const auto& kv : tickets) total += std::max(0, kv.second);
     if (total <= 0) return tickets;
 
-    // Arms: need roughly one serviceable arm per unit fielded.
-    if (st.arms < total && total > 0) {
-        const double scale = static_cast<double>(std::max(0, st.arms)) / static_cast<double>(total);
+    // Muskets: need roughly one serviceable musket per unit fielded.
+    if (st.muskets < total && total > 0) {
+        const double scale = static_cast<double>(std::max(0, st.muskets)) / static_cast<double>(total);
         for (auto& kv : tickets) {
             if (kv.first == "militia" || kv.second > 0)
                 kv.second = std::max(0, static_cast<int>(kv.second * scale + 0.5));
         }
     }
 
-    // Powder shortage mainly stands down militia (line keeps a minimum).
+    // Cartridges (not powder) cap how many militia can be fielded with ammunition.
     auto mit = tickets.find("militia");
     if (mit != tickets.end() && mit->second > 0) {
-        const int powder_cap = std::max(0, st.powder);
-        if (powder_cap < mit->second) mit->second = powder_cap;
+        const int cart_cap = std::max(0, st.cartridges);
+        if (cart_cap < mit->second) mit->second = cart_cap;
     }
 
     // Readiness / fatigue soft-cap (aggregate, not personal inventory).
@@ -43,7 +42,7 @@ std::map<std::string, int> gate_tickets_by_stores(const CampaignState& state, co
     }
 
     // Temporary personnel commitments hold paper units out of fielding without touching
-    // Army.units, arms, readiness, or morale.
+    // Army.units, equipment, readiness, or morale.
     for (const auto& pc : state.progress.personnel_commitments) {
         if (pc.army_id != army.id || pc.count <= 0) continue;
         if (pc.release_on_hour > 0 && state.now.hour_index >= pc.release_on_hour) continue;
@@ -118,6 +117,8 @@ BattleSetup build_battle_setup(const CampaignState& state, const std::string& pr
     b.defender_faction = dit->second.faction;
     b.seed = detail::mix64(state.seed ^ detail::mix64(static_cast<uint64_t>(state.now.hour_index)) ^
                            detail::fnv1a(province));
+    b.province_cartridges = province_ledger(state, province).cartridges;
+    b.force_notes = "sourced approximation — not a precise muster roll";
     for (const auto& tag : pit->second.terrain) b.terrain_tags.push_back(tag);
     // The clock pauses on contact, so the attacker's previous province is the edge just marched.
     if (!ait->second.previous_province.empty()) {
@@ -138,9 +139,15 @@ BattleSetup build_battle_setup(const CampaignState& state, const std::string& pr
         SideSetup s;
         s.faction = a->faction;
         s.army_id = a->id;
-        s.tickets = gate_tickets_by_stores(state, *a);
+        s.tickets = gate_tickets_by_stores(state, *a, province);
         s.morale = a->morale;
         s.readiness = a->readiness;
+        // Fortifications help whoever holds the province defend it.
+        if (a->faction == pit->second.owner && pit->second.fort_level > 0) {
+            s.morale = detail::clamp_int(s.morale + 3 * pit->second.fort_level, 0, 100);
+            s.readiness = detail::clamp_int(s.readiness + 2 * pit->second.fort_level, 0, 100);
+        }
+        s.cartridge_budget = b.province_cartridges;
         s.retreat_province = choose_retreat(state, province, a->faction);
         b.sides[a->faction] = s;
     }
@@ -159,15 +166,15 @@ CampaignState apply_battle_result(const CampaignState& in, const BattleResult& r
     CampaignState s = in;
     ensure_logistics_defaults(s);
     const std::string loser = detail::other_faction(r.winner);
+    const int support_before = s.local_support;
+    const std::string owner_before = s.provinces.at(r.province_id).owner;
 
-    // The force actually fielded is the stores-gated ticket pool from before the battle,
-    // not the paper roster: units stood down for want of powder/arms expend nothing.
     std::map<std::string, int> fielded_by_army;
     std::map<std::string, std::map<std::string, int>> gated_by_army;
     for (const std::string& aid : {pb.attacker_army, pb.defender_army}) {
         auto it = in.armies.find(aid);
         if (it == in.armies.end()) continue;
-        gated_by_army[aid] = gate_tickets_by_stores(in, it->second);
+        gated_by_army[aid] = gate_tickets_by_stores(in, it->second, r.province_id);
     }
     if (scenario_preset_for_province(r.province_id) == "concord_bridge") {
         int prov = 0;
@@ -182,7 +189,7 @@ CampaignState apply_battle_result(const CampaignState& in, const BattleResult& r
     }
     for (const auto& gk : gated_by_army) fielded_by_army[gk.first] = ticket_total(gk.second);
 
-    // Losses per unit class, clamped to what the army has.
+    // Killed: reduce fit. Wounded: move fit → wounded.
     for (const auto& fk : r.losses) {
         for (const std::string& aid : {pb.attacker_army, pb.defender_army}) {
             auto it = s.armies.find(aid);
@@ -194,8 +201,49 @@ CampaignState apply_battle_result(const CampaignState& in, const BattleResult& r
             }
         }
     }
+    for (const auto& fk : r.wounded) {
+        for (const std::string& aid : {pb.attacker_army, pb.defender_army}) {
+            auto it = s.armies.find(aid);
+            if (it == s.armies.end() || it->second.faction != fk.first) continue;
+            for (const auto& ck : fk.second) {
+                if (ck.second <= 0) continue;
+                auto& fit = it->second.units[ck.first];
+                const int move = std::min(fit, ck.second);
+                fit -= move;
+                it->second.wounded[ck.first] += move;
+            }
+        }
+    }
 
-    // Expend powder/arms for units that fought; recover a few arms on a costly win.
+    // Expend cartridges (and optional powder) from the battle province. No free refill.
+    ProvinceStores& pst = province_ledger(s, r.province_id);
+    const int cart_before = pst.cartridges;
+    const int powder_before = pst.powder;
+    int total_cart_spent = 0;
+    int total_powder_spent = 0;
+    for (const auto& kv : r.cartridges_spent) total_cart_spent += std::max(0, kv.second);
+    for (const auto& kv : r.powder_spent) total_powder_spent += std::max(0, kv.second);
+
+    // If UE omitted spend, derive from fielded tickets (2 cartridges per engaged, clamped).
+    if (total_cart_spent <= 0) {
+        for (const auto& fk : fielded_by_army) {
+            auto it = in.armies.find(fk.first);
+            if (it == in.armies.end()) continue;
+            const int spend = std::max(0, fk.second * 2);
+            total_cart_spent += spend;
+        }
+    }
+    total_cart_spent = std::min(total_cart_spent, cart_before);
+    total_powder_spent = std::min(total_powder_spent, powder_before);
+    pst.cartridges = cart_before - total_cart_spent;
+    pst.powder = powder_before - total_powder_spent;
+
+    // Musket loss from killed (equipment broken/captured); no free recovery.
+    int muskets_lost = 0;
+    for (const auto& fk : r.losses)
+        for (const auto& ck : fk.second) muskets_lost += std::max(0, ck.second);
+    pst.muskets = std::max(0, pst.muskets - muskets_lost);
+
     for (const std::string& aid : {pb.attacker_army, pb.defender_army}) {
         auto it = s.armies.find(aid);
         if (it == s.armies.end()) continue;
@@ -203,19 +251,8 @@ CampaignState apply_battle_result(const CampaignState& in, const BattleResult& r
         int lost = 0;
         if (loss_it != r.losses.end())
             for (const auto& ck : loss_it->second) lost += std::max(0, ck.second);
-        const int engaged = fielded_by_army.count(aid) ? fielded_by_army.at(aid) : 0;
-        FactionStores& st = s.stores[it->second.faction];
-        const int powder_use = engaged > 0 ? std::min(st.powder, engaged / 2) : 0;
-        const int arms_lost = std::min(st.arms, lost);
-        st.powder = std::max(0, st.powder - powder_use);
-        st.arms = std::max(0, st.arms - arms_lost);
         it->second.fatigue = detail::clamp_int(it->second.fatigue + 15 + lost, 0, 100);
         it->second.readiness = detail::clamp_int(it->second.readiness - 10 - lost, 0, 100);
-    }
-    if (r.winner == s.player_faction) {
-        // Recover a few serviceable arms from the field (not allegiance).
-        auto& st = s.stores[s.player_faction];
-        st.arms += 1;
     }
 
     // Morale, retreat, destruction.
@@ -223,16 +260,17 @@ CampaignState apply_battle_result(const CampaignState& in, const BattleResult& r
     {
         auto pit = s.provinces.find(r.province_id);
         bool ok = pit != s.provinces.end() && detail::contains(pit->second.adjacent, retreat);
-        if (ok)  // retreat must not be into an enemy army
+        if (ok)
             for (const auto& kv : s.armies)
                 if (kv.second.province == retreat && kv.second.faction == r.winner) ok = false;
         if (!ok) retreat = choose_retreat(in, r.province_id, loser);
     }
+    std::map<std::string, int> morale_delta;
     for (auto& kv : s.armies) {
         Army& a = kv.second;
-        // Only the two armies whose tickets were included fought this battle.
         if (kv.first != pb.attacker_army && kv.first != pb.defender_army) continue;
         if (a.province != r.province_id) continue;
+        const int before = a.morale;
         if (a.faction == r.winner) {
             a.morale = detail::clamp_int(a.morale + 5, 0, 100);
         } else {
@@ -242,6 +280,7 @@ CampaignState apply_battle_result(const CampaignState& in, const BattleResult& r
                 a.province = retreat;
             }
         }
+        morale_delta[kv.first] = a.morale - before;
     }
     for (const std::string& aid : {pb.attacker_army, pb.defender_army}) {
         auto it = s.armies.find(aid);
@@ -260,9 +299,7 @@ CampaignState apply_battle_result(const CampaignState& in, const BattleResult& r
     }
 
     // Ownership: the winner takes the ground when they held the objective.
-    // Escalating Parker's company (hold_stores) adds a second way to lose it: if his
-    // army is beaten, the town is forfeit even when the winner never held the post.
-    // Protected provinces (Boston) stay outside that risk.
+    // Capturing ground never raises local_support by itself.
     bool stores_forfeit = false;
     const DetachedCommander& cmd = s.progress.commander;
     if (cmd.objective == "hold_stores" && r.winner != s.player_faction && r.objective_holder != r.winner &&
@@ -277,6 +314,40 @@ CampaignState apply_battle_result(const CampaignState& in, const BattleResult& r
         if (stores_forfeit)
             detail::add_log(s, "stores exposed: " + r.province_id + " forfeited when the field was lost");
     }
+    // Stores stay in the province on capture (magazine capture). local_support unchanged.
+    if (s.local_support != support_before) s.local_support = support_before;
+
+    BattleReport report;
+    report.province_id = r.province_id;
+    report.winner = r.winner;
+    report.province_owner_before = owner_before;
+    report.province_owner_after = s.provinces.at(r.province_id).owner;
+    report.local_support_before = support_before;
+    report.local_support_after = s.local_support;
+    report.objective_holder = r.objective_holder;
+    report.objectives_held = r.objectives_held;
+    report.losses = r.losses;
+    report.wounded = r.wounded;
+    // Split spent across sides for the report (proportional to fielded, clamped total).
+    int fielded_all = 0;
+    for (const auto& fk : fielded_by_army) fielded_all += fk.second;
+    for (const std::string& aid : {pb.attacker_army, pb.defender_army}) {
+        auto it = in.armies.find(aid);
+        if (it == in.armies.end()) continue;
+        const int engaged = fielded_by_army.count(aid) ? fielded_by_army.at(aid) : 0;
+        int cart = 0;
+        if (r.cartridges_spent.count(it->second.faction))
+            cart = std::max(0, r.cartridges_spent.at(it->second.faction));
+        else if (fielded_all > 0)
+            cart = total_cart_spent * engaged / fielded_all;
+        report.cartridges_spent[it->second.faction] = cart;
+        int pwd = 0;
+        if (r.powder_spent.count(it->second.faction))
+            pwd = std::max(0, r.powder_spent.at(it->second.faction));
+        report.powder_spent[it->second.faction] = pwd;
+    }
+    report.morale_delta = morale_delta;
+    s.progress.last_battle_report = report;
 
     s.memory.push_back(
         {s.now.hour_index, r.winner, "Battle of " + s.provinces.at(r.province_id).name + " won by " + r.winner});
@@ -284,7 +355,8 @@ CampaignState apply_battle_result(const CampaignState& in, const BattleResult& r
     detail::add_log(s, "battle at " + r.province_id + " won by " + r.winner);
 
     ++s.progress.battles_fought;
-    if (r.province_id == "lexington" || s.progress.battles_fought == 1) {
+    // Opening-war gate: first battle (Concord in this slice) unlocks aftermath correspondence.
+    if (r.province_id == "concord" || r.province_id == "lexington" || s.progress.battles_fought == 1) {
         s.progress.lexington_fought = true;
         s.progress.aftermath_pending = true;
     }

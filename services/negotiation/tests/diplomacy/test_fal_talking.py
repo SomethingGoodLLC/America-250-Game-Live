@@ -21,7 +21,10 @@ def _speech(seconds_list: list[float], gap: float = 0.4) -> np.ndarray:
     parts = []
     for s in seconds_list:
         t = np.arange(int(s * RATE)) / RATE
-        parts += [(0.3 * np.sin(2 * np.pi * 180 * t) * 32767).astype("<i2"), np.zeros(int(gap * RATE), "<i2")]
+        parts += [
+            (0.3 * np.sin(2 * np.pi * 180 * t) * 32767).astype("<i2"),
+            np.zeros(int(gap * RATE), "<i2"),
+        ]
     return np.concatenate(parts).reshape(-1, 1)
 
 
@@ -53,7 +56,9 @@ def test_unavailable_reasons(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("FAL_KEY", raising=False)
     assert fts.FalTalkingVideoSource().unavailable_reason() == "FAL_KEY not set"
     monkeypatch.setenv("FAL_KEY", "x")
-    assert "unknown" in (fts.FalTalkingVideoSource(model="fal-ai/musetalk").unavailable_reason() or "")
+    assert "unknown" in (
+        fts.FalTalkingVideoSource(model="fal-ai/musetalk").unavailable_reason() or ""
+    )
     monkeypatch.setenv("PA250_FAL", "0")
     assert fts.FalTalkingVideoSource().unavailable_reason() == "PA250_FAL=0"
 
@@ -62,7 +67,7 @@ class _FakeHandle:
     def __init__(self, out: dict[str, Any], delay: float) -> None:
         self.out, self.delay, self.cancelled = out, delay, False
 
-    async def get(self) -> dict[str, Any]:
+    async def get(self, interval: float = 0.1) -> dict[str, Any]:
         await asyncio.sleep(self.delay)
         return self.out
 
@@ -104,11 +109,14 @@ def _offline_fal(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         def __init__(self, **_: Any) -> None: ...
         async def __aenter__(self) -> _Http:
             return self
+
         async def __aexit__(self, *_: Any) -> None: ...
         async def get(self, url: str) -> Any:
             class R:
                 content = b"mp4"
+
                 def raise_for_status(self) -> None: ...
+
             return R()
 
     monkeypatch.setattr(fts.httpx, "AsyncClient", _Http)
@@ -124,7 +132,9 @@ def _offline_fal(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setattr(fts, "probe_streams", fake_probe)
 
 
-def test_render_then_cache_hit_makes_no_fal_call(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_render_then_cache_hit_makes_no_fal_call(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     _offline_fal(monkeypatch, tmp_path)
     wav = _wav(tmp_path / "line.wav", _speech([5.6]))
     portrait = tmp_path / "p.jpg"
@@ -132,16 +142,23 @@ def test_render_then_cache_hit_makes_no_fal_call(monkeypatch: pytest.MonkeyPatch
     src = fts.FalTalkingVideoSource(model="veed/fabric-1.0")
     r1 = asyncio.run(src.render(str(wav), str(portrait), str(tmp_path / "a.mp4")))
     assert r1.path and not r1.cache_hit and r1.parts == 1
-    assert _FakeFal.calls[0]["resolution"] == "480p" and _FakeFal.calls[0]["app"] == "veed/fabric-1.0"
+    assert (
+        _FakeFal.calls[0]["resolution"] == "480p"
+        and _FakeFal.calls[0]["app"] == "veed/fabric-1.0"
+    )
     assert r1.est_cost_usd == pytest.approx(6.0 * 0.08)
     assert _FakeFal.uploads == ["p.jpg:1d", "part0.wav:1h"]  # short-lived uploads only
 
     r2 = asyncio.run(src.render(str(wav), str(portrait), str(tmp_path / "b.mp4")))
-    assert r2.cache_hit and r2.est_cost_usd == 0 and len(_FakeFal.calls) == 1  # no second fal call
+    assert (
+        r2.cache_hit and r2.est_cost_usd == 0 and len(_FakeFal.calls) == 1
+    )  # no second fal call
     assert (tmp_path / "b.mp4").read_bytes() == b"muxed"
 
 
-def test_portrait_url_reused_from_source_cache(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_portrait_url_reused_from_source_cache(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     _offline_fal(monkeypatch, tmp_path)
     portrait = tmp_path / "p.jpg"
     portrait.write_bytes(b"jpeg")
@@ -152,25 +169,36 @@ def test_portrait_url_reused_from_source_cache(monkeypatch: pytest.MonkeyPatch, 
     assert [u for u in _FakeFal.uploads if u.startswith("p.jpg")] == ["p.jpg:1d"]
 
 
-def test_timeout_goes_audio_only_and_cancels_fal(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_timeout_goes_audio_only_and_cancels_fal(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     _offline_fal(monkeypatch, tmp_path)
     _FakeFal.delay = 5.0
     wav = _wav(tmp_path / "line.wav", _speech([2.0]))
 
-    async def fake_tts(text: str, job_id: str, envoy_id: str = "default") -> tuple[str, str]:
+    async def fake_tts(
+        text: str, job_id: str, envoy_id: str = "default"
+    ) -> tuple[str, str]:
         return str(wav), "elevenlabs"
 
     monkeypatch.setattr(avatar, "synthesize_line_audio", fake_tts)
     monkeypatch.setattr(avatar, "VIDEO_DIR", tmp_path)
     monkeypatch.setenv("PA250_AVATAR", "fal")
     monkeypatch.setenv("PA250_AVATAR_TIMEOUT", "0.5")
+    monkeypatch.setenv("PA250_VIDEO_WAIT", "1")
     line = asyncio.run(avatar.render_avatar_line("x", "j", portrait=wav))
-    assert line.backend == "audio_only" and line.video_file is None and line.audio_file == str(wav)
+    assert (
+        line.backend == "audio_only"
+        and line.video_file is None
+        and line.audio_file == str(wav)
+    )
     assert any("timed out" in n for n in line.notes)
     assert _FakeFal.handles and _FakeFal.handles[0].cancelled
 
 
-def test_wav_is_never_sent_to_did_as_text(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_wav_is_never_sent_to_did_as_text(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """D-ID gets our audio (upload + script type audio), never text for its own voice."""
     seen: dict[str, Any] = {}
 
@@ -189,8 +217,15 @@ def test_wav_is_never_sent_to_did_as_text(monkeypatch: pytest.MonkeyPatch, tmp_p
     monkeypatch.setenv("DID_API_KEY", "k")
     monkeypatch.setenv("PA250_DID", "1")
     wav = _wav(tmp_path / "line.wav", _speech([1.0]))
-    out = asyncio.run(avatar._did_video(str(wav), tmp_path / "p.jpg", tmp_path / "o.mp4"))
-    assert out and seen["uploaded"] == "line.wav" and seen["audio_url"] == "s3://audio" and "text" not in seen
+    out = asyncio.run(
+        avatar._did_video(str(wav), tmp_path / "p.jpg", tmp_path / "o.mp4")
+    )
+    assert (
+        out
+        and seen["uploaded"] == "line.wav"
+        and seen["audio_url"] == "s3://audio"
+        and "text" not in seen
+    )
 
 
 def test_wav_roundtrip(tmp_path: Path) -> None:
@@ -200,3 +235,38 @@ def test_wav_roundtrip(tmp_path: Path) -> None:
     assert rate == RATE and ch == 1 and np.array_equal(back, pcm)
     with wave.open(str(p)) as w:
         assert w.getsampwidth() == 2
+
+
+def test_voice_first_uses_only_cached_video(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Default (no PA250_VIDEO_WAIT): audio goes out at once; no fal call; a cached render is used if present."""
+    _offline_fal(monkeypatch, tmp_path)
+    wav = _wav(tmp_path / "line.wav", _speech([2.0]))
+    portrait = tmp_path / "p.jpg"
+    portrait.write_bytes(b"jpeg")
+
+    async def fake_tts(
+        text: str, job_id: str, envoy_id: str = "default"
+    ) -> tuple[str, str]:
+        return str(wav), "elevenlabs"
+
+    monkeypatch.setattr(avatar, "synthesize_line_audio", fake_tts)
+    monkeypatch.setattr(avatar, "VIDEO_DIR", tmp_path)
+    monkeypatch.setenv("PA250_AVATAR", "auto")
+    monkeypatch.delenv("PA250_VIDEO_WAIT", raising=False)
+    line = asyncio.run(avatar.render_avatar_line("x", "j1", portrait=portrait))
+    assert line.backend == "audio_only" and not _FakeFal.calls
+
+    asyncio.run(
+        fts.FalTalkingVideoSource().render(
+            str(wav), str(portrait), str(tmp_path / "r.mp4")
+        )
+    )
+    calls = len(_FakeFal.calls)
+    line = asyncio.run(avatar.render_avatar_line("x", "j2", portrait=portrait))
+    assert (
+        line.backend == "fal_talking"
+        and line.video_file
+        and len(_FakeFal.calls) == calls
+    )

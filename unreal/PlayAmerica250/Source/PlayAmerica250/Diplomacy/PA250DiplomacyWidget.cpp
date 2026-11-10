@@ -67,7 +67,10 @@ TSharedRef<SWidget> UPA250DiplomacyWidget::RebuildWidget()
 		{
 		case EPA250DiplomacyState::Connecting: return FText::FromString(TEXT("Connecting to the envoy..."));
 		case EPA250DiplomacyState::Unavailable: return FText::FromString(TEXT("The representative is unavailable. You may Leave; nothing has changed."));
-		case EPA250DiplomacyState::Talking: return FText::FromString(G->bBusy ? TEXT("The envoy considers your words...") : (G->StatusLine.IsEmpty() ? TEXT("Talking. Type your words and press Send.") : *G->StatusLine));
+		case EPA250DiplomacyState::Talking:
+			if (G->IsMicRecording()) return FText::FromString(FString::Printf(TEXT("Listening... %.1fs   (click Stop when you have finished)"), G->GetMicSeconds()));
+			if (G->bTranscribing) return FText::FromString(TEXT("Writing down your words..."));
+			return FText::FromString(G->bBusy ? TEXT("The envoy considers your words...") : (G->StatusLine.IsEmpty() ? TEXT("Type your words and press Send, or click Speak and talk.") : *G->StatusLine));
 		default: return FText::GetEmpty();
 		}
 	};
@@ -95,6 +98,24 @@ TSharedRef<SWidget> UPA250DiplomacyWidget::RebuildWidget()
 		return (G && G->GetUiState() == EPA250DiplomacyState::Talking && !G->bBusy);
 	};
 
+	auto CanMic = [GM]() {
+		const APA250DiplomacyGameMode* G = GM();
+		return G && (G->IsMicRecording() || (G->GetUiState() == EPA250DiplomacyState::Talking && !G->bBusy && !G->bTranscribing));
+	};
+	auto MicLabel = [GM]() {
+		const APA250DiplomacyGameMode* G = GM();
+		if (G && G->IsMicRecording())
+		{
+			const int32 Bars = FMath::Clamp(FMath::RoundToInt(G->GetMicLevel() * 12.f), 0, 6);
+			return FText::FromString(FString::Printf(TEXT("Stop  %s%s"), *FString::ChrN(Bars, TEXT('|')), *FString::ChrN(6 - Bars, TEXT('.'))));
+		}
+		return FText::FromString(G && G->bTranscribing ? TEXT("...") : TEXT("Speak"));
+	};
+	auto MicColor = [GM]() {
+		const APA250DiplomacyGameMode* G = GM();
+		return FSlateColor(G && G->IsMicRecording() ? FLinearColor(1.f, 0.35f, 0.3f) : FLinearColor(0.95f, 0.9f, 0.75f));
+	};
+
 	auto Btn = [&Body](const TCHAR* Label, TFunction<void()> Fn, TAttribute<EVisibility> Vis = EVisibility::Visible, TAttribute<bool> Enabled = true) {
 		return SNew(SButton).Visibility(Vis).IsEnabled(Enabled).ContentPadding(FMargin(14.f, 6.f))
 			.OnClicked_Lambda([Fn]() { Fn(); return FReply::Handled(); })
@@ -102,7 +123,7 @@ TSharedRef<SWidget> UPA250DiplomacyWidget::RebuildWidget()
 	};
 
 	TSharedRef<SEditableTextBox> InputBox = SNew(SEditableTextBox)
-		.Font(Body).HintText(FText::FromString(TEXT("Speak to the envoy...")))
+		.Font(Body).HintText(FText::FromString(TEXT("Address the envoy...")))
 		.IsEnabled_Lambda(CanTalk)
 		.OnTextCommitted_Lambda([Weak](const FText& T, ETextCommit::Type Type) {
 			if (Type == ETextCommit::OnEnter && Weak.IsValid() && !T.IsEmptyOrWhitespace()) Weak->SubmitText(T.ToString());
@@ -112,12 +133,12 @@ TSharedRef<SWidget> UPA250DiplomacyWidget::RebuildWidget()
 	return SNew(SOverlay)
 		+ SOverlay::Slot().VAlign(VAlign_Top).HAlign(HAlign_Center)
 		[
-			SNew(SBorder).BorderImage(FAppStyle::GetBrush("WhiteBrush")).BorderBackgroundColor(FLinearColor(0.f, 0.f, 0.f, 0.6f)).Padding(FMargin(24.f, 10.f))
+			SNew(SBorder).BorderImage(FAppStyle::GetBrush("WhiteBrush")).BorderBackgroundColor(FLinearColor(0.05f, 0.03f, 0.02f, 0.7f)).Padding(FMargin(24.f, 10.f))
 			[SNew(STextBlock).Font(Title).ColorAndOpacity(Parchment).Text_Lambda(Header)]
 		]
 		+ SOverlay::Slot().VAlign(VAlign_Bottom).HAlign(HAlign_Fill).Padding(20.f)
 		[
-			SNew(SBorder).BorderImage(FAppStyle::GetBrush("WhiteBrush")).BorderBackgroundColor(FLinearColor(0.06f, 0.04f, 0.03f, 0.88f)).Padding(14.f)
+			SNew(SBorder).BorderImage(FAppStyle::GetBrush("WhiteBrush")).BorderBackgroundColor(FLinearColor(0.07f, 0.04f, 0.025f, 0.78f)).Padding(14.f)
 			[
 				SNew(SVerticalBox)
 				+ SVerticalBox::Slot().AutoHeight()
@@ -128,7 +149,7 @@ TSharedRef<SWidget> UPA250DiplomacyWidget::RebuildWidget()
 						[SNew(SScrollBox) + SScrollBox::Slot()[SNew(STextBlock).Font(Body).ColorAndOpacity(Parchment).AutoWrapText(true).Text_Lambda(TranscriptText)]]]
 					+ SHorizontalBox::Slot().FillWidth(0.38f)
 					[
-						SNew(SBorder).BorderImage(FAppStyle::GetBrush("WhiteBrush")).BorderBackgroundColor(FLinearColor(0.16f, 0.12f, 0.06f, 0.95f)).Padding(10.f)
+						SNew(SBorder).BorderImage(FAppStyle::GetBrush("WhiteBrush")).BorderBackgroundColor(FLinearColor(0.2f, 0.13f, 0.06f, 0.85f)).Padding(10.f)
 						[
 							SNew(SVerticalBox)
 							+ SVerticalBox::Slot().AutoHeight()[SNew(STextBlock).Font(Bold).ColorAndOpacity(Parchment).Text(FText::FromString(TEXT("Proposed terms")))]
@@ -146,6 +167,13 @@ TSharedRef<SWidget> UPA250DiplomacyWidget::RebuildWidget()
 				[
 					SNew(SHorizontalBox)
 					+ SHorizontalBox::Slot().FillWidth(1.f).Padding(0, 0, 8, 0)[InputBox]
+					+ SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 8, 0)
+					[
+						SNew(SButton).IsEnabled_Lambda(CanMic).ContentPadding(FMargin(14.f, 6.f))
+						.ToolTipText(FText::FromString(TEXT("Click, speak to the envoy, click again to send")))
+						.OnClicked_Lambda([GM]() { if (auto* G = GM()) G->ToggleMic(); return FReply::Handled(); })
+						[SNew(SBox).MinDesiredWidth(74.f)[SNew(STextBlock).Font(Bold).Justification(ETextJustify::Center).ColorAndOpacity_Lambda(MicColor).Text_Lambda(MicLabel)]]
+					]
 					+ SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 8, 0)[Btn(TEXT("Send"), [Weak, InputBox]() { if (Weak.IsValid() && !InputBox->GetText().IsEmptyOrWhitespace()) Weak->SubmitText(InputBox->GetText().ToString()); }, EVisibility::Visible, TAttribute<bool>::CreateLambda(CanTalk))]
 					+ SHorizontalBox::Slot().AutoWidth()[Btn(TEXT("Leave"), [GM]() { if (auto* G = GM()) G->Leave(); })]
 				]

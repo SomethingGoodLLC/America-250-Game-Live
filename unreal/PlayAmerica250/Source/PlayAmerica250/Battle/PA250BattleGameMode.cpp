@@ -235,8 +235,9 @@ void APA250BattleGameMode::ConfigurePostForScenario(APA250ControlPoint* P, const
 	P->SetObjectiveTitle(FString());
 	if (Fight.bContestSingleCrossing)
 	{
-		// One contested crossing. The magazine and the search foothold stay as they are.
+		// Concord North Bridge: three contestable posts (muster, bridge, far bridgehead).
 		P->MarkHoldersAssigned();
+		P->SetContestLocked(false);
 		if (P->PostId == TEXT("green"))
 		{
 			P->DebugSetHolder(NAME_None);
@@ -245,16 +246,12 @@ void APA250BattleGameMode::ConfigurePostForScenario(APA250ControlPoint* P, const
 		else if (P->PostId == TEXT("meetinghouse"))
 		{
 			P->DebugSetHolder(TEXT("continental"));
-			P->SetObjectiveTitle(TEXT("Magazine"));
+			P->SetObjectiveTitle(TEXT("Muster ground"));
 		}
 		else if (P->PostId == TEXT("buckman"))
 		{
 			P->DebugSetHolder(TEXT("british"));
-			P->SetObjectiveTitle(TEXT("Foothold"));
-		}
-		if (P->PostId != Fight.CrossingPostId)
-		{
-			P->SetContestLocked(true);
+			P->SetObjectiveTitle(TEXT("Far bridgehead"));
 		}
 	}
 	else if (Fight.bRewardForcePreservation)
@@ -1769,7 +1766,29 @@ void APA250BattleGameMode::EndBattle(FName Winner, const FString& Reason)
 			{
 				Result.losses[ToStd(FK.Key)][ToStd(CK.Key)] = Lost;
 			}
+			// Rough wounded estimate: half of kills as wounded (gameplay report, not historical).
+			const int32 Wounded = Lost / 2;
+			if (Wounded > 0)
+			{
+				Result.wounded[ToStd(FK.Key)][ToStd(CK.Key)] = Wounded;
+			}
 		}
+	}
+	// Cartridges spent: clamp to province stock; prefer side budgets from setup.
+	const int32 ProvinceCart = Setup.province_cartridges;
+	int32 Remaining = ProvinceCart;
+	for (const auto& Side : Setup.sides)
+	{
+		const int32 Fielded = [&]() {
+			int32 N = 0;
+			for (const auto& T : Side.second.tickets) N += std::max(0, T.second);
+			return N;
+		}();
+		int32 Spend = Fielded * 2;
+		if (Side.second.cartridge_budget > 0) Spend = FMath::Min(Spend, Side.second.cartridge_budget);
+		Spend = FMath::Clamp(Spend, 0, Remaining);
+		Remaining -= Spend;
+		Result.cartridges_spent[Side.first] = Spend;
 	}
 	++BattleResultEmitCount;
 	const std::string Loser = Winner == TEXT("british") ? "continental" : "british";

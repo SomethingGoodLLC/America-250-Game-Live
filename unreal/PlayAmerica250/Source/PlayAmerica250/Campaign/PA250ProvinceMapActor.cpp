@@ -109,6 +109,18 @@ FString SideWordFor(const pa250::CampaignState& St, const pa250::Army& A)
 	return A.faction == "british" ? FString(TEXT("British")) : ToFStr(A.faction);
 }
 
+/** Plate second line: your strength is yours to know; enemy strength stays unreported. */
+FString PlateSideFor(const pa250::CampaignState& St, const pa250::Army& A)
+{
+	if (A.faction != St.player_faction)
+	{
+		return SideWordFor(St, A);
+	}
+	int32 Fit = 0;
+	for (const auto& U : A.units) Fit += U.second;
+	return FString::Printf(TEXT("Yours · %d fit"), Fit);
+}
+
 /** Province the army is heading into on its current edge, or empty. */
 std::string NextProvinceOnPath(const pa250::CampaignState& St, const pa250::Army& A)
 {
@@ -1137,7 +1149,7 @@ void APA250ProvinceMapActor::RefreshArmyTokens()
 	{
 		const FString Pid = ToFStr(Pl.Army->province);
 		const FVector2D Foot = APA250ArmyToken::FactionFootprintUU(ToFStr(Pl.Army->faction));
-		const FVector2D Plate = APA250ArmyToken::PlateSizeUU(ShortArmyName(*Pl.Army), SideWordFor(St, *Pl.Army));
+		const FVector2D Plate = APA250ArmyToken::PlateSizeUU(ShortArmyName(*Pl.Army), PlateSideFor(St, *Pl.Army));
 		float Overlap = 0.f;
 		int32 Candidate = 0;
 		const FVector2D A = ChooseArmyAnchor(Pid, Towns, Placed, Foot, Plate, Overlap, Candidate);
@@ -1185,8 +1197,8 @@ void APA250ProvinceMapActor::RefreshArmyTokens()
 		{
 			continue;
 		}
-		// Plate = short name + side word. Strength stays in the HUD selection panel (and enemy strength unreported).
-		Tok->Configure(ToFStr(Army.id), ToFStr(Army.faction), ShortArmyName(Army), SideWordFor(St, Army), ToFStr(Army.id) == SelectedArmyId,
+		// Plate = short name + side line (your fit count; enemy strength unreported).
+		Tok->Configure(ToFStr(Army.id), ToFStr(Army.faction), ShortArmyName(Army), PlateSideFor(St, Army), ToFStr(Army.id) == SelectedArmyId,
 					   Pl.Art, bMirror);
 		ArmyTokens.Add(Tok);
 	}

@@ -5,6 +5,7 @@
 #   scripts/run_voice_test.sh                 # turn your volume up: the envoy speaks through the speakers
 #   LLM=claude scripts/run_voice_test.sh      # real Claude reply instead of MockLocal
 #   PA250_TTS=say scripts/run_voice_test.sh   # macOS say backup instead of ElevenLabs
+#   PA250_AVATAR=fal PA250_VIDEO_WAIT=1 scripts/run_voice_test.sh  # wait for a real fal render (~$0.08/s)
 #   EXTRA_ARGS="-PA250VoiceTestVideo=/abs/clip.mp4" scripts/run_voice_test.sh   # test the MP4 (talking portrait) path
 # Logs: unreal/PlayAmerica250/Saved/Logs/voicetest_game.log, voicetest_service.log
 set -u
@@ -28,8 +29,8 @@ SVC_PID=""
 cleanup() { [ -n "$SVC_PID" ] && { kill "$SVC_PID" 2>/dev/null; wait "$SVC_PID" 2>/dev/null; }; }
 trap cleanup EXIT
 
-echo "== starting main:app on :$PORT (TTS=${PA250_TTS:-auto}, LLM=${LLM:-mock}, voice only)"
-(cd "$SVC" && PA250_LLM="${LLM:-mock}" PA250_TTS="${PA250_TTS:-auto}" PA250_AVATAR=none \
+echo "== starting main:app on :$PORT (TTS=${PA250_TTS:-auto}, LLM=${LLM:-mock}, AVATAR=${PA250_AVATAR:-none})"
+(cd "$SVC" && PA250_LLM="${LLM:-mock}" PA250_TTS="${PA250_TTS:-auto}" PA250_AVATAR="${PA250_AVATAR:-none}" PA250_VIDEO_WAIT="${PA250_VIDEO_WAIT:-0}" \
   exec .venv/bin/python -m uvicorn main:app --host 127.0.0.1 --port "$PORT" >"$SLOG" 2>&1) &
 SVC_PID=$!
 for _ in $(seq 1 60); do curl -fs -m 2 "http://127.0.0.1:$PORT/health" >/dev/null 2>&1 && break; sleep 0.5; done

@@ -142,6 +142,10 @@ APA250ArmyToken::APA250ArmyToken()
 	UMaterialInterface* Shape = ShapeMat.Succeeded() ? ShapeMat.Object : nullptr;
 	FlagMesh = MakeMesh(this, Root, TEXT("Flag"), Disc.Succeeded() ? Disc.Object : nullptr, Shape);
 	MarkMesh = MakeMesh(this, Root, TEXT("Mark"), Bar.Succeeded() ? Bar.Object : nullptr, Shape);
+	CounterMesh = MakeMesh(this, Root, TEXT("Counter"), Bar.Succeeded() ? Bar.Object : nullptr, Shape);
+	BodyMesh = MakeMesh(this, Root, TEXT("CounterBody"), Bar.Succeeded() ? Bar.Object : nullptr, Shape);
+	CrossMeshA = MakeMesh(this, Root, TEXT("CrossA"), Bar.Succeeded() ? Bar.Object : nullptr, Shape);
+	CrossMeshB = MakeMesh(this, Root, TEXT("CrossB"), Bar.Succeeded() ? Bar.Object : nullptr, Shape);
 	SelectRing = MakeMesh(this, Root, TEXT("SelectRing"), Disc.Succeeded() ? Disc.Object : nullptr, Shape);
 	SpriteMesh = MakeMesh(this, Root, TEXT("Sprite"), Plane.Succeeded() ? Plane.Object : nullptr, nullptr);
 	GroundMesh = MakeMesh(this, Root, TEXT("Ground"), Plane.Succeeded() ? Plane.Object : nullptr, nullptr);
@@ -230,10 +234,16 @@ void APA250ArmyToken::Configure(const FString& InArmyId, const FString& Faction,
 		Tint(SelectBar, Gold);
 	}
 
-	// Compact symbol colours (layout depends on zoom; see ApplyLod).
+	// Compact counter colours (layout depends on zoom; see ApplyLod).
+	// Frame goes gold when selected; the body always carries the faction colour,
+	// crossed by parchment bars so it reads as an army, never as a town diamond.
 	Tint(FlagMesh, Fill);
 	Tint(MarkMesh, Parchment);
 	Tint(SelectRing, Gold);
+	Tint(CounterMesh, bSelected ? Gold : Parchment);
+	Tint(BodyMesh, Fill);
+	Tint(CrossMeshA, Parchment);
+	Tint(CrossMeshB, Parchment);
 
 	// Name plate under the feet (PlateSizeUU reserves its room). Game-rendered text; never baked into the art.
 	const FRotator TextRot(90.f, 90.f, 0.f); // == APA250ProvinceMapActor::FlatMapTextRotation()
@@ -267,12 +277,27 @@ void APA250ArmyToken::LayoutCompact(float DiameterUU)
 {
 	CompactDiameterUU = DiameterUU;
 	const FVector A = GetActorLocation();
-	// The disc stands on the ground line like the figures do, so switching LOD keeps the anchor.
+	// The counter stands on the ground line like the figures do, so switching LOD keeps the anchor.
 	const FVector C = A + FVector(0.f, -DiameterUU * 0.5f, 2.f);
 	PlaceAbs(FlagMesh, C, FVector(DiameterUU / 100.f, DiameterUU / 100.f, 0.04f));
 	PlaceAbs(MarkMesh, C + FVector(0.f, 0.f, 2.5f), FVector(DiameterUU * 0.58f / 100.f, DiameterUU * 0.15f / 100.f, 0.04f));
 	const float RingD = DiameterUU + 5.f;
 	PlaceAbs(SelectRing, C + FVector(0.f, 0.f, -1.5f), FVector(RingD / 100.f, RingD / 100.f, 0.03f));
+	// NATO-style infantry counter: framed rectangle, faction body, crossed bars.
+	const float W = DiameterUU * 1.30f;
+	const float H = DiameterUU * 0.86f;
+	PlaceAbs(CounterMesh, C + FVector(0.f, 0.f, 0.6f), FVector(W / 100.f, H / 100.f, 0.04f));
+	PlaceAbs(BodyMesh, C + FVector(0.f, 0.f, 1.4f), FVector((W - 3.5f) / 100.f, (H - 3.5f) / 100.f, 0.04f));
+	auto PlaceCross = [&](UStaticMeshComponent* Mesh, float YawDeg) {
+		if (!Mesh) return;
+		Mesh->SetAbsolute(true, true, true);
+		Mesh->SetWorldLocation(C + FVector(0.f, 0.f, 2.4f));
+		Mesh->SetWorldRotation(FRotator(0.f, YawDeg, 0.f));
+		Mesh->SetWorldScale3D(FVector(FMath::Sqrt(W * W + H * H) * 0.92f / 100.f, DiameterUU * 0.11f / 100.f, 0.04f));
+	};
+	const float Yaw = FMath::RadiansToDegrees(FMath::Atan2(H, W));
+	PlaceCross(CrossMeshA, Yaw);
+	PlaceCross(CrossMeshB, -Yaw);
 }
 
 void APA250ArmyToken::ApplyLod(float PxPerUU)
@@ -299,9 +324,14 @@ void APA250ArmyToken::ApplyLod(float PxPerUU)
 	GroundMesh->SetVisibility(bIllus && GroundTexture != nullptr && GroundOpacity > 0.f);
 	FactionBar->SetVisibility(bIllus);
 	SelectBar->SetVisibility(bIllus && bSelected);
-	FlagMesh->SetVisibility(!bIllus);
-	MarkMesh->SetVisibility(!bIllus);
-	SelectRing->SetVisibility(!bIllus && bSelected);
+	// Compact view draws the framed counter, not the old disc-and-bar.
+	FlagMesh->SetVisibility(false);
+	MarkMesh->SetVisibility(false);
+	SelectRing->SetVisibility(false);
+	if (CounterMesh) CounterMesh->SetVisibility(!bIllus);
+	if (BodyMesh) BodyMesh->SetVisibility(!bIllus);
+	if (CrossMeshA) CrossMeshA->SetVisibility(!bIllus);
+	if (CrossMeshB) CrossMeshB->SetVisibility(!bIllus);
 }
 
 FBox2D APA250ArmyToken::GetDrawnRect() const
@@ -311,8 +341,11 @@ FBox2D APA250ArmyToken::GetDrawnRect() const
 	{
 		return FBox2D(FVector2D(A.X - ArtSizeUU.X * 0.5f, A.Y - ArtSizeUU.Y), FVector2D(A.X + ArtSizeUU.X * 0.5f, A.Y + 1.f));
 	}
-	const float R = CompactDiameterUU * 0.5f;
-	return FBox2D(FVector2D(A.X - R, A.Y - 2.f * R), FVector2D(A.X + R, A.Y));
+	// Framed counter centred half a diameter above the ground anchor.
+	const float HalfW = CompactDiameterUU * 0.65f;
+	const float HalfH = CompactDiameterUU * 0.43f;
+	const FVector2D C(A.X, A.Y - CompactDiameterUU * 0.5f);
+	return FBox2D(C - FVector2D(HalfW, HalfH), C + FVector2D(HalfW, HalfH));
 }
 
 bool APA250ArmyToken::HitTest(const FVector& World) const
@@ -324,6 +357,5 @@ bool APA250ArmyToken::HitTest(const FVector& World) const
 		// Content rect only (padding was cropped at preparation) plus a 2 UU grace margin.
 		return GetDrawnRect().ExpandBy(2.f).IsInside(P);
 	}
-	const FVector2D C(A.X, A.Y - CompactDiameterUU * 0.5f);
-	return FVector2D::Distance(P, C) <= CompactDiameterUU * 0.5f + 2.f;
+	return GetDrawnRect().ExpandBy(2.f).IsInside(P);
 }

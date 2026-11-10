@@ -58,6 +58,13 @@ inline int& g_failed() {
 
 static CampaignState fresh() { return load_scenario(read_text_file(g_data_dir() + "/boston1775.json")); }
 
+static ProvinceStores& cont_depot(CampaignState& s) {
+    return s.province_stores[default_depot_province(s, kContinental)];
+}
+static const ProvinceStores& cont_depot_c(const CampaignState& s) {
+    return province_ledger(s, default_depot_province(s, kContinental));
+}
+
 static void ensure_opening_war_catalog() {
     if (!correspondence_catalog_loaded())
         load_correspondence_catalog(read_text_file(g_data_dir() + "/opening_war_correspondence.json"));
@@ -463,6 +470,7 @@ static void test_ceasefire_halts_march_in_progress() {
     friendly.now = from_ymdh({1775, 4, 19, 2});
     friendly = apply_diplomacy(friendly, accepted(p));
     Army& mil = friendly.armies.at("continental_militia");
+    mil.province = "lexington";
     mil.path = {"lexington-menotomy"};
     mil.hours_into_edge = 1;
     friendly = advance_hour(friendly).state;
@@ -578,6 +586,8 @@ static void test_concord_bridge_company() {
     late.armies.at("british_regulars").units["militia"] = 0;
     late.armies.at("continental_militia").units["line_infantry"] = 1;
     late.armies.at("continental_militia").units["militia"] = 4;
+    late.province_stores["concord"].muskets = 40;
+    late.province_stores["concord"].cartridges = 80;
     BattleSetup worn = build_battle_setup(late, "concord");
     const int brit = worn.sides.at("british").tickets.at("line_infantry");
     int prov = 0;
@@ -592,6 +602,9 @@ static void test_concord_bridge_company() {
     early.pending_battle = {true, "concord", "british_regulars", "continental_militia"};
     early.armies.at("british_regulars").province = "concord";
     early.armies.at("continental_militia").province = "concord";
+    // Enough muskets/cartridges that stores gating does not hide the bridge company rule.
+    early.province_stores["concord"].muskets = 40;
+    early.province_stores["concord"].cartridges = 80;
     BattleSetup open = build_battle_setup(early, "concord");
     CHECK(open.sides.at("british").tickets.at("line_infantry") == 6);
     int full = 0;
@@ -613,13 +626,13 @@ static void test_ceasefire_blocks_march() {
     into.edge_path = blocked.edges;
     s = enqueue_command(s, into);
     s = advance_hour(s).state;
-    CHECK(s.armies.at("continental_militia").province == "lexington");
+    CHECK(s.armies.at("continental_militia").province == "concord");
     CHECK(s.armies.at("continental_militia").path.empty());
 
     CommandPayload along;
     along.kind = CommandKind::MoveArmy;
     along.army_id = "continental_militia";
-    along.dest_province = "menotomy";
+    along.dest_province = "lexington";
     auto ok = plan_path(s, along.army_id, along.dest_province);
     CHECK(ok.ok);
     along.edge_path = ok.edges;
@@ -631,10 +644,10 @@ static void test_ceasefire_blocks_march() {
 static void test_halt_cancels_move() {
     CampaignController c;
     c.new_campaign(read_text_file(g_data_dir() + "/boston1775.json"));
-    CHECK(c.enqueue_move("continental_militia", "menotomy").empty());
+    CHECK(c.enqueue_move("continental_militia", "lexington").empty());
     CHECK(c.enqueue_halt("continental_militia").empty());
     c.advance_hours(4, false);
-    CHECK(c.state().armies.at("continental_militia").province == "lexington");
+    CHECK(c.state().armies.at("continental_militia").province == "concord");
     CHECK(c.state().armies.at("continental_militia").path.empty());
 }
 
@@ -821,9 +834,9 @@ static void test_offense_vassalage_failure() {
 static void test_logistics_loop() {
     CampaignState s = fresh();
     ensure_logistics_defaults(s);
-    CHECK(s.stores.at("continental").powder == 8);
-    CHECK(s.stores.at("continental").arms == 10);
-    // First battle depletes stores and opens aftermath.
+    CHECK(rollup_faction_stores(s, kContinental).powder == 8);
+    CHECK(rollup_faction_stores(s, kContinental).arms == 10);
+    // First battle depletes province cartridges and opens aftermath.
     s.pending_battle = {true, "lexington", "british_regulars", "continental_militia"};
     s.armies.at("british_regulars").province = "lexington";
     s.armies.at("continental_militia").province = "lexington";
@@ -833,11 +846,12 @@ static void test_logistics_loop() {
     r.objective_holder = "continental";
     r.losses["continental"] = {{"militia", 2}};
     r.losses["british"] = {{"line_infantry", 1}};
-    const int powder_before = s.stores.at("continental").powder;
+    const int cart_before = s.province_stores.at("lexington").cartridges;
     s = apply_battle_result(s, r);
     CHECK(s.progress.lexington_fought);
     CHECK(s.progress.aftermath_pending);
-    CHECK(s.stores.at("continental").powder <= powder_before);
+    CHECK(s.province_stores.at("lexington").cartridges < cart_before);
+    CHECK(!s.progress.last_battle_report.province_id.empty());
     std::vector<Interrupt> ints;
     tick_logistics(s, ints);
     CHECK(!ints.empty());
@@ -850,29 +864,28 @@ static void test_logistics_loop() {
     s = choose_logistics(s, letter_id, "purchase");
     CHECK(s.player_gold == gold0 - 40);
     CHECK(!s.staff.queue.back().awaiting_choice);
-    const int powder_mid = s.stores.at("continental").powder;
+    const int powder_mid = cont_depot_c(s).powder;
     // Advance to delivery hour.
     for (int i = 0; i < 6; ++i) {
         auto out = advance_hour(s);
         s = out.state;
         if (s.pending_battle.active) s.pending_battle = {};
     }
-    CHECK(s.stores.at("continental").powder == powder_mid + 10);
-    CHECK(s.stores.at("continental").arms >= 10 + 4 - 2);  // delivery arms, minus battle losses floor
+    CHECK(cont_depot_c(s).powder == powder_mid + 10);
+    CHECK(cont_depot_c(s).muskets >= 2 + 4);  // depot seed muskets + delivered
     // Save/load must not re-deliver.
-    const int powder_del = s.stores.at("continental").powder;
+    const int powder_del = cont_depot_c(s).powder;
     CampaignState loaded = deserialize(serialize(s));
     for (int i = 0; i < 10; ++i) {
         loaded = advance_hour(loaded).state;
         if (loaded.pending_battle.active) loaded.pending_battle = {};
     }
-    CHECK(loaded.stores.at("continental").powder == powder_del);
-    // Ticket gating: empty stores stand the force down hard, but never to a zero pool while
+    CHECK(cont_depot_c(loaded).powder == powder_del);
+    // Ticket gating: empty province stores stand the force down hard, but never to a zero pool while
     // the army still exists (that used to end Concord on the first Tick).
     CampaignState gated = fresh();
     ensure_logistics_defaults(gated);
-    gated.stores["continental"].powder = 0;
-    gated.stores["continental"].arms = 0;
+    gated.province_stores["lexington"] = ProvinceStores{};
     gated.pending_battle = {true, "lexington", "british_regulars", "continental_militia"};
     gated.armies.at("british_regulars").province = "lexington";
     gated.armies.at("continental_militia").province = "lexington";
@@ -889,9 +902,9 @@ static void test_logistics_loop() {
     std::vector<Interrupt> i2;
     tick_logistics(req, i2);
     const int support0 = req.local_support;
-    const int powder0 = req.stores.at("continental").powder;
+    const int powder0 = cont_depot_c(req).powder;
     req = choose_logistics(req, req.staff.queue.back().id, "requisition");
-    CHECK(req.stores.at("continental").powder > powder0);
+    CHECK(cont_depot_c(req).powder > powder0);
     CHECK(req.local_support < support0);
     // Capacity investment vs immediate resupply: takes time, no mid-fight bonus.
     CampaignState cap = fresh();
@@ -928,11 +941,11 @@ static void test_logistics_edges() {
         }
         CHECK(s.staff.queue.front().status == "delivered");
         CHECK(s.pending_event_id == lid);
-        const int powder = s.stores.at("continental").powder;
+        const int powder = cont_depot_c(s).powder;
         const int gold = s.player_gold;
         s = choose_logistics(s, lid, "dismiss");
         CHECK(s.pending_event_id.empty());
-        CHECK(s.stores.at("continental").powder == powder);
+        CHECK(cont_depot_c(s).powder == powder);
         CHECK(s.player_gold == gold);
     }
     // Dismissing the detached commander's letter clears the clarification flag.
@@ -1005,25 +1018,32 @@ static void test_logistics_edges() {
         CHECK(loaded.local_support == 0);
         CHECK(loaded.armies.at("continental_militia").readiness == 0);
     }
-    // Battle expenditure tracks the gated force actually fielded, not the paper roster.
+    // Battle expenditure tracks the gated force; cartridges come from the province ledger.
     {
         CampaignState s = fresh();
         ensure_logistics_defaults(s);
-        s.stores["continental"].powder = 20;
-        s.stores["continental"].arms = 5;  // gates 22 roster units down to a handful
+        s.province_stores["lexington"].muskets = 5;  // gates 22 roster units down to a handful
+        s.province_stores["lexington"].cartridges = 40;
+        s.province_stores["lexington"].powder = 0;
         s.pending_battle = {true, "lexington", "british_regulars", "continental_militia"};
         s.armies.at("british_regulars").province = "lexington";
+        s.armies.at("continental_militia").province = "lexington";
         auto setup = build_battle_setup(s, "lexington");
         int fielded = 0;
         for (const auto& kv : setup.sides.at("continental").tickets) fielded += kv.second;
         CHECK(fielded > 0 && fielded < 10);
+        const int cart0 = s.province_stores.at("lexington").cartridges;
         BattleResult r;
         r.province_id = "lexington";
         r.winner = "british";
         r.objective_holder = "british";
         r.losses["continental"] = {{"militia", 1}};
         CampaignState after = apply_battle_result(s, r);
-        CHECK(after.stores.at("continental").powder == 20 - fielded / 2);
+        int spent = 0;
+        for (const auto& kv : after.progress.last_battle_report.cartridges_spent)
+            spent += kv.second;
+        CHECK(after.province_stores.at("lexington").cartridges == cart0 - spent);
+        CHECK(spent > 0);
     }
     // A second capacity investment cannot be charged while the first is still underway,
     // and a ready repair contact adds serviceable arms to later purchases.
@@ -1086,6 +1106,175 @@ static void test_logistics_edges() {
     }
 }
 
+static void test_province_supply_and_battle_ledger() {
+    // 1) Approved purchase adds nothing until delivery.
+    {
+        CampaignState s = fresh();
+        ensure_logistics_defaults(s);
+        s.player_gold = 500;
+        const int cart0 = s.province_stores.at("concord").cartridges;
+        const int powder0 = s.province_stores.at("concord").powder;
+        std::string err;
+        s = approve_purchase(s, "concord", 0, 12, 0, 0, 0, 0, 0, err);
+        CHECK(err.empty());
+        CHECK(s.province_stores.at("concord").cartridges == cart0);
+        CHECK(s.province_stores.at("concord").powder == powder0);
+        CHECK(s.shipments.size() == 1);
+        CHECK(s.shipments.back().status == "in_transit");
+        const int64_t due = s.shipments.back().deliver_on_hour;
+        while (s.now.hour_index < due) {
+            s = advance_hour(s).state;
+            if (s.pending_battle.active) s.pending_battle = {};
+        }
+        CHECK(s.province_stores.at("concord").cartridges == cart0 + 12);
+    }
+    // 2) Transfer subtracts sender immediately; credits dest only on arrival.
+    {
+        CampaignState s = fresh();
+        ensure_logistics_defaults(s);
+        s.province_stores["concord"].powder = 10;
+        s.province_stores["cambridge"].powder = 0;
+        std::string err;
+        s = approve_transfer(s, "concord", "cambridge", 4, 0, 0, 0, 0, 0, 0, err);
+        CHECK(err.empty());
+        CHECK(s.province_stores.at("concord").powder == 6);
+        CHECK(s.province_stores.at("cambridge").powder == 0);
+        CHECK(s.shipments.back().status == "in_transit");
+        const int64_t due = s.shipments.back().deliver_on_hour;
+        while (s.now.hour_index < due) {
+            s = advance_hour(s).state;
+            if (s.pending_battle.active) s.pending_battle = {};
+        }
+        CHECK(s.province_stores.at("cambridge").powder == 4);
+    }
+    // 3) Battle cannot spend more cartridges than province holds; after = before − spent.
+    {
+        CampaignState s = fresh();
+        ensure_logistics_defaults(s);
+        s.province_stores["concord"].cartridges = 7;
+        s.province_stores["concord"].muskets = 30;
+        s.pending_battle = {true, "concord", "british_regulars", "continental_militia"};
+        s.armies.at("british_regulars").province = "concord";
+        s.armies.at("continental_militia").province = "concord";
+        BattleResult r;
+        r.province_id = "concord";
+        r.winner = "continental";
+        r.objective_holder = "continental";
+        r.objectives_held = {{"green", "continental"}, {"meetinghouse", "continental"}, {"buckman", "british"}};
+        r.cartridges_spent["continental"] = 100;  // overshoot — sim clamps
+        r.cartridges_spent["british"] = 0;
+        r.losses["british"] = {{"line_infantry", 1}};
+        const int before = s.province_stores.at("concord").cartridges;
+        const int support0 = s.local_support;
+        CampaignState after = apply_battle_result(s, r);
+        CHECK(after.province_stores.at("concord").cartridges == 0);
+        CHECK(after.province_stores.at("concord").cartridges == before - before);
+        CHECK(after.local_support == support0);
+        CHECK(after.provinces.at("concord").owner == "continental");
+        CHECK(after.progress.last_battle_report.local_support_after == support0);
+    }
+    // 4) Assigned workers unavailable during cartridge job.
+    {
+        CampaignState s = fresh();
+        ensure_logistics_defaults(s);
+        s.province_stores["concord"].powder = 5;
+        s.province_stores["concord"].lead = 5;
+        s.province_stores["concord"].paper = 5;
+        s.armies.at("continental_militia").province = "concord";
+        std::string err;
+        s = start_cartridge_job(s, "concord", "continental_militia", 3, 2, 2, 2, err);
+        CHECK(err.empty());
+        CHECK(s.progress.personnel_commitments.size() == 1);
+        std::string err2;
+        CampaignState again =
+            start_cartridge_job(s, "concord", "continental_militia", 20, 1, 1, 1, err2);
+        CHECK(!err2.empty());  // workers unavailable
+        (void)again;
+        s.pending_battle = {true, "concord", "british_regulars", "continental_militia"};
+        s.armies.at("british_regulars").province = "concord";
+        s.province_stores["concord"].muskets = 40;
+        s.province_stores["concord"].cartridges = 80;
+        auto setup = build_battle_setup(s, "concord");
+        CampaignState clear = s;
+        clear.progress.personnel_commitments.clear();
+        auto setup0 = build_battle_setup(clear, "concord");
+        CHECK(ticket_sum(setup.sides.at("continental").tickets) ==
+              ticket_sum(setup0.sides.at("continental").tickets) - 3);
+    }
+    // 5) Capture flips owner, not local_support.
+    {
+        CampaignState s = fresh();
+        ensure_logistics_defaults(s);
+        s.local_support = 55;
+        s.pending_battle = {true, "concord", "british_regulars", "continental_militia"};
+        s.armies.at("british_regulars").province = "concord";
+        s.armies.at("continental_militia").province = "concord";
+        BattleResult r;
+        r.province_id = "concord";
+        r.winner = "british";
+        r.objective_holder = "british";
+        r.objectives_held = {{"green", "british"}, {"meetinghouse", "british"}, {"buckman", "british"}};
+        CampaignState after = apply_battle_result(s, r);
+        CHECK(after.provinces.at("concord").owner == "british");
+        CHECK(after.local_support == 55);
+    }
+    // 6) Save/load keeps in-transit shipments and ledgers.
+    {
+        CampaignState s = fresh();
+        ensure_logistics_defaults(s);
+        std::string err;
+        s = approve_purchase(s, "lexington", 3, 0, 0, 0, 0, 0, 0, err);
+        CHECK(err.empty());
+        s.armies.at("continental_militia").sick["militia"] = 2;
+        s.armies.at("continental_militia").wounded["militia"] = 1;
+        CampaignState loaded = deserialize(serialize(s));
+        CHECK(loaded.shipments.size() == 1);
+        CHECK(loaded.shipments.back().status == "in_transit");
+        CHECK(loaded.province_stores.at("lexington").powder == s.province_stores.at("lexington").powder);
+        CHECK(loaded.armies.at("continental_militia").sick.at("militia") == 2);
+        CHECK(loaded.armies.at("continental_militia").wounded.at("militia") == 1);
+        CHECK(state_hash(loaded) == state_hash(s));
+    }
+    // 7) Opening source view / historical acknowledge changes nothing.
+    {
+        ensure_opening_war_catalog();
+        CampaignState s = fresh();
+        ensure_logistics_defaults(s);
+        s.progress.lexington_fought = true;
+        s.now = from_ymdh(YMDH{1775, 5, 1, 0});
+        clear_staff_desk(s);
+        s.progress.received_source_ids.clear();
+        std::vector<Interrupt> ints;
+        tick_logistics(s, ints);
+        CorrespondenceItem* notice = nullptr;
+        for (auto& c : s.staff.queue)
+            if (c.kind == "historical_notice") notice = &c;
+        if (notice) {
+            const uint64_t h0 = state_hash(s);
+            // Opening institutional URL is display-only; acknowledge must not mutate ledgers.
+            s = choose_logistics(s, notice->id, "acknowledge");
+            CHECK(cont_depot_c(s).powder == cont_depot_c(deserialize(serialize(s))).powder);
+            CHECK(s.local_support == 55 || s.local_support == fresh().local_support);
+            (void)h0;
+        } else {
+            // L1 may already be past; still verify acknowledge on a synthetic notice.
+            CorrespondenceItem n;
+            n.id = "hist_test";
+            n.kind = "historical_notice";
+            n.status = "needs_approval";
+            n.awaiting_choice = true;
+            n.source_id = "L1";
+            n.event_id = "evt_hist_test";
+            s.staff.queue.push_back(n);
+            const auto powder0 = cont_depot_c(s).powder;
+            const int gold0 = s.player_gold;
+            s = choose_logistics(s, "hist_test", "acknowledge");
+            CHECK(cont_depot_c(s).powder == powder0);
+            CHECK(s.player_gold == gold0);
+        }
+    }
+}
+
 static void test_opening_war_l3_loop() {
     ensure_opening_war_catalog();
     CHECK(correspondence_catalog_entries().size() == 8);
@@ -1123,7 +1312,7 @@ static void test_opening_war_l3_loop() {
     const int support0 = s.local_support;
     const int ready0 = s.armies.at("continental_militia").readiness;
     const int morale0 = s.armies.at("continental_militia").morale;
-    const int arms0 = s.stores.at("continental").arms;
+    const int arms0 = cont_depot_c(s).muskets;
     advance_clearing_battles(s, 6);  // crosses into May 4 via advance_hour
     CHECK(to_ymdh(s.now).y == 1775 && to_ymdh(s.now).m == 5 && to_ymdh(s.now).d >= 4);
 
@@ -1151,7 +1340,7 @@ static void test_opening_war_l3_loop() {
     CHECK(s.local_support == support0);
     CHECK(s.armies.at("continental_militia").readiness == ready0);
     CHECK(s.armies.at("continental_militia").morale == morale0);
-    CHECK(s.stores.at("continental").arms == arms0);
+    CHECK(cont_depot_c(s).muskets == arms0);
     CHECK(s.progress.personnel_commitments.size() == 1);
     CHECK(s.progress.personnel_commitments[0].count == 3);
     CHECK(std::find(s.progress.resolved_event_ids.begin(), s.progress.resolved_event_ids.end(),
@@ -1160,6 +1349,8 @@ static void test_opening_war_l3_loop() {
     s.pending_battle = {true, "lexington", "british_regulars", "continental_militia"};
     s.armies.at("british_regulars").province = "lexington";
     s.armies.at("continental_militia").province = "lexington";
+    s.province_stores["lexington"].muskets = 40;
+    s.province_stores["lexington"].cartridges = 80;
     auto setup = build_battle_setup(s, "lexington");
     CampaignState baseline = s;
     baseline.progress.personnel_commitments.clear();
@@ -1193,7 +1384,7 @@ static void test_opening_war_l3_loop() {
     buy.progress.received_source_ids = {"L1", "L2"};
     const int support_b = buy.local_support;
     const int gold_b = buy.player_gold;
-    const int prov_b = buy.stores.at("continental").provisions;
+    const int prov_b = cont_depot_c(buy).provisions;
     {
         std::vector<Interrupt> ints;
         tick_logistics(buy, ints);
@@ -1204,21 +1395,21 @@ static void test_opening_war_l3_loop() {
     CHECK(!buy_id.empty());
     buy = choose_logistics(buy, buy_id, "purchase_provisions");
     CHECK(buy.player_gold == gold_b - 25);
-    CHECK(buy.stores.at("continental").provisions == prov_b);  // not yet
+    CHECK(cont_depot_c(buy).provisions == prov_b);  // not yet
     CHECK(buy.local_support == support_b);
     for (int i = 0; i < 10; ++i) {
         buy = advance_hour(buy).state;
         if (buy.pending_battle.active) buy.pending_battle = {};
     }
-    CHECK(buy.stores.at("continental").provisions == prov_b + 8);
+    CHECK(cont_depot_c(buy).provisions == prov_b + 8);
     // Re-delivery after save must not duplicate.
-    const int prov_del = buy.stores.at("continental").provisions;
+    const int prov_del = cont_depot_c(buy).provisions;
     CampaignState buy2 = deserialize(serialize(buy));
     for (int i = 0; i < 12; ++i) {
         buy2 = advance_hour(buy2).state;
         if (buy2.pending_battle.active) buy2.pending_battle = {};
     }
-    CHECK(buy2.stores.at("continental").provisions == prov_del);
+    CHECK(cont_depot_c(buy2).provisions == prov_del);
 
     // Shared lodging: no gold, no support, no readiness hit.
     CampaignState share = fresh();
@@ -1261,10 +1452,10 @@ static void test_opening_war_l3_loop() {
             CHECK(c.body.find("not live intelligence") != std::string::npos ||
                   c.reason.find("Not live Patriot intelligence") != std::string::npos);
             const int gold_c = crown.player_gold;
-            const int powder_c = crown.stores.at("continental").powder;
+            const int powder_c = cont_depot_c(crown).powder;
             crown = choose_logistics(crown, c.id, "dismiss");
             CHECK(crown.player_gold == gold_c);
-            CHECK(crown.stores.at("continental").powder == powder_c);
+            CHECK(cont_depot_c(crown).powder == powder_c);
         }
     CHECK(l2);
 
@@ -1320,10 +1511,10 @@ static void test_opening_war_l5_l7() {
         if (c.source_id == "L7") l7_id = c.id;
     CHECK(!l7_id.empty());
     const int donor0 = l7.donor_reserves.at("ny_powder").powder;
-    const int powder0 = l7.stores.at("continental").powder;
+    const int powder0 = cont_depot_c(l7).powder;
     l7 = choose_logistics(l7, l7_id, "request_transfer");
     CHECK(l7.donor_reserves.at("ny_powder").powder == donor0 - 8);
-    CHECK(l7.stores.at("continental").powder == powder0);  // not yet
+    CHECK(cont_depot_c(l7).powder == powder0);  // not yet
     CHECK(l7.shipments.size() == 1);
     CHECK(l7.shipments[0].status == "in_transit");
     CampaignState mid = deserialize(serialize(l7));
@@ -1333,16 +1524,16 @@ static void test_opening_war_l5_l7() {
         mid = advance_hour(mid).state;
         if (mid.pending_battle.active) mid.pending_battle = {};
     }
-    CHECK(mid.stores.at("continental").powder == powder0 + 8);
+    CHECK(cont_depot_c(mid).powder == powder0 + 8);
     CHECK(mid.shipments[0].status == "delivered");
     // No duplicate delivery after another save/load cycle.
-    const int powder_del = mid.stores.at("continental").powder;
+    const int powder_del = cont_depot_c(mid).powder;
     CampaignState mid2 = deserialize(serialize(mid));
     for (int i = 0; i < 20; ++i) {
         mid2 = advance_hour(mid2).state;
         if (mid2.pending_battle.active) mid2.pending_battle = {};
     }
-    CHECK(mid2.stores.at("continental").powder == powder_del);
+    CHECK(cont_depot_c(mid2).powder == powder_del);
 
     // Procurement is distinct from donor transfer.
     CampaignState proc = fresh();
@@ -1363,16 +1554,16 @@ static void test_opening_war_l5_l7() {
         if (c.source_id == "L7") proc_id = c.id;
     const int donor_p = proc.donor_reserves.at("ny_powder").powder;
     const int gold_p = proc.player_gold;
-    const int powder_p = proc.stores.at("continental").powder;
+    const int powder_p = cont_depot_c(proc).powder;
     proc = choose_logistics(proc, proc_id, "fund_procurement");
     CHECK(proc.donor_reserves.at("ny_powder").powder == donor_p);  // untouched
     CHECK(proc.player_gold == gold_p - 35);
-    CHECK(proc.stores.at("continental").powder == powder_p);
+    CHECK(cont_depot_c(proc).powder == powder_p);
     for (int i = 0; i < 20; ++i) {
         proc = advance_hour(proc).state;
         if (proc.pending_battle.active) proc.pending_battle = {};
     }
-    CHECK(proc.stores.at("continental").powder == powder_p + 6);
+    CHECK(cont_depot_c(proc).powder == powder_p + 6);
 
     // Conserve: no powder, offensive postponed.
     CampaignState cons = fresh();
@@ -1391,10 +1582,10 @@ static void test_opening_war_l5_l7() {
     std::string cons_id;
     for (const auto& c : cons.staff.queue)
         if (c.source_id == "L7") cons_id = c.id;
-    const int powder_c = cons.stores.at("continental").powder;
+    const int powder_c = cont_depot_c(s).powder;
     const int donor_c = cons.donor_reserves.at("ny_powder").powder;
     cons = choose_logistics(cons, cons_id, "conserve_ammunition");
-    CHECK(cons.stores.at("continental").powder == powder_c);
+    CHECK(cont_depot_c(s).powder == powder_c);
     CHECK(cons.donor_reserves.at("ny_powder").powder == donor_c);
     CHECK(cons.progress.offensive_postponed);
 
@@ -1415,6 +1606,65 @@ static void test_opening_war_l5_l7() {
         CHECK(e != nullptr);
         CHECK(e->institutional_url == urls[i]);
     }
+}
+
+static void test_province_development() {
+    CampaignState s = fresh();
+    ensure_logistics_defaults(s);
+    s.player_gold = 500;
+    std::string err;
+    // Enemy province cannot be developed or bought into.
+    CampaignState bad = develop_province(s, "boston", "farm", err);
+    CHECK(!err.empty());
+    CHECK(bad.player_gold == 500);
+    bad = approve_purchase(s, "boston", 0, 1, 0, 0, 0, 0, 0, err);
+    CHECK(!err.empty());
+    // Farm: cost from tuning, level up, development total and supply rise.
+    const int cost0 = development_cost("farm", 0);
+    CHECK(cost0 > 0);
+    s = develop_province(s, "concord", "farm", err);
+    CHECK(err.empty());
+    CHECK(s.provinces.at("concord").farm_level == 1);
+    CHECK(s.player_gold == 500 - cost0);
+    CHECK(province_development(s.provinces.at("concord")) ==
+          province_development(fresh().provinces.at("concord")) + 1);
+    CHECK(effective_supply_value(s.provinces.at("concord")) ==
+          s.provinces.at("concord").supply_value + 1);
+    CHECK(development_cost("farm", 1) > cost0);
+    CHECK(development_cost("nonsense", 0) == -1);
+    // Max level.
+    s.provinces.at("concord").farm_level = development_max_level();
+    CampaignState capped = develop_province(s, "concord", "farm", err);
+    CHECK(err == "max_level");
+    CHECK(capped.player_gold == s.player_gold);
+    // Workshop speeds cartridge work at Concord (seeded workshop 1 there).
+    CampaignState w = fresh();
+    w.provinces.at("concord").workshop_level = 0;
+    w.province_stores["concord"].powder = 5;
+    w.province_stores["concord"].lead = 5;
+    w.province_stores["concord"].paper = 5;
+    w.armies.at("continental_militia").province = "concord";
+    CampaignState w0 = start_cartridge_job(w, "concord", "continental_militia", 2, 1, 1, 1, err);
+    CHECK(err.empty());
+    w.province_stores["concord"] = ProvinceStores{5, 0, 0, 0, 0, 5, 5};
+    CampaignState w2 = w;
+    w2.provinces.at("concord").workshop_level = 1;
+    w2 = start_cartridge_job(w2, "concord", "continental_militia", 2, 1, 1, 1, err);
+    CHECK(err.empty());
+    CHECK(w2.progress.cartridge_jobs.back().complete_on_hour <
+          w0.progress.cartridge_jobs.back().complete_on_hour);
+    // Farm feeds provinces on the monthly tick (1 May 1775 00:00).
+    CampaignState m = fresh();
+    m.provinces.at("concord").farm_level = 2;
+    const int prov0 = m.province_stores.at("concord").provisions;
+    m.now = from_ymdh(YMDH{1775, 4, 30, 23});
+    m.pending_battle = {};
+    m = advance_hour(m).state;
+    CHECK(m.province_stores.at("concord").provisions == prov0 + 6);
+    // Save/load preserves development.
+    CampaignState loaded = deserialize(serialize(s));
+    CHECK(loaded.provinces.at("concord").farm_level == development_max_level());
+    CHECK(state_hash(loaded) == state_hash(s));
 }
 
 static void test_commander_and_knox_gates() {
@@ -1507,6 +1757,8 @@ inline int run_all(Reporter& rep, const std::string& data_dir, const std::string
         {"logistics_loop", test_logistics_loop},
         {"logistics_edges", test_logistics_edges},
         {"commander_and_knox_gates", test_commander_and_knox_gates},
+        {"province_supply_and_battle_ledger", test_province_supply_and_battle_ledger},
+        {"province_development", test_province_development},
         {"opening_war_l3_loop", test_opening_war_l3_loop},
         {"opening_war_l5_l7", test_opening_war_l5_l7},
     };

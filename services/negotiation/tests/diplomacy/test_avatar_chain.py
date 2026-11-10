@@ -21,13 +21,17 @@ def _fake_audio(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     wav = tmp_path / "x.wav"
     wav.write_bytes(b"RIFF")
 
-    async def fake(text: str, job_id: str, envoy_id: str = "default") -> tuple[str, str]:
+    async def fake(
+        text: str, job_id: str, envoy_id: str = "default"
+    ) -> tuple[str, str]:
         return str(wav), "say"
 
     monkeypatch.setattr(avatar, "synthesize_line_audio", fake)
 
 
-def test_falls_back_to_audio_only(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_falls_back_to_audio_only(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     _fake_audio(monkeypatch, tmp_path)
     monkeypatch.setenv("PA250_AVATAR", "auto")
     monkeypatch.delenv("MUSETALK_HOME", raising=False)
@@ -36,7 +40,9 @@ def test_falls_back_to_audio_only(monkeypatch: pytest.MonkeyPatch, tmp_path: Pat
     assert line.backend == "audio_only" and line.video_file is None and line.audio_file
 
 
-def test_musetalk_preferred_then_did(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_musetalk_preferred_then_did(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     _fake_audio(monkeypatch, tmp_path)
     monkeypatch.setenv("PA250_AVATAR", "auto")
     calls = []
@@ -50,6 +56,7 @@ def test_musetalk_preferred_then_did(monkeypatch: pytest.MonkeyPatch, tmp_path: 
         return str(out)
 
     monkeypatch.setenv("DID_API_KEY", "test")
+    monkeypatch.setenv("PA250_VIDEO_WAIT", "1")
     monkeypatch.setenv("PA250_DID", "1")
     monkeypatch.setattr(MuseTalkVideoSource, "unavailable_reason", lambda self: None)
     monkeypatch.setattr(MuseTalkVideoSource, "render_line", mt_ok)

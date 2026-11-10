@@ -29,7 +29,7 @@ import wave
 from collections.abc import AsyncGenerator, AsyncIterator
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 import httpx
 import numpy as np
@@ -44,15 +44,17 @@ SERVICE_DIR = Path(__file__).resolve().parents[2]
 VIDEO_DIR = SERVICE_DIR / "generated_video"
 SOURCE_CACHE = VIDEO_DIR / "source_cache.json"
 RENDER_CACHE = VIDEO_DIR / "cache"
-PORTRAIT_EXPIRES = "1d"
+PORTRAIT_EXPIRES: Final = "1d"
 PORTRAIT_REUSE_S = 23 * 3600  # re-upload before fal's 1-day expiry
-AUDIO_EXPIRES = "1h"
+AUDIO_EXPIRES: Final = "1h"
 
 
 @dataclass(frozen=True)
 class FalModel:
     app: str
-    usd_per_s: dict[str, float]  # resolution ("" if the model has none) -> USD per output second
+    usd_per_s: dict[
+        str, float
+    ]  # resolution ("" if the model has none) -> USD per output second
     max_clip_s: float | None = None  # model's own audio limit
     args: dict[str, Any] = field(default_factory=dict)
 
@@ -62,7 +64,9 @@ class FalModel:
 
 MODELS: dict[str, FalModel] = {
     "veed/fabric-1.0": FalModel("veed/fabric-1.0", {"480p": 0.08, "720p": 0.15}),
-    "fal-ai/bytedance/omnihuman": FalModel("fal-ai/bytedance/omnihuman", {"": 0.14}, max_clip_s=29.5),
+    "fal-ai/bytedance/omnihuman": FalModel(
+        "fal-ai/bytedance/omnihuman", {"": 0.14}, max_clip_s=29.5
+    ),
 }
 
 
@@ -99,7 +103,9 @@ def _write_wav(path: Path, pcm: np.ndarray, rate: int) -> None:
         w.writeframes(pcm.astype("<i2").tobytes())
 
 
-def split_points(pcm: np.ndarray, rate: int, max_s: float, min_pause_s: float = 0.18) -> list[int]:
+def split_points(
+    pcm: np.ndarray, rate: int, max_s: float, min_pause_s: float = 0.18
+) -> list[int]:
     """Sample indices to cut at so no part exceeds max_s, preferring the middle of the latest pause.
 
     A pause is a run of 20 ms frames whose RMS is under 4 % of the line's peak frame RMS (sentence gaps
@@ -111,7 +117,11 @@ def split_points(pcm: np.ndarray, rate: int, max_s: float, min_pause_s: float = 
         return []
     hop = max(1, int(0.02 * rate))
     frames = len(mono) // hop
-    rms = np.sqrt((mono[: frames * hop].reshape(frames, hop) ** 2).mean(axis=1)) if frames else np.zeros(0)
+    rms = (
+        np.sqrt((mono[: frames * hop].reshape(frames, hop) ** 2).mean(axis=1))
+        if frames
+        else np.zeros(0)
+    )
     quiet = rms < 0.04 * (rms.max() if len(rms) else 1.0)
     pauses: list[int] = []  # centre sample of each long-enough quiet run
     run_start = None
@@ -133,8 +143,14 @@ def split_points(pcm: np.ndarray, rate: int, max_s: float, min_pause_s: float = 
 
 async def _ffmpeg(*args: str) -> tuple[int, str]:
     proc = await asyncio.create_subprocess_exec(
-        "ffmpeg", "-hide_banner", "-loglevel", "error", "-y", *args,
-        stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE,
+        "ffmpeg",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-y",
+        *args,
+        stdout=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.PIPE,
     )
     try:
         _, err = await proc.communicate()
@@ -147,8 +163,16 @@ async def _ffmpeg(*args: str) -> tuple[int, str]:
 async def probe_streams(path: str) -> dict[str, Any]:
     """ffprobe -> {"video": [codecs], "audio": [codecs], "duration": seconds}."""
     proc = await asyncio.create_subprocess_exec(
-        "ffprobe", "-v", "error", "-show_entries", "stream=codec_type,codec_name:format=duration",
-        "-of", "json", path, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+        "ffprobe",
+        "-v",
+        "error",
+        "-show_entries",
+        "stream=codec_type,codec_name:format=duration",
+        "-of",
+        "json",
+        path,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.DEVNULL,
     )
     out, _ = await proc.communicate()
     info = json.loads(out or b"{}")
@@ -161,10 +185,16 @@ async def probe_streams(path: str) -> dict[str, Any]:
 
 
 class FalTalkingVideoSource(BaseVideoSource):
-    def __init__(self, config: VideoSourceConfig | None = None, model: str | None = None) -> None:
+    def __init__(
+        self, config: VideoSourceConfig | None = None, model: str | None = None
+    ) -> None:
         super().__init__(config or VideoSourceConfig(source_type="fal_talking"))
         self.model_id = model or os.getenv("FAL_TALKING_MODEL") or "veed/fabric-1.0"
-        self.resolution = os.getenv("FAL_RESOLUTION", "480p") if self.model_id == "veed/fabric-1.0" else ""
+        self.resolution = (
+            os.getenv("FAL_RESOLUTION", "480p")
+            if self.model_id == "veed/fabric-1.0"
+            else ""
+        )
         self.max_clip_s = float(os.getenv("FAL_MAX_CLIP_SECONDS", "30"))
 
     # -- availability ------------------------------------------------------
@@ -190,29 +220,65 @@ class FalTalkingVideoSource(BaseVideoSource):
 
     # -- caches --------------------------------------------------------------
     def cache_key(self, portrait_bytes: bytes, wav_bytes: bytes) -> str:
-        return _sha256(b"|".join([self.model_id.encode(), self.resolution.encode(),
-                                  _sha256(portrait_bytes).encode(), _sha256(wav_bytes).encode()]))
+        return _sha256(
+            b"|".join(
+                [
+                    self.model_id.encode(),
+                    self.resolution.encode(),
+                    _sha256(portrait_bytes).encode(),
+                    _sha256(wav_bytes).encode(),
+                ]
+            )
+        )
 
-    async def _portrait_url(self, client: Any, portrait: Path, digest: str, force: bool = False) -> str:
+    async def _portrait_url(
+        self, client: Any, portrait: Path, digest: str, force: bool = False
+    ) -> str:
         cache: dict[str, Any] = {}
         try:
             cache = json.loads(SOURCE_CACHE.read_text())
         except (FileNotFoundError, ValueError):
             pass
         hit = cache.get(digest)
-        if not force and hit and time.time() - float(hit.get("uploaded_at", 0)) < PORTRAIT_REUSE_S:
+        if (
+            not force
+            and hit
+            and time.time() - float(hit.get("uploaded_at", 0)) < PORTRAIT_REUSE_S
+        ):
             return str(hit["url"])
         import fal_client
 
-        url = await client.upload_file(portrait, lifecycle=fal_client.StorageSettings(expires_in=PORTRAIT_EXPIRES))
-        cache[digest] = {"url": url, "uploaded_at": time.time(), "expires_in": PORTRAIT_EXPIRES, "file": portrait.name}
+        url = await client.upload_file(
+            portrait, lifecycle=fal_client.StorageSettings(expires_in=PORTRAIT_EXPIRES)
+        )
+        cache[digest] = {
+            "url": url,
+            "uploaded_at": time.time(),
+            "expires_in": PORTRAIT_EXPIRES,
+            "file": portrait.name,
+        }
         VIDEO_DIR.mkdir(parents=True, exist_ok=True)
         SOURCE_CACHE.write_text(json.dumps(cache, indent=1))
-        logger.info("fal portrait uploaded", file=portrait.name, expires_in=PORTRAIT_EXPIRES)
+        logger.info(
+            "fal portrait uploaded", file=portrait.name, expires_in=PORTRAIT_EXPIRES
+        )
         return str(url)
 
     # -- rendering -------------------------------------------------------------
-    async def render_line(self, audio_file: str, portrait: str, out_mp4: str) -> str | None:
+    def cached_path(self, audio_file: str, portrait: str) -> Path | None:
+        """The render cache entry for this exact (model, portrait, WAV), or None. Makes no network call."""
+        try:
+            key = self.cache_key(
+                Path(portrait).read_bytes(), Path(audio_file).read_bytes()
+            )
+        except OSError:
+            return None
+        hit = RENDER_CACHE / f"{key}.mp4"
+        return hit if hit.exists() else None
+
+    async def render_line(
+        self, audio_file: str, portrait: str, out_mp4: str
+    ) -> str | None:
         return (await self.render(audio_file, portrait, out_mp4)).path
 
     async def render(self, audio_file: str, portrait: str, out_mp4: str) -> FalRender:
@@ -226,7 +292,10 @@ class FalTalkingVideoSource(BaseVideoSource):
         spec = MODELS[self.model_id]
         portrait_p = Path(portrait)
         try:
-            portrait_bytes, wav_bytes = portrait_p.read_bytes(), Path(audio_file).read_bytes()
+            portrait_bytes, wav_bytes = (
+                portrait_p.read_bytes(),
+                Path(audio_file).read_bytes(),
+            )
         except OSError as e:
             res.error = f"cannot read input: {e}"
             logger.warning("fal render failed", model=self.model_id, error=res.error)
@@ -238,8 +307,15 @@ class FalTalkingVideoSource(BaseVideoSource):
             res.path, res.cache_hit = out_mp4, True
             res.seconds = (await probe_streams(out_mp4))["duration"]
             res.render_s = time.monotonic() - t0
-            logger.info("fal render", model=self.model_id, cache_hit=True, seconds=round(res.seconds, 2),
-                        est_cost_usd=0.0, render_s=round(res.render_s, 2), path=out_mp4)
+            logger.info(
+                "fal render",
+                model=self.model_id,
+                cache_hit=True,
+                seconds=round(res.seconds, 2),
+                est_cost_usd=0.0,
+                render_s=round(res.render_s, 2),
+                path=out_mp4,
+            )
             return res
 
         import fal_client
@@ -254,45 +330,92 @@ class FalTalkingVideoSource(BaseVideoSource):
             res.parts = len(bounds)
             with tempfile.TemporaryDirectory(prefix="fal_") as tmp_s:
                 tmp = Path(tmp_s)
-                image_url = await self._portrait_url(client, portrait_p, _sha256(portrait_bytes))
+                image_url = await self._portrait_url(
+                    client, portrait_p, _sha256(portrait_bytes)
+                )
                 part_mp4s: list[Path] = []
                 billed = 0.0
                 for i, (a, b) in enumerate(bounds):
                     part_wav = tmp / f"part{i}.wav"
                     _write_wav(part_wav, pcm[a:b], rate)
                     audio_url = await client.upload_file(
-                        part_wav, lifecycle=fal_client.StorageSettings(expires_in=AUDIO_EXPIRES))
+                        part_wav,
+                        lifecycle=fal_client.StorageSettings(expires_in=AUDIO_EXPIRES),
+                    )
                     args = {"image_url": image_url, "audio_url": audio_url, **spec.args}
                     if self.resolution:
                         args["resolution"] = self.resolution
                     try:
                         out = await self._run_model(client, args, handles)
                     except fal_client.FalClientHTTPError as e:
-                        if i == 0 and "image" in str(e).lower():  # cached portrait URL gone: re-upload once
-                            logger.warning("fal could not use the cached portrait URL; re-uploading", error=str(e)[:300])
-                            image_url = await self._portrait_url(client, portrait_p, _sha256(portrait_bytes), force=True)
-                            out = await self._run_model(client, dict(args, image_url=image_url), handles)
+                        if (
+                            i == 0 and "image" in str(e).lower()
+                        ):  # cached portrait URL gone: re-upload once
+                            logger.warning(
+                                "fal could not use the cached portrait URL; re-uploading",
+                                error=str(e)[:300],
+                            )
+                            image_url = await self._portrait_url(
+                                client, portrait_p, _sha256(portrait_bytes), force=True
+                            )
+                            out = await self._run_model(
+                                client, dict(args, image_url=image_url), handles
+                            )
                         else:
                             raise
                     url = (out.get("video") or {}).get("url")
                     if not url:
-                        raise RuntimeError(f"fal returned no video url (keys: {sorted(out)})")
+                        raise RuntimeError(
+                            f"fal returned no video url (keys: {sorted(out)})"
+                        )
                     part_mp4 = tmp / f"part{i}.mp4"
-                    async with httpx.AsyncClient(timeout=60, follow_redirects=True) as http:
+                    async with httpx.AsyncClient(
+                        timeout=60, follow_redirects=True
+                    ) as http:
                         r = await http.get(url)
                         r.raise_for_status()
                         part_mp4.write_bytes(r.content)
                     part_mp4s.append(part_mp4)
-                    billed += float(out.get("duration") or (await probe_streams(str(part_mp4)))["duration"])
+                    billed += float(
+                        out.get("duration")
+                        or (await probe_streams(str(part_mp4)))["duration"]
+                    )
 
                 # Concatenate the fal parts (video only) and mux the original voice as AAC: one H.264 + AAC file.
                 listing = tmp / "parts.txt"
                 listing.write_text("".join(f"file '{p}'\n" for p in part_mp4s))
                 rc, err = await _ffmpeg(
-                    "-f", "concat", "-safe", "0", "-i", str(listing), "-i", audio_file,
-                    "-map", "0:v:0", "-map", "1:a:0", "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
-                    "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "128k", "-ar", "48000",
-                    "-shortest", "-movflags", "+faststart", out_mp4)
+                    "-f",
+                    "concat",
+                    "-safe",
+                    "0",
+                    "-i",
+                    str(listing),
+                    "-i",
+                    audio_file,
+                    "-map",
+                    "0:v:0",
+                    "-map",
+                    "1:a:0",
+                    "-c:v",
+                    "libx264",
+                    "-preset",
+                    "veryfast",
+                    "-crf",
+                    "20",
+                    "-pix_fmt",
+                    "yuv420p",
+                    "-c:a",
+                    "aac",
+                    "-b:a",
+                    "128k",
+                    "-ar",
+                    "48000",
+                    "-shortest",
+                    "-movflags",
+                    "+faststart",
+                    out_mp4,
+                )
                 if rc != 0:
                     raise RuntimeError(f"ffmpeg mux failed (exit {rc}): {err}")
             probe = await probe_streams(out_mp4)
@@ -303,29 +426,51 @@ class FalTalkingVideoSource(BaseVideoSource):
             res.path, res.seconds = out_mp4, probe["duration"]
             res.est_cost_usd = round(billed * spec.rate(self.resolution), 4)
             res.render_s = time.monotonic() - t0
-            logger.info("fal render", model=self.model_id, resolution=self.resolution or None, cache_hit=False,
-                        seconds=round(res.seconds, 2), billed_seconds=round(billed, 2), parts=res.parts,
-                        est_cost_usd=res.est_cost_usd, usd_per_s=spec.rate(self.resolution),
-                        render_s=round(res.render_s, 2), path=out_mp4)
+            logger.info(
+                "fal render",
+                model=self.model_id,
+                resolution=self.resolution or None,
+                cache_hit=False,
+                seconds=round(res.seconds, 2),
+                billed_seconds=round(billed, 2),
+                parts=res.parts,
+                est_cost_usd=res.est_cost_usd,
+                usd_per_s=spec.rate(self.resolution),
+                render_s=round(res.render_s, 2),
+                path=out_mp4,
+            )
             return res
         except asyncio.CancelledError:
-            for h in handles:  # time budget ran out: stop paying for renders nobody will watch
+            for h in (
+                handles
+            ):  # time budget ran out: stop paying for renders nobody will watch
                 try:
                     await h.cancel()
                 except Exception:  # noqa: BLE001 - best effort
                     pass
-            logger.warning("fal render cancelled", model=self.model_id, render_s=round(time.monotonic() - t0, 2))
+            logger.warning(
+                "fal render cancelled",
+                model=self.model_id,
+                render_s=round(time.monotonic() - t0, 2),
+            )
             raise
         except Exception as e:
             res.error = f"{type(e).__name__}: {e}"[:600]
             res.render_s = time.monotonic() - t0
-            logger.warning("fal render failed", model=self.model_id, error=res.error, render_s=round(res.render_s, 2))
+            logger.warning(
+                "fal render failed",
+                model=self.model_id,
+                error=res.error,
+                render_s=round(res.render_s, 2),
+            )
             return res
 
-    async def _run_model(self, client: Any, args: dict[str, Any], handles: list[Any]) -> dict[str, Any]:
+    async def _run_model(
+        self, client: Any, args: dict[str, Any], handles: list[Any]
+    ) -> dict[str, Any]:
         handle = await client.submit(self.model_id, arguments=args)
         handles.append(handle)
-        out = await handle.get()
+        out = await handle.get(interval=1.0)  # fal's default polls every 0.1 s
         return out if isinstance(out, dict) else {}
 
     # -- BaseVideoSource (no live frames: one MP4 per line) ---------------------
@@ -339,9 +484,11 @@ class FalTalkingVideoSource(BaseVideoSource):
         return None
 
     async def frames(self) -> AsyncIterator[np.ndarray]:
-        raise NotImplementedError("fal_talking renders one MP4 per line; use render_line()")
-        yield  # pragma: no cover
+        raise NotImplementedError(
+            "fal_talking renders one MP4 per line; use render_line()"
+        )
 
     async def stream_frames(self) -> AsyncGenerator[VideoFrame, None]:
-        raise NotImplementedError("fal_talking renders one MP4 per line; use render_line()")
-        yield  # pragma: no cover
+        raise NotImplementedError(
+            "fal_talking renders one MP4 per line; use render_line()"
+        )

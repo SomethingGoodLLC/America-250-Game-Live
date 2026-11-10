@@ -40,6 +40,41 @@ CampaignState apply_battle_result(const CampaignState& state, const BattleResult
 // ---- Logistics / correspondence / staff (pure) -------------------------
 // Ensure default stores/staff exist (called from load_scenario path).
 void ensure_logistics_defaults(CampaignState& s);
+// Soft-migrate older schema-2 saves (faction stores → province_stores, etc.).
+void migrate_campaign_state(CampaignState& s);
+// Gameplay-tuning file (not historical fact). Optional; defaults apply if unloaded.
+void load_logistics_tuning(const std::string& json_text);
+bool logistics_tuning_loaded();
+
+// Province ledger helpers.
+ProvinceStores& province_ledger(CampaignState& s, const std::string& province_id);
+const ProvinceStores& province_ledger(const CampaignState& s, const std::string& province_id);
+// Computed rollup of province ledgers owned by faction (display only; not a write path).
+FactionStores rollup_faction_stores(const CampaignState& s, const std::string& faction);
+std::string default_depot_province(const CampaignState& s, const std::string& faction);
+
+// Purchase: debit gold, create in-transit shipment; destination unchanged until delivery.
+// Transfer: debit source immediately; credit dest only on delivery.
+CampaignState approve_purchase(const CampaignState& state, const std::string& dest_province,
+                               int powder, int cartridges, int muskets, int bayonets, int provisions,
+                               int lead, int paper, std::string& error);
+CampaignState approve_transfer(const CampaignState& state, const std::string& source_province,
+                               const std::string& dest_province, int powder, int cartridges, int muskets,
+                               int bayonets, int provisions, int lead, int paper, std::string& error);
+// Province development (EU4-style: spend gold to raise a track, effects are sim-side).
+int province_development(const Province& p);  // 1 + farm+workshop+depot+fort
+int effective_supply_value(const Province& p);  // supply_value + farm_level
+int development_cost(const std::string& track, int current_level);  // gold, -1 = unknown track
+int development_max_level();
+CampaignState develop_province(const CampaignState& state, const std::string& province_id,
+                               const std::string& track, std::string& error);
+
+// Start a cartridge job: reserves powder/lead/paper and commits workers until complete_on_hour.
+CampaignState start_cartridge_job(const CampaignState& state, const std::string& province_id,
+                                  const std::string& army_id, int workers, int powder, int lead, int paper,
+                                  std::string& error);
+void tick_cartridge_jobs(CampaignState& s);
+
 // Player chooses among purchase | request_assistance | requisition | capacity_investment | knox_support | dismiss
 // | source_decision choice ids | acknowledge for historical_notice.
 // letter_id empty → use the pending aftermath choice letter.

@@ -208,11 +208,13 @@ void monthly_supply(CampaignState& s) {
     if (!(y.d == 1 && y.h == 0)) return;
     for (const auto& pk : s.provinces) {
         if (pk.second.owner.empty()) continue;
-        s.supplies[pk.second.owner] += pk.second.supply_value;
+        s.supplies[pk.second.owner] += effective_supply_value(pk.second);
+        // Farms feed the province magazine (development effect; 3 per farm level by default in tuning).
+        if (pk.second.farm_level > 0) province_ledger(s, pk.first).provisions += pk.second.farm_level * 3;
     }
     // Treasury income: uncapped, grows with the provinces the player holds.
     for (const auto& pk : s.provinces)
-        if (pk.second.owner == s.player_faction) s.player_gold += 15 * pk.second.supply_value;
+        if (pk.second.owner == s.player_faction) s.player_gold += 15 * effective_supply_value(pk.second);
     detail::add_log(s, "monthly supply accrual");
 }
 

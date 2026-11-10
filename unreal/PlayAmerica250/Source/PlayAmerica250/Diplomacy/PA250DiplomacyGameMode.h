@@ -5,12 +5,14 @@
 #include "CoreMinimal.h"
 #include "GameFramework/GameModeBase.h"
 #include "PA250DiplomacyClient.h"
+#include "PA250MicRecorder.h"
 #include "PA250DiplomacyGameMode.generated.h"
 
 class UAudioComponent;
 class UMediaPlayer;
 class UMediaSoundComponent;
 class UMaterialInterface;
+class UMaterialInstanceDynamic;
 class UPA250DiplomacyWidget;
 class UStaticMeshComponent;
 class USoundWaveProcedural;
@@ -39,6 +41,13 @@ public:
 	void Reject();
 	void Leave();
 
+	// ---- push-to-talk: click to start, click to stop; the clip is transcribed and sent like typed text ----
+	void ToggleMic();
+	bool IsMicRecording() const { return Mic && Mic->IsRecording(); }
+	bool bTranscribing = false;
+	float GetMicSeconds() const { return Mic ? Mic->GetSeconds() : 0.f; }
+	float GetMicLevel() const { return Mic ? Mic->GetLevel() : 0.f; }
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type Reason) override;
@@ -62,6 +71,15 @@ private:
 	void StopVideo();
 	FString VoiceFile;
 	float VoiceSeconds = 0.f;
+	// ---- lip-sync flipbook on the painting (M_PortraitStill "Frame": 0 = rest, 1..15 wider open) ----
+	void UpdateLipSync(int32 BytesLeft);
+	void SetLipFrame(int32 Frame);
+	TArray<float> VoiceEnvelope;   // 30 Hz loudness of the current line, ~0..1.3
+	float VoiceBytesPerSecond = 1.f;
+	float LipOpen = 0.f;
+	int32 LipFrame = 0;
+	int32 LipChanges = 0;
+	uint32 LipCellsUsed = 0;
 	int32 VoiceBytes = 0;
 	double VoiceStartTime = 0.0;
 	double VoiceDrainedTime = 0.0;
@@ -78,6 +96,20 @@ private:
 	bool bVoiceTestDone = false;
 	FString VoiceTestVideo;  // -PA250VoiceTestVideo=<mp4>: play this clip for the line (tests the MP4 path)
 	FTimerHandle VoiceTestTimer;
+
+	// ---- mic ----
+	void SendMicClip(const TArray<uint8>& Wav, float Seconds, float Peak);
+	TUniquePtr<FPA250MicRecorder> Mic;
+	FTimerHandle MicTimer;
+	// -PA250MicTest: record 3 s from the real mic, transcribe, log, exit. -PA250MicTestWav=<file>: inject a clip.
+	bool bMicTest = false;
+	FString MicTestWav;
+
+	// ---- fire and candle flicker (lights tagged FireLight / CandleLight) ----
+	void Flicker();
+	FTimerHandle FlickerTimer;
+	struct FFlickerLight { TWeakObjectPtr<class ULightComponent> Light; float Base = 0.f; float Seed = 0.f; bool bFire = false; };
+	TArray<FFlickerLight> FlickerLights;
 	void SetupMedia();
 	FString DescribeClause(const TSharedPtr<FJsonObject>& Clause) const;
 	void ReturnToCampaign();
@@ -109,6 +141,8 @@ private:
 	TObjectPtr<UMediaSoundComponent> MediaSound;
 	UPROPERTY(Transient)
 	TObjectPtr<UMaterialInterface> StillMaterial;
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInstanceDynamic> TalkMID;
 	UPROPERTY(Transient)
 	TObjectPtr<UMaterialInterface> VideoMaterial;
 	UPROPERTY(Transient)

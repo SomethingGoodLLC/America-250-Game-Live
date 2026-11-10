@@ -37,7 +37,7 @@ public class PlayAmerica250 : ModuleRules
 			"FunctionalTesting"
 		});
 
-		PrivateDependencyModuleNames.AddRange(new string[] { "ImageWrapper", "AnimationCore" });
+		PrivateDependencyModuleNames.AddRange(new string[] { "ImageWrapper", "AnimationCore", "AudioCapture", "AudioCaptureCore" });
 		PublicIncludePaths.Add("PlayAmerica250/Campaign");
 		PublicIncludePaths.Add("PlayAmerica250/Battle");
 		PublicIncludePaths.Add("PlayAmerica250/Diplomacy");

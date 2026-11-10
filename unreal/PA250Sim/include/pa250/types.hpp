@@ -49,6 +49,12 @@ struct Province {
     std::vector<Point> polygon;             // map-space outline (legacy / bootstrap)
     Point label;                            // label anchor for the UI
     int supply_value = 1;
+    // Development tracks (0..3 each, gameplay tuning). Total development is
+    // 1 + the sum; effects live in logistics/clock/battle, never in UI code.
+    int farm_level = 0;      // monthly provisions + supply income
+    int workshop_level = 0;  // faster cartridge manufacture
+    int depot_level = 0;     // faster shipments into this province
+    int fort_level = 0;      // defender morale/readiness bonus at this province
 };
 
 struct Army {
@@ -57,7 +63,9 @@ struct Army {
     std::string faction;
     std::string province;
     std::string previous_province;
-    std::map<std::string, int> units;  // unit class -> strength
+    std::map<std::string, int> units;    // unit class -> fit (fieldable)
+    std::map<std::string, int> sick;     // unit class -> sick (not fieldable)
+    std::map<std::string, int> wounded;  // unit class -> wounded (not fieldable)
     int morale = 70;
     int readiness = 100;  // 0..100 material/rest readiness (campaign, not battlefield morale)
     int fatigue = 0;      // 0..100; rises with fighting, falls with rest
@@ -65,10 +73,22 @@ struct Army {
     int hours_into_edge = 0;
 };
 
-// Usable war materials (not the same as faction "supplies" accrual or gold).
+// Usable war materials at one province (not gold; not abstract faction "supplies").
+// Funds stay on CampaignState.player_gold. Capture changes owner, not local_support.
+struct ProvinceStores {
+    int powder = 0;
+    int cartridges = 0;
+    int muskets = 0;
+    int bayonets = 0;
+    int provisions = 0;
+    int lead = 0;   // cartridge crafting input (gameplay tuning)
+    int paper = 0;  // cartridge crafting input (gameplay tuning)
+};
+
+// Legacy faction bag kept for soft-migration of older schema-2 saves only.
 struct FactionStores {
     int powder = 0;
-    int arms = 0;
+    int arms = 0;  // maps to muskets on migrate
     int provisions = 0;
 };
 
@@ -91,17 +111,58 @@ struct DonorReserve {
     int provisions = 0;
 };
 
-// In-transit material from a donor reserve to a faction store. Commit ≠ receive.
+// In-transit material. Commit ≠ receive. Purchase has empty source_province;
+// transfer debits source at departure and credits dest only on delivery.
 struct Shipment {
     std::string id;
-    std::string donor_reserve_id;
-    std::string dest_faction;
+    std::string donor_reserve_id;  // optional donor abstraction (L7)
+    std::string source_province;   // empty = market/donor purchase
+    std::string dest_province;     // province ledger credited on delivery
+    std::string dest_faction;      // legacy; prefer dest_province
     int powder = 0;
-    int arms = 0;
+    int cartridges = 0;
+    int muskets = 0;
+    int bayonets = 0;
+    int arms = 0;  // legacy alias for muskets on soft migrate
     int provisions = 0;
+    int lead = 0;
+    int paper = 0;
     int64_t commit_hour = 0;
     int64_t deliver_on_hour = 0;
     std::string status;  // committed | in_transit | delivered | lost
+};
+
+// Clock-driven cartridge manufacture: powder + lead/paper + workers → cartridges.
+struct CartridgeJob {
+    std::string id;
+    std::string province_id;
+    std::string army_id;
+    std::string unit_class = "militia";
+    int workers = 0;
+    int powder = 0;
+    int lead = 0;
+    int paper = 0;
+    int cartridges_out = 0;
+    int64_t started_hour = 0;
+    int64_t complete_on_hour = 0;
+    std::string status;  // underway | complete | cancelled
+};
+
+// Structured after-battle snapshot (ground held ≠ losses ≠ ammo ≠ morale).
+struct BattleReport {
+    std::string province_id;
+    std::string winner;
+    std::string province_owner_before;
+    std::string province_owner_after;
+    int local_support_before = 0;
+    int local_support_after = 0;
+    std::string objective_holder;
+    std::map<std::string, std::string> objectives_held;
+    std::map<std::string, std::map<std::string, int>> losses;
+    std::map<std::string, std::map<std::string, int>> wounded;
+    std::map<std::string, int> cartridges_spent;
+    std::map<std::string, int> powder_spent;
+    std::map<std::string, int> morale_delta;  // army_id -> delta
 };
 
 // Structured staff letter. Flavor text is display-only and never parsed for state.
@@ -166,7 +227,7 @@ struct CampaignProject {
 
 struct CampaignProgress {
     int battles_fought = 0;
-    bool lexington_fought = false;
+    bool lexington_fought = false;  // opening-war gate; set after first fight (Concord in this slice)
     bool aftermath_pending = false;
     bool concord_followup_seeded = false;
     bool chapter_continental = false;  // after 14 Jun 1775
@@ -177,6 +238,8 @@ struct CampaignProgress {
     CampaignProject knox;
     DetachedCommander commander;
     std::vector<PersonnelCommitment> personnel_commitments;
+    std::vector<CartridgeJob> cartridge_jobs;
+    BattleReport last_battle_report;
     std::vector<std::string> resolved_event_ids;
     std::vector<std::string> received_source_ids;
     bool offensive_postponed = false;  // L7 conserve (gameplay tuning)
@@ -261,9 +324,12 @@ struct CampaignState {
     bool player_vassal = false;                  // pledged to the Crown (rogue army under its protection)
     std::string player_title;                    // title the Crown granted the player
     int player_gold = 500;                       // treasury the player can offer
-    std::map<std::string, std::string> fiefs;    // province -> envoy name it was granted to
-    std::map<std::string, FactionStores> stores; // faction -> usable war materials
-    int local_support = 55;                      // 0..100 civilian cooperation (not military control)
+    std::map<std::string, std::string> fiefs;  // province -> envoy name it was granted to
+    // Authoritative war-material ledgers keyed by province id (all 13 seeded).
+    std::map<std::string, ProvinceStores> province_stores;
+    // Legacy faction bags: read for soft migration only; not the write path after migrate.
+    std::map<std::string, FactionStores> stores;
+    int local_support = 55;  // 0..100 civilian cooperation (not military control)
     StaffState staff;
     CampaignProgress progress;
     std::string pending_event_id;  // correspondence id that raised EventPopup
@@ -334,6 +400,7 @@ struct SideSetup {
     std::map<std::string, int> tickets;  // per unit class, after stores gating
     int morale = 0;                     // campaign confidence (feeds UE pressure bias)
     int readiness = 100;
+    int cartridge_budget = 0;           // cartridges available to this side from the province
     std::string retreat_province;
 };
 struct BattleSetup {
@@ -348,14 +415,21 @@ struct BattleSetup {
     std::string player_faction;
     std::vector<std::string> terrain_tags;
     std::map<std::string, SideSetup> sides;  // keyed by faction
+    int province_cartridges = 0;            // stock at fight start (authoritative cap)
+    std::string force_notes = "sourced approximation — not a precise muster roll";
 };
 struct BattleResult {
     std::string province_id;
     std::string winner;
     std::string objective_holder;  // plurality owner of posts at the end, or ""
     std::map<std::string, std::string> objectives_held;  // post_id -> faction (omit neutral)
-    std::map<std::string, std::map<std::string, int>> losses;  // faction -> class -> lost
+    std::map<std::string, std::map<std::string, int>> losses;   // faction -> class -> killed
+    std::map<std::string, std::map<std::string, int>> wounded;  // faction -> class -> wounded
+    std::map<std::string, int> cartridges_spent;               // faction -> spent
+    std::map<std::string, int> powder_spent;                   // faction -> spent (rare)
+    std::map<std::string, int> morale_delta;                   // army_id -> delta (optional input)
     std::string retreat_province;  // loser's retreat; empty = sim chooses
+    std::string province_owner_after;  // filled by apply when ownership flips
 };
 
 struct TickOutput {

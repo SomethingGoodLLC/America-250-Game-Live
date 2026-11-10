@@ -272,4 +272,61 @@ bool CampaignController::has_staff_event() const {
     return false;
 }
 
+std::vector<std::string> CampaignController::approve_purchase_order(
+    const std::string& dest_province, int powder, int cartridges, int muskets, int bayonets,
+    int provisions, int lead, int paper) {
+    if (!started_ || flow_ != Flow::Campaign) return {detail::err("not_in_campaign")};
+    if (state_.pending_battle.active) return {detail::err("battle_pending")};
+    std::string error;
+    CampaignState next =
+        approve_purchase(state_, dest_province, powder, cartridges, muskets, bayonets, provisions,
+                         lead, paper, error);
+    if (!error.empty()) return {detail::err(error)};
+    state_ = next;
+    record("purchase", dest_province);
+    return {};
+}
+
+std::vector<std::string> CampaignController::approve_transfer_order(
+    const std::string& source_province, const std::string& dest_province, int powder, int cartridges,
+    int muskets, int bayonets, int provisions, int lead, int paper) {
+    if (!started_ || flow_ != Flow::Campaign) return {detail::err("not_in_campaign")};
+    if (state_.pending_battle.active) return {detail::err("battle_pending")};
+    std::string error;
+    CampaignState next =
+        approve_transfer(state_, source_province, dest_province, powder, cartridges, muskets,
+                         bayonets, provisions, lead, paper, error);
+    if (!error.empty()) return {detail::err(error)};
+    state_ = next;
+    record("transfer", source_province + "->" + dest_province);
+    return {};
+}
+
+std::vector<std::string> CampaignController::develop_province_action(const std::string& province_id,
+                                                                     const std::string& track) {
+    if (!started_ || flow_ != Flow::Campaign) return {detail::err("not_in_campaign")};
+    if (state_.pending_battle.active) return {detail::err("battle_pending")};
+    std::string error;
+    CampaignState next = develop_province(state_, province_id, track, error);
+    if (!error.empty()) return {detail::err(error)};
+    state_ = next;
+    record("develop", province_id + ":" + track);
+    return {};
+}
+
+std::vector<std::string> CampaignController::start_cartridge_craft(const std::string& province_id,
+                                                                  const std::string& army_id,
+                                                                  int workers, int powder, int lead,
+                                                                  int paper) {
+    if (!started_ || flow_ != Flow::Campaign) return {detail::err("not_in_campaign")};
+    if (state_.pending_battle.active) return {detail::err("battle_pending")};
+    std::string error;
+    CampaignState next =
+        start_cartridge_job(state_, province_id, army_id, workers, powder, lead, paper, error);
+    if (!error.empty()) return {detail::err(error)};
+    state_ = next;
+    record("cartridge_job", province_id);
+    return {};
+}
+
 }  // namespace pa250

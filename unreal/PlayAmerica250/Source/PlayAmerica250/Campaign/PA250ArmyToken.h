@@ -45,10 +45,10 @@ public:
 
 	/** World height of one standing figure (UU). The map plane is 1600 UU wide. */
 	static constexpr float FigureHeightUU = 16.f;
-	/** Compact symbol target size on screen, clamped in world units. */
-	static constexpr float CompactSymbolPx = 30.f;
-	static constexpr float CompactMinUU = 12.f;
-	static constexpr float CompactMaxUU = 26.f;
+	/** Compact counter target size on screen, clamped in world units. */
+	static constexpr float CompactSymbolPx = 38.f;
+	static constexpr float CompactMinUU = 16.f;
+	static constexpr float CompactMaxUU = 34.f;
 	/** Illustration appears when one figure is at least this tall on screen; hides below the lower value. */
 	static constexpr float RevealFigurePx = 22.f;
 	static constexpr float HideFigurePx = 19.f;
@@ -97,6 +97,16 @@ public:
 	/** Gold ring behind the compact symbol when selected. */
 	UPROPERTY(VisibleAnywhere)
 	TObjectPtr<UStaticMeshComponent> SelectRing;
+
+	/** Compact counter: parchment-framed rectangle with crossed bars (infantry). Towns are diamonds; armies are rectangles. */
+	UPROPERTY(VisibleAnywhere)
+	TObjectPtr<UStaticMeshComponent> CounterMesh;
+	UPROPERTY(VisibleAnywhere)
+	TObjectPtr<UStaticMeshComponent> BodyMesh;
+	UPROPERTY(VisibleAnywhere)
+	TObjectPtr<UStaticMeshComponent> CrossMeshA;
+	UPROPERTY(VisibleAnywhere)
+	TObjectPtr<UStaticMeshComponent> CrossMeshB;
 
 	/** Illustration quad (translucent unlit, content rect only — no transparent padding). */
 	UPROPERTY(VisibleAnywhere)

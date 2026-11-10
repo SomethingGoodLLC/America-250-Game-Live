@@ -26,8 +26,16 @@ public:
 	void PressLoad();
 	void PressLogistics(const FString& Choice);
 	void PressCommander(const FString& Action);
+	void PressBuyCartridges();
+	void PressTransferToDepot();
+	void PressMakeCartridges();
+	void PressDevelop(const FString& Track);
 	void PressResetOverview();
 	void PressFocusSelected();
+	void PressLedgerToggle();
+	bool IsLedgerOpen() const { return bShowLedger; }
+	void PressSelectArmy(const FString& ArmyId);
+	void PressSelectArmyAtSelection();
 	void PressAboutToggle();
 	void PressDevToggle();
 	void PressEnterBattleAtSelection();
@@ -85,6 +93,13 @@ private:
 	FText BattleText() const;
 	FText StaffPanelText() const;
 	FText LocationPanelText() const;
+	FText ProvinceTitleText() const;
+	FText SelectedArmyBannerText() const;
+	FText ArmyButtonText(int32 Index) const;
+	bool GetPlayerArmyId(int32 Index, FString& OutId) const;
+	FText DevelopmentText() const;
+	FText BattleReportText() const;
+	FText LedgerText() const;
 	bool CanEnterBattleAtSelection() const;
 	void NotifyMapSelectionChanged();
 
@@ -96,5 +111,6 @@ private:
 	/** Held arrow keys (bit 0 left, 1 right, 2 up, 3 down); the controller pans while held. */
 	uint8 HeldArrows = 0;
 	bool bShowDev = false;
+	bool bShowLedger = false;
 	TWeakObjectPtr<APA250ProvinceMapActor> MapActor;
 };

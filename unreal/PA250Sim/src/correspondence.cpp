@@ -198,14 +198,24 @@ void deliver_due_shipments(CampaignState& s, std::vector<Interrupt>* interrupts)
     for (auto& sh : s.shipments) {
         if (sh.status == "delivered" || sh.status == "lost") continue;
         if (sh.deliver_on_hour > 0 && s.now.hour_index >= sh.deliver_on_hour) {
-            FactionStores& st = s.stores[sh.dest_faction.empty() ? s.player_faction : sh.dest_faction];
+            std::string dest = sh.dest_province;
+            if (dest.empty()) {
+                const std::string fac = sh.dest_faction.empty() ? s.player_faction : sh.dest_faction;
+                dest = default_depot_province(s, fac);
+                sh.dest_province = dest;
+            }
+            ProvinceStores& st = province_ledger(s, dest);
             st.powder += std::max(0, sh.powder);
-            st.arms += std::max(0, sh.arms);
+            st.cartridges += std::max(0, sh.cartridges);
+            st.muskets += std::max(0, sh.muskets) + std::max(0, sh.arms);
+            st.bayonets += std::max(0, sh.bayonets);
             st.provisions += std::max(0, sh.provisions);
+            st.lead += std::max(0, sh.lead);
+            st.paper += std::max(0, sh.paper);
             sh.status = "delivered";
-            detail::add_log(s, "shipment delivered: " + sh.id + " powder+" + std::to_string(sh.powder));
+            detail::add_log(s, "shipment delivered: " + sh.id + " to " + dest + " powder+" +
+                                   std::to_string(sh.powder) + " cart+" + std::to_string(sh.cartridges));
             if (interrupts) {
-                // Surface as a notice on an existing letter if one matches; otherwise log only.
                 (void)interrupts;
             }
         } else if (sh.status == "committed") {
@@ -385,7 +395,7 @@ CampaignState apply_source_decision(const CampaignState& in, const std::string& 
             pc.reason = "boat_guard_crews";
             pc.release_on_hour = s.now.hour_index + 48;
             s.progress.personnel_commitments.push_back(pc);
-            FactionStores& st = s.stores[s.player_faction];
+            ProvinceStores& st = province_ledger(s, default_depot_province(s, s.player_faction));
             st.provisions = std::max(0, st.provisions - 4);
             letter->status = "delivered";
             letter->reason =
@@ -406,7 +416,7 @@ CampaignState apply_source_decision(const CampaignState& in, const std::string& 
             letter->resolve_on_hour = s.now.hour_index + 8;
             letter->reason = "Negotiation paid; provisions arrive in 8 hours if consent holds (gameplay tuning).";
         } else if (choice == "evacuate_preserve_boats") {
-            FactionStores& st = s.stores[s.player_faction];
+            ProvinceStores& st = province_ledger(s, default_depot_province(s, s.player_faction));
             st.provisions = std::max(0, st.provisions - 6);
             letter->status = "delivered";
             letter->reason =
@@ -437,6 +447,7 @@ CampaignState apply_source_decision(const CampaignState& in, const std::string& 
             sh.id = "ship_" + letter->id;
             sh.donor_reserve_id = "ny_powder";
             sh.dest_faction = s.player_faction;
+            sh.dest_province = default_depot_province(s, s.player_faction);
             sh.powder = take;
             sh.commit_hour = s.now.hour_index;
             sh.deliver_on_hour = s.now.hour_index + 12;

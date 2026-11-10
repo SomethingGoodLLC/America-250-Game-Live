@@ -1,0 +1,48 @@
+{
+  "note": "Gameplay tuning — not historical fact. Balance values for the April–June 1775 campaign loop.",
+  "purchase": {
+    "gold_per_powder": 4,
+    "gold_per_cartridge": 1,
+    "gold_per_musket": 8,
+    "gold_per_bayonet": 3,
+    "gold_per_provision": 2,
+    "gold_per_lead": 1,
+    "gold_per_paper": 1,
+    "transit_hours": 8
+  },
+  "transfer": {
+    "transit_hours": 6
+  },
+  "cartridge_craft": {
+    "powder_per_batch": 1,
+    "lead_per_batch": 1,
+    "paper_per_batch": 1,
+    "cartridges_per_batch": 10,
+    "hours_per_batch": 4,
+    "workers_per_batch": 2
+  },
+  "aftermath_purchase": {
+    "gold_cost": 40,
+    "powder": 10,
+    "muskets": 4,
+    "capacity_bonus_muskets": 2,
+    "transit_hours": 4
+  },
+  "battle": {
+    "cartridges_per_engaged": 2,
+    "recover_muskets_on_win": false
+  },
+  "development": {
+    "farm_gold": 30,
+    "workshop_gold": 40,
+    "depot_gold": 35,
+    "fort_gold": 45,
+    "cost_growth_per_level": 20,
+    "max_level": 3,
+    "farm_provisions_per_month": 3
+  },
+  "hq_province": {
+    "continental": "cambridge",
+    "british": "boston"
+  }
+}

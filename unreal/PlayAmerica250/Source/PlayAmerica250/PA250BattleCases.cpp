@@ -1280,7 +1280,7 @@ void RunScenario(FLog& Log)
 
 	const FPA250ScenarioFight Concord = APA250BattleGameMode::ResolveScenario(TEXT("concord_bridge"), {TEXT("woods"), TEXT("bridge_crossing")});
 	Log.Check(Concord.bContestSingleCrossing && !Concord.bRewardForcePreservation,
-		TEXT("scenario: Concord contests one crossing"));
+		TEXT("scenario: Concord uses the bridge preset (three contestable posts)"));
 	const FPA250ScenarioFight BridgeTag = APA250BattleGameMode::ResolveScenario(TEXT(""), {TEXT("bridge_crossing")});
 	Log.Check(BridgeTag.bContestSingleCrossing && !BridgeTag.bRewardForcePreservation,
 		TEXT("scenario: bridge_crossing tag is read without the preset label"));
@@ -1316,12 +1316,16 @@ void RunScenario(FLog& Log)
 	APA250BattleGameMode::ConfigurePostForScenario(Green, Concord);
 	APA250BattleGameMode::ConfigurePostForScenario(House, Concord);
 	APA250BattleGameMode::ConfigurePostForScenario(Buck, Concord);
-	Log.Check(!Green->IsContestLocked() && Green->GetHolder().IsNone(), TEXT("scenario: the crossing starts neutral and can be taken"));
-	Log.Check(House->IsContestLocked() && House->GetHolder() == TEXT("continental"), TEXT("scenario: the magazine is locked for the provincials"));
-	Log.Check(Buck->IsContestLocked() && Buck->GetHolder() == TEXT("british"), TEXT("scenario: the foothold is locked for the regulars"));
+	Log.Check(!Green->IsContestLocked() && Green->GetHolder().IsNone(), TEXT("scenario: North Bridge starts neutral and can be taken"));
+	Log.Check(!House->IsContestLocked() && House->GetHolder() == TEXT("continental"), TEXT("scenario: Muster ground starts Continental and is contestable"));
+	Log.Check(!Buck->IsContestLocked() && Buck->GetHolder() == TEXT("british"), TEXT("scenario: Far bridgehead starts British and is contestable"));
+	Log.Check(House->GetObjectiveTitle() == TEXT("Muster ground"), TEXT("scenario: meetinghouse labeled Muster ground"));
+	Log.Check(Buck->GetObjectiveTitle() == TEXT("Far bridgehead"), TEXT("scenario: buckman labeled Far bridgehead"));
 	const bool bHouseMoved = House->ApplyCapturePressure(TEXT("british"), 6, 0, 30.f);
-	Log.Check(!bHouseMoved && House->GetHolder() == TEXT("continental") && House->GetCaptureProgress() == 0.f,
-		TEXT("scenario: a locked post ignores a full capture push"));
+	// Capture of a held post first clears the holder, then a second push assigns the capturer.
+	const bool bHouseTaken = House->ApplyCapturePressure(TEXT("british"), 6, 0, 30.f);
+	Log.Check(bHouseMoved && bHouseTaken && House->GetHolder() == TEXT("british"),
+		TEXT("scenario: muster ground can change hands"));
 	const bool bGreenMoved = Green->ApplyCapturePressure(TEXT("continental"), 4, 0, 10.f);
 	Log.Check(bGreenMoved && Green->GetHolder() == TEXT("continental"), TEXT("scenario: the crossing changes hands"));
 	Log.Check(Green->GetObjectiveTitle() == TEXT("North Bridge"), TEXT("scenario: the crossing post is the North Bridge"));

@@ -58,6 +58,20 @@ public:
     std::vector<std::string> resolve_commander_action(const std::string& action);
     bool has_staff_event() const;
 
+    // Province supply pipeline / cartridge craft (commit ≠ receive for shipments).
+    std::vector<std::string> approve_purchase_order(const std::string& dest_province, int powder,
+                                                    int cartridges, int muskets, int bayonets,
+                                                    int provisions, int lead, int paper);
+    std::vector<std::string> approve_transfer_order(const std::string& source_province,
+                                                    const std::string& dest_province, int powder,
+                                                    int cartridges, int muskets, int bayonets,
+                                                    int provisions, int lead, int paper);
+    std::vector<std::string> develop_province_action(const std::string& province_id,
+                                                     const std::string& track);
+    std::vector<std::string> start_cartridge_craft(const std::string& province_id,
+                                                   const std::string& army_id, int workers, int powder,
+                                                   int lead, int paper);
+
     const std::vector<TraceEntry>& trace() const { return trace_; }
     std::string trace_json() const;
     void record(const std::string& event, const std::string& detail = std::string());

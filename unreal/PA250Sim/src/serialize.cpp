@@ -101,6 +101,8 @@ json army_to_json(const Army& a) {
             {"province", a.province},
             {"previous_province", a.previous_province},
             {"units", a.units},
+            {"sick", a.sick},
+            {"wounded", a.wounded},
             {"morale", a.morale},
             {"readiness", a.readiness},
             {"fatigue", a.fatigue},
@@ -115,6 +117,8 @@ Army army_from_json(const json& j) {
     a.province = j.at("province").get<std::string>();
     a.previous_province = j.value("previous_province", "");
     a.units = j.at("units").get<std::map<std::string, int>>();
+    a.sick = j.value("sick", std::map<std::string, int>{});
+    a.wounded = j.value("wounded", std::map<std::string, int>{});
     a.morale = j.value("morale", 70);
     a.readiness = j.value("readiness", 100);
     a.fatigue = j.value("fatigue", 0);
@@ -130,6 +134,26 @@ FactionStores stores_from_json(const json& j) {
     st.powder = j.value("powder", 0);
     st.arms = j.value("arms", 0);
     st.provisions = j.value("provisions", 0);
+    return st;
+}
+json province_stores_to_json(const ProvinceStores& st) {
+    return {{"powder", st.powder},
+            {"cartridges", st.cartridges},
+            {"muskets", st.muskets},
+            {"bayonets", st.bayonets},
+            {"provisions", st.provisions},
+            {"lead", st.lead},
+            {"paper", st.paper}};
+}
+ProvinceStores province_stores_from_json(const json& j) {
+    ProvinceStores st;
+    st.powder = j.value("powder", 0);
+    st.cartridges = j.value("cartridges", 0);
+    st.muskets = j.value("muskets", j.value("arms", 0));
+    st.bayonets = j.value("bayonets", 0);
+    st.provisions = j.value("provisions", 0);
+    st.lead = j.value("lead", 0);
+    st.paper = j.value("paper", 0);
     return st;
 }
 json letter_to_json(const CorrespondenceItem& c) {
@@ -225,10 +249,17 @@ DonorReserve donor_from_json(const json& j) {
 json shipment_to_json(const Shipment& sh) {
     return {{"id", sh.id},
             {"donor_reserve_id", sh.donor_reserve_id},
+            {"source_province", sh.source_province},
+            {"dest_province", sh.dest_province},
             {"dest_faction", sh.dest_faction},
             {"powder", sh.powder},
+            {"cartridges", sh.cartridges},
+            {"muskets", sh.muskets},
+            {"bayonets", sh.bayonets},
             {"arms", sh.arms},
             {"provisions", sh.provisions},
+            {"lead", sh.lead},
+            {"paper", sh.paper},
             {"commit_hour", sh.commit_hour},
             {"deliver_on_hour", sh.deliver_on_hour},
             {"status", sh.status}};
@@ -237,14 +268,84 @@ Shipment shipment_from_json(const json& j) {
     Shipment sh;
     sh.id = j.value("id", "");
     sh.donor_reserve_id = j.value("donor_reserve_id", "");
+    sh.source_province = j.value("source_province", "");
+    sh.dest_province = j.value("dest_province", "");
     sh.dest_faction = j.value("dest_faction", "");
     sh.powder = j.value("powder", 0);
+    sh.cartridges = j.value("cartridges", 0);
+    sh.muskets = j.value("muskets", 0);
+    sh.bayonets = j.value("bayonets", 0);
     sh.arms = j.value("arms", 0);
+    if (sh.muskets == 0 && sh.arms > 0) sh.muskets = sh.arms;
     sh.provisions = j.value("provisions", 0);
+    sh.lead = j.value("lead", 0);
+    sh.paper = j.value("paper", 0);
     sh.commit_hour = j.value("commit_hour", int64_t{0});
     sh.deliver_on_hour = j.value("deliver_on_hour", int64_t{0});
     sh.status = j.value("status", "");
     return sh;
+}
+json cartridge_job_to_json(const CartridgeJob& job) {
+    return {{"id", job.id},
+            {"province_id", job.province_id},
+            {"army_id", job.army_id},
+            {"unit_class", job.unit_class},
+            {"workers", job.workers},
+            {"powder", job.powder},
+            {"lead", job.lead},
+            {"paper", job.paper},
+            {"cartridges_out", job.cartridges_out},
+            {"started_hour", job.started_hour},
+            {"complete_on_hour", job.complete_on_hour},
+            {"status", job.status}};
+}
+CartridgeJob cartridge_job_from_json(const json& j) {
+    CartridgeJob job;
+    job.id = j.value("id", "");
+    job.province_id = j.value("province_id", "");
+    job.army_id = j.value("army_id", "");
+    job.unit_class = j.value("unit_class", "militia");
+    job.workers = j.value("workers", 0);
+    job.powder = j.value("powder", 0);
+    job.lead = j.value("lead", 0);
+    job.paper = j.value("paper", 0);
+    job.cartridges_out = j.value("cartridges_out", 0);
+    job.started_hour = j.value("started_hour", int64_t{0});
+    job.complete_on_hour = j.value("complete_on_hour", int64_t{0});
+    job.status = j.value("status", "");
+    return job;
+}
+json battle_report_to_json(const BattleReport& r) {
+    return {{"province_id", r.province_id},
+            {"winner", r.winner},
+            {"province_owner_before", r.province_owner_before},
+            {"province_owner_after", r.province_owner_after},
+            {"local_support_before", r.local_support_before},
+            {"local_support_after", r.local_support_after},
+            {"objective_holder", r.objective_holder},
+            {"objectives_held", r.objectives_held},
+            {"losses", r.losses},
+            {"wounded", r.wounded},
+            {"cartridges_spent", r.cartridges_spent},
+            {"powder_spent", r.powder_spent},
+            {"morale_delta", r.morale_delta}};
+}
+BattleReport battle_report_from_json(const json& j) {
+    BattleReport r;
+    r.province_id = j.value("province_id", "");
+    r.winner = j.value("winner", "");
+    r.province_owner_before = j.value("province_owner_before", "");
+    r.province_owner_after = j.value("province_owner_after", "");
+    r.local_support_before = j.value("local_support_before", 0);
+    r.local_support_after = j.value("local_support_after", 0);
+    r.objective_holder = j.value("objective_holder", "");
+    r.objectives_held = j.value("objectives_held", std::map<std::string, std::string>{});
+    r.losses = j.value("losses", std::map<std::string, std::map<std::string, int>>{});
+    r.wounded = j.value("wounded", std::map<std::string, std::map<std::string, int>>{});
+    r.cartridges_spent = j.value("cartridges_spent", std::map<std::string, int>{});
+    r.powder_spent = j.value("powder_spent", std::map<std::string, int>{});
+    r.morale_delta = j.value("morale_delta", std::map<std::string, int>{});
+    return r;
 }
 json staff_to_json(const StaffState& st) {
     json q = json::array();
@@ -268,6 +369,8 @@ StaffState staff_from_json(const json& j) {
 json progress_to_json(const CampaignProgress& p) {
     json pcs = json::array();
     for (const auto& pc : p.personnel_commitments) pcs.push_back(personnel_to_json(pc));
+    json jobs = json::array();
+    for (const auto& job : p.cartridge_jobs) jobs.push_back(cartridge_job_to_json(job));
     return {{"battles_fought", p.battles_fought},
             {"lexington_fought", p.lexington_fought},
             {"aftermath_pending", p.aftermath_pending},
@@ -278,6 +381,8 @@ json progress_to_json(const CampaignProgress& p) {
             {"capacity_ready_hour", p.capacity_ready_hour},
             {"player_role", p.player_role},
             {"personnel_commitments", pcs},
+            {"cartridge_jobs", jobs},
+            {"last_battle_report", battle_report_to_json(p.last_battle_report)},
             {"resolved_event_ids", p.resolved_event_ids},
             {"received_source_ids", p.received_source_ids},
             {"offensive_postponed", p.offensive_postponed},
@@ -315,6 +420,11 @@ CampaignProgress progress_from_json(const json& j) {
     if (j.contains("personnel_commitments"))
         for (const auto& pc : j.at("personnel_commitments"))
             p.personnel_commitments.push_back(personnel_from_json(pc));
+    if (j.contains("cartridge_jobs"))
+        for (const auto& job : j.at("cartridge_jobs"))
+            p.cartridge_jobs.push_back(cartridge_job_from_json(job));
+    if (j.contains("last_battle_report"))
+        p.last_battle_report = battle_report_from_json(j.at("last_battle_report"));
     if (j.contains("knox")) {
         const json& k = j.at("knox");
         p.knox.id = k.value("id", "knox_ticonderoga");
@@ -378,7 +488,11 @@ json province_to_json(const Province& p) {
             {"adjacent", p.adjacent},
             {"polygon", pts_to_json(p.polygon)},
             {"label", json::array({p.label.x, p.label.y})},
-            {"supply_value", p.supply_value}};
+            {"supply_value", p.supply_value},
+            {"farm_level", p.farm_level},
+            {"workshop_level", p.workshop_level},
+            {"depot_level", p.depot_level},
+            {"fort_level", p.fort_level}};
 }
 Province province_from_json(const json& j) {
     Province p;
@@ -392,6 +506,10 @@ Province province_from_json(const json& j) {
     p.polygon = pts_from_json(j.value("polygon", json::array()));
     if (j.contains("label")) p.label = {j.at("label").at(0).get<double>(), j.at("label").at(1).get<double>()};
     p.supply_value = j.value("supply_value", 1);
+    p.farm_level = j.value("farm_level", 0);
+    p.workshop_level = j.value("workshop_level", 0);
+    p.depot_level = j.value("depot_level", 0);
+    p.fort_level = j.value("fort_level", 0);
     return p;
 }
 Edge edge_from_json(const json& j) {
@@ -482,6 +600,10 @@ CampaignState state_from_json(const json& j, bool is_save) {
     s.fiefs = j.value("fiefs", std::map<std::string, std::string>{});
     s.local_support = j.value("local_support", 55);
     s.pending_event_id = j.value("pending_event_id", "");
+    if (j.contains("province_stores")) {
+        for (auto it = j.at("province_stores").begin(); it != j.at("province_stores").end(); ++it)
+            s.province_stores[it.key()] = province_stores_from_json(it.value());
+    }
     if (j.contains("stores")) {
         for (auto it = j.at("stores").begin(); it != j.at("stores").end(); ++it)
             s.stores[it.key()] = stores_from_json(it.value());
@@ -495,6 +617,7 @@ CampaignState state_from_json(const json& j, bool is_save) {
     if (j.contains("shipments"))
         for (const auto& sh : j.at("shipments")) s.shipments.push_back(shipment_from_json(sh));
     ensure_logistics_defaults(s);
+    migrate_campaign_state(s);
     if (is_save) {
         for (const auto& t : j.at("treaties")) s.treaties.push_back(treaty_from_json(t));
         for (const auto& m : j.at("memory"))
@@ -565,6 +688,9 @@ std::string serialize(const CampaignState& s) {
     j["fiefs"] = s.fiefs;
     j["local_support"] = s.local_support;
     j["pending_event_id"] = s.pending_event_id;
+    j["province_stores"] = json::object();
+    for (const auto& kv : s.province_stores)
+        j["province_stores"][kv.first] = province_stores_to_json(kv.second);
     j["stores"] = json::object();
     for (const auto& kv : s.stores) j["stores"][kv.first] = stores_to_json(kv.second);
     j["staff"] = staff_to_json(s.staff);
@@ -842,6 +968,8 @@ std::string setup_to_json(const BattleSetup& b) {
     j["defender_faction"] = b.defender_faction;
     j["player_faction"] = b.player_faction;
     j["terrain_tags"] = b.terrain_tags;
+    j["province_cartridges"] = b.province_cartridges;
+    j["force_notes"] = b.force_notes;
     j["sides"] = json::object();
     for (const auto& kv : b.sides)
         j["sides"][kv.first] = {{"faction", kv.second.faction},
@@ -849,6 +977,7 @@ std::string setup_to_json(const BattleSetup& b) {
                                 {"tickets", kv.second.tickets},
                                 {"morale", kv.second.morale},
                                 {"readiness", kv.second.readiness},
+                                {"cartridge_budget", kv.second.cartridge_budget},
                                 {"retreat_province", kv.second.retreat_province}};
     return j.dump();
 }
@@ -867,6 +996,8 @@ BattleSetup setup_from_json(const std::string& text) {
         b.defender_faction = j.at("defender_faction").get<std::string>();
         b.player_faction = j.at("player_faction").get<std::string>();
         b.terrain_tags = j.value("terrain_tags", std::vector<std::string>{});
+        b.province_cartridges = j.value("province_cartridges", 0);
+        b.force_notes = j.value("force_notes", std::string("sourced approximation — not a precise muster roll"));
         for (auto it = j.at("sides").begin(); it != j.at("sides").end(); ++it) {
             SideSetup s;
             s.faction = it.value().at("faction").get<std::string>();
@@ -874,6 +1005,7 @@ BattleSetup setup_from_json(const std::string& text) {
             s.tickets = it.value().at("tickets").get<std::map<std::string, int>>();
             s.morale = it.value().at("morale").get<int>();
             s.readiness = it.value().value("readiness", 100);
+            s.cartridge_budget = it.value().value("cartridge_budget", b.province_cartridges);
             s.retreat_province = it.value().at("retreat_province").get<std::string>();
             b.sides[it.key()] = s;
         }
@@ -889,6 +1021,11 @@ std::string result_to_json(const BattleResult& r) {
            {"objective_holder", r.objective_holder},
            {"objectives_held", r.objectives_held},
            {"losses", r.losses},
+           {"wounded", r.wounded},
+           {"cartridges_spent", r.cartridges_spent},
+           {"powder_spent", r.powder_spent},
+           {"morale_delta", r.morale_delta},
+           {"province_owner_after", r.province_owner_after},
            {"retreat_province", r.retreat_province}};
     return j.dump();
 }
@@ -902,6 +1039,11 @@ BattleResult result_from_json(const std::string& text) {
         r.objective_holder = j.value("objective_holder", "");
         r.objectives_held = j.value("objectives_held", std::map<std::string, std::string>{});
         r.losses = j.value("losses", std::map<std::string, std::map<std::string, int>>{});
+        r.wounded = j.value("wounded", std::map<std::string, std::map<std::string, int>>{});
+        r.cartridges_spent = j.value("cartridges_spent", std::map<std::string, int>{});
+        r.powder_spent = j.value("powder_spent", std::map<std::string, int>{});
+        r.morale_delta = j.value("morale_delta", std::map<std::string, int>{});
+        r.province_owner_after = j.value("province_owner_after", "");
         r.retreat_province = j.value("retreat_province", "");
         return r;
     } catch (const json::exception& e) {

@@ -19,3 +19,4 @@ def _offline_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("PA250_AVATAR", "none")
     monkeypatch.setenv("PA250_FAL", "0")  # never a paid fal render from a unit test
     monkeypatch.setenv("PA250_DID", "0")
+    monkeypatch.setenv("PA250_STT_PREWARM", "0")

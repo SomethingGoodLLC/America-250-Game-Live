@@ -3,6 +3,11 @@
 #include "AudioDevice.h"
 #include "Camera/CameraActor.h"
 #include "Components/AudioComponent.h"
+#include "Components/LightComponent.h"
+#include "HttpModule.h"
+#include "Interfaces/IHttpRequest.h"
+#include "Interfaces/IHttpResponse.h"
+#include "Math/UnrealMathUtility.h"
 #include "Campaign/PA250Autoplay.h"
 #include "Campaign/PA250Subsystem.h"
 #include "Components/StaticMeshComponent.h"
@@ -18,6 +23,7 @@
 #include "MediaPlayer.h"
 #include "MediaSoundComponent.h"
 #include "Materials/MaterialInterface.h"
+#include "Materials/MaterialInstanceDynamic.h"
 #include "Misc/CommandLine.h"
 #include "Misc/Parse.h"
 #include "PA250DiplomacyWidget.h"
@@ -52,6 +58,8 @@ void APA250DiplomacyGameMode::BeginPlay()
 	bScripted = bSelftest || PA250Autoplay::IsAutoplay();
 	bExpectUnavailable = FParse::Param(FCommandLine::Get(), TEXT("PA250ExpectUnavailable"));
 	bVoiceTest = !bScripted && FParse::Param(FCommandLine::Get(), TEXT("PA250VoiceTest"));
+	bMicTest = !bScripted && !bVoiceTest && (FParse::Param(FCommandLine::Get(), TEXT("PA250MicTest")) ||
+		FParse::Value(FCommandLine::Get(), TEXT("PA250MicTestWav="), MicTestWav));
 	if (bVoiceTest)
 	{
 		FParse::Value(FCommandLine::Get(), TEXT("PA250VoiceTestVideo="), VoiceTestVideo);
@@ -86,6 +94,22 @@ void APA250DiplomacyGameMode::BeginPlay()
 		}
 	}
 	SetupMedia();
+
+	for (TActorIterator<AActor> It(GetWorld()); It; ++It)
+	{
+		const bool bFire = It->ActorHasTag(TEXT("FireLight"));
+		if (bFire || It->ActorHasTag(TEXT("CandleLight")))
+		{
+			if (ULightComponent* L = It->FindComponentByClass<ULightComponent>())
+			{
+				FlickerLights.Add({L, L->Intensity, FMath::FRand() * 100.f, bFire});
+			}
+		}
+	}
+	if (FlickerLights.Num() > 0)
+	{
+		GetWorldTimerManager().SetTimer(FlickerTimer, FTimerDelegate::CreateUObject(this, &APA250DiplomacyGameMode::Flicker), 0.05f, true);
+	}
 
 	Client = NewObject<UPA250DiplomacyClient>(this);
 	Client->OnStateChanged = [this](EPA250DiplomacyState S) { HandleState(S); };
@@ -129,6 +153,11 @@ void APA250DiplomacyGameMode::EndPlay(const EEndPlayReason::Type Reason)
 {
 	StopVoice(TEXT("level ending"));
 	StopVideo();
+	if (Mic)
+	{
+		Mic->Abort();
+		Mic.Reset();
+	}
 	if (Client)
 	{
 		Client->OnMessage = nullptr;
@@ -143,6 +172,13 @@ void APA250DiplomacyGameMode::SetupMedia()
 	MediaPlayer = LoadObject<UMediaPlayer>(nullptr, TEXT("/Game/PA250/Media/MP_Envoy.MP_Envoy"));
 	StillMaterial = LoadObject<UMaterialInterface>(nullptr, TEXT("/Game/PA250/Materials/M_PortraitStill.M_PortraitStill"));
 	VideoMaterial = LoadObject<UMaterialInterface>(nullptr, TEXT("/Game/PA250/Materials/M_PortraitVideo.M_PortraitVideo"));
+	float FrameDefault = 0.f;
+	if (StillMaterial && StillMaterial->GetScalarParameterValue(FHashedMaterialParameterInfo(TEXT("Frame")), FrameDefault))
+	{
+		TalkMID = UMaterialInstanceDynamic::Create(StillMaterial, this);
+		StillMaterial = TalkMID;  // idle and live speech share it; the voice drives "Frame"
+	}
+	UE_LOG(LogTemp, Display, TEXT("EnvoyLipSync: %s"), TalkMID ? TEXT("flipbook ready (M_PortraitStill has Frame)") : TEXT("off (M_PortraitStill has no Frame parameter)"));
 	for (TActorIterator<AStaticMeshActor> It(GetWorld()); It && !PortraitMesh; ++It)
 	{
 		if (It->ActorHasTag(TEXT("Portrait")))
@@ -190,6 +226,21 @@ void APA250DiplomacyGameMode::OnMediaOpened(FString OpenedUrl)
 	{
 		MediaPlayer->Play();
 	}
+	if (bVoiceTest)
+	{
+		// Two stills of the room mid-line (Saved/Screenshots/Mac): the mouth should differ between them.
+		for (const float At : {2.0f, 3.5f})
+		{
+			FTimerHandle H;
+			GetWorldTimerManager().SetTimer(H, FTimerDelegate::CreateWeakLambda(this, [this, At]() {
+				if (APlayerController* PC = GetWorld()->GetFirstPlayerController())
+				{
+					UE_LOG(LogTemp, Display, TEXT("EnvoyVideo screenshot at %.1fs into the clip"), At);
+					PC->ConsoleCommand(TEXT("Shot showui"));
+				}
+			}), At, false);
+		}
+	}
 }
 
 void APA250DiplomacyGameMode::OnMediaOpenFailed(FString FailedUrl)
@@ -200,7 +251,7 @@ void APA250DiplomacyGameMode::OnMediaOpenFailed(FString FailedUrl)
 	{
 		PortraitMesh->SetMaterial(0, StillMaterial);
 	}
-	if (bVoiceTest && !VoiceTestVideo.IsEmpty())
+	if (bVoiceTest)
 	{
 		VoiceTestFinish(false, TEXT("EnvoyVideo open failed: ") + FailedUrl);
 	}
@@ -215,7 +266,7 @@ void APA250DiplomacyGameMode::OnMediaEnded()
 	const float Peak = VideoPeakEnvelope;
 	UE_LOG(LogTemp, Display, TEXT("EnvoyVideo finished %s wall=%.2fs duration=%.2fs (portrait on video material %d, MP4 voice peak envelope %.3f, WAV voice component %s)"),
 		*VideoFilePlaying, Wall, Dur, bWasVideoMat ? 1 : 0, Peak, VoiceComponent ? TEXT("PLAYING (should not be)") : TEXT("idle"));
-	if (bVoiceTest && !VoiceTestVideo.IsEmpty())
+	if (bVoiceTest)
 	{
 		const FString Done = VideoFilePlaying;
 		GetWorldTimerManager().SetTimerForNextTick(FTimerDelegate::CreateWeakLambda(this, [this, Done, Wall, Dur, bWasVideoMat, Peak]() {
@@ -328,6 +379,36 @@ bool APA250DiplomacyGameMode::PlayVoiceWav(const FString& File)
 	}
 	const float Seconds = (float)DataBytes / (float)(Block * Rate);
 
+	// 30 Hz loudness envelope for the lip-sync flipbook, normalised to this line's own speaking level.
+	VoiceEnvelope.Reset();
+	{
+		const int16* Pcm = reinterpret_cast<const int16*>(Info.SampleDataStart);
+		const int32 Frames = DataBytes / Block;
+		const int32 Win = FMath::Max(1, (int32)Rate / 30);
+		for (int32 f0 = 0; f0 < Frames; f0 += Win)
+		{
+			double Sum = 0.0;
+			const int32 N = FMath::Min(Win, Frames - f0);
+			for (int32 f = 0; f < N; ++f)
+			{
+				const float S = (float)Pcm[(f0 + f) * Channels] / 32768.f;
+				Sum += S * S;
+			}
+			VoiceEnvelope.Add((float)FMath::Sqrt(Sum / FMath::Max(1, N)));
+		}
+		TArray<float> Sorted = VoiceEnvelope;
+		Sorted.Sort();
+		const float Ref = Sorted.Num() ? FMath::Max(Sorted[(int32)(Sorted.Num() * 0.9f)], 1e-4f) : 1.f;
+		for (float& E : VoiceEnvelope)
+		{
+			E = FMath::Clamp(E / Ref, 0.f, 1.3f);
+		}
+	}
+	VoiceBytesPerSecond = (float)(Block * Rate);
+	LipOpen = 0.f;
+	LipChanges = 0;
+	LipCellsUsed = 0;
+
 	VoiceWave = NewObject<USoundWaveProcedural>(this);
 	VoiceWave->SetSampleRate(Rate);
 	VoiceWave->NumChannels = Channels;
@@ -351,7 +432,22 @@ bool APA250DiplomacyGameMode::PlayVoiceWav(const FString& File)
 	VoiceTicks = VoiceAudibleTicks = 0;
 	UE_LOG(LogTemp, Display, TEXT("EnvoyVoice started %s %.2f (%u Hz, %u ch, focus %d, unfocused volume %.2f)"), *File, Seconds, Rate, Channels,
 		FApp::HasFocus() ? 1 : 0, FApp::GetUnfocusedVolumeMultiplier());
-	GetWorldTimerManager().SetTimer(VoiceTimer, FTimerDelegate::CreateUObject(this, &APA250DiplomacyGameMode::PollVoice), 0.05f, true);
+	GetWorldTimerManager().SetTimer(VoiceTimer, FTimerDelegate::CreateUObject(this, &APA250DiplomacyGameMode::PollVoice), 1.f / 30.f, true);
+	if (bVoiceTest)
+	{
+		// Stills of the painting mid-line (Saved/Screenshots/Mac*): the mouth should differ between them.
+		for (const float ShotAt : {0.9f, 1.25f, 1.6f, 1.95f})
+		{
+			FTimerHandle ShotTimer;
+			GetWorldTimerManager().SetTimer(ShotTimer, FTimerDelegate::CreateWeakLambda(this, [this, ShotAt]() {
+				if (APlayerController* PC = GetWorld()->GetFirstPlayerController())
+				{
+					UE_LOG(LogTemp, Display, TEXT("EnvoyLipSync screenshot at %.2fs, cell %d"), ShotAt, LipFrame);
+					PC->ConsoleCommand(TEXT("HighResShot 1280x720"));
+				}
+			}), ShotAt, false);
+		}
+	}
 	return true;
 }
 
@@ -367,6 +463,7 @@ void APA250DiplomacyGameMode::PollVoice()
 	const double Now = FPlatformTime::Seconds();
 	++VoiceTicks;
 	VoiceAudibleTicks += AudibleNow() ? 1 : 0;
+	UpdateLipSync(Left);
 	if (Left <= 0 && VoiceDrainedTime == 0.0)
 	{
 		VoiceDrainedTime = Now;
@@ -376,13 +473,16 @@ void APA250DiplomacyGameMode::PollVoice()
 		const float Audible = VoiceTicks ? (float)VoiceAudibleTicks / (float)VoiceTicks : 0.f;
 		const double Wall = Now - VoiceStartTime;
 		UE_LOG(LogTemp, Display, TEXT("EnvoyVoice finished %s played=%.2fs wall=%.2fs audible=%.0f%%"), *VoiceFile, VoiceSeconds, Wall, Audible * 100.f);
+		UE_LOG(LogTemp, Display, TEXT("EnvoyLipSync: %d frame changes, %d distinct cells over %.2fs"), LipChanges, FMath::CountBits(LipCellsUsed), VoiceSeconds);
 		const FString Done = VoiceFile;
 		StopVoice(nullptr);
-		if (bVoiceTest)
+		if (bVoiceTest || bMicTest)
 		{
 			const bool bRealTime = Wall >= VoiceSeconds * 0.9;
-			VoiceTestFinish(bRealTime && Audible >= 0.9f, FString::Printf(TEXT("%s: %.2fs in %.2fs wall, audible %.0f%%%s"), *Done, VoiceSeconds, Wall,
-				Audible * 100.f, Audible < 0.9f ? TEXT(" (window lost focus and UnfocusedVolumeMultiplier is 0: muted)") : TEXT("")));
+			const bool bLips = !TalkMID || LipChanges >= (int32)VoiceSeconds * 3;  // the painting's mouth must have moved
+			VoiceTestFinish(bRealTime && Audible >= 0.9f && bLips, FString::Printf(TEXT("%s: %.2fs in %.2fs wall, audible %.0f%%, lip-sync %d changes%s"), *Done,
+				VoiceSeconds, Wall, Audible * 100.f, LipChanges,
+				Audible < 0.9f ? TEXT(" (window lost focus and UnfocusedVolumeMultiplier is 0: muted)") : TEXT("")));
 		}
 		return;
 	}
@@ -398,8 +498,43 @@ void APA250DiplomacyGameMode::PollVoice()
 	}
 }
 
+void APA250DiplomacyGameMode::UpdateLipSync(int32 BytesLeft)
+{
+	if (!TalkMID || VoiceEnvelope.Num() == 0)
+	{
+		return;
+	}
+	// Bytes the mixer has pulled, less ~60 ms it buffers ahead of the speakers.
+	const float T = FMath::Max(0.f, (float)(VoiceBytes - BytesLeft) / VoiceBytesPerSecond - 0.06f);
+	const float Target = VoiceEnvelope[FMath::Min((int32)(T * 30.f), VoiceEnvelope.Num() - 1)];
+	LipOpen = FMath::Lerp(LipOpen, Target, Target > LipOpen ? 0.75f : 0.45f);  // open fast, close a little slower
+	int32 Cell = 0;
+	if (LipOpen > 0.15f)
+	{
+		Cell = 1 + FMath::RoundToInt((FMath::Min(LipOpen, 1.f) - 0.15f) / 0.85f * 14.f);
+		if (LipOpen > 0.3f)
+		{
+			Cell += FMath::RandRange(-1, 1);  // neighbouring shapes: held vowels do not freeze
+		}
+		Cell = FMath::Clamp(Cell, 1, 15);
+	}
+	SetLipFrame(Cell);
+}
+
+void APA250DiplomacyGameMode::SetLipFrame(int32 Frame)
+{
+	if (TalkMID && Frame != LipFrame)
+	{
+		TalkMID->SetScalarParameterValue(TEXT("Frame"), (float)Frame);
+		LipFrame = Frame;
+		++LipChanges;
+		LipCellsUsed |= 1u << (uint32)FMath::Clamp(Frame, 0, 31);
+	}
+}
+
 void APA250DiplomacyGameMode::StopVoice(const TCHAR* Why)
 {
+	SetLipFrame(0);  // mouth back at rest
 	if (UWorld* W = GetWorld())
 	{
 		W->GetTimerManager().ClearTimer(VoiceTimer);
@@ -431,8 +566,150 @@ void APA250DiplomacyGameMode::VoiceTestFinish(bool bPassed, const FString& Why)
 	PA250Autoplay::Check(Sub, bPassed, TEXT("voice test: ") + Why);
 	// Exit on the next tick, not from inside an audio/HTTP callback.
 	GetWorldTimerManager().SetTimerForNextTick(FTimerDelegate::CreateWeakLambda(this, [this]() {
-		PA250Autoplay::Finish(UPA250Subsystem::Get(this), TEXT("voicetest"));
+		PA250Autoplay::Finish(UPA250Subsystem::Get(this), bMicTest ? TEXT("mictest") : TEXT("voicetest"));
 	}));
+}
+
+void APA250DiplomacyGameMode::Flicker()
+{
+	const float T = GetWorld()->GetTimeSeconds();
+	for (const FFlickerLight& F : FlickerLights)
+	{
+		if (ULightComponent* L = F.Light.Get())
+		{
+			const float A = FMath::PerlinNoise1D(T * (F.bFire ? 5.f : 8.f) + F.Seed);
+			const float B = FMath::PerlinNoise1D(T * (F.bFire ? 17.f : 23.f) + F.Seed * 3.f);
+			const float K = F.bFire ? 0.8f + 0.28f * A + 0.12f * B : 0.93f + 0.06f * A + 0.03f * B;
+			L->SetIntensity(F.Base * K);
+		}
+	}
+}
+
+void APA250DiplomacyGameMode::ToggleMic()
+{
+	if (!Mic)
+	{
+		Mic = MakeUnique<FPA250MicRecorder>();
+	}
+	if (Mic->IsRecording())
+	{
+		GetWorldTimerManager().ClearTimer(MicTimer);
+		TArray<uint8> Wav;
+		float Secs = 0.f, Peak = 0.f;
+		Mic->Stop(Wav, Secs, Peak);
+		UE_LOG(LogTemp, Display, TEXT("PA250 mic: stopped, %.2fs captured from \"%s\", peak %.3f"), Secs, *Mic->GetDeviceName(), Peak);
+		if (Secs < 0.3f)
+		{
+			StatusLine = TEXT("Too short. Click Speak, say your piece, then click Stop.");
+			if (bMicTest)
+			{
+				VoiceTestFinish(false, TEXT("mic test: no audio captured"));
+			}
+			return;
+		}
+		SendMicClip(Wav, Secs, Peak);
+		return;
+	}
+	if (!Client || Client->GetState() != EPA250DiplomacyState::Talking || bBusy || bTranscribing)
+	{
+		return;
+	}
+	StopVoice(TEXT("player speaking"));  // the envoy falls silent, and his voice does not leak into the mic
+	StopVideo();
+	FString Err;
+	if (!Mic->Start(Err))
+	{
+		StatusLine = TEXT("Microphone: ") + Err;
+		UE_LOG(LogTemp, Warning, TEXT("PA250 mic: %s"), *Err);
+		if (bMicTest)
+		{
+			VoiceTestFinish(false, TEXT("mic test: ") + Err);
+		}
+		return;
+	}
+	StatusLine = TEXT("Listening... click Stop when you have finished.");
+	UE_LOG(LogTemp, Display, TEXT("PA250 mic: recording from \"%s\""), *Mic->GetDeviceName());
+	GetWorldTimerManager().SetTimer(MicTimer, FTimerDelegate::CreateWeakLambda(this, [this]() {
+		if (IsMicRecording() && GetMicSeconds() >= FPA250MicRecorder::MaxSeconds - 0.2f)
+		{
+			ToggleMic();  // hard stop at the limit
+		}
+	}), 0.25f, true);
+}
+
+void APA250DiplomacyGameMode::SendMicClip(const TArray<uint8>& Wav, float Seconds, float Peak)
+{
+	if (Peak < 0.001f)
+	{
+		// macOS asks the app that launched Unreal for the mic; a denied terminal (Cursor, Terminal) yields zeros.
+		const FString Term = FPlatformMisc::GetEnvironmentVariable(TEXT("TERM_PROGRAM"));
+		const FString Launcher = Term == TEXT("vscode") ? TEXT("Cursor") : Term == TEXT("Apple_Terminal") ? TEXT("Terminal") : Term;
+		StatusLine = Launcher.IsEmpty()
+			? FString(TEXT("The microphone gave only silence. Allow Unreal Editor in System Settings > Privacy & Security > Microphone."))
+			: FString::Printf(TEXT("The microphone gave only silence: Unreal was started from %s, so macOS asks %s for the mic. Allow %s in System Settings > Privacy & Security > Microphone and restart it, or start Unreal from the Dock or Finder."),
+				*Launcher, *Launcher, *Launcher);
+		UE_LOG(LogTemp, Warning, TEXT("PA250 mic: clip is silent (%.2fs); microphone permission denied or input muted"), Seconds);
+		if (bMicTest)
+		{
+			VoiceTestFinish(false, TEXT("mic test: captured audio is silent (microphone permission?)"));
+		}
+		return;
+	}
+	if (!Client)
+	{
+		return;
+	}
+	bTranscribing = true;
+	StatusLine = TEXT("Transcribing...");
+	TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Req = FHttpModule::Get().CreateRequest();
+	Req->SetURL(Client->GetBaseUrl() + TEXT("/v1/stt"));
+	Req->SetVerb(TEXT("POST"));
+	Req->SetHeader(TEXT("Content-Type"), TEXT("audio/wav"));
+	Req->SetContent(Wav);
+	Req->SetTimeout(30.f);
+	const double T0 = FPlatformTime::Seconds();
+	TWeakObjectPtr<APA250DiplomacyGameMode> Weak(this);
+	Req->OnProcessRequestComplete().BindLambda([Weak, T0](FHttpRequestPtr, FHttpResponsePtr Resp, bool bOk) {
+		APA250DiplomacyGameMode* Self = Weak.Get();
+		if (!Self)
+		{
+			return;
+		}
+		Self->bTranscribing = false;
+		TSharedPtr<FJsonObject> Json;
+		const bool bParsed = bOk && Resp.IsValid() && Resp->GetResponseCode() == 200 &&
+			FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(Resp->GetContentAsString()), Json) && Json.IsValid();
+		if (!bParsed)
+		{
+			const int32 Code = Resp.IsValid() ? Resp->GetResponseCode() : 0;
+			Self->StatusLine = FString::Printf(TEXT("Could not understand the recording (speech service: %d)."), Code);
+			UE_LOG(LogTemp, Warning, TEXT("PA250 mic: transcription failed, HTTP %d %s"), Code, Resp.IsValid() ? *Resp->GetContentAsString().Left(200) : TEXT(""));
+			if (Self->bMicTest)
+			{
+				Self->VoiceTestFinish(false, TEXT("mic test: transcription request failed"));
+			}
+			return;
+		}
+		FString Text;
+		Json->TryGetStringField(TEXT("text"), Text);
+		bool bSilent = false;
+		Json->TryGetBoolField(TEXT("silent"), bSilent);
+		Text.TrimStartAndEndInline();
+		UE_LOG(LogTemp, Display, TEXT("PA250 mic: heard \"%s\" (silent %d, %.2fs round trip)"), *Text, bSilent ? 1 : 0, FPlatformTime::Seconds() - T0);
+		if (Text.IsEmpty())
+		{
+			Self->StatusLine = bSilent ? TEXT("The microphone gave only silence. Check System Settings > Privacy & Security > Microphone.")
+			                           : TEXT("I did not catch that. Click Speak and try again.");
+			if (Self->bMicTest)
+			{
+				Self->VoiceTestFinish(false, TEXT("mic test: nothing recognised"));
+			}
+			return;
+		}
+		Self->StatusLine.Reset();
+		Self->Send(Text);  // the same path as typed words: player_utterance, then the sim validates any terms
+	});
+	Req->ProcessRequest();
 }
 
 void APA250DiplomacyGameMode::HandleState(EPA250DiplomacyState NewState)
@@ -444,6 +721,39 @@ void APA250DiplomacyGameMode::HandleState(EPA250DiplomacyState NewState)
 		if (bVoiceTest)
 		{
 			VoiceTestFinish(false, TEXT("negotiation service unavailable"));
+		}
+	}
+	if (bMicTest && NewState == EPA250DiplomacyState::Unavailable)
+	{
+		VoiceTestFinish(false, TEXT("mic test: negotiation service unavailable"));
+	}
+	if (bMicTest && NewState == EPA250DiplomacyState::Talking && !bVoiceTestSent)
+	{
+		bVoiceTestSent = true;
+		GetWorldTimerManager().SetTimer(VoiceTestTimer, FTimerDelegate::CreateWeakLambda(this, [this]() {
+			VoiceTestFinish(false, TEXT("mic test: no envoy reply within 90 s"));
+		}), 90.f, false);
+		if (!MicTestWav.IsEmpty())
+		{
+			TArray<uint8> Wav;
+			if (!FFileHelper::LoadFileToArray(Wav, *MicTestWav))
+			{
+				VoiceTestFinish(false, TEXT("mic test: cannot read ") + MicTestWav);
+				return;
+			}
+			UE_LOG(LogTemp, Display, TEXT("PA250 mic test: injecting %s (%d bytes) in place of the live microphone"), *MicTestWav, Wav.Num());
+			SendMicClip(Wav, 0.f, 1.f);
+		}
+		else
+		{
+			ToggleMic();  // start; stop after 3 s
+			FTimerHandle H;
+			GetWorldTimerManager().SetTimer(H, FTimerDelegate::CreateWeakLambda(this, [this]() {
+				if (IsMicRecording())
+				{
+					ToggleMic();
+				}
+			}), 3.f, false);
 		}
 	}
 	if (bVoiceTest && NewState == EPA250DiplomacyState::Talking && !bVoiceTestSent)
@@ -565,6 +875,12 @@ void APA250DiplomacyGameMode::HandleProposal(const TSharedPtr<FJsonObject>& Msg)
 {
 	bBusy = false;
 	bGotProposal = true;
+	if (bMicTest && bPlayerSpoke)
+	{
+		FString Spoken;
+		Msg->TryGetStringField(TEXT("spoken_line"), Spoken);
+		UE_LOG(LogTemp, Display, TEXT("PA250 mic test: envoy replied to the transcribed line: %s"), *Spoken.Left(160));
+	}
 	TermLines.Reset();
 	PendingProposalJson.Reset();
 	UPA250Subsystem* Sub = UPA250Subsystem::Get(this);

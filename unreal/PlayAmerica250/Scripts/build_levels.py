@@ -1530,136 +1530,475 @@ def make_portrait_assets():
     unreal.EditorAssetLibrary.save_loaded_asset(mp)
     unreal.EditorAssetLibrary.save_loaded_asset(mt)
 
-    def unlit_material(name, texture):
+    def painting_material(name, texture, atlas_grid=0):
+        """Oil portrait over the mantel: lit like the room, cropped to 3:4, linen + varnish + darker edges.
+
+        The still and the talking-portrait video (MediaTexture) share this graph, so the mouth moves
+        inside the painting. A little emissive keeps the face readable in a candlelit room.
+        """
         path = "/Game/PA250/Materials/" + name
         if unreal.EditorAssetLibrary.does_asset_exist(path):
             unreal.EditorAssetLibrary.delete_asset(path)
-        mat = tools().create_asset(
-            name,
-            "/Game/PA250/Materials",
-            unreal.Material,
-            unreal.MaterialFactoryNew(),
-        )
-        mat.set_editor_property(
-            "shading_model", unreal.MaterialShadingModel.MSM_UNLIT
-        )
+        mat = tools().create_asset(name, "/Game/PA250/Materials", unreal.Material, unreal.MaterialFactoryNew())
         mat.set_editor_property("two_sided", True)
-        node = unreal.MaterialEditingLibrary.create_material_expression(
-            mat,
-            unreal.MaterialExpressionTextureSampleParameter2D,
-            -400,
-            0,
-        )
-        node.set_editor_property("parameter_name", "Portrait")
-        node.set_editor_property("texture", texture)
-        unreal.MaterialEditingLibrary.connect_material_property(
-            node, "RGB", unreal.MaterialProperty.MP_EMISSIVE_COLOR
-        )
-        unreal.MaterialEditingLibrary.recompile_material(mat)
+        mel = unreal.MaterialEditingLibrary
+        X = unreal
+
+        def node(cls, x, y, **props):
+            n = mel.create_material_expression(mat, cls, x, y)
+            for k, v in props.items():
+                n.set_editor_property(k, v)
+            return n
+
+        def link(a, a_out, b, b_in):
+            mel.connect_material_expressions(a, a_out, b, b_in)
+
+        uv = node(X.MaterialExpressionTextureCoordinate, -1600, 0)
+        if atlas_grid:
+            # Lip-sync flipbook: cell `Frame` of an atlas_grid x atlas_grid atlas (cells are already 3:4).
+            frame = node(X.MaterialExpressionScalarParameter, -2000, -300, parameter_name="Frame", default_value=0.0)
+            col = node(X.MaterialExpressionFmod, -1800, -300)
+            grid = node(X.MaterialExpressionConstant, -2000, -150, r=float(atlas_grid))
+            link(frame, "", col, "A"); link(grid, "", col, "B")
+            rowf = node(X.MaterialExpressionDivide, -1800, -150)
+            link(frame, "", rowf, "A"); link(grid, "", rowf, "B")
+            row = node(X.MaterialExpressionFloor, -1650, -150)
+            link(rowf, "", row, "")
+            cell = node(X.MaterialExpressionAppendVector, -1500, -250)
+            link(col, "", cell, "A"); link(row, "", cell, "B")
+            in_cell = node(X.MaterialExpressionAdd, -1350, -100)
+            link(cell, "", in_cell, "A"); link(uv, "", in_cell, "B")
+            crop_uv = node(X.MaterialExpressionDivide, -1200, -100, const_b=float(atlas_grid))
+            link(in_cell, "", crop_uv, "A")
+        crop = node(X.MaterialExpressionScalarParameter, -1600, 150, parameter_name="CropWidth", default_value=PORTRAIT_CROP)
+        one = node(X.MaterialExpressionConstant, -1600, 250, r=1.0)
+        scale = node(X.MaterialExpressionAppendVector, -1400, 150)
+        link(crop, "", scale, "A"); link(one, "", scale, "B")
+        half_rest = node(X.MaterialExpressionOneMinus, -1400, 300)
+        link(crop, "", half_rest, "")
+        half = node(X.MaterialExpressionMultiply, -1250, 300, const_b=0.5)
+        link(half_rest, "", half, "A")
+        zero = node(X.MaterialExpressionConstant, -1250, 400, r=0.0)
+        offset = node(X.MaterialExpressionAppendVector, -1100, 300)
+        link(half, "", offset, "A"); link(zero, "", offset, "B")
+        scaled = node(X.MaterialExpressionMultiply, -1100, 100)
+        link(uv, "", scaled, "A"); link(scale, "", scaled, "B")
+        if not atlas_grid:
+            crop_uv = node(X.MaterialExpressionAdd, -950, 100)
+            link(scaled, "", crop_uv, "A"); link(offset, "", crop_uv, "B")
+
+        tex = node(X.MaterialExpressionTextureSampleParameter2D, -750, 0, parameter_name="Portrait", texture=texture)
+        link(crop_uv, "", tex, "UVs")
+
+        canvas_uv = node(X.MaterialExpressionMultiply, -950, 450, const_b=3.0)
+        link(uv, "", canvas_uv, "A")
+        canvas = node(X.MaterialExpressionTextureSampleParameter2D, -750, 400, parameter_name="Canvas",
+                      texture=import_texture_mipped("canvas"))
+        link(canvas_uv, "", canvas, "UVs")
+
+        centre = node(X.MaterialExpressionConstant2Vector, -1100, 650, r=0.5, g=0.5)
+        dist = node(X.MaterialExpressionDistance, -950, 650)
+        link(uv, "", dist, "A"); link(centre, "", dist, "B")
+        d0 = node(X.MaterialExpressionSubtract, -800, 650, const_b=0.3)
+        link(dist, "", d0, "A")
+        d1 = node(X.MaterialExpressionMultiply, -650, 650, const_b=1.6)
+        link(d0, "", d1, "A")
+        d2 = node(X.MaterialExpressionSaturate, -500, 650)
+        link(d1, "", d2, "")
+        d3 = node(X.MaterialExpressionMultiply, -350, 650, const_b=0.65)
+        link(d2, "", d3, "A")
+        vignette = node(X.MaterialExpressionOneMinus, -200, 650)
+        link(d3, "", vignette, "")
+
+        varnish = node(X.MaterialExpressionVectorParameter, -750, 250, parameter_name="Varnish",
+                       default_value=X.LinearColor(1.0, 0.86, 0.66, 1.0))
+        c1 = node(X.MaterialExpressionMultiply, -450, 0)
+        link(tex, "RGB", c1, "A"); link(canvas, "RGB", c1, "B")
+        c2 = node(X.MaterialExpressionMultiply, -300, 0)
+        link(c1, "", c2, "A"); link(varnish, "", c2, "B")
+        color = node(X.MaterialExpressionMultiply, -150, 0)
+        link(c2, "", color, "A"); link(vignette, "", color, "B")
+        mel.connect_material_property(color, "", X.MaterialProperty.MP_BASE_COLOR)
+
+        glow = node(X.MaterialExpressionScalarParameter, -300, 250, parameter_name="Brightness", default_value=PORTRAIT_BRIGHTNESS)
+        emissive = node(X.MaterialExpressionMultiply, -150, 250)
+        link(color, "", emissive, "A"); link(glow, "", emissive, "B")
+        mel.connect_material_property(emissive, "", X.MaterialProperty.MP_EMISSIVE_COLOR)
+        rough = node(X.MaterialExpressionScalarParameter, -150, 400, parameter_name="Roughness", default_value=0.42)
+        mel.connect_material_property(rough, "", X.MaterialProperty.MP_ROUGHNESS)
+        mel.recompile_material(mat)
         unreal.EditorAssetLibrary.save_loaded_asset(mat)
         return mat
 
-    still_mat = unlit_material("M_PortraitStill", still)
-    video_mat = unlit_material("M_PortraitVideo", mt)
+    atlas = import_lipsync_atlas()
+    # Idle and live speech share one material: cell 0 at rest, cells 1..15 driven by the voice (PollVoice).
+    still_mat = painting_material("M_PortraitStill", atlas, atlas_grid=4) if atlas else painting_material("M_PortraitStill", still)
+    video_mat = painting_material("M_PortraitVideo", mt)
     return still_mat, video_mat
 
 
-def build_diplomacy():
-    """Graybox candlelit parlor, 700 x 600 x 320 cm.
+PARLOUR_DIR = "/Game/PA250/Materials/Parlour"
+PARLOUR_TEX_SRC = os.path.abspath(os.path.join(PROJECT, "SourceArt", "parlour"))
+PORTRAIT_BRIGHTNESS = 0.35  # emissive share of the lit painting (face stays readable by candlelight)
+PORTRAIT_CROP = 0.42  # width share of the 1.77-1.8:1 still/video shown: a 3:4 oil portrait
+# Manual exposure with physical-camera exposure off: the bias is a compensation (+1 = 2x brighter), not EV100.
+PARLOUR_EXPOSURE_COMP = 0.0
 
-    The envoy's portrait hangs on the north wall.
+
+def import_lipsync_atlas():
+    """tools/art/build_envoy_lipsync_atlas.py output: 4x4 cells, 1448x1920 (not power of two: no mips, never stream)."""
+    src = os.path.join(PARLOUR_TEX_SRC, "envoy_lipsync_atlas.png")
+    if not os.path.exists(src):
+        LOG("PA250: lip-sync atlas missing (run tools/art/build_envoy_lipsync_atlas.py); portrait stays still")
+        return None
+    task = unreal.AssetImportTask()
+    for k, v in (("filename", src), ("destination_path", PARLOUR_DIR + "/Textures"), ("destination_name", "T_EnvoyLipSyncAtlas"),
+                 ("replace_existing", True), ("automated", True), ("save", True)):
+        task.set_editor_property(k, v)
+    unreal.AssetToolsHelpers.get_asset_tools().import_asset_tasks([task])
+    tex = unreal.EditorAssetLibrary.load_asset(PARLOUR_DIR + "/Textures/T_EnvoyLipSyncAtlas")
+    tex.set_editor_property("srgb", True)
+    tex.set_editor_property("mip_gen_settings", unreal.TextureMipGenSettings.TMGS_NO_MIPMAPS)
+    tex.set_editor_property("never_stream", True)
+    tex.set_editor_property("filter", unreal.TextureFilter.TF_BILINEAR)
+    unreal.EditorAssetLibrary.save_loaded_asset(tex)
+    LOG("PA250: lip-sync atlas %dx%d" % (tex.blueprint_get_size_x(), tex.blueprint_get_size_y()))
+    return tex
+
+
+def import_texture_mipped(name):
+    """Tiling surface texture: sRGB, mips from the texture group (sources are power of two), trilinear."""
+    src = os.path.join(PARLOUR_TEX_SRC, name + ".png")
+    if not os.path.exists(src):
+        LOG("PA250: parlour texture missing (run tools/art/gen_parlour_textures.py): " + src)
+        return None
+    task = unreal.AssetImportTask()
+    for k, v in (("filename", src), ("destination_path", PARLOUR_DIR + "/Textures"), ("destination_name", "T_" + name),
+                 ("replace_existing", True), ("automated", True), ("save", True)):
+        task.set_editor_property(k, v)
+    unreal.AssetToolsHelpers.get_asset_tools().import_asset_tasks([task])
+    tex = unreal.EditorAssetLibrary.load_asset(PARLOUR_DIR + "/Textures/T_" + name)
+    tex.set_editor_property("srgb", True)
+    tex.set_editor_property("mip_gen_settings", unreal.TextureMipGenSettings.TMGS_FROM_TEXTURE_GROUP)
+    tex.set_editor_property("filter", unreal.TextureFilter.TF_TRILINEAR)
+    unreal.EditorAssetLibrary.save_loaded_asset(tex)
+    LOG("PA250: parlour texture T_%s %dx%d mips=%s" % (name, tex.blueprint_get_size_x(), tex.blueprint_get_size_y(),
+                                                      tex.get_editor_property("mip_gen_settings")))
+    return tex
+
+
+def _fresh_material(name):
+    path = PARLOUR_DIR + "/" + name
+    if unreal.EditorAssetLibrary.does_asset_exist(path):
+        mat = unreal.EditorAssetLibrary.load_asset(path)
+        unreal.MaterialEditingLibrary.delete_all_material_expressions(mat)
+        return mat
+    return tools().create_asset(name, PARLOUR_DIR, unreal.Material, unreal.MaterialFactoryNew())
+
+
+def _param(mat, cls, name, x, y, value=None):
+    mel = unreal.MaterialEditingLibrary
+    n = mel.create_material_expression(mat, cls, x, y)
+    n.set_editor_property("parameter_name", name)
+    if value is not None:
+        n.set_editor_property("default_value", value)
+    return n
+
+
+def parlour_masters(default_tex):
+    """M_Parlour_World (tri-planar, world cm), M_Parlour_UV (mesh UVs), M_Parlour_Glow (unlit emissive)."""
+    mel = unreal.MaterialEditingLibrary
+    P = unreal.MaterialProperty
+
+    world = _fresh_material("M_Parlour_World")
+    tex = _param(world, unreal.MaterialExpressionTextureObjectParameter, "Tex", -900, 0)
+    tex.set_editor_property("texture", default_tex)
+    size = _param(world, unreal.MaterialExpressionVectorParameter, "TileCm", -900, 200, unreal.LinearColor(100, 100, 100, 0))
+    wat = mel.create_material_expression(world, unreal.MaterialExpressionMaterialFunctionCall, -600, 0)
+    wat.set_editor_property("material_function", unreal.EditorAssetLibrary.load_asset(
+        "/Engine/Functions/Engine_MaterialFunctions01/Texturing/WorldAlignedTexture"))
+    mel.connect_material_expressions(tex, "", wat, "TextureObject")
+    mel.connect_material_expressions(size, "", wat, "TextureSize")
+    tint = _param(world, unreal.MaterialExpressionVectorParameter, "Tint", -600, 250, unreal.LinearColor(1, 1, 1, 1))
+    mul = mel.create_material_expression(world, unreal.MaterialExpressionMultiply, -300, 0)
+    mel.connect_material_expressions(wat, "XYZ Texture", mul, "A")
+    mel.connect_material_expressions(tint, "", mul, "B")
+    mel.connect_material_property(mul, "", P.MP_BASE_COLOR)
+    mel.connect_material_property(_param(world, unreal.MaterialExpressionScalarParameter, "Roughness", -300, 300, 0.7), "", P.MP_ROUGHNESS)
+    mel.connect_material_property(_param(world, unreal.MaterialExpressionScalarParameter, "Metallic", -300, 400, 0.0), "", P.MP_METALLIC)
+    mel.recompile_material(world)
+    unreal.EditorAssetLibrary.save_loaded_asset(world)
+
+    uv = _fresh_material("M_Parlour_UV")
+    t2 = _param(uv, unreal.MaterialExpressionTextureSampleParameter2D, "Tex", -600, 0)
+    t2.set_editor_property("texture", default_tex)
+    tint2 = _param(uv, unreal.MaterialExpressionVectorParameter, "Tint", -600, 250, unreal.LinearColor(1, 1, 1, 1))
+    mul2 = mel.create_material_expression(uv, unreal.MaterialExpressionMultiply, -300, 0)
+    mel.connect_material_expressions(t2, "RGB", mul2, "A")
+    mel.connect_material_expressions(tint2, "", mul2, "B")
+    mel.connect_material_property(mul2, "", P.MP_BASE_COLOR)
+    mel.connect_material_property(_param(uv, unreal.MaterialExpressionScalarParameter, "Roughness", -300, 300, 0.9), "", P.MP_ROUGHNESS)
+    mel.recompile_material(uv)
+    unreal.EditorAssetLibrary.save_loaded_asset(uv)
+
+    glow = _fresh_material("M_Parlour_Glow")
+    glow.set_editor_property("shading_model", unreal.MaterialShadingModel.MSM_UNLIT)
+    col = _param(glow, unreal.MaterialExpressionVectorParameter, "Color", -600, 0, unreal.LinearColor(1, 0.5, 0.1, 1))
+    k = _param(glow, unreal.MaterialExpressionScalarParameter, "Strength", -600, 200, 5.0)
+    mul3 = mel.create_material_expression(glow, unreal.MaterialExpressionMultiply, -300, 0)
+    mel.connect_material_expressions(col, "", mul3, "A")
+    mel.connect_material_expressions(k, "", mul3, "B")
+    mel.connect_material_property(mul3, "", P.MP_EMISSIVE_COLOR)
+    mel.recompile_material(glow)
+    unreal.EditorAssetLibrary.save_loaded_asset(glow)
+    return world, uv, glow
+
+
+def parlour_mi(name, parent, tex=None, tile_cm=None, tint=(1, 1, 1), rough=None, metal=None, color=None, strength=None):
+    path = PARLOUR_DIR + "/" + name
+    if unreal.EditorAssetLibrary.does_asset_exist(path):
+        mi = unreal.EditorAssetLibrary.load_asset(path)
+    else:
+        mi = tools().create_asset(name, PARLOUR_DIR, unreal.MaterialInstanceConstant,
+                                  unreal.MaterialInstanceConstantFactoryNew())
+    mi.set_editor_property("parent", parent)
+    mel = unreal.MaterialEditingLibrary
+    if tex:
+        mel.set_material_instance_texture_parameter_value(mi, "Tex", tex)
+    if tile_cm:
+        mel.set_material_instance_vector_parameter_value(mi, "TileCm", unreal.LinearColor(tile_cm, tile_cm, tile_cm, 0))
+    mel.set_material_instance_vector_parameter_value(mi, "Tint", unreal.LinearColor(tint[0], tint[1], tint[2], 1))
+    if rough is not None:
+        mel.set_material_instance_scalar_parameter_value(mi, "Roughness", rough)
+    if metal is not None:
+        mel.set_material_instance_scalar_parameter_value(mi, "Metallic", metal)
+    if color is not None:
+        mel.set_material_instance_vector_parameter_value(mi, "Color", unreal.LinearColor(color[0], color[1], color[2], 1))
+    if strength is not None:
+        mel.set_material_instance_scalar_parameter_value(mi, "Strength", strength)
+    unreal.EditorAssetLibrary.save_loaded_asset(mi)
+    return mi
+
+
+def parlour_light(label, loc, intensity, color, radius, shadows=True, tag_name=None, source_radius=2.0):
+    pl = spawn(unreal.PointLight, loc, (0, 0, 0), label)
+    c = pl.get_component_by_class(unreal.PointLightComponent)
+    c.set_mobility(unreal.ComponentMobility.MOVABLE)  # Lumen; fire and candles flicker at runtime
+    c.set_editor_property("intensity_units", unreal.LightUnits.CANDELAS)
+    c.set_editor_property("intensity", intensity)
+    c.set_editor_property("light_color", unreal.Color(r=color[0], g=color[1], b=color[2], a=255))
+    c.set_editor_property("attenuation_radius", radius)
+    c.set_editor_property("source_radius", source_radius)
+    c.set_editor_property("cast_shadows", shadows)
+    if tag_name:
+        tag(pl, tag_name)
+    return pl
+
+
+def build_diplomacy():
+    """Georgian parlour, 700 x 600 x 320 cm, lit by fire and candles (GAME INVENTION interior).
+
+    North wall: chimney breast with a marble fireplace, the envoy's portrait over the mantel, and a
+    curtained sash window either side. Panelled cream wainscot, green damask above, plank floor, a
+    Turkey carpet under a mahogany table with candles, two chairs. Manual exposure (no auto exposure).
+    The camera sits at the player's chair, so the portrait is the centre of the shot.
     """
     still_mat, _ = make_portrait_assets()
-    floor = make_material("MI_PA250_Floor", (0.22, 0.13, 0.07))
-    wall = make_material("MI_PA250_Wall", (0.40, 0.34, 0.26))
-    wood = make_material("MI_PA250_Wood", (0.36, 0.22, 0.12))
-    cloth = make_material("MI_PA250_Cloth", (0.32, 0.05, 0.05))
-    gold = make_material("MI_PA250_Gold", (0.70, 0.55, 0.15))
-    candle = make_material("MI_PA250_Candle", (0.95, 0.9, 0.7))
+    T = {n: import_texture_mipped(n) for n in
+         ("floor_planks", "wallpaper", "paint_cream", "mahogany", "marble", "firebrick", "rug", "curtain")}
+    world, uvm, glowm = parlour_masters(T["paint_cream"])
+    m_floor = parlour_mi("MI_Parlour_Floor", world, T["floor_planks"], 200, rough=0.55)
+    m_paper = parlour_mi("MI_Parlour_Wallpaper", world, T["wallpaper"], 120, rough=0.85)
+    m_paint = parlour_mi("MI_Parlour_Paint", world, T["paint_cream"], 100, rough=0.6)
+    m_ceiling = parlour_mi("MI_Parlour_Ceiling", world, T["paint_cream"], 200, tint=(0.62, 0.58, 0.52), rough=0.95)
+    m_wood = parlour_mi("MI_Parlour_Mahogany", world, T["mahogany"], 80, rough=0.35)
+    m_marble = parlour_mi("MI_Parlour_Marble", world, T["marble"], 90, tint=(0.78, 0.76, 0.72), rough=0.3)
+    m_brick = parlour_mi("MI_Parlour_Firebrick", world, T["firebrick"], 60, rough=0.95)
+    m_gilt = parlour_mi("MI_Parlour_Gilt", world, T["marble"], 40, tint=(0.78, 0.56, 0.24), rough=0.45, metal=1.0)
+    m_brass = parlour_mi("MI_Parlour_Brass", world, T["marble"], 30, tint=(0.95, 0.75, 0.4), rough=0.3, metal=1.0)
+    m_iron = parlour_mi("MI_Parlour_Iron", world, T["firebrick"], 30, tint=(0.12, 0.12, 0.12), rough=0.6, metal=1.0)
+    m_rug = parlour_mi("MI_Parlour_Rug", uvm, T["rug"], rough=0.95)
+    m_curtain = parlour_mi("MI_Parlour_Curtain", uvm, T["curtain"], rough=0.9)
+    m_velvet = parlour_mi("MI_Parlour_Velvet", world, T["curtain"], 40, rough=0.9)
+    m_paper_sheet = parlour_mi("MI_Parlour_Paper", world, T["paint_cream"], 50, tint=(1.1, 1.08, 1.0), rough=0.9)
+    m_log = parlour_mi("MI_Parlour_Log", world, T["mahogany"], 30, tint=(0.35, 0.25, 0.2), rough=0.9)
+    m_wax = parlour_mi("MI_Parlour_Wax", world, T["paint_cream"], 20, tint=(0.9, 0.85, 0.75), rough=0.4)
+    m_flame = parlour_mi("MI_Parlour_Flame", glowm, color=(1.0, 0.42, 0.08), strength=3.5)
+    m_ember = parlour_mi("MI_Parlour_Embers", glowm, color=(1.0, 0.2, 0.03), strength=2.5)
+    m_night = parlour_mi("MI_Parlour_NightGlass", glowm, color=(0.03, 0.05, 0.12), strength=0.35)
 
     les = new_level(MAPS + "/L_DiplomacyRoom")
     set_game_mode("PA250DiplomacyGameMode")
 
-    block("Floor", (0, 0, -5), (700, 600, 10), floor)
-    block("Ceiling", (0, 0, 325), (700, 600, 10), wall)
-    block("Wall_North", (0, -305, 160), (700, 10, 320), wall)
-    block("Wall_South", (0, 305, 160), (700, 10, 320), wall)
-    block("Wall_East", (355, 0, 160), (10, 600, 320), wall)
-    block("Wall_West", (-355, 0, 160), (10, 600, 320), wall)
-    block("Wainscot_North", (0, -297, 50), (700, 6, 100), wood)
+    W, D, H = 700.0, 600.0, 320.0
+    N = -D / 2  # north wall plane (y)
 
-    # Table, two chairs.
-    block("Table", (0, -10, 38), (240, 100, 8), wood)
-    for i, (x, y) in enumerate(
-        [(-105, -45), (105, -45), (-105, 25), (105, 25)]
-    ):
-        block("TableLeg_%d" % i, (x, y, 17), (10, 10, 34), wood)
-    block("TableCloth", (0, -10, 43), (200, 70, 2), cloth)
-    for name, y, _yaw in (
-        ("Chair_Envoy", -150, 0),
-        ("Chair_Player", 130, 180),
-    ):
-        block(name + "_Seat", (0, y, 25), (55, 55, 8), wood)
-        back_y = y + (-27 if y < 0 else 27)
-        block(name + "_Back", (0, back_y, 62), (55, 6, 70), wood)
-        for i, (dx, dy) in enumerate(
-            [(-22, -22), (22, -22), (-22, 22), (22, 22)]
-        ):
-            block(
-                name + "_Leg%d" % i,
-                (dx, y + dy, 11),
-                (6, 6, 22),
-                wood,
-            )
+    # ---- shell
+    block("Floor", (0, 0, -5), (W, D, 10), m_floor)
+    block("Ceiling", (0, 0, H + 5), (W, D, 10), m_ceiling)
+    block("Wall_North", (0, N - 5, H / 2), (W, 10, H), m_paper)
+    block("Wall_South", (0, -N + 5, H / 2), (W, 10, H), m_paper)
+    block("Wall_East", (W / 2 + 5, 0, H / 2), (10, D, H), m_paper)
+    block("Wall_West", (-W / 2 - 5, 0, H / 2), (10, D, H), m_paper)
 
-    # Candles with warm point lights.
-    for i, x in enumerate((-70, 0, 70)):
-        block(
-            "Candle_%d" % i,
-            (x, -10, 56),
-            (4, 4, 24),
-            candle,
-            mesh="/Engine/BasicShapes/Cylinder",
-        )
-        pl = spawn(
-            unreal.PointLight,
-            (x, -10, 82),
-            (0, 0, 0),
-            "CandleLight_%d" % i,
-        )
-        comp = pl.get_component_by_class(unreal.PointLightComponent)
-        comp.set_editor_property("intensity", 60.0)
-        comp.set_editor_property("light_color", unreal.Color(255, 170, 90, 255))
-        comp.set_editor_property("attenuation_radius", 520.0)
-        comp.set_editor_property("source_radius", 3.0)
-    sky = spawn(unreal.SkyLight, (0, 0, 250), (0, 0, 0), "DimAmbient")
-    sky.get_component_by_class(unreal.SkyLightComponent).set_editor_property(
-        "intensity", 0.15
+    # ---- wainscot, chair rail, skirting, crown on all four walls
+    walls = (  # (label, centre xy of the inner face, along-axis length, normal axis, inward sign)
+        ("N", (0, N), W, "y", 1), ("S", (0, -N), W, "y", -1),
+        ("E", (W / 2, 0), D, "x", -1), ("W", (-W / 2, 0), D, "x", 1),
     )
+    for lab, (cx, cy), length, axis, sgn in walls:
+        def slab(name, depth, z0, z1, mat, inset=0.0, along=None, offset=0.0):
+            ln = along if along is not None else length
+            if axis == "y":
+                block("%s_%s" % (name, lab), (cx + offset, cy + sgn * (inset + depth / 2), (z0 + z1) / 2), (ln, depth, z1 - z0), mat)
+            else:
+                block("%s_%s" % (name, lab), (cx + sgn * (inset + depth / 2), cy + offset, (z0 + z1) / 2), (depth, ln, z1 - z0), mat)
+        slab("Dado", 2, 0, 92, m_paint)
+        slab("Skirting", 3, 0, 18, m_paint, inset=2)
+        slab("ChairRail", 4, 88, 96, m_paint, inset=2)
+        slab("Crown", 10, H - 14, H, m_paint)
+        slab("CrownLip", 4, H - 20, H - 14, m_paint, inset=10)
+        n_panels = int(length // 80)
+        pw = length / n_panels
+        for i in range(n_panels):
+            off = -length / 2 + pw * (i + 0.5)
+            slab("Panel%d" % i, 1.5, 28, 80, m_paint, inset=2, along=pw - 18, offset=off)
 
-    # Framed portrait: frame slab + media-fed plane in front.
-    block("PortraitFrame", (0, -297, 195), (150, 6, 190), gold)
-    portrait = spawn(
-        unreal.StaticMeshActor,
-        (0, -293, 195),
-        (0, 0, 90),
-        "EnvoyPortrait",
-    )
-    portrait.set_actor_scale3d(unreal.Vector(1.3, 1.7, 1.0))  # 130 x 170 cm
+    # ---- chimney breast and fireplace (north wall centre)
+    BW, BD = 230.0, 40.0
+    face = N + BD  # front face of the breast
+    OW, OH = 92.0, 82.0  # fire opening
+    block("Breast_L", (-(BW / 2 + OW / 2) / 2, N + BD / 2, H / 2), ((BW - OW) / 2, BD, H), m_paper)
+    block("Breast_R", ((BW / 2 + OW / 2) / 2, N + BD / 2, H / 2), ((BW - OW) / 2, BD, H), m_paper)
+    block("Breast_Top", (0, N + BD / 2, (OH + H) / 2), (OW, BD, H - OH), m_paper)
+    block("Firebox_Back", (0, N + 6, OH / 2), (OW, 4, OH), m_brick)
+    block("Firebox_L", (-OW / 2 + 2, N + BD / 2, OH / 2), (4, BD, OH), m_brick, rot=(0, 8, 0))
+    block("Firebox_R", (OW / 2 - 2, N + BD / 2, OH / 2), (4, BD, OH), m_brick, rot=(0, -8, 0))
+    block("Firebox_Floor", (0, N + BD / 2, 1), (OW, BD, 2), m_brick)
+    # marble surround, mantel, hearth
+    block("Surround_L", (-OW / 2 - 14, face + 2, 52), (28, 4, 104), m_marble)
+    block("Surround_R", (OW / 2 + 14, face + 2, 52), (28, 4, 104), m_marble)
+    block("Surround_Lintel", (0, face + 2, OH + 11), (OW + 56, 4, 22), m_marble)
+    block("Mantel_Frieze", (0, face + 5, 112), (OW + 80, 6, 16), m_wood)
+    block("Mantel_Shelf", (0, face + 9, 123), (OW + 100, 18, 5), m_wood)
+    block("Mantel_Pilaster_L", (-OW / 2 - 36, face + 5, 56), (10, 6, 112), m_wood)
+    block("Mantel_Pilaster_R", (OW / 2 + 36, face + 5, 56), (10, 6, 112), m_wood)
+    block("Hearth", (0, face + 25, 1.5), (OW + 110, 50, 3), m_marble)
+    # fire: andirons, logs, flames, embers
+    for sx in (-1, 1):
+        block("Andiron_%d" % sx, (sx * 28, N + 22, 10), (4, 30, 20), m_iron)
+    for i, (lx, lz, yaw) in enumerate(((0, 9, 0), (-6, 17, 12), (8, 16, -10))):
+        block("Log_%d" % i, (lx, N + 22, lz), (70, 11, 11), m_log, mesh="/Engine/BasicShapes/Cylinder", rot=(90, 0, yaw))
+    block("Embers", (0, N + 22, 3), (70, 26, 3), m_ember)
+    for i, (fx, fh, fw) in enumerate(((0, 40, 22), (-20, 28, 16), (19, 32, 17), (-8, 22, 12), (10, 24, 12))):
+        block("Flame_%d" % i, (fx, N + 22, 18 + fh / 2), (fw, fw * 0.6, fh), m_flame, mesh="/Engine/BasicShapes/Cone")
+    parlour_light("FireLight", (0, N + 24, 30), 45.0, (255, 120, 45), 850, tag_name="FireLight", source_radius=20)
+    parlour_light("FireGlowLow", (0, N + 80, 6), 8.0, (255, 100, 35), 350, shadows=False, tag_name="FireLight")
+
+    # ---- the envoy's portrait over the mantel (media-fed plane in a gilt frame)
+    # 3:4 canvas (the material crops the 16:9 still/video) in a deep, stepped gilt frame.
+    PW, PH, PZ, F = 96.0, 128.0, 214.0, 16.0
+    m_gilt_dark = parlour_mi("MI_Parlour_GiltDark", world, T["marble"], 30, tint=(0.42, 0.29, 0.12), rough=0.55, metal=1.0)
+
+    def ring(name, w_out, h_out, w_in, h_in, depth, y, mat):
+        bw, bh = (w_out - w_in) / 2.0, (h_out - h_in) / 2.0
+        block(name + "_T", (0, y, PZ + (h_in + bh) / 2.0), (w_out, depth, bh), mat)
+        block(name + "_B", (0, y, PZ - (h_in + bh) / 2.0), (w_out, depth, bh), mat)
+        block(name + "_L", (-(w_in + bw) / 2.0, y, PZ), (bw, depth, h_in), mat)
+        block(name + "_R", ((w_in + bw) / 2.0, y, PZ), (bw, depth, h_in), mat)
+
+    block("PortraitBacking", (0, face + 1.5, PZ), (PW + 8, 3, PH + 8), m_wood)
+    ring("PortraitFrame", PW + 2 * F, PH + 2 * F, PW + 8, PH + 8, 6, face + 3, m_gilt)           # outer moulding
+    ring("PortraitFrameOgee", PW + 2 * F - 9, PH + 2 * F - 9, PW + 11, PH + 11, 5, face + 7.5, m_gilt)  # raised ogee
+    ring("PortraitFrameSight", PW + 11, PH + 11, PW, PH, 4, face + 5, m_gilt_dark)               # dark sight edge
+    for i, (cx, cz) in enumerate(((-1, -1), (1, -1), (-1, 1), (1, 1))):
+        block("PortraitFrameBoss_%d" % i, (cx * (PW / 2 + F - 4), face + 9, PZ + cz * (PH / 2 + F - 4)), (9, 5, 9), m_gilt,
+              mesh="/Engine/BasicShapes/Sphere")
+    block("PortraitFrameCrest", (0, face + 7, PZ + PH / 2 + F + 5), (34, 5, 10), m_gilt, mesh="/Engine/BasicShapes/Cylinder", rot=(90, 0, 0))
+    block("PortraitFrameCrestTop", (0, face + 8, PZ + PH / 2 + F + 12), (10, 5, 10), m_gilt, mesh="/Engine/BasicShapes/Sphere")
+    portrait = spawn(unreal.StaticMeshActor, (0, face + 3.5, PZ), (0, 0, 90), "EnvoyPortrait")
+    portrait.set_actor_scale3d(unreal.Vector(PW / 100.0, PH / 100.0, 1.0))
     comp = portrait.static_mesh_component
     comp.set_mobility(unreal.ComponentMobility.STATIC)
-    comp.set_static_mesh(
-        unreal.EditorAssetLibrary.load_asset("/Engine/BasicShapes/Plane")
-    )
+    comp.set_static_mesh(unreal.EditorAssetLibrary.load_asset("/Engine/BasicShapes/Plane"))
     comp.set_material(0, still_mat)
+    comp.set_editor_property("cast_shadow", False)
     tag(portrait, "Portrait")
 
-    # Fixed camera looking at the envoy and portrait.
-    cam = spawn(unreal.CameraActor, (0, 270, 165), (-4, -90, 0), "RoomCamera")
+    # ---- mantel garniture: candlesticks and a clock
+    for sx in (-1, 1):
+        x = sx * 78
+        block("MantelStick_%d" % sx, (x, face + 9, 136), (6, 6, 22), m_brass, mesh="/Engine/BasicShapes/Cylinder")
+        block("MantelCandle_%d" % sx, (x, face + 9, 155), (3, 3, 16), m_wax, mesh="/Engine/BasicShapes/Cylinder")
+        block("MantelFlame_%d" % sx, (x, face + 9, 166), (2.2, 2.2, 5), m_flame, mesh="/Engine/BasicShapes/Sphere")
+        parlour_light("MantelCandleLight_%d" % sx, (x, face + 16, 168), 3.0, (255, 175, 95), 380, shadows=False, tag_name="CandleLight")
+
+    # ---- sash windows with curtains, either side of the breast
+    for sx in (-1, 1):
+        wx, ww, wz0, wz1 = sx * 232.0, 92.0, 70.0, 250.0
+        block("Window_Glass_%d" % sx, (wx, N + 1.5, (wz0 + wz1) / 2), (ww, 1, wz1 - wz0), m_night)
+        block("Window_Sill_%d" % sx, (wx, N + 8, wz0 - 2), (ww + 16, 16, 4), m_paint)
+        for side in (-1, 1):
+            block("Window_Jamb_%d_%d" % (sx, side), (wx + side * (ww / 2 + 4), N + 4, (wz0 + wz1) / 2), (8, 8, wz1 - wz0 + 8), m_paint)
+        block("Window_Head_%d" % sx, (wx, N + 4, wz1 + 4), (ww + 16, 8, 8), m_paint)
+        block("Window_MeetingRail_%d" % sx, (wx, N + 3, (wz0 + wz1) / 2), (ww, 4, 4), m_paint)
+        for k in (1, 2):  # 6-over-6 glazing bars
+            block("Window_BarV_%d_%d" % (sx, k), (wx - ww / 2 + k * ww / 3, N + 2.5, (wz0 + wz1) / 2), (2, 2, wz1 - wz0), m_paint)
+        for k in (1, 2, 4, 5):
+            block("Window_BarH_%d_%d" % (sx, k), (wx, N + 2.5, wz0 + k * (wz1 - wz0) / 6), (ww, 2, 2), m_paint)
+        block("Pelmet_%d" % sx, (wx, N + 14, 272), (ww + 70, 12, 22), m_wood)
+        for side in (-1, 1):
+            block("Curtain_%d_%d" % (sx, side), (wx + side * (ww / 2 + 6), N + 10, 145), (44, 6, 250), m_curtain)
+        block("Window_Moon_%d" % sx, (wx, N - 2, (wz0 + wz1) / 2), (ww - 10, 1, wz1 - wz0 - 10), m_night)
+
+    # ---- Turkey carpet, table, chairs, candles and papers
+    block("Rug", (0, 40, 0.6), (330, 230, 1.2), m_rug)
+    TZ, TY = 76.0, 40.0
+    block("Table_Top", (0, TY, TZ - 2), (190, 96, 4), m_wood)
+    block("Table_Apron", (0, TY, TZ - 9), (176, 82, 10), m_wood)
+    for i, (x, y) in enumerate(((-84, TY - 42), (84, TY - 42), (-84, TY + 42), (84, TY + 42))):
+        block("Table_Leg_%d" % i, (x, y, (TZ - 14) / 2), (7, 7, TZ - 14), m_wood, mesh="/Engine/BasicShapes/Cylinder")
+    for i, (x, y) in enumerate(((-72, TY - 18), (72, TY - 18))):
+        block("TableStick_%d" % i, (x, y, TZ + 1.5), (12, 12, 3), m_brass, mesh="/Engine/BasicShapes/Cylinder")
+        block("TableStickStem_%d" % i, (x, y, TZ + 10), (3.5, 3.5, 16), m_brass, mesh="/Engine/BasicShapes/Cylinder")
+        block("TableCandle_%d" % i, (x, y, TZ + 26), (3, 3, 16), m_wax, mesh="/Engine/BasicShapes/Cylinder")
+        block("TableFlame_%d" % i, (x, y, TZ + 37), (2.2, 2.2, 5), m_flame, mesh="/Engine/BasicShapes/Sphere")
+        parlour_light("TableCandleLight_%d" % i, (x, y, TZ + 42), 4.0, (255, 170, 90), 450, tag_name="CandleLight")
+    block("Papers_A", (-12, TY + 10, TZ + 0.3), (30, 22, 0.6), m_paper_sheet, rot=(0, 8, 0))
+    block("Papers_B", (16, TY + 14, TZ + 0.6), (30, 22, 0.6), m_paper_sheet, rot=(0, -14, 0))
+    block("Inkwell", (40, TY + 18, TZ + 3), (6, 6, 6), m_iron, mesh="/Engine/BasicShapes/Cylinder")
+    for name, y, back in (("Chair_Player", TY + 102, 1),):  # the envoy is present as his portrait
+        block(name + "_Seat", (0, y, 46), (56, 52, 5), m_wood)
+        block(name + "_Cushion", (0, y, 50), (50, 46, 4), m_velvet)
+        block(name + "_Back", (0, y + back * 24, 82), (54, 5, 64), m_wood)
+        block(name + "_BackPad", (0, y + back * 21, 84), (40, 2, 46), m_velvet)
+        for i, (dx, dy) in enumerate(((-24, -22), (24, -22), (-24, 22), (24, 22))):
+            block(name + "_Leg%d" % i, (dx, y + dy, 22), (5, 5, 44), m_wood)
+
+    # ---- low warm fill so the room reads (Lumen does the bounce)
+    parlour_light("FillWarm", (0, 150, 140), 3.0, (255, 185, 125), 900, shadows=False, source_radius=60)
+
+    # ---- manual exposure, warm grade
+    pp = spawn(unreal.PostProcessVolume, (0, 0, 160), (0, 0, 0), "PP_Parlour")
+    pp.set_editor_property("unbound", True)
+    st = pp.get_editor_property("settings")
+    for k, v in (("override_auto_exposure_method", True), ("auto_exposure_method", unreal.AutoExposureMethod.AEM_MANUAL),
+                 ("override_auto_exposure_apply_physical_camera_exposure", True), ("auto_exposure_apply_physical_camera_exposure", False),
+                 ("override_auto_exposure_bias", True), ("auto_exposure_bias", PARLOUR_EXPOSURE_COMP),
+                 ("override_bloom_intensity", True), ("bloom_intensity", 0.25),
+                 ("override_vignette_intensity", True), ("vignette_intensity", 0.5),
+                 ("override_white_temp", True), ("white_temp", 5600.0),
+                 ("override_film_grain_intensity", True), ("film_grain_intensity", 0.08)):
+        st.set_editor_property(k, v)
+    pp.set_editor_property("settings", st)
+
+    # ---- camera at the player's chair, portrait centred above the dialogue panel
+    cam = spawn(unreal.CameraActor, (0, 250, 148), (3.5, -90, 0), "RoomCamera")
+    cc = cam.get_component_by_class(unreal.CameraComponent)
+    cc.set_editor_property("field_of_view", 62.0)
     tag(cam, "RoomCamera")
     save(les)
-    LOG("PA250: built L_DiplomacyRoom")
-
+    LOG("PA250: built L_DiplomacyRoom (parlour)")
 
 def build_ftest_bot_spacing():
     """Flat Lexington-like layout for APA250BotSpacingTest (3 CPs, battle GM)."""

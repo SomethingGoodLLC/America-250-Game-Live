@@ -158,6 +158,14 @@ envoys. Use premade voices: on a free key, library voices return HTTP 402 `paid_
 control socket does not cancel them. Tests: `scripts/speak_test.py` (service chain + afplay) and
 `scripts/run_voice_test.sh` (Unreal room with sound).
 
+**Talking portrait (file-per-line MP4)**: chain musetalk_local → musetalk_remote (not built) → `fal_talking` →
+D-ID → audio-only, under `PA250_AVATAR_TIMEOUT` (90 s). `fal_talking` needs `FAL_KEY`; `FAL_TALKING_MODEL` =
+`veed/fabric-1.0` (default, `FAL_RESOLUTION=480p`, $0.08/s) or `fal-ai/bytedance/omnihuman` ($0.14/s, clips < 30 s).
+Lines over `FAL_MAX_CLIP_SECONDS` (30) are split at pauses and joined. The voice is always re-muxed from our WAV
+(H.264 + AAC). Renders are cached by hash(model, portrait, WAV) in `generated_video/cache/`. D-ID lip-syncs our
+WAV (POST `/audios`, script type `audio`), never its own voice. `GET /v1/avatar/health` lists each backend's
+availability and reason. Test: `scripts/test_talking_portrait.py` (run twice: the second run makes no fal call).
+
 **Available Voices**:
 - `21m00Tcm4TlvDq8ikWAM` - Rachel (default, professional female)
 - `AZnzlk1XvdvUeBnXmlld` - Drew (male)

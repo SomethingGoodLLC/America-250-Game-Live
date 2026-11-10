@@ -3,7 +3,7 @@
  "scenario": "boston1775",
  "seed": 1775,
  "player_faction": "continental",
- "ai_objective": "lexington",
+ "ai_objective": "concord",
  "start_ymdh": {
   "y": 1775,
   "m": 4,
@@ -46,7 +46,7 @@
     110,
     240
    ],
-   "supply_value": 1
+   "workshop_level": 1, "depot_level": 1, "supply_value": 1
   },
   {
    "id": "lincoln",
@@ -190,7 +190,7 @@
     410,
     410
    ],
-   "supply_value": 1
+   "workshop_level": 1, "depot_level": 1, "supply_value": 1
   },
   {
    "id": "charlestown",
@@ -226,7 +226,7 @@
     680,
     385
    ],
-   "supply_value": 1
+   "fort_level": 1, "supply_value": 1
   },
   {
    "id": "medford",
@@ -414,7 +414,7 @@
     755,
     550
    ],
-   "supply_value": 1
+   "workshop_level": 1, "depot_level": 1, "fort_level": 1, "supply_value": 1
   },
   {
    "id": "dorchester",
@@ -627,11 +627,13 @@
    "id": "continental_militia",
    "name": "Massachusetts Militia",
    "faction": "continental",
-   "province": "lexington",
+   "province": "concord",
    "units": {
     "line_infantry": 4,
     "militia": 18
    },
+   "sick": {},
+   "wounded": {},
    "morale": 70
   }
  ],
@@ -639,10 +641,30 @@
   "british": 10,
   "continental": 10
  },
- "stores": {
-  "british": { "powder": 40, "arms": 30, "provisions": 40 },
-  "continental": { "powder": 8, "arms": 10, "provisions": 20 }
+ "province_stores": {
+  "boston": {
+   "powder": 40, "cartridges": 80, "muskets": 30, "bayonets": 24, "provisions": 40, "lead": 20, "paper": 20
+  },
+  "concord": {
+   "powder": 4, "cartridges": 40, "muskets": 6, "bayonets": 4, "provisions": 10, "lead": 8, "paper": 8
+  },
+  "lexington": {
+   "powder": 2, "cartridges": 10, "muskets": 2, "bayonets": 1, "provisions": 5, "lead": 2, "paper": 2
+  },
+  "cambridge": {
+   "powder": 2, "cartridges": 10, "muskets": 2, "bayonets": 1, "provisions": 10, "lead": 4, "paper": 4
+  },
+  "lincoln": { "powder": 0, "cartridges": 0, "muskets": 0, "bayonets": 0, "provisions": 0, "lead": 0, "paper": 0 },
+  "menotomy": { "powder": 0, "cartridges": 0, "muskets": 0, "bayonets": 0, "provisions": 0, "lead": 0, "paper": 0 },
+  "charlestown": { "powder": 0, "cartridges": 0, "muskets": 0, "bayonets": 0, "provisions": 0, "lead": 0, "paper": 0 },
+  "medford": { "powder": 0, "cartridges": 0, "muskets": 0, "bayonets": 0, "provisions": 0, "lead": 0, "paper": 0 },
+  "watertown": { "powder": 0, "cartridges": 0, "muskets": 0, "bayonets": 0, "provisions": 0, "lead": 0, "paper": 0 },
+  "brookline": { "powder": 0, "cartridges": 0, "muskets": 0, "bayonets": 0, "provisions": 0, "lead": 0, "paper": 0 },
+  "roxbury": { "powder": 0, "cartridges": 0, "muskets": 0, "bayonets": 0, "provisions": 0, "lead": 0, "paper": 0 },
+  "dorchester": { "powder": 0, "cartridges": 0, "muskets": 0, "bayonets": 0, "provisions": 0, "lead": 0, "paper": 0 },
+  "chelsea": { "powder": 0, "cartridges": 0, "muskets": 0, "bayonets": 0, "provisions": 0, "lead": 0, "paper": 0 }
  },
+ "stores_note": "Gameplay tuning seed — not a historical inventory. Legacy faction stores omitted; province_stores is authoritative.",
  "local_support": 55,
  "relations": {
   "british": -20

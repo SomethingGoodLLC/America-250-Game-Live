@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import sys
 import time
@@ -23,6 +24,7 @@ from ruamel.yaml import YAML
 from starlette.websockets import WebSocketState
 
 from core.logging_config import setup_logging
+from diplomacy import stt
 from diplomacy.avatar import backend_status, render_avatar_line
 from diplomacy.models import DiplomacyContext
 from diplomacy.service import (
@@ -44,6 +46,7 @@ load_dotenv()
 
 # Setup logging
 setup_logging()
+logging.getLogger("httpx").setLevel(logging.WARNING)  # fal/ElevenLabs request lines drown the service log
 logger = structlog.get_logger(__name__)
 
 yaml = YAML()
@@ -1016,6 +1019,28 @@ async def sdp_offer(sid: str, sdp_in: SDPIn):
 async def health_check():
     """Health check endpoint."""
     return {"status": "ok", "service": "negotiation", "version": "1.0.0"}
+
+
+@app.on_event("startup")
+async def _prewarm_stt() -> None:
+    # Load the speech model in the background so the first mic press is not a ~1 min download/load.
+    if os.getenv("PA250_STT_PREWARM", "1") != "0":
+        asyncio.create_task(stt.prewarm())
+
+
+@app.post("/v1/stt")
+async def speech_to_text(request: Request) -> JSONResponse:
+    """Player mic clip (16-bit PCM WAV body) -> text. The client sends the text as a player_utterance."""
+    body = await request.body()
+    if not body.startswith(b"RIFF") or len(body) > 12_000_000:
+        return JSONResponse({"error": "send a 16-bit PCM WAV body (max 12 MB)"}, status_code=422)
+    try:
+        return JSONResponse(await stt.transcribe_wav(body))
+    except ValueError as e:
+        return JSONResponse({"error": str(e)}, status_code=422)
+    except Exception as e:
+        logger.warning("STT failed", error=f"{type(e).__name__}: {e}"[:400])
+        return JSONResponse({"error": "speech recognition unavailable"}, status_code=503)
 
 
 @app.get("/v1/avatar/health")

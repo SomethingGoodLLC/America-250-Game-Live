@@ -253,7 +253,9 @@ async def _did_video(audio_file: str, portrait: Path, out_mp4: Path) -> str | No
 
         prov = DIDVideoProvider()
         audio_url = await prov.upload_audio(Path(audio_file))
-        path = await prov.generate_video(audio_url=audio_url, image_url=str(portrait), output_path=out_mp4)
+        path = await prov.generate_video(
+            audio_url=audio_url, image_url=str(portrait), output_path=out_mp4
+        )
         return str(path) if path else None
     except Exception as e:
         logger.warning("D-ID failed", error=f"{type(e).__name__}: {e}"[:600])
@@ -261,7 +263,11 @@ async def _did_video(audio_file: str, portrait: Path, out_mp4: Path) -> str | No
 
 
 def _musetalk_remote_reason() -> str:
-    return "not built yet" + (" (MUSETALK_REMOTE_URL is set but ignored)" if os.getenv("MUSETALK_REMOTE_URL") else "")
+    return "not built yet" + (
+        " (MUSETALK_REMOTE_URL is set but ignored)"
+        if os.getenv("MUSETALK_REMOTE_URL")
+        else ""
+    )
 
 
 def backend_status() -> list[dict[str, Any]]:
@@ -270,17 +276,26 @@ def backend_status() -> list[dict[str, Any]]:
 
     fal = FalTalkingVideoSource()
     rows: list[dict[str, Any]] = [
-        {"name": "musetalk_local", "reason": MuseTalkVideoSource().unavailable_reason()},
+        {
+            "name": "musetalk_local",
+            "reason": MuseTalkVideoSource().unavailable_reason(),
+        },
         {"name": "musetalk_remote", "reason": _musetalk_remote_reason()},
-        {"name": "fal_talking", "reason": fal.unavailable_reason(), "model": fal.model_id,
-         "resolution": fal.resolution or None},
+        {
+            "name": "fal_talking",
+            "reason": fal.unavailable_reason(),
+            "model": fal.model_id,
+            "resolution": fal.resolution or None,
+        },
         {"name": "did", "reason": _did_unavailable_reason()},
         {"name": "audio_only", "reason": None},
     ]
     mode = os.getenv("PA250_AVATAR", "auto").lower()
     for r in rows:
         r["available"] = r["reason"] is None
-        r["enabled"] = r["name"] == "audio_only" or mode == "auto" or r["name"].startswith(mode)
+        r["enabled"] = (
+            r["name"] == "audio_only" or mode == "auto" or r["name"].startswith(mode)
+        )
     return rows
 
 
@@ -328,8 +343,10 @@ async def render_avatar_line(
             if reason is None:
                 r = await fal.render(audio, str(portrait), str(out_mp4))
                 if r.path:
-                    notes.append(f"fal_talking {r.model}: {r.seconds:.2f}s video, est ${r.est_cost_usd:.2f}, "
-                                 f"render {r.render_s:.1f}s{' (cache hit)' if r.cache_hit else ''}")
+                    notes.append(
+                        f"fal_talking {r.model}: {r.seconds:.2f}s video, est ${r.est_cost_usd:.2f}, "
+                        f"render {r.render_s:.1f}s{' (cache hit)' if r.cache_hit else ''}"
+                    )
                     return done(r.path, "fal_talking")
                 notes.append(f"fal_talking failed: {r.error}")
             else:
@@ -347,14 +364,40 @@ async def render_avatar_line(
 
     if mode in ("none", "off", "audio_only"):
         return done(None, "audio_only")
+    if os.getenv("PA250_VIDEO_WAIT", "0") != "1":
+        # Voice first: renders take 35 s+ (fal) or minutes (MuseTalk on this Mac), far longer than a reply may
+        # wait. Use a talking-portrait video only when this exact line is already rendered; otherwise speak now.
+        if mode in ("auto", "fal"):
+            from providers.video_sources.fal_talking_source import FalTalkingVideoSource
+
+            hit = FalTalkingVideoSource().cached_path(audio, str(portrait))
+            if hit:
+                shutil.copyfile(hit, out_mp4)
+                notes.append("fal_talking cache hit")
+                return done(str(out_mp4), "fal_talking")
+        notes.append(
+            "voice first: no cached video (PA250_VIDEO_WAIT=1 waits for a render)"
+        )
+        return done(None, "audio_only")
     budget = float(os.getenv("PA250_AVATAR_TIMEOUT", "90"))
     t0 = time.monotonic()
     try:
         line = await asyncio.wait_for(chain(), timeout=budget)
     except TimeoutError:
         notes.append(f"video timed out after {budget:.0f}s (PA250_AVATAR_TIMEOUT)")
-        logger.warning("Avatar video timed out; sending audio-only", job_id=job_id, timeout_s=budget, notes=notes)
+        logger.warning(
+            "Avatar video timed out; sending audio-only",
+            job_id=job_id,
+            timeout_s=budget,
+            notes=notes,
+        )
         return done(None, "audio_only")
-    logger.info("Avatar video", job_id=job_id, backend=line.backend, video_file=line.video_file,
-                elapsed_s=round(time.monotonic() - t0, 2), notes=notes)
+    logger.info(
+        "Avatar video",
+        job_id=job_id,
+        backend=line.backend,
+        video_file=line.video_file,
+        elapsed_s=round(time.monotonic() - t0, 2),
+        notes=notes,
+    )
     return line

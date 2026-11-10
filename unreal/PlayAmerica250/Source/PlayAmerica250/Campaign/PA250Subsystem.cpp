@@ -31,6 +31,11 @@ FString UPA250Subsystem::CorrespondenceCatalogPath()
 	return FPaths::ConvertRelativePathToFull(
 		FPaths::Combine(FPaths::ProjectDir(), TEXT("../PA250Sim/data/opening_war_correspondence.json")));
 }
+FString UPA250Subsystem::LogisticsTuningPath()
+{
+	return FPaths::ConvertRelativePathToFull(
+		FPaths::Combine(FPaths::ProjectDir(), TEXT("../PA250Sim/data/logistics_tuning.json")));
+}
 FString UPA250Subsystem::SavePath() { return FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("PA250/campaign.json")); }
 FString UPA250Subsystem::TracePath() { return FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("PA250/autoplay_trace.json")); }
 FString UPA250Subsystem::AutosaveDir() { return FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("Autosaves")); }
@@ -256,6 +261,14 @@ bool UPA250Subsystem::NewCampaign(FString& OutError)
 		{
 			return false;
 		}
+		try
+		{
+			pa250::load_logistics_tuning(pa250::read_text_file(ToStd(LogisticsTuningPath())));
+		}
+		catch (...)
+		{
+			// Defaults inside the sim apply when the tuning file is missing.
+		}
 		Controller.new_campaign(pa250::read_text_file(ToStd(ScenarioPath())));
 		bPaused = true;
 		HourAccumulator = 0.f;
@@ -348,6 +361,114 @@ bool UPA250Subsystem::ResolveCommander(const FString& Action, FString& OutError)
 		return false;
 	}
 	return true;
+}
+
+bool UPA250Subsystem::ApprovePurchaseOrder(const FString& DestProvince, int32 Powder, int32 Cartridges,
+										   int32 Muskets, int32 Bayonets, int32 Provisions, int32 Lead, int32 Paper,
+										   FString& OutError)
+{
+	const auto Errs = Controller.approve_purchase_order(ToStd(DestProvince), Powder, Cartridges, Muskets, Bayonets,
+														Provisions, Lead, Paper);
+	if (!Errs.empty())
+	{
+		OutError = ToFStr(Errs.front());
+		return false;
+	}
+	return true;
+}
+
+bool UPA250Subsystem::ApproveTransferOrder(const FString& SourceProvince, const FString& DestProvince, int32 Powder,
+										   int32 Cartridges, int32 Muskets, int32 Bayonets, int32 Provisions,
+										   int32 Lead, int32 Paper, FString& OutError)
+{
+	const auto Errs = Controller.approve_transfer_order(ToStd(SourceProvince), ToStd(DestProvince), Powder, Cartridges,
+														Muskets, Bayonets, Provisions, Lead, Paper);
+	if (!Errs.empty())
+	{
+		OutError = ToFStr(Errs.front());
+		return false;
+	}
+	return true;
+}
+
+bool UPA250Subsystem::DevelopProvince(const FString& ProvinceId, const FString& Track, FString& OutError)
+{
+	const auto Errs = Controller.develop_province_action(ToStd(ProvinceId), ToStd(Track));
+	if (!Errs.empty())
+	{
+		OutError = ToFStr(Errs.front());
+		return false;
+	}
+	return true;
+}
+
+FString UPA250Subsystem::GetProvinceDevelopmentJson() const
+{
+	FString Out = TEXT("{");
+	bool First = true;
+	for (const auto& Kv : Controller.state().provinces)
+	{
+		if (!First) Out += TEXT(",");
+		First = false;
+		const pa250::Province& P = Kv.second;
+		Out += FString::Printf(
+			TEXT("\"%s\":{\"dev\":%d,\"farm\":%d,\"workshop\":%d,\"depot\":%d,\"fort\":%d,\"supply\":%d}"),
+			UTF8_TO_TCHAR(P.id.c_str()), pa250::province_development(P), P.farm_level, P.workshop_level,
+			P.depot_level, P.fort_level, pa250::effective_supply_value(P));
+	}
+	Out += TEXT("}");
+	return Out;
+}
+
+bool UPA250Subsystem::StartCartridgeCraft(const FString& ProvinceId, const FString& ArmyId, int32 Workers,
+										  int32 Powder, int32 Lead, int32 Paper, FString& OutError)
+{
+	const auto Errs =
+		Controller.start_cartridge_craft(ToStd(ProvinceId), ToStd(ArmyId), Workers, Powder, Lead, Paper);
+	if (!Errs.empty())
+	{
+		OutError = ToFStr(Errs.front());
+		return false;
+	}
+	return true;
+}
+
+FString UPA250Subsystem::GetLastBattleReportJson() const
+{
+	return ToFStr(pa250::result_to_json([&]() {
+		pa250::BattleResult R;
+		const pa250::BattleReport& Br = Controller.state().progress.last_battle_report;
+		R.province_id = Br.province_id;
+		R.winner = Br.winner;
+		R.objective_holder = Br.objective_holder;
+		R.objectives_held = Br.objectives_held;
+		R.losses = Br.losses;
+		R.wounded = Br.wounded;
+		R.cartridges_spent = Br.cartridges_spent;
+		R.powder_spent = Br.powder_spent;
+		R.morale_delta = Br.morale_delta;
+		R.province_owner_after = Br.province_owner_after;
+		return R;
+	}()));
+}
+
+FString UPA250Subsystem::GetShipmentsJson() const
+{
+	FString Out = TEXT("[");
+	bool First = true;
+	for (const auto& Sh : Controller.state().shipments)
+	{
+		if (!First) Out += TEXT(",");
+		First = false;
+		Out += FString::Printf(
+			TEXT("{\"id\":\"%s\",\"status\":\"%s\",\"source\":\"%s\",\"dest\":\"%s\",\"deliver_on_hour\":%lld,"
+				 "\"powder\":%d,\"cartridges\":%d,\"muskets\":%d}"),
+			UTF8_TO_TCHAR(Sh.id.c_str()), UTF8_TO_TCHAR(Sh.status.c_str()),
+			UTF8_TO_TCHAR(Sh.source_province.c_str()), UTF8_TO_TCHAR(Sh.dest_province.c_str()),
+			static_cast<long long>(Sh.deliver_on_hour), Sh.powder, Sh.cartridges, Sh.muskets);
+	}
+	Out += TEXT("]");
+	return Out;
 }
 
 bool UPA250Subsystem::HasStaffEvent() const { return Controller.has_staff_event(); }

@@ -20,7 +20,43 @@ namespace
 {
 FString ToFStr(const std::string& S) { return FString(UTF8_TO_TCHAR(S.c_str())); }
 std::string ToStd(const FString& S) { return std::string(TCHAR_TO_UTF8(*S)); }
+
+int32 FitCount(const pa250::Army& A)
+{
+	int32 N = 0;
+	for (const auto& U : A.units) N += U.second;
+	return N;
 }
+FString ProvName(const pa250::CampaignState& St, const std::string& Id)
+{
+	auto It = St.provinces.find(Id);
+	return It == St.provinces.end() ? ToFStr(Id) : ToFStr(It->second.name);
+}
+/** Route the army is on, as province names, following its remaining edge path. */
+TArray<FString> RouteNames(const pa250::CampaignState& St, const pa250::Army& A)
+{
+	TArray<FString> Out;
+	Out.Add(ProvName(St, A.province));
+	std::string Cur = A.province;
+	for (const std::string& Eid : A.path)
+	{
+		auto Eit = St.edges.find(Eid);
+		if (Eit == St.edges.end()) break;
+		Cur = (Eit->second.a == Cur) ? Eit->second.b : Eit->second.a;
+		Out.Add(ProvName(St, Cur));
+	}
+	return Out;
+}
+FString OrdersText(const pa250::CampaignState& St, const pa250::Army& A)
+{
+	if (A.path.empty())
+	{
+		return TEXT("holding");
+	}
+	const TArray<FString> Route = RouteNames(St, A);
+	return FString::Printf(TEXT("→ %s"), Route.Num() > 1 ? *Route.Last() : TEXT("?"));
+}
+} // namespace
 
 UPA250Subsystem* UPA250MapWidget::Sub() const
 {
@@ -49,27 +85,27 @@ FText UPA250MapWidget::HeaderText() const
 	const FString Date = S->FormatDate();
 	const FString Sp = FPA250CampaignSpeed::Format(S->GetHoursPerSecond());
 	const TCHAR* Pause = S->IsPaused() ? TEXT("PAUSED") : TEXT("RUNNING");
-	auto Store = [&](const char* Faction, const char* Field) -> int32 {
-		auto It = St.stores.find(Faction);
-		if (It == St.stores.end())
-		{
-			return 0;
-		}
-		if (std::strcmp(Field, "powder") == 0)
-		{
-			return It->second.powder;
-		}
-		if (std::strcmp(Field, "arms") == 0)
-		{
-			return It->second.arms;
-		}
-		return It->second.provisions;
-	};
+	const pa250::FactionStores Roll = pa250::rollup_faction_stores(St, pa250::kContinental);
+	int32 InTransit = 0;
+	for (const auto& Sh : St.shipments)
+	{
+		if (Sh.status == "in_transit" || Sh.status == "committed") ++InTransit;
+	}
 	return FText::FromString(FString::Printf(
-		TEXT("%s   |   %s  speed %s   |   Gold %d   |   Powder %d  Arms %d  Prov %d   |   Local support %d   |   Supplies Cont %d  Brit %d   |   Attitude %d   |   Treaties: %s"),
-		*Date, Pause, *Sp, St.player_gold, Store("continental", "powder"), Store("continental", "arms"),
-		Store("continental", "provisions"), St.local_support, Get(St.supplies, "continental"), Get(St.supplies, "british"),
-		Get(St.relations, "british"), Treaties.IsEmpty() ? TEXT("none") : *Treaties));
+		TEXT("%s   |   %s  speed %s   |   Gold %d   |   Powder %d  Cart %d  Muskets %d  Prov %d   |   In transit %d   |   Local support %d   |   Supplies Cont %d  Brit %d   |   Attitude %d   |   Treaties: %s"),
+		*Date, Pause, *Sp, St.player_gold, Roll.powder,
+		[&]() {
+			int32 C = 0;
+			for (const auto& KV : St.provinces)
+			{
+				if (KV.second.owner != pa250::kContinental) continue;
+				C += pa250::province_ledger(St, KV.first).cartridges;
+			}
+			return C;
+		}(),
+		Roll.arms, Roll.provisions, InTransit, St.local_support, Get(St.supplies, "continental"),
+		Get(St.supplies, "british"), Get(St.relations, "british"),
+		Treaties.IsEmpty() ? TEXT("none") : *Treaties));
 }
 
 FText UPA250MapWidget::DateText() const
@@ -91,7 +127,7 @@ FText UPA250MapWidget::TreasuryText() const
 	{
 		return FText::GetEmpty();
 	}
-	return FText::FromString(FString::Printf(TEXT("Treasury: Gold %d"), S->GetState().player_gold));
+	return FText::FromString(FString::Printf(TEXT("🪙 %d"), S->GetState().player_gold));
 }
 
 FText UPA250MapWidget::StoresText() const
@@ -102,13 +138,265 @@ FText UPA250MapWidget::StoresText() const
 		return FText::GetEmpty();
 	}
 	const pa250::CampaignState& St = S->GetState();
-	auto It = St.stores.find("continental");
-	if (It == St.stores.end())
+	// Compact faction totals for the top bar (detail lives in the province window / ledger).
+	int32 Powder = 0, Cart = 0, Muskets = 0, Prov = 0, InTransit = 0;
+	for (const auto& Kv : St.provinces)
 	{
-		return FText::FromString(TEXT("Stores: —"));
+		if (Kv.second.owner != St.player_faction) continue;
+		const pa250::ProvinceStores& Ps = pa250::province_ledger(St, Kv.first);
+		Powder += Ps.powder;
+		Cart += Ps.cartridges;
+		Muskets += Ps.muskets;
+		Prov += Ps.provisions;
 	}
-	return FText::FromString(FString::Printf(TEXT("Stores: Powder %d · Arms %d · Provisions %d"), It->second.powder,
-											 It->second.arms, It->second.provisions));
+	for (const auto& Sh : St.shipments)
+	{
+		if (Sh.status == "in_transit" || Sh.status == "committed") ++InTransit;
+	}
+	return FText::FromString(FString::Printf(TEXT("Powder %d · Cart %d · Musk %d · Prov %d · ⛟ %d"), Powder, Cart,
+											 Muskets, Prov, InTransit));
+}
+
+bool UPA250MapWidget::GetPlayerArmyId(int32 Index, FString& OutId) const
+{
+	UPA250Subsystem* S = Sub();
+	if (!S || !S->GetController().has_campaign() || Index < 0)
+	{
+		return false;
+	}
+	const pa250::CampaignState& St = S->GetState();
+	int32 I = 0;
+	for (const auto& Kv : St.armies)
+	{
+		if (Kv.second.faction != St.player_faction) continue;
+		if (I == Index)
+		{
+			OutId = ToFStr(Kv.first);
+			return true;
+		}
+		++I;
+	}
+	return false;
+}
+
+FText UPA250MapWidget::ArmyButtonText(int32 Index) const
+{
+	FString Id;
+	if (!GetPlayerArmyId(Index, Id))
+	{
+		return FText::GetEmpty();
+	}
+	UPA250Subsystem* S = Sub();
+	const pa250::CampaignState& St = S->GetState();
+	const pa250::Army& A = St.armies.at(ToStd(Id));
+	const bool bSel = Id == SelectedArmyId;
+	return FText::FromString(FString::Printf(TEXT("%s %s — %s · %d fit · %s"), bSel ? TEXT("▶") : TEXT("⚔"),
+											 *ToFStr(A.name), *ProvName(St, A.province), FitCount(A),
+											 *OrdersText(St, A)));
+}
+
+FText UPA250MapWidget::SelectedArmyBannerText() const
+{
+	UPA250Subsystem* S = Sub();
+	if (!S || SelectedArmyId.IsEmpty() || !S->GetController().has_campaign())
+	{
+		return FText::GetEmpty();
+	}
+	const pa250::CampaignState& St = S->GetState();
+	auto It = St.armies.find(ToStd(SelectedArmyId));
+	if (It == St.armies.end())
+	{
+		return FText::GetEmpty();
+	}
+	const pa250::Army& A = It->second;
+	FString Route;
+	if (!A.path.empty())
+	{
+		Route = TEXT(" · Route: ");
+		const TArray<FString> Names = RouteNames(St, A);
+		for (int32 i = 0; i < Names.Num(); ++i)
+		{
+			Route += (i ? TEXT(" → ") : TEXT("")) + Names[i];
+		}
+	}
+	return FText::FromString(FString::Printf(
+		TEXT("⚔ %s selected — at %s · %d fit · %s%s\nClick a town to march there · Esc / right-click cancels"),
+		*ToFStr(A.name), *ProvName(St, A.province), FitCount(A), *OrdersText(St, A), *Route));
+}
+
+void UPA250MapWidget::PressSelectArmy(const FString& ArmyId)
+{
+	UPA250Subsystem* S = Sub();
+	if (!S || ArmyId.IsEmpty() || !S->GetController().has_campaign())
+	{
+		return;
+	}
+	const pa250::CampaignState& St = S->GetState();
+	auto It = St.armies.find(ToStd(ArmyId));
+	if (It == St.armies.end() || It->second.faction != St.player_faction)
+	{
+		return;
+	}
+	SelectedArmyId = ArmyId;
+	SelectedProvinceId = ToFStr(It->second.province);
+	SetStatusMessage(FString::Printf(TEXT("%s selected at %s. Click a destination town."),
+									 *ToFStr(It->second.name), *ProvName(St, It->second.province)));
+	NotifyMapSelectionChanged();
+	if (APA250ProvinceMapActor* Map = MapActor.Get())
+	{
+		Map->FocusSelected();
+	}
+}
+
+void UPA250MapWidget::PressSelectArmyAtSelection()
+{
+	UPA250Subsystem* S = Sub();
+	if (!S || SelectedProvinceId.IsEmpty())
+	{
+		return;
+	}
+	for (int32 i = 0;; ++i)
+	{
+		FString Id;
+		if (!GetPlayerArmyId(i, Id)) break;
+		const pa250::CampaignState& St = S->GetState();
+		if (ToFStr(St.armies.at(ToStd(Id)).province) == SelectedProvinceId)
+		{
+			PressSelectArmy(Id);
+			return;
+		}
+	}
+	SetStatusMessage(TEXT("No friendly army in this province. Use the Your forces panel (top-left)."));
+}
+
+FText UPA250MapWidget::ProvinceTitleText() const
+{
+	UPA250Subsystem* S = Sub();
+	if (!S || SelectedProvinceId.IsEmpty() || !S->GetController().has_campaign())
+	{
+		return FText::GetEmpty();
+	}
+	const pa250::CampaignState& St = S->GetState();
+	auto Pit = St.provinces.find(ToStd(SelectedProvinceId));
+	if (Pit == St.provinces.end())
+	{
+		return FText::GetEmpty();
+	}
+	const pa250::Province& P = Pit->second;
+	const TCHAR* Owner = P.owner == pa250::kBritish ? TEXT("♛ British Crown") : TEXT("⚜ Continentals — yours");
+	FString Terrain;
+	for (const std::string& T : P.terrain)
+	{
+		Terrain += Terrain.IsEmpty() ? ToFStr(T) : TEXT(", ") + ToFStr(T);
+	}
+	return FText::FromString(FString::Printf(TEXT("%s\n%s · %s · Development %d"), *ToFStr(P.name), Owner,
+											 Terrain.IsEmpty() ? TEXT("—") : *Terrain,
+											 pa250::province_development(P)));
+}
+
+FText UPA250MapWidget::DevelopmentText() const
+{
+	UPA250Subsystem* S = Sub();
+	if (!S || SelectedProvinceId.IsEmpty() || !S->GetController().has_campaign())
+	{
+		return FText::GetEmpty();
+	}
+	const pa250::CampaignState& St = S->GetState();
+	auto Pit = St.provinces.find(ToStd(SelectedProvinceId));
+	if (Pit == St.provinces.end())
+	{
+		return FText::GetEmpty();
+	}
+	const pa250::Province& P = Pit->second;
+	auto Pips = [](int32 Lvl) {
+		FString Out;
+		for (int32 i = 0; i < pa250::development_max_level(); ++i) Out += i < Lvl ? TEXT("●") : TEXT("○");
+		return Out;
+	};
+	auto Cost = [](const char* Track, int32 Lvl) { return pa250::development_cost(Track, Lvl); };
+	const bool bYours = P.owner == St.player_faction;
+	return FText::FromString(FString::Printf(
+		TEXT("Farms %s %d   ·   Workshop %s %d\nDepot %s %d   ·   Fort %s %d\nSupply value %d%s"),
+		*Pips(P.farm_level), P.farm_level, *Pips(P.workshop_level), P.workshop_level, *Pips(P.depot_level),
+		P.depot_level, *Pips(P.fort_level), P.fort_level, pa250::effective_supply_value(P),
+		bYours ? *FString::Printf(TEXT("\nNext: Farm %dg · Workshop %dg · Depot %dg · Fort %dg"),
+								  Cost("farm", P.farm_level), Cost("workshop", P.workshop_level),
+								  Cost("depot", P.depot_level), Cost("fort", P.fort_level))
+			   : TEXT("\nDevelop only provinces you hold.")));
+}
+
+FText UPA250MapWidget::BattleReportText() const
+{
+	UPA250Subsystem* S = Sub();
+	if (!S || !S->GetController().has_campaign())
+	{
+		return FText::GetEmpty();
+	}
+	const pa250::BattleReport& Br = S->GetState().progress.last_battle_report;
+	if (Br.province_id.empty())
+	{
+		return FText::GetEmpty();
+	}
+	auto Count = [](const std::map<std::string, std::map<std::string, int>>& M, const char* F) {
+		int32 N = 0;
+		auto It = M.find(F);
+		if (It != M.end())
+			for (const auto& Kv : It->second) N += Kv.second;
+		return N;
+	};
+	auto Spent = [](const std::map<std::string, int>& M, const char* F) {
+		auto It = M.find(F);
+		return It == M.end() ? 0 : It->second;
+	};
+	int32 Morale = 0;
+	for (const auto& Kv : Br.morale_delta) Morale += Kv.second;
+	return FText::FromString(FString::Printf(
+		TEXT("After-battle report — %s\nGround: %s → %s (support %d → %d, unchanged by capture)\n"
+			 "Losses: yours %d killed / %d wounded · British %d / %d\n"
+			 "Ammunition: cartridges spent yours %d · British %d · powder %d\nMorale: net %+d · Held by %s"),
+		*ToFStr(Br.province_id), *ToFStr(Br.province_owner_before), *ToFStr(Br.province_owner_after),
+		Br.local_support_before, Br.local_support_after, Count(Br.losses, "continental"),
+		Count(Br.wounded, "continental"), Count(Br.losses, "british"), Count(Br.wounded, "british"),
+		Spent(Br.cartridges_spent, "continental"), Spent(Br.cartridges_spent, "british"),
+		Spent(Br.powder_spent, "continental") + Spent(Br.powder_spent, "british"), Morale,
+		Br.objective_holder.empty() ? TEXT("—") : *ToFStr(Br.objective_holder)));
+}
+
+FText UPA250MapWidget::LedgerText() const
+{
+	UPA250Subsystem* S = Sub();
+	if (!S || !S->GetController().has_campaign())
+	{
+		return FText::GetEmpty();
+	}
+	const pa250::CampaignState& St = S->GetState();
+	FString Lines = TEXT("Ledger — province · dev · cart/musk/prov\n");
+	for (const auto& Kv : St.provinces)
+	{
+		if (Kv.second.owner != St.player_faction) continue;
+		const pa250::ProvinceStores& Ps = pa250::province_ledger(St, Kv.first);
+		Lines += FString::Printf(TEXT("%s · %d · %d/%d/%d\n"), *ToFStr(Kv.second.name),
+								 pa250::province_development(Kv.second), Ps.cartridges, Ps.muskets, Ps.provisions);
+	}
+	Lines += TEXT("■ yours  ■ British  ● your army  ● British army");
+	bool bAny = false;
+	for (const auto& Sh : St.shipments)
+	{
+		if (Sh.status != "in_transit" && Sh.status != "committed") continue;
+		if (!bAny) Lines += TEXT("In transit:\n");
+		bAny = true;
+		Lines += FString::Printf(TEXT("  %s → %s · arrives %s\n"),
+								 *ToFStr(Sh.source_province.empty() ? std::string("market") : Sh.source_province),
+								 *ToFStr(Sh.dest_province),
+								 *S->FormatWhen(Sh.deliver_on_hour));
+	}
+	for (const auto& Job : St.progress.cartridge_jobs)
+	{
+		if (Job.status != "underway") continue;
+		Lines += FString::Printf(TEXT("Cartridges being made @ %s: +%d, ready %s\n"), *ToFStr(Job.province_id),
+								 Job.cartridges_out, *S->FormatWhen(Job.complete_on_hour));
+	}
+	return FText::FromString(Lines);
 }
 
 FText UPA250MapWidget::SupportText() const
@@ -129,9 +417,10 @@ FText UPA250MapWidget::SupportText() const
 		Treaties += FString::Printf(TEXT("%s%s %s"), Treaties.IsEmpty() ? TEXT("") : TEXT(", "),
 									UTF8_TO_TCHAR(T.type.c_str()), *UPA250Subsystem::FormatHoursRemaining(T.hours_remaining));
 	}
-	return FText::FromString(FString::Printf(TEXT("Support: Local %d · Supplies C %d / B %d · British attitude %d · Treaties: %s"),
-											 St.local_support, Get(St.supplies, "continental"), Get(St.supplies, "british"),
-											 Get(St.relations, "british"), Treaties.IsEmpty() ? TEXT("none") : *Treaties));
+	(void)Get;
+	return FText::FromString(FString::Printf(TEXT("Support %d · Attitude %d%s"), St.local_support,
+											 Get(St.relations, "british"),
+											 Treaties.IsEmpty() ? TEXT("") : *FString(TEXT(" · ") + Treaties)));
 }
 
 FText UPA250MapWidget::AboutText() const
@@ -198,7 +487,13 @@ FText UPA250MapWidget::LocationPanelText() const
 		return UTF8_TO_TCHAR(Owner.c_str());
 	};
 	FString Lines;
-	Lines += FString::Printf(TEXT("%s\nHeld by: %s\n"), UTF8_TO_TCHAR(Prov.name.c_str()), *OwnerLabel(Prov.owner));
+	Lines += FString::Printf(TEXT("Held by: %s\n"), *OwnerLabel(Prov.owner));
+	{
+		const pa250::ProvinceStores& Ps = pa250::province_ledger(St, Pid);
+		Lines += FString::Printf(
+			TEXT("Stores — powder %d · cartridges %d · muskets %d\nbayonets %d · provisions %d · lead %d · paper %d\n"),
+			Ps.powder, Ps.cartridges, Ps.muskets, Ps.bayonets, Ps.provisions, Ps.lead, Ps.paper);
+	}
 
 	// Selected friendly army first, with the details the counter hides at rest.
 	if (!SelectedArmyId.IsEmpty())
@@ -212,9 +507,13 @@ FText UPA250MapWidget::LocationPanelText() const
 				Strength += U.second;
 			}
 			const FString Orders = AIt->second.path.empty() ? TEXT("Holding position") : TEXT("On the march");
-			Lines += FString::Printf(TEXT("\nSelected force\n%s — %d men\nMorale %d · Readiness %d · Fatigue %d\nOrders: %s\n"),
-									 UTF8_TO_TCHAR(AIt->second.name.c_str()), Strength, AIt->second.morale,
-									 AIt->second.readiness, AIt->second.fatigue, *Orders);
+			int32 Sick = 0, Wounded = 0;
+			for (const auto& U : AIt->second.sick) Sick += U.second;
+			for (const auto& U : AIt->second.wounded) Wounded += U.second;
+			Lines += FString::Printf(
+				TEXT("\nSelected force\n%s — %d fit · %d sick · %d wounded\nMorale %d · Readiness %d · Fatigue %d\nOrders: %s\n"),
+				UTF8_TO_TCHAR(AIt->second.name.c_str()), Strength, Sick, Wounded, AIt->second.morale,
+				AIt->second.readiness, AIt->second.fatigue, *Orders);
 		}
 	}
 
@@ -247,6 +546,21 @@ FText UPA250MapWidget::LocationPanelText() const
 	if (!bAnyArmy)
 	{
 		Lines += TEXT("No forces known to be present.\n");
+		// Say where your forces actually are, so an empty town is not a dead end.
+		Lines += TEXT("\nYour forces elsewhere\n");
+		bool bElsewhere = false;
+		for (const auto& Kv : St.armies)
+		{
+			if (Kv.second.faction != St.player_faction) continue;
+			bElsewhere = true;
+			Lines += FString::Printf(TEXT("• %s — at %s · %d fit · %s\n"), *ToFStr(Kv.second.name),
+									 *ProvName(St, Kv.second.province), FitCount(Kv.second),
+									 *OrdersText(St, Kv.second));
+		}
+		if (bElsewhere)
+		{
+			Lines += TEXT("Select one in Your forces (top-left), then click a town to march.\n");
+		}
 	}
 
 	Lines += TEXT("\nReports\n");
@@ -299,7 +613,7 @@ FText UPA250MapWidget::BattleText() const
 		FString Rule = Preset;
 		if (Preset == TEXT("concord_bridge"))
 		{
-			Rule = TEXT("North Bridge — one crossing");
+			Rule = TEXT("Concord — three posts: Muster Ground · North Bridge · Far Bridgehead");
 		}
 		else if (Preset == TEXT("battle_road"))
 		{
@@ -395,8 +709,14 @@ FString UPA250MapWidget::ClickProvince(const FString& ProvinceId)
 		{
 			const pa250::PathPlan Plan = pa250::plan_path(St, ToStd(SelectedArmyId), Pid);
 			const FString When = Plan.ok ? S->FormatWhen(Plan.arrival.hour_index) : FString();
-			LastMessage = ToFStr(A.name) + TEXT(" ordered to ") + ToFStr(St.provinces.at(Pid).name) +
-			              (When.IsEmpty() ? TEXT(".") : TEXT(". Arrives ") + When + TEXT("."));
+			FString Route;
+			for (int32 i = 0; i < Plan.provinces.size(); ++i)
+			{
+				Route += (i ? TEXT(" → ") : TEXT("")) + ProvName(St, Plan.provinces[i]);
+			}
+			LastMessage = ToFStr(A.name) + TEXT(" → ") + ToFStr(St.provinces.at(Pid).name) +
+						  (When.IsEmpty() ? TEXT(".") : TEXT(". Arrives ") + When + TEXT(".")) +
+						  (Route.IsEmpty() ? FString() : TEXT(" Route: ") + Route);
 			SelectedProvinceId = ProvinceId;
 		}
 		else
@@ -471,6 +791,11 @@ FReply UPA250MapWidget::NativeOnKeyDown(const FGeometry& InGeometry, const FKeyE
 			bShowAbout = false;
 			return FReply::Handled();
 		}
+		if (bShowLedger)
+		{
+			bShowLedger = false;
+			return FReply::Handled();
+		}
 		ClearSelection();
 		return FReply::Handled();
 	}
@@ -543,7 +868,7 @@ TSharedRef<SWidget> UPA250MapWidget::RebuildWidget()
 				Fn();
 				return FReply::Handled();
 			})
-			.ContentPadding(FMargin(14.f, 6.f))[SNew(STextBlock).Text(FText::FromString(Label)).Font(BodyFont)];
+			.ContentPadding(FMargin(9.f, 4.f))[SNew(STextBlock).Text(FText::FromString(Label)).Font(BodyFont)];
 	};
 	TAttribute<EVisibility> BattleVis = TAttribute<EVisibility>::CreateLambda([this]() {
 		UPA250Subsystem* S2 = Sub();
@@ -639,7 +964,36 @@ TSharedRef<SWidget> UPA250MapWidget::RebuildWidget()
 	});
 
 	TAttribute<EVisibility> LocationVis = TAttribute<EVisibility>::CreateLambda([this]() {
+		// The battle broadside owns the right side while a battle is pending;
+		// the province window must never sit on top of it.
+		UPA250Subsystem* S2 = Sub();
+		if (S2 && S2->IsBattlePending()) return EVisibility::Collapsed;
 		return SelectedProvinceId.IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible;
+	});
+	TAttribute<EVisibility> ForcesVis = TAttribute<EVisibility>::CreateLambda([this]() {
+		// Staff correspondence and battles take the screen; the forces list returns after.
+		UPA250Subsystem* S2 = Sub();
+		if (S2 && (S2->IsBattlePending() || S2->HasStaffEvent())) return EVisibility::Collapsed;
+		return EVisibility::Visible;
+	});
+	TAttribute<EVisibility> ArmyBannerVis = TAttribute<EVisibility>::CreateLambda([this]() {
+		UPA250Subsystem* S2 = Sub();
+		return (!SelectedArmyId.IsEmpty() && S2 && !S2->IsBattlePending()) ? EVisibility::Visible
+																		   : EVisibility::Collapsed;
+	});
+	TAttribute<EVisibility> SelectArmyHereVis = TAttribute<EVisibility>::CreateLambda([this]() {
+		UPA250Subsystem* S2 = Sub();
+		if (!S2 || SelectedProvinceId.IsEmpty() || !S2->GetController().has_campaign()) return EVisibility::Collapsed;
+		const pa250::CampaignState& St = S2->GetState();
+		for (const auto& Kv : St.armies)
+		{
+			if (Kv.second.province == ToStd(SelectedProvinceId) && Kv.second.faction == St.player_faction &&
+				ToFStr(Kv.first) != SelectedArmyId)
+			{
+				return EVisibility::Visible;
+			}
+		}
+		return EVisibility::Collapsed;
 	});
 	TAttribute<EVisibility> EnterBattleVis = TAttribute<EVisibility>::CreateLambda([this]() {
 		return CanEnterBattleAtSelection() ? EVisibility::Visible : EVisibility::Collapsed;
@@ -647,13 +1001,24 @@ TSharedRef<SWidget> UPA250MapWidget::RebuildWidget()
 	TAttribute<EVisibility> AboutVis = TAttribute<EVisibility>::CreateLambda([this]() {
 		return bShowAbout ? EVisibility::Visible : EVisibility::Collapsed;
 	});
+	TAttribute<EVisibility> LedgerVis = TAttribute<EVisibility>::CreateLambda([this]() {
+		return bShowLedger ? EVisibility::Visible : EVisibility::Collapsed;
+	});
 
-	auto MakeGroup = [&BodyFont](TFunction<FText()> Fn, const TCHAR* Tip) {
+	const FLinearColor Ink(0.12f, 0.08f, 0.04f);
+	const FLinearColor Cream(0.93f, 0.87f, 0.70f);
+	const FLinearColor Gold(0.85f, 0.65f, 0.25f);
+	const FLinearColor DarkBar(0.10f, 0.08f, 0.06f, 0.97f);
+	const FLinearColor DarkPanel(0.13f, 0.10f, 0.08f, 0.96f);
+	auto MakeGroup = [&BodyFont, Cream](TFunction<FText()> Fn, const TCHAR* Tip) {
 		return SNew(STextBlock)
 			.Font(BodyFont)
-			.ColorAndOpacity(FLinearColor(0.15f, 0.1f, 0.05f))
+			.ColorAndOpacity(Cream)
 			.ToolTipText(FText::FromString(Tip))
 			.Text_Lambda(MoveTemp(Fn));
+	};
+	auto PanelText = [&BodyFont, Cream](TFunction<FText()> Fn) {
+		return SNew(STextBlock).Font(BodyFont).ColorAndOpacity(Cream).AutoWrapText(true).Text_Lambda(MoveTemp(Fn));
 	};
 
 	// Transparent centre — the 3D province map is the only map layer.
@@ -661,21 +1026,28 @@ TSharedRef<SWidget> UPA250MapWidget::RebuildWidget()
 		+ SOverlay::Slot().VAlign(VAlign_Top).HAlign(HAlign_Fill)
 			  [SNew(SBorder)
 				   .BorderImage(FAppStyle::GetBrush("WhiteBrush"))
-				   .BorderBackgroundColor(FLinearColor(0.93f, 0.88f, 0.74f, 0.94f))
+				   .BorderBackgroundColor(DarkBar)
 				   .Padding(FMargin(14.f, 8.f))
 					   [SNew(SHorizontalBox) +
+						SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 14, 0).VAlign(VAlign_Center)
+							[SNew(STextBlock)
+								 .Font(HeaderFont)
+								 .ColorAndOpacity(Gold)
+								 .Text(FText::FromString(TEXT("⚜ Play America 250")))] +
 						SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 18, 0).VAlign(VAlign_Center)
 							[SNew(STextBlock)
 								 .Font(HeaderFont)
-								 .ColorAndOpacity(FLinearColor(0.15f, 0.1f, 0.05f))
+								 .ColorAndOpacity(Cream)
 								 .ToolTipText(FText::FromString(TEXT("Campaign date, pause state and clock speed. Space pauses; 1–7 set speed.")))
 								 .Text_Lambda([this]() { return DateText(); })] +
 						SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 18, 0).VAlign(VAlign_Center)
-							[MakeGroup([this]() { return TreasuryText(); }, TEXT("Gold available to the Continental cause. Spent through staff purchases and diplomacy."))] +
+							[MakeGroup([this]() { return TreasuryText(); }, TEXT("Gold: spend on purchases, development and diplomacy."))] +
 						SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 18, 0).VAlign(VAlign_Center)
-							[MakeGroup([this]() { return StoresText(); }, TEXT("Usable war materials held by the Continental forces: powder, arms and provisions."))] +
+							[MakeGroup([this]() { return StoresText(); }, TEXT("Selected province stores and shipments in transit."))] +
 						SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Center)
-							[MakeGroup([this]() { return SupportText(); }, TEXT("Local support, supply accrual for each side, British attitude, and treaties currently in force."))]]]
+							[MakeGroup([this]() { return SupportText(); }, TEXT("Local support, British attitude, treaties."))] +
+						SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+							[MakeButton(TEXT("📖 Ledger"), [this]() { PressLedgerToggle(); })]]]
 		+ SOverlay::Slot()
 			  .VAlign(VAlign_Center)
 			  .HAlign(HAlign_Right)
@@ -695,28 +1067,118 @@ TSharedRef<SWidget> UPA250MapWidget::RebuildWidget()
 								[MakeButton(TEXT("To arms!"), [this]() { PressFight(); })]]]
 		+ SOverlay::Slot()
 			  .VAlign(VAlign_Top)
+			  .HAlign(HAlign_Left)
+			  .Padding(FMargin(16.f, 84.f, 0.f, 0.f))
+				  [SNew(SBox).WidthOverride(300.f)
+					   [SNew(SBorder)
+							.Visibility(ForcesVis)
+							.BorderImage(FAppStyle::GetBrush("WhiteBrush"))
+							.BorderBackgroundColor(DarkPanel)
+							.Padding(FMargin(10.f, 8.f))
+								[SNew(SVerticalBox) +
+								 SVerticalBox::Slot().AutoHeight()
+									 [SNew(STextBlock)
+										  .Font(FCoreStyle::GetDefaultFontStyle("Bold", 13))
+										  .ColorAndOpacity(Gold)
+										  .Text(FText::FromString(TEXT("Your forces — click to select")))] +
+								 SVerticalBox::Slot().AutoHeight().Padding(0, 6, 0, 0)
+									 [SNew(SButton)
+										  .IsFocusable(false)
+										  .ContentPadding(FMargin(9.f, 5.f))
+										  .OnClicked_Lambda([this]() {
+											  FString Id;
+											  if (GetPlayerArmyId(0, Id)) PressSelectArmy(Id);
+											  return FReply::Handled();
+										  })
+											  [SNew(STextBlock)
+												   .Font(BodyFont)
+												   .Text_Lambda([this]() { return ArmyButtonText(0); })]]]]]
+		+ SOverlay::Slot()
+			  .VAlign(VAlign_Top)
+			  .HAlign(HAlign_Center)
+			  .Padding(FMargin(0.f, 84.f, 0.f, 0.f))
+				  [SNew(SBorder)
+					   .Visibility(ArmyBannerVis)
+					   .BorderImage(FAppStyle::GetBrush("WhiteBrush"))
+					   .BorderBackgroundColor(FLinearColor(0.35f, 0.24f, 0.05f, 0.97f))
+					   .Padding(FMargin(16.f, 8.f))
+						   [SNew(STextBlock)
+								.Font(FCoreStyle::GetDefaultFontStyle("Bold", 14))
+								.ColorAndOpacity(FLinearColor(1.f, 0.95f, 0.80f))
+								.AutoWrapText(true)
+								.Text_Lambda([this]() { return SelectedArmyBannerText(); })]]
+		+ SOverlay::Slot()
+			  .VAlign(VAlign_Top)
 			  .HAlign(HAlign_Right)
 			  .Padding(FMargin(0.f, 78.f, 24.f, 0.f))
-				  [SNew(SBox).WidthOverride(360.f)
+				  [SNew(SBox).WidthOverride(336.f)
 					   [SNew(SBorder)
 							.Visibility(LocationVis)
 							.BorderImage(FAppStyle::GetBrush("WhiteBrush"))
-							.BorderBackgroundColor(FLinearColor(0.95f, 0.91f, 0.82f, 0.96f))
+							.BorderBackgroundColor(DarkPanel)
 							.Padding(FMargin(14.f, 12.f))
 								[SNew(SVerticalBox) +
 								 SVerticalBox::Slot().AutoHeight()
 									 [SNew(STextBlock)
-										  .Font(BodyFont)
-										  .ColorAndOpacity(FLinearColor(0.12f, 0.08f, 0.04f))
+										  .Font(FCoreStyle::GetDefaultFontStyle("Bold", 17))
+										  .ColorAndOpacity(Gold)
 										  .AutoWrapText(true)
-										  .Text_Lambda([this]() { return LocationPanelText(); })] +
+										  .Text_Lambda([this]() { return ProvinceTitleText(); })] +
+								 SVerticalBox::Slot().AutoHeight().Padding(0, 8, 0, 0)
+									 [PanelText([this]() { return LocationPanelText(); })] +
+								 SVerticalBox::Slot().AutoHeight().Padding(0, 8, 0, 0)
+									 [SNew(STextBlock)
+										  .Font(FCoreStyle::GetDefaultFontStyle("Bold", 13))
+										  .ColorAndOpacity(Gold)
+										  .Text(FText::FromString(TEXT("— Development —")))] +
+								 SVerticalBox::Slot().AutoHeight()
+									 [PanelText([this]() { return DevelopmentText(); })] +
+								 SVerticalBox::Slot().AutoHeight().Padding(0, 8, 0, 0)
+									 [MakeButton(TEXT("⚔ Select the army here — then click a town to march"),
+												 [this]() { PressSelectArmyAtSelection(); }, SelectArmyHereVis)] +
+								 SVerticalBox::Slot().AutoHeight().Padding(0, 6, 0, 0)
+									 [SNew(SHorizontalBox) +
+									  SHorizontalBox::Slot().FillWidth(0.5f).Padding(0, 0, 6, 0)
+										  [MakeButton(TEXT("🌾 Farm"), [this]() { PressDevelop(TEXT("farm")); })] +
+									  SHorizontalBox::Slot().FillWidth(0.5f)
+										  [MakeButton(TEXT("⚒ Workshop"), [this]() { PressDevelop(TEXT("workshop")); })]] +
+								 SVerticalBox::Slot().AutoHeight().Padding(0, 6, 0, 0)
+									 [SNew(SHorizontalBox) +
+									  SHorizontalBox::Slot().FillWidth(0.5f).Padding(0, 0, 6, 0)
+										  [MakeButton(TEXT("⛟ Depot"), [this]() { PressDevelop(TEXT("depot")); })] +
+									  SHorizontalBox::Slot().FillWidth(0.5f)
+										  [MakeButton(TEXT("🏰 Fort"), [this]() { PressDevelop(TEXT("fort")); })]] +
 								 SVerticalBox::Slot().AutoHeight().Padding(0, 10, 0, 0)
 									 [SNew(SHorizontalBox) +
-									  SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 6, 0)
+									  SHorizontalBox::Slot().FillWidth(0.5f).Padding(0, 0, 6, 0)
+										  [MakeButton(TEXT("Buy cart."), [this]() { PressBuyCartridges(); })] +
+									  SHorizontalBox::Slot().FillWidth(0.5f)
+										  [MakeButton(TEXT("Make cart."), [this]() { PressMakeCartridges(); })]] +
+								 SVerticalBox::Slot().AutoHeight().Padding(0, 6, 0, 0)
+									 [SNew(SHorizontalBox) +
+									  SHorizontalBox::Slot().FillWidth(0.5f).Padding(0, 0, 6, 0)
+										  [MakeButton(TEXT("Xfer → depot"), [this]() { PressTransferToDepot(); })] +
+									  SHorizontalBox::Slot().FillWidth(0.5f).Padding(0, 0, 6, 0)
 										  [MakeButton(TEXT("Clear"), [this]() { ClearSelection(); })] +
 									  SHorizontalBox::Slot().AutoWidth()
-										  [MakeButton(TEXT("Enter battle"), [this]() { PressEnterBattleAtSelection(); },
-													  EnterBattleVis)]]]]]
+										  [MakeButton(TEXT("⚔ Enter battle"), [this]() { PressEnterBattleAtSelection(); },
+													  EnterBattleVis)]] +
+								 SVerticalBox::Slot().AutoHeight().Padding(0, 10, 0, 0)
+									 [PanelText([this]() { return BattleReportText(); })]]]]
+		+ SOverlay::Slot()
+			  .VAlign(VAlign_Top)
+			  .HAlign(HAlign_Left)
+			  .Padding(FMargin(16.f, 196.f, 0.f, 0.f))
+				  [SNew(SBox).WidthOverride(300.f)
+					   [SNew(SBorder)
+							.Visibility(LedgerVis)
+							.BorderImage(FAppStyle::GetBrush("WhiteBrush"))
+							.BorderBackgroundColor(DarkPanel)
+							.Padding(FMargin(12.f, 10.f))
+								[SNew(STextBlock)
+									 .Font(FCoreStyle::GetDefaultFontStyle("Regular", 12))
+									 .ColorAndOpacity(Cream)
+									 .Text_Lambda([this]() { return LedgerText(); })]]]
 		+ SOverlay::Slot()
 			  .VAlign(VAlign_Center)
 			  .HAlign(HAlign_Left)
@@ -844,100 +1306,45 @@ TSharedRef<SWidget> UPA250MapWidget::RebuildWidget()
 		+ SOverlay::Slot()
 			  .VAlign(VAlign_Bottom)
 			  .HAlign(HAlign_Right)
-			  .Padding(FMargin(0.f, 0.f, 16.f, 64.f))
+			  .Padding(FMargin(0.f, 0.f, 12.f, 56.f))
 				  [SNew(SBorder)
 					   .Visibility(NoBattleVis)
 					   .BorderImage(FAppStyle::GetBrush("WhiteBrush"))
-					   .BorderBackgroundColor(FLinearColor(0.93f, 0.88f, 0.74f, 0.88f))
-					   .Padding(FMargin(8.f, 8.f))
-						   [SNew(SVerticalBox) +
-							SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 4)
-								[MakeButton(TEXT("Campaign overview"), [this]() { PressResetOverview(); })] +
-							SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 4)
-								[MakeButton(TEXT("Focus selected"), [this]() { PressFocusSelected(); })] +
-							SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 4)
-								[MakeButton(TEXT("Zoom +"), [this]() {
-									if (APA250ProvinceMapActor* A = MapActor.Get())
-									{
-										A->ZoomBy(1.4f);
-									}
-								})] +
-							SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 4)
-								[MakeButton(TEXT("Zoom −"), [this]() {
-									if (APA250ProvinceMapActor* A = MapActor.Get())
-									{
-										A->ZoomBy(1.f / 1.4f);
-									}
-								})] +
-							SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 4)
-								[MakeButton(TEXT("Parley"), [this]() { PressParley(); })] +
-							SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 4)
-								[MakeButton(TEXT("Save"), [this]() { PressSave(); })] +
-							SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 4)
-								[MakeButton(TEXT("Load"), [this]() { PressLoad(); })] +
-							SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 4)
-								[MakeButton(TEXT("About this map"), [this]() { PressAboutToggle(); })] +
-							SVerticalBox::Slot().AutoHeight()
-								[MakeButton(TEXT("Dev"), [this]() { PressDevToggle(); })]]]
-		+ SOverlay::Slot()
-			  .VAlign(VAlign_Bottom)
-			  .HAlign(HAlign_Left)
-			  .Padding(FMargin(16.f, 0.f, 0.f, 56.f))
-				  [SNew(SBorder)
-					   .BorderImage(FAppStyle::GetBrush("WhiteBrush"))
-					   .BorderBackgroundColor(FLinearColor(0.93f, 0.88f, 0.74f, 0.94f))
-					   .Padding(FMargin(10.f, 6.f))
+					   .BorderBackgroundColor(DarkPanel)
+					   .Padding(FMargin(6.f, 5.f))
 						   [SNew(SHorizontalBox) +
-							SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 6, 0)
-								[SNew(SBox).WidthOverride(12.f).HeightOverride(12.f)
-									 [SNew(SBorder)
-										  .BorderImage(FAppStyle::GetBrush("WhiteBrush"))
-										  .BorderBackgroundColor(FLinearColor(0.10f, 0.28f, 0.72f))]] +
-							SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 14, 0)
-								[SNew(STextBlock)
-									 .Font(BodyFont)
-									 .ColorAndOpacity(FLinearColor(0.15f, 0.1f, 0.05f))
-									 .Text(FText::FromString(TEXT("Your towns")))] +
-							SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 6, 0)
-								[SNew(SBox).WidthOverride(12.f).HeightOverride(12.f)
-									 [SNew(SBorder)
-										  .BorderImage(FAppStyle::GetBrush("WhiteBrush"))
-										  .BorderBackgroundColor(FLinearColor(0.78f, 0.12f, 0.10f))]] +
-							SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 14, 0)
-								[SNew(STextBlock)
-									 .Font(BodyFont)
-									 .ColorAndOpacity(FLinearColor(0.15f, 0.1f, 0.05f))
-									 .Text(FText::FromString(TEXT("British towns")))] +
-							SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 6, 0)
-								[SNew(SBox).WidthOverride(16.f).HeightOverride(10.f)
-									 [SNew(SBorder)
-										  .BorderImage(FAppStyle::GetBrush("WhiteBrush"))
-										  .BorderBackgroundColor(FLinearColor(0.12f, 0.34f, 0.82f))]] +
-							SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 14, 0)
-								[SNew(STextBlock)
-									 .Font(BodyFont)
-									 .ColorAndOpacity(FLinearColor(0.15f, 0.1f, 0.05f))
-									 .Text(FText::FromString(TEXT("Your army (round)")))] +
-							SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 6, 0)
-								[SNew(SBox).WidthOverride(16.f).HeightOverride(10.f)
-									 [SNew(SBorder)
-										  .BorderImage(FAppStyle::GetBrush("WhiteBrush"))
-										  .BorderBackgroundColor(FLinearColor(0.82f, 0.14f, 0.11f))]] +
-							SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
-								[SNew(STextBlock)
-									 .Font(BodyFont)
-									 .ColorAndOpacity(FLinearColor(0.15f, 0.1f, 0.05f))
-									 .Text(FText::FromString(TEXT("British army (round)")))]]]
+							SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 4, 0)
+								[MakeButton(TEXT("⌂ Overview"), [this]() { PressResetOverview(); })] +
+							SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 4, 0)
+								[MakeButton(TEXT("◎ Focus"), [this]() { PressFocusSelected(); })] +
+							SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 4, 0)
+								[MakeButton(TEXT("＋"), [this]() {
+									if (APA250ProvinceMapActor* A = MapActor.Get()) A->ZoomBy(1.4f);
+								})] +
+							SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 4, 0)
+								[MakeButton(TEXT("－"), [this]() {
+									if (APA250ProvinceMapActor* A = MapActor.Get()) A->ZoomBy(1.f / 1.4f);
+								})] +
+							SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 4, 0)
+								[MakeButton(TEXT("Parley"), [this]() { PressParley(); })] +
+							SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 4, 0)
+								[MakeButton(TEXT("Save"), [this]() { PressSave(); })] +
+							SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 4, 0)
+								[MakeButton(TEXT("Load"), [this]() { PressLoad(); })] +
+							SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 4, 0)
+								[MakeButton(TEXT("About"), [this]() { PressAboutToggle(); })] +
+							SHorizontalBox::Slot().AutoWidth()
+								[MakeButton(TEXT("Dev"), [this]() { PressDevToggle(); })]]]
 		+ SOverlay::Slot().VAlign(VAlign_Bottom).HAlign(HAlign_Fill)
 			  [SNew(SBorder)
 				   .BorderImage(FAppStyle::GetBrush("WhiteBrush"))
-				   .BorderBackgroundColor(FLinearColor(0.93f, 0.88f, 0.74f, 0.94f))
+				   .BorderBackgroundColor(DarkBar)
 				   .Padding(FMargin(14.f, 6.f))
 					   [SNew(SHorizontalBox) +
 						SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Center)
 							[SNew(STextBlock)
 								 .Font(BodyFont)
-								 .ColorAndOpacity(FLinearColor(0.15f, 0.1f, 0.05f))
+								 .ColorAndOpacity(Cream)
 								 .Text_Lambda([this]() { return StatusText(); })] +
 						SHorizontalBox::Slot().AutoWidth().Padding(4, 0)
 							[MakeButton(
@@ -1038,6 +1445,13 @@ void UPA250MapWidget::PressFocusSelected()
 	}
 }
 
+void UPA250MapWidget::PressLedgerToggle()
+{
+	bShowLedger = !bShowLedger;
+	SetStatusMessage(bShowLedger ? TEXT("Ledger open — every province you hold, its development and stores.")
+								 : TEXT("Ledger closed."));
+}
+
 void UPA250MapWidget::PressAboutToggle()
 {
 	bShowAbout = !bShowAbout;
@@ -1060,13 +1474,23 @@ bool UPA250MapWidget::IsPointOverHud(FVector2D ScreenPos) const
 	{
 		return true;
 	}
-	// Selection panel (top-right) and utility stack (bottom-right).
-	if (!SelectedProvinceId.IsEmpty() && ScreenPos.X >= Size.X - 408.f && ScreenPos.Y >= TopStripHeightPx &&
-		ScreenPos.Y <= TopStripHeightPx + 340.f)
+	// Selection panel (top-right), ledger (top-left, when open), toolbar (bottom-right).
+	if (!SelectedProvinceId.IsEmpty() && ScreenPos.X >= Size.X - 384.f && ScreenPos.Y >= TopStripHeightPx &&
+		ScreenPos.Y <= TopStripHeightPx + 620.f)
 	{
 		return true;
 	}
-	if (ScreenPos.X >= Size.X - 220.f && ScreenPos.Y >= Size.Y - BottomStripHeightPx - 380.f)
+	if (ScreenPos.X <= 332.f && ScreenPos.Y >= TopStripHeightPx && ScreenPos.Y <= TopStripHeightPx + 110.f)
+	{
+		return true; // Your forces panel
+	}
+	if (bShowLedger && ScreenPos.X <= 332.f && ScreenPos.Y >= TopStripHeightPx + 110.f &&
+		ScreenPos.Y <= TopStripHeightPx + 480.f)
+	{
+		return true;
+	}
+	if (ScreenPos.X >= Size.X - 720.f && ScreenPos.Y >= Size.Y - BottomStripHeightPx - 64.f &&
+		ScreenPos.Y <= Size.Y - BottomStripHeightPx)
 	{
 		return true;
 	}
@@ -1103,6 +1527,118 @@ void UPA250MapWidget::PressLoad()
 	ClearSelection();
 	SetStatusMessage(bOk ? TEXT("Campaign loaded.") : TEXT("Load failed: ") + Err);
 	NotifyMapSelectionChanged();
+}
+
+void UPA250MapWidget::PressBuyCartridges()
+{
+	UPA250Subsystem* S = Sub();
+	if (!S || SelectedProvinceId.IsEmpty())
+	{
+		return;
+	}
+	FString Err;
+	if (S->ApprovePurchaseOrder(SelectedProvinceId, 0, 20, 0, 0, 0, 0, 0, Err))
+	{
+		SetStatusMessage(TEXT("Purchase approved — cartridges in transit (not delivered yet)."));
+	}
+	else
+	{
+		SetStatusMessage(TEXT("Purchase failed: ") + Err);
+	}
+}
+
+void UPA250MapWidget::PressTransferToDepot()
+{
+	UPA250Subsystem* S = Sub();
+	if (!S || SelectedProvinceId.IsEmpty())
+	{
+		return;
+	}
+	const FString Depot = ToFStr(pa250::default_depot_province(S->GetState(), pa250::kContinental));
+	if (Depot == SelectedProvinceId)
+	{
+		SetStatusMessage(TEXT("Already at the depot province."));
+		return;
+	}
+	FString Err;
+	if (S->ApproveTransferOrder(SelectedProvinceId, Depot, 2, 0, 0, 0, 0, 0, 0, Err))
+	{
+		SetStatusMessage(TEXT("Transfer departed — source debited now; depot credits on arrival."));
+	}
+	else
+	{
+		SetStatusMessage(TEXT("Transfer failed: ") + Err);
+	}
+}
+
+void UPA250MapWidget::PressDevelop(const FString& Track)
+{
+	UPA250Subsystem* S = Sub();
+	if (!S || SelectedProvinceId.IsEmpty())
+	{
+		return;
+	}
+	FString Err;
+	if (S->DevelopProvince(SelectedProvinceId, Track, Err))
+	{
+		const pa250::CampaignState& St = S->GetState();
+		auto Pit = St.provinces.find(ToStd(SelectedProvinceId));
+		const int32 Dev = Pit == St.provinces.end() ? 0 : pa250::province_development(Pit->second);
+		SetStatusMessage(FString::Printf(TEXT("Developed %s (%s) — development now %d. Gold %d."), *SelectedProvinceId,
+										 *Track, Dev, St.player_gold));
+	}
+	else if (Err == TEXT("not_your_province"))
+	{
+		SetStatusMessage(TEXT("You can only develop a province you hold."));
+	}
+	else if (Err == TEXT("max_level"))
+	{
+		SetStatusMessage(TEXT("That track is already at its maximum level."));
+	}
+	else if (Err == TEXT("insufficient_gold"))
+	{
+		SetStatusMessage(TEXT("Not enough gold to develop that track."));
+	}
+	else
+	{
+		SetStatusMessage(TEXT("Development failed: ") + Err);
+	}
+}
+
+void UPA250MapWidget::PressMakeCartridges()
+{
+	UPA250Subsystem* S = Sub();
+	if (!S || SelectedProvinceId.IsEmpty())
+	{
+		return;
+	}
+	FString ArmyId = SelectedArmyId;
+	if (ArmyId.IsEmpty())
+	{
+		const std::string Pid = ToStd(SelectedProvinceId);
+		for (const auto& KV : S->GetState().armies)
+		{
+			if (KV.second.province == Pid && KV.second.faction == S->GetState().player_faction)
+			{
+				ArmyId = ToFStr(KV.first);
+				break;
+			}
+		}
+	}
+	if (ArmyId.IsEmpty())
+	{
+		SetStatusMessage(TEXT("Need a friendly army in this province to assign workers."));
+		return;
+	}
+	FString Err;
+	if (S->StartCartridgeCraft(SelectedProvinceId, ArmyId, 2, 1, 1, 1, Err))
+	{
+		SetStatusMessage(TEXT("Cartridge job underway — workers unavailable until it finishes."));
+	}
+	else
+	{
+		SetStatusMessage(TEXT("Cartridge job failed: ") + Err);
+	}
 }
 
 void UPA250MapWidget::PressLogistics(const FString& Choice)

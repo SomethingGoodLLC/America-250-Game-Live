@@ -48,6 +48,7 @@ public:
 
 	static FString ScenarioPath();
 	static FString CorrespondenceCatalogPath();
+	static FString LogisticsTuningPath();
 	static FString SavePath();
 	bool EnsureCorrespondenceCatalog(FString& OutError);
 	static FString TracePath();
@@ -112,6 +113,18 @@ public:
 	bool ChooseLogistics(const FString& LetterId, const FString& Choice, FString& OutError);
 	UFUNCTION(BlueprintCallable, Category = "PA250")
 	bool ResolveCommander(const FString& Action, FString& OutError);
+	/** Province supply pipeline (commit ≠ receive) and cartridge craft. */
+	bool ApprovePurchaseOrder(const FString& DestProvince, int32 Powder, int32 Cartridges, int32 Muskets,
+							  int32 Bayonets, int32 Provisions, int32 Lead, int32 Paper, FString& OutError);
+	bool ApproveTransferOrder(const FString& SourceProvince, const FString& DestProvince, int32 Powder,
+							  int32 Cartridges, int32 Muskets, int32 Bayonets, int32 Provisions, int32 Lead,
+							  int32 Paper, FString& OutError);
+	bool DevelopProvince(const FString& ProvinceId, const FString& Track, FString& OutError);
+	FString GetProvinceDevelopmentJson() const;
+	bool StartCartridgeCraft(const FString& ProvinceId, const FString& ArmyId, int32 Workers, int32 Powder,
+							 int32 Lead, int32 Paper, FString& OutError);
+	FString GetLastBattleReportJson() const;
+	FString GetShipmentsJson() const;
 	UFUNCTION(BlueprintPure, Category = "PA250")
 	bool HasStaffEvent() const;
 	/** True when the shown letter still needs a choice; false for a delivered/refused notice. */

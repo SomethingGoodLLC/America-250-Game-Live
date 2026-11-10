@@ -39,6 +39,7 @@ public:
 
 	/** -PA250Service=host:port, env PA250_SERVICE, else http://127.0.0.1:8000 */
 	static FString DefaultBaseUrl();
+	FString GetBaseUrl() const { return BaseUrl; }
 
 	float ConnectTimeoutSeconds = 8.f;
 	float ReplyTimeoutSeconds = 40.f;
