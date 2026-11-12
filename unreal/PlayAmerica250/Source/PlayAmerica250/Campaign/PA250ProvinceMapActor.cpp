@@ -68,16 +68,17 @@ int32 UnitCount(const pa250::Army& A, const char* Cls)
  * Illustration from campaign state only. A variant appears only when its state exists:
  * marching = the army has a path; firing = the army is a party to the pending battle.
  * Art is matched to nationality and role: British line infantry, and provincial regulars for a
- * Continental force that is at least half line infantry. Anything else keeps the compact symbol:
- * a militia-majority force (no militia art was supplied) and a British force standing still
- * (no neutral British art was supplied). Figure count never encodes strength.
+ * Continental force that is at least half line infantry, and the militia company for any other
+ * Continental force. Anything else keeps the compact symbol: a British militia-majority force and a
+ * British force standing still (no such British art was supplied). Figure count never encodes strength.
  */
 EPA250ArmyArt ChooseArmyArt(const pa250::CampaignState& St, const pa250::Army& A)
 {
 	const int32 Total = FMath::Max(1, TotalStrength(A));
 	if (A.faction == "british")
 	{
-		if (UnitCount(A, "line_infantry") * 2 < Total)
+		// Grenadier and light companies and their officers are regulars too (the 1775 column was mostly these).
+		if ((Total - UnitCount(A, "militia")) * 2 < Total)
 		{
 			return EPA250ArmyArt::None;
 		}
@@ -92,9 +93,11 @@ EPA250ArmyArt ChooseArmyArt(const pa250::CampaignState& St, const pa250::Army& A
 		}
 		return EPA250ArmyArt::None;
 	}
-	if (A.faction == "continental" && UnitCount(A, "line_infantry") * 2 >= Total)
+	if (A.faction == "continental")
 	{
-		return EPA250ArmyArt::ProvincialRegulars;
+		// Officers stand with whichever kind of troops they lead, so they do not tip the picture.
+		const int32 Led = FMath::Max(1, Total - UnitCount(A, "officer"));
+		return UnitCount(A, "line_infantry") * 2 >= Led ? EPA250ArmyArt::ProvincialRegulars : EPA250ArmyArt::Militia;
 	}
 	return EPA250ArmyArt::None;
 }
@@ -169,30 +172,27 @@ const FWaterLabel GWaterLabels[] = {
 	{TEXT("Charles Basin"), 0.50f, 0.55f},
 };
 
-FLinearColor TownOwnerColor(const std::string& Owner)
-{
-	if (Owner == "british")
-	{
-		return FLinearColor(0.78f, 0.12f, 0.10f);
-	}
-	if (Owner == "continental")
-	{
-		return FLinearColor(0.10f, 0.28f, 0.72f);
-	}
-	return FLinearColor(0.28f, 0.22f, 0.14f);
-}
-
+// Town marks are printed in ink like the engraving: dark, unlit (exact) colours.
 FColor TownOwnerInk(const std::string& Owner)
 {
 	if (Owner == "british")
 	{
-		return FColor(150, 28, 22);
+		return FColor(128, 30, 24);
 	}
 	if (Owner == "continental")
 	{
-		return FColor(16, 48, 130);
+		return FColor(30, 52, 110);
 	}
-	return FColor(40, 32, 20);
+	return FColor(70, 54, 36);
+}
+
+FLinearColor TownOwnerColor(const std::string& Owner) { return FLinearColor::FromSRGBColor(TownOwnerInk(Owner)); }
+
+// Inner diamond: parchment (hollow mark) for your and neutral towns, ink (solid mark) for British
+// towns, so the side reads by shape as well as colour.
+FLinearColor TownFillColor(const std::string& Owner)
+{
+	return Owner == "british" ? TownOwnerColor(Owner) : FLinearColor::FromSRGBColor(FColor(236, 224, 194));
 }
 
 void ApplyShapeColor(UStaticMeshComponent* Mesh, const FLinearColor& Color)
@@ -210,7 +210,26 @@ void ApplyShapeColor(UStaticMeshComponent* Mesh, const FLinearColor& Color)
 	{
 		MID->SetVectorParameterValue(TEXT("Color"), Color);
 		MID->SetVectorParameterValue(TEXT("BaseColor"), Color);
+		MID->SetVectorParameterValue(TEXT("Tint"), Color); // unlit ink material (M_MapSprite)
 	}
+}
+
+/** Unlit solid-colour mark: M_MapSprite over a white texture, tinted by ApplyShapeColor. */
+void UseInkMaterial(UStaticMeshComponent* Mesh, UMaterialInterface* InkMat, UTexture2D* White, int32 SortPriority)
+{
+	if (!Mesh || !InkMat || !White)
+	{
+		return;
+	}
+	Mesh->SetMaterial(0, InkMat);
+	if (UMaterialInstanceDynamic* MID = Mesh->CreateAndSetMaterialInstanceDynamic(0))
+	{
+		MID->SetTextureParameterValue(TEXT("Sprite"), White);
+		MID->SetVectorParameterValue(TEXT("UVRect"), FLinearColor(0.f, 0.f, 1.f, 1.f));
+		MID->SetScalarParameterValue(TEXT("Opacity"), 1.f);
+	}
+	Mesh->SetTranslucentSortPriority(SortPriority);
+	Mesh->SetCastShadow(false);
 }
 } // namespace
 
@@ -321,6 +340,30 @@ FVector2D APA250ProvinceMapActor::ChooseArmyAnchor(const FString& HomeId, const 
 	return Cand[BestIdx];
 }
 
+FVector2D APA250ProvinceMapActor::PointAlongPath(const TArray<FVector2D>& Path, float T)
+{
+	if (Path.Num() == 0)
+	{
+		return FVector2D::ZeroVector;
+	}
+	float Total = 0.f;
+	for (int32 k = 0; k + 1 < Path.Num(); ++k)
+	{
+		Total += FVector2D::Distance(Path[k], Path[k + 1]);
+	}
+	float Remaining = FMath::Clamp(T, 0.f, 1.f) * Total;
+	for (int32 k = 0; k + 1 < Path.Num(); ++k)
+	{
+		const float Seg = FVector2D::Distance(Path[k], Path[k + 1]);
+		if (Remaining <= Seg || k + 2 == Path.Num())
+		{
+			return FMath::Lerp(Path[k], Path[k + 1], Seg > 0.f ? FMath::Clamp(Remaining / Seg, 0.f, 1.f) : 1.f);
+		}
+		Remaining -= Seg;
+	}
+	return Path.Last();
+}
+
 EPA250ArmyArt APA250ProvinceMapActor::ArtForArmy(const pa250::CampaignState& St, const pa250::Army& A) { return ChooseArmyArt(St, A); }
 
 APA250ProvinceMapActor::APA250ProvinceMapActor()
@@ -386,7 +429,12 @@ void APA250ProvinceMapActor::Tick(float DeltaSeconds)
 	RebuildStateTexture();
 	RefreshHotspotVisibility();
 	RefreshTownOwnership();
+	if (UPA250Subsystem* Sys = Sub())
+	{
+		if (Sys->GetHudEpoch() != BuildingIconHudEpoch) RefreshBuildingIcons();
+	}
 	RefreshArmyTokens();
+	MoveArmyTokens(DeltaSeconds);
 	UpdateArmyLod();
 	RefreshBattleMarker();
 	RefreshRoutes();
@@ -621,7 +669,40 @@ bool APA250ProvinceMapActor::LoadDeCostaLocations()
 		}
 	}
 
-	// Route polylines: straight segments between hotspot endpoints from sim adjacency (not pixel miles).
+	// Traced roads (decosta_locations.json "routes"): only edges whose road is legible on the plate.
+	RouteUVByEdge.Reset();
+	const TSharedPtr<FJsonObject>* RoutesObj = nullptr;
+	const TSharedPtr<FJsonObject>* RouteEdges = nullptr;
+	if (Root->TryGetObjectField(TEXT("routes"), RoutesObj) && RoutesObj && (*RoutesObj)->TryGetObjectField(TEXT("edges"), RouteEdges) &&
+		RouteEdges)
+	{
+		for (const TPair<FString, TSharedPtr<FJsonValue>>& R : (*RouteEdges)->Values)
+		{
+			const TSharedPtr<FJsonObject> RObj = R.Value->AsObject();
+			const TArray<TSharedPtr<FJsonValue>>* Pts = nullptr;
+			if (!RObj.IsValid() || !RObj->TryGetArrayField(TEXT("polyline_uv"), Pts) || !Pts || Pts->Num() < 2)
+			{
+				continue;
+			}
+			TArray<FVector2D> Poly;
+			for (const TSharedPtr<FJsonValue>& P : *Pts)
+			{
+				const TArray<TSharedPtr<FJsonValue>>& XY = P->AsArray();
+				if (XY.Num() >= 2)
+				{
+					Poly.Add(FVector2D(XY[0]->AsNumber(), XY[1]->AsNumber()));
+				}
+			}
+			if (Poly.Num() >= 2)
+			{
+				RouteUVByEdge.Add(R.Key, MoveTemp(Poly));
+			}
+		}
+	}
+	UE_LOG(LogTemp, Display, TEXT("PA250: traced road routes loaded: %d"), RouteUVByEdge.Num());
+
+	// Route polylines between hotspots from sim adjacency: the traced road where the plate shows one,
+	// otherwise a straight segment (not pixel miles either way).
 	if (UPA250Subsystem* S = Sub())
 	{
 		for (const auto& Kv : S->GetState().edges)
@@ -636,8 +717,20 @@ bool APA250ProvinceMapActor::LoadDeCostaLocations()
 			E.From = A;
 			E.To = B;
 			E.Type = ToFStr(Kv.second.type);
-			E.PolyUV.Add(TokenUV[A]);
-			E.PolyUV.Add(TokenUV[B]);
+			if (const TArray<FVector2D>* Road = RouteUVByEdge.Find(ToFStr(Kv.first)))
+			{
+				// Orient A -> B.
+				const bool bReverse = FVector2D::Distance(Road->Last(), TokenUV[A]) < FVector2D::Distance((*Road)[0], TokenUV[A]);
+				for (int32 i = 0; i < Road->Num(); ++i)
+				{
+					E.PolyUV.Add((*Road)[bReverse ? Road->Num() - 1 - i : i]);
+				}
+			}
+			else
+			{
+				E.PolyUV.Add(TokenUV[A]);
+				E.PolyUV.Add(TokenUV[B]);
+			}
 			Edges.Add(MoveTemp(E));
 		}
 	}
@@ -929,8 +1022,24 @@ FString APA250ProvinceMapActor::ProvinceAtWorld(const FVector& World) const
 FString APA250ProvinceMapActor::ArmyAtWorld(const FVector& World) const
 {
 	// Only what is drawn is clickable: the illustration's content rect (padding was cropped) or the
-	// compact disc. Slots never cover a town hotspot, so a town click is never taken by an army.
+	// compact disc. Town hotspots always win: resting slots never cover one, and a column passing
+	// over a town on its road must not turn a click on that town into a click on the column's
+	// province (with an army selected, that would issue the wrong march order).
 	// Selected army wins where two overlap (it draws on top).
+	{
+		FVector2D UV;
+		WorldToUV(World, UV);
+		const float ImgW = ImageW > 0 ? static_cast<float>(ImageW) : 1.f;
+		const float ImgH = ImageH > 0 ? static_cast<float>(ImageH) : 1.f;
+		for (const TPair<FString, FVector2D>& Kv : LabelUV)
+		{
+			const float* R = HitRadiusPx.Find(Kv.Key);
+			if (FVector2D::Distance(FVector2D(UV.X * ImgW, UV.Y * ImgH), FVector2D(Kv.Value.X * ImgW, Kv.Value.Y * ImgH)) <= (R ? *R : 90.f))
+			{
+				return FString();
+			}
+		}
+	}
 	FString Hit;
 	for (const APA250ArmyToken* Tok : ArmyTokens)
 	{
@@ -1088,6 +1197,8 @@ void APA250ProvinceMapActor::RefreshArmyTokens()
 		const pa250::Army* Army = nullptr;
 		EPA250ArmyArt Art = EPA250ArmyArt::None;
 		std::string Next;
+		float Progress = 0.f; // share of the current edge already marched (hours_into_edge / march_hours)
+		FString EdgeId;
 	};
 	TArray<FPlan> Plans;
 	for (int32 Pass = 0; Pass < 2; ++Pass)
@@ -1099,15 +1210,25 @@ void APA250ProvinceMapActor::RefreshArmyTokens()
 			{
 				continue;
 			}
-			Plans.Add({&Kv.second, ChooseArmyArt(St, Kv.second), NextProvinceOnPath(St, Kv.second)});
+			FPlan P{&Kv.second, ChooseArmyArt(St, Kv.second), NextProvinceOnPath(St, Kv.second), 0.f, FString()};
+			if (!P.Next.empty())
+			{
+				P.EdgeId = ToFStr(Kv.second.path.front());
+				const auto E = St.edges.find(Kv.second.path.front());
+				if (E != St.edges.end() && E->second.march_hours > 0)
+				{
+					P.Progress = FMath::Clamp(static_cast<float>(Kv.second.hours_into_edge) / static_cast<float>(E->second.march_hours), 0.f, 1.f);
+				}
+			}
+			Plans.Add(P);
 		}
 	}
 
 	FString Sig = SelectedArmyId + TEXT("|");
 	for (const FPlan& Pl : Plans)
 	{
-		Sig += FString::Printf(TEXT("%s@%s>%s#%d;"), UTF8_TO_TCHAR(Pl.Army->id.c_str()), UTF8_TO_TCHAR(Pl.Army->province.c_str()),
-							   UTF8_TO_TCHAR(Pl.Next.c_str()), static_cast<int32>(Pl.Art));
+		Sig += FString::Printf(TEXT("%s@%s>%s+%d#%d;"), UTF8_TO_TCHAR(Pl.Army->id.c_str()), UTF8_TO_TCHAR(Pl.Army->province.c_str()),
+							   UTF8_TO_TCHAR(Pl.Next.c_str()), Pl.Army->hours_into_edge, static_cast<int32>(Pl.Art));
 		for (const auto& U : Pl.Army->units)
 		{
 			Sig += FString::Printf(TEXT("%s%d"), UTF8_TO_TCHAR(U.first.c_str()), U.second);
@@ -1119,15 +1240,16 @@ void APA250ProvinceMapActor::RefreshArmyTokens()
 	}
 	LastTokenSig = Sig;
 
+	// Tokens persist per army (a marching column moves; it is not respawned each hour).
+	TMap<FString, APA250ArmyToken*> Existing;
 	for (APA250ArmyToken* T : ArmyTokens)
 	{
 		if (IsValid(T))
 		{
-			T->Destroy();
+			Existing.Add(T->ArmyId, T);
 		}
 	}
 	ArmyTokens.Reset();
-	LoggedIllustrationById.Reset();
 
 	UWorld* World = GetWorld();
 	if (!World)
@@ -1163,8 +1285,46 @@ void APA250ProvinceMapActor::RefreshArmyTokens()
 			   UTF8_TO_TCHAR(Pl.Next.c_str()));
 	}
 
-	// Pass 2: spawn. Art faces east as drawn; mirror when marching west or when the enemy it is
-	// engaged with stands to the west.
+	// Marching columns: stand part-way between the start town's slot and the slot they will take at
+	// the next town, by hours marched on this edge. Position comes only from sim state; a column
+	// resting overnight mid-road stays there. Both ends are slots, so departure and arrival are seamless.
+	TArray<FVector2D> Targets = Anchors;
+	for (int32 i = 0; i < Plans.Num(); ++i)
+	{
+		const FPlan& Pl = Plans[i];
+		if (Pl.Next.empty())
+		{
+			continue;
+		}
+		const FVector2D Foot = APA250ArmyToken::FactionFootprintUU(ToFStr(Pl.Army->faction));
+		const FVector2D Plate = APA250ArmyToken::PlateSizeUU(ShortArmyName(*Pl.Army), PlateSideFor(St, *Pl.Army));
+		float Overlap = 0.f;
+		int32 Candidate = 0;
+		const FVector2D Dest = ChooseArmyAnchor(ToFStr(Pl.Next), Towns, Placed, Foot, Plate, Overlap, Candidate);
+		// Path: start slot -> traced road waypoints (if the plate shows this road) -> destination slot,
+		// walked by arc length so the column stands on the printed road part-way along.
+		TArray<FVector2D> Path;
+		Path.Add(Anchors[i]);
+		if (const TArray<FVector2D>* Road = RouteUVByEdge.Find(Pl.EdgeId))
+		{
+			const FVector2D* FromUV = TokenUV.Find(ToFStr(Pl.Army->province));
+			const bool bReverse = FromUV && FVector2D::Distance(Road->Last(), *FromUV) < FVector2D::Distance((*Road)[0], *FromUV);
+			for (int32 k = 1; k + 1 < Road->Num(); ++k) // interior waypoints; the ends are the town slots
+			{
+				const FVector2D& UV = (*Road)[bReverse ? Road->Num() - 1 - k : k];
+				Path.Add(FVector2D((UV.X - 0.5f) * MapWidthUU, (UV.Y - 0.5f) * MapHeightUU));
+			}
+		}
+		Path.Add(Dest);
+		Targets[i] = PointAlongPath(Path, Pl.Progress);
+		UE_LOG(LogTemp, Display, TEXT("PA250 army march: %s %s->%s edge=%s road=%s progress=%.2f (%d h into edge) at (%.1f,%.1f)"),
+			   UTF8_TO_TCHAR(Pl.Army->id.c_str()), UTF8_TO_TCHAR(Pl.Army->province.c_str()), UTF8_TO_TCHAR(Pl.Next.c_str()), *Pl.EdgeId,
+			   RouteUVByEdge.Contains(Pl.EdgeId) ? TEXT("traced") : TEXT("straight"), Pl.Progress, Pl.Army->hours_into_edge, Targets[i].X,
+			   Targets[i].Y);
+	}
+
+	// Pass 2: configure (spawn only new armies). Art faces east as drawn; mirror when marching west or
+	// when the enemy it is engaged with stands to the west.
 	for (int32 i = 0; i < Plans.Num(); ++i)
 	{
 		const FPlan& Pl = Plans[i];
@@ -1188,11 +1348,21 @@ void APA250ProvinceMapActor::RefreshArmyTokens()
 				}
 			}
 		}
-		FActorSpawnParameters Params;
-		Params.Owner = this;
-		const FVector Loc(Anchors[i].X, Anchors[i].Y, 14.f + i * 0.5f);
-		APA250ArmyToken* Tok =
-			World->SpawnActor<APA250ArmyToken>(APA250ArmyToken::StaticClass(), Loc, APA250ProvinceMapActor::FlatMapTextRotation(), Params);
+		const FString Id = ToFStr(Army.id);
+		const FVector Loc(Targets[i].X, Targets[i].Y, 14.f + i * 0.5f);
+		ArmyTargetAnchor.Add(Id, Loc);
+		APA250ArmyToken* Tok = nullptr;
+		if (APA250ArmyToken** Found = Existing.Find(Id))
+		{
+			Tok = *Found;
+			Existing.Remove(Id);
+		}
+		else
+		{
+			FActorSpawnParameters Params;
+			Params.Owner = this;
+			Tok = World->SpawnActor<APA250ArmyToken>(APA250ArmyToken::StaticClass(), Loc, APA250ProvinceMapActor::FlatMapTextRotation(), Params);
+		}
 		if (!Tok)
 		{
 			continue;
@@ -1202,7 +1372,48 @@ void APA250ProvinceMapActor::RefreshArmyTokens()
 					   Pl.Art, bMirror);
 		ArmyTokens.Add(Tok);
 	}
+	// Armies that no longer exist (or no longer have a town on this sheet).
+	for (const TPair<FString, APA250ArmyToken*>& Kv : Existing)
+	{
+		ArmyTargetAnchor.Remove(Kv.Key);
+		LoggedIllustrationById.Remove(Kv.Key);
+		if (IsValid(Kv.Value))
+		{
+			Kv.Value->Destroy();
+		}
+	}
 	UpdateArmyLod();
+}
+
+void APA250ProvinceMapActor::MoveArmyTokens(float DeltaSeconds)
+{
+	// Presentation smoothing only: the sim moves a column once per campaign hour; the drawn column
+	// eases to that position instead of hopping. It never runs ahead of the sim.
+	constexpr float TimeConstant = 0.25f;
+	constexpr float SnapUU = 250.f; // e.g. a save loaded elsewhere on the map: jump, don't glide across it
+	const float Alpha = 1.f - FMath::Exp(-FMath::Max(0.f, DeltaSeconds) / TimeConstant);
+	for (APA250ArmyToken* Tok : ArmyTokens)
+	{
+		if (!IsValid(Tok))
+		{
+			continue;
+		}
+		const FVector* Target = ArmyTargetAnchor.Find(Tok->ArmyId);
+		if (!Target)
+		{
+			continue;
+		}
+		const FVector Cur = Tok->GetActorLocation();
+		const float Dist = FVector::Dist2D(Cur, *Target);
+		if (Dist < 0.05f || Dist > SnapUU)
+		{
+			Tok->SetAnchor(*Target);
+		}
+		else
+		{
+			Tok->SetAnchor(FMath::Lerp(Cur, *Target, Alpha));
+		}
+	}
 }
 
 float APA250ProvinceMapActor::MeasurePxPerUU() const
@@ -1480,6 +1691,130 @@ bool APA250ProvinceMapActor::GetArmyTokenLocation(const FString& ArmyId, FVector
 	return false;
 }
 
+FString APA250ProvinceMapActor::DescribeHover(const FString& ArmyId, const FString& ProvinceId) const
+{
+	UPA250Subsystem* S = Sub();
+	if (!S || !S->GetController().has_campaign())
+	{
+		return FString();
+	}
+	const pa250::CampaignState& St = S->GetState();
+	auto TownName = [&St](const std::string& Id) {
+		const auto P = St.provinces.find(Id);
+		return P != St.provinces.end() ? ToFStr(P->second.name) : ToFStr(Id);
+	};
+	if (!ArmyId.IsEmpty())
+	{
+		const auto It = St.armies.find(TCHAR_TO_UTF8(*ArmyId));
+		if (It == St.armies.end())
+		{
+			return FString();
+		}
+		const pa250::Army& A = It->second;
+		const bool bOwn = A.faction == St.player_faction;
+		TArray<FString> Lines;
+		Lines.Add(ToFStr(A.name) + TEXT(" — ") + (bOwn ? FString(TEXT("yours")) : SideWordFor(St, A)));
+		Lines.Add(bOwn ? FString::Printf(TEXT("%d men · morale %d · readiness %d"), TotalStrength(A), A.morale, A.readiness)
+					   : FString(TEXT("Strength unreported")));
+		const bool bEngaged = St.pending_battle.active && (St.pending_battle.attacker_army == A.id || St.pending_battle.defender_army == A.id);
+		if (bEngaged)
+		{
+			Lines.Add(TEXT("Engaged at ") + TownName(St.pending_battle.province));
+		}
+		else if (!A.path.empty())
+		{
+			if (bOwn)
+			{
+				// Walk the remaining edges to name the final destination.
+				std::string At = A.province;
+				for (const std::string& Eid : A.path)
+				{
+					const auto E = St.edges.find(Eid);
+					if (E == St.edges.end())
+					{
+						break;
+					}
+					At = E->second.a == At ? E->second.b : E->second.a;
+				}
+				Lines.Add(TEXT("Marching to ") + TownName(At) + TEXT(" (next: ") + TownName(NextProvinceOnPath(St, A)) + TEXT(")"));
+			}
+			else
+			{
+				Lines.Add(TEXT("On the march"));
+			}
+		}
+		else
+		{
+			Lines.Add(TEXT("Holding at ") + TownName(A.province));
+		}
+		return FString::Join(Lines, TEXT("\n"));
+	}
+	if (!ProvinceId.IsEmpty())
+	{
+		const std::string Pid = TCHAR_TO_UTF8(*ProvinceId);
+		const auto P = St.provinces.find(Pid);
+		if (P == St.provinces.end())
+		{
+			return FString();
+		}
+		TArray<FString> Lines;
+		Lines.Add(ToFStr(P->second.name));
+		const std::string& Owner = P->second.owner;
+		Lines.Add(Owner.empty() ? FString(TEXT("Not held"))
+								: Owner == St.player_faction ? FString(TEXT("Held by the Continentals (yours)"))
+															 : (Owner == "british" ? FString(TEXT("Held by the British")) : TEXT("Held by ") + ToFStr(Owner)));
+		TArray<FString> Here;
+		for (const auto& Kv : St.armies)
+		{
+			if (Kv.second.province == Pid && Kv.second.path.empty())
+			{
+				Here.Add(ToFStr(Kv.second.name) + (Kv.second.faction == St.player_faction ? TEXT(" (yours)") : TEXT("")));
+			}
+		}
+		Lines.Add(Here.Num() > 0 ? TEXT("Forces here: ") + FString::Join(Here, TEXT(", ")) : FString(TEXT("No forces here")));
+		if (St.pending_battle.active && St.pending_battle.province == Pid)
+		{
+			Lines.Add(TEXT("A battle is pending here"));
+		}
+		return FString::Join(Lines, TEXT("\n"));
+	}
+	return FString();
+}
+
+FBox2D APA250ProvinceMapActor::HoverWorldBox(const FString& ArmyId, const FString& ProvinceId) const
+{
+	if (!ArmyId.IsEmpty())
+	{
+		for (const APA250ArmyToken* Tok : ArmyTokens)
+		{
+			if (IsValid(Tok) && Tok->ArmyId == ArmyId)
+			{
+				return Tok->GetFootprint();
+			}
+		}
+	}
+	FBox2D Box(ForceInit);
+	if (const FVector2D* UV = LabelUV.Find(ProvinceId))
+	{
+		const FVector C = UVToWorld(*UV, 0.f);
+		const float R = 12.f;
+		Box += FBox2D(FVector2D(C.X - R, C.Y - R), FVector2D(C.X + R, C.Y + R));
+		if (UTextRenderComponent* const* Cap = CaptionById.Find(ProvinceId))
+		{
+			if (*Cap && (*Cap)->IsVisible())
+			{
+				// Flat, left-aligned, vertically centred text: local Y = advance (width), Z = glyph height.
+				const FVector L = (*Cap)->GetComponentLocation();
+				const FVector Sz = (*Cap)->GetTextLocalSize() * (*Cap)->GetComponentScale().X;
+				const float W = Sz.Y > 0.f ? Sz.Y : (*Cap)->Text.ToString().Len() * (*Cap)->WorldSize * 0.55f;
+				const float H = Sz.Z > 0.f ? Sz.Z : (*Cap)->WorldSize;
+				Box += FBox2D(FVector2D(L.X - 2.f, L.Y - H * 0.6f), FVector2D(L.X + W + 2.f, L.Y + H * 0.6f));
+			}
+		}
+	}
+	return Box;
+}
+
 FString APA250ProvinceMapActor::DescribeArmyTokens() const
 {
 	TArray<FString> Lines;
@@ -1557,6 +1892,12 @@ void APA250ProvinceMapActor::SpawnHotspotMarkers()
 	CaptionById.Reset();
 	TownWashes.Reset();
 	WashById.Reset();
+	for (UStaticMeshComponent* C : BuildingIconMarkers)
+	{
+		if (C) C->DestroyComponent();
+	}
+	BuildingIconMarkers.Reset();
+	BuildingIconSignature.Reset();
 	if (SelectionHalo)
 	{
 		SelectionHalo->DestroyComponent();
@@ -1576,6 +1917,25 @@ void APA250ProvinceMapActor::SpawnHotspotMarkers()
 
 	// Selection halo: gold, never red. Red is British ownership; a red halo made
 	// a selected Continental town look like it had changed hands.
+	UMaterialInterface* InkMat = LoadObject<UMaterialInterface>(nullptr, TEXT("/Game/PA250/Materials/M_MapSprite.M_MapSprite"));
+	UTexture2D* WhiteTex = LoadObject<UTexture2D>(nullptr, TEXT("/Engine/EngineResources/WhiteSquareTexture.WhiteSquareTexture"));
+	MapTextMaterial = LoadObject<UMaterialInterface>(nullptr, TEXT("/Game/PA250/Materials/M_MapText.M_MapText"));
+	UE_LOG(LogTemp, Display, TEXT("PA250 town marks: ink=%d text=%d (unlit; lit fallback otherwise)"), (InkMat && WhiteTex) ? 1 : 0,
+		   MapTextMaterial ? 1 : 0);
+	RingById.Reset();
+	FillById.Reset();
+	for (UStaticMeshComponent* C : CaptionPlates)
+	{
+		if (C)
+		{
+			C->DestroyComponent();
+		}
+	}
+	CaptionPlates.Reset();
+	CaptionPlateById.Reset();
+	UTexture2D* PlateTex = LoadObject<UTexture2D>(nullptr, TEXT("/Game/PA250/Textures/Army/T_Army_GroundOval.T_Army_GroundOval"));
+	LastMarkerPxPerUU = -1.f;
+
 	SelectionHalo = NewObject<UStaticMeshComponent>(this);
 	SelectionHalo->SetupAttachment(MapMesh);
 	SelectionHalo->RegisterComponent();
@@ -1586,7 +1946,8 @@ void APA250ProvinceMapActor::SpawnHotspotMarkers()
 	SelectionHalo->SetWorldScale3D(FVector(0.40f, 0.40f, 1.f));
 	SelectionHalo->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	SelectionHalo->SetVisibility(false);
-	ApplyShapeColor(SelectionHalo, FLinearColor(0.86f, 0.64f, 0.12f));
+	UseInkMaterial(SelectionHalo, InkMat, WhiteTex, 0);
+	ApplyShapeColor(SelectionHalo, FLinearColor::FromSRGBColor(FColor(196, 150, 40)));
 
 	UMaterialInterface* WashMat = LoadObject<UMaterialInterface>(nullptr, TEXT("/Game/PA250/Materials/M_MapSprite.M_MapSprite"));
 	UTexture2D* WashTex = LoadObject<UTexture2D>(nullptr, TEXT("/Game/PA250/Textures/Army/T_Map_TownWash.T_Map_TownWash"));
@@ -1662,8 +2023,10 @@ void APA250ProvinceMapActor::SpawnHotspotMarkers()
 		Ring->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 		Ring->ComponentTags.Add(TEXT("town_ring"));
 		Ring->ComponentTags.Add(FName(*Kv.Key));
+		UseInkMaterial(Ring, InkMat, WhiteTex, 1);
 		ApplyShapeColor(Ring, TownOwnerColor(Owner));
 		HotspotMarkers.Add(Ring);
+		RingById.Add(Kv.Key, Ring);
 
 		UStaticMeshComponent* Fill = NewObject<UStaticMeshComponent>(this);
 		Fill->SetupAttachment(MapMesh);
@@ -1675,8 +2038,10 @@ void APA250ProvinceMapActor::SpawnHotspotMarkers()
 		Fill->SetWorldRotation(FRotator(0.f, 45.f, 0.f));
 		Fill->SetWorldScale3D(FVector(0.13f, 0.13f, 1.f));
 		Fill->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-		ApplyShapeColor(Fill, FLinearColor(0.86f, 0.78f, 0.62f));
+		UseInkMaterial(Fill, InkMat, WhiteTex, 2);
+		ApplyShapeColor(Fill, TownFillColor(Owner));
 		HotspotMarkers.Add(Fill);
+		FillById.Add(Kv.Key, Fill);
 
 		// Caption: short name only, offset north-east so it does not sit on the
 		// engraved town name. Visibility is zoom/selection dependent (see
@@ -1692,6 +2057,32 @@ void APA250ProvinceMapActor::SpawnHotspotMarkers()
 		Cap->SetVerticalAlignment(EVRTA_TextCenter);
 		Cap->SetWorldSize(GCaptionSizeUU);
 		Cap->SetTextRenderColor(TownOwnerInk(Owner));
+		if (MapTextMaterial)
+		{
+			Cap->SetTextMaterial(MapTextMaterial);
+		}
+		Cap->SetTranslucentSortPriority(4);
+		if (InkMat && PlateTex)
+		{
+			UStaticMeshComponent* Plate = NewObject<UStaticMeshComponent>(this);
+			Plate->SetupAttachment(MapMesh);
+			Plate->RegisterComponent();
+			Plate->SetAbsolute(true, true, true);
+			Plate->SetStaticMesh(PlaneMesh);
+			Plate->SetMaterial(0, InkMat);
+			Plate->SetWorldRotation(FRotator::ZeroRotator);
+			Plate->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+			Plate->SetCastShadow(false);
+			Plate->SetTranslucentSortPriority(3);
+			if (UMaterialInstanceDynamic* MID = Plate->CreateAndSetMaterialInstanceDynamic(0))
+			{
+				MID->SetTextureParameterValue(TEXT("Sprite"), PlateTex);
+				MID->SetVectorParameterValue(TEXT("UVRect"), FLinearColor(0.f, 0.f, 1.f, 1.f));
+				MID->SetScalarParameterValue(TEXT("Opacity"), 0.85f);
+			}
+			CaptionPlates.Add(Plate);
+			CaptionPlateById.Add(Kv.Key, Plate);
+		}
 		FString Name = Kv.Key;
 		if (St)
 		{
@@ -1705,7 +2096,77 @@ void APA250ProvinceMapActor::SpawnHotspotMarkers()
 		HotspotCaptions.Add(Cap);
 		CaptionById.Add(Kv.Key, Cap);
 	}
+	RefreshBuildingIcons();
 	RefreshHotspotVisibility();
+}
+
+void APA250ProvinceMapActor::RefreshBuildingIcons()
+{
+	UPA250Subsystem* S = Sub();
+	const bool bCampaign = S && S->GetController().has_campaign();
+	// HudEpoch moves every sim hour; buildings change a few times a campaign. Compare what the
+	// markers show before destroying and re-registering a mesh component per building.
+	FString Signature;
+	if (bCampaign)
+	{
+		BuildingIconHudEpoch = S->GetHudEpoch();
+		for (const TPair<FString, FVector2D>& Kv : LabelUV)
+		{
+			auto Pit = S->GetState().provinces.find(TCHAR_TO_UTF8(*Kv.Key));
+			if (Pit == S->GetState().provinces.end()) continue;
+			const pa250::Province& P = Pit->second;
+			Signature += FString::Printf(TEXT("%s:%d%d%d%d%d%d;"), *Kv.Key, P.farm_level > 0 ? 1 : 0,
+										 P.workshop_level > 0 ? 1 : 0, P.depot_level > 0 ? 1 : 0, P.fort_level > 0 ? 1 : 0,
+										 P.church ? 1 : 0, P.militia_muster ? 1 : 0);
+		}
+	}
+	if (Signature == BuildingIconSignature && (BuildingIconMarkers.Num() > 0 || !Signature.Contains(TEXT("1"))))
+	{
+		return;
+	}
+	BuildingIconSignature = Signature;
+	for (UStaticMeshComponent* C : BuildingIconMarkers)
+	{
+		if (C) C->DestroyComponent();
+	}
+	BuildingIconMarkers.Reset();
+	if (!bCampaign) return;
+	const pa250::CampaignState& St = S->GetState();
+	UStaticMesh* PlaneMesh = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Plane.Plane"));
+	UMaterialInterface* ShapeMat =
+		LoadObject<UMaterialInterface>(nullptr, TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
+	if (!PlaneMesh || !ShapeMat) return;
+
+	auto AddIcon = [&](const FVector2D& TownUV, int32 Index, const FLinearColor& Color) {
+		const FVector2D IconUV = TownUV + FVector2D(0.006f * static_cast<float>(Index) - 0.009f, 0.018f);
+		UStaticMeshComponent* Icon = NewObject<UStaticMeshComponent>(this);
+		Icon->SetupAttachment(MapMesh);
+		Icon->RegisterComponent();
+		Icon->SetAbsolute(true, true, true);
+		Icon->SetStaticMesh(PlaneMesh);
+		Icon->SetMaterial(0, ShapeMat);
+		Icon->SetWorldLocation(UVToWorld(IconUV, 6.2f));
+		Icon->SetWorldRotation(FRotator::ZeroRotator);
+		Icon->SetWorldScale3D(FVector(0.06f, 0.06f, 1.f));
+		Icon->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		Icon->ComponentTags.Add(TEXT("building_icon"));
+		ApplyShapeColor(Icon, Color);
+		BuildingIconMarkers.Add(Icon);
+	};
+
+	for (const TPair<FString, FVector2D>& Kv : LabelUV)
+	{
+		auto Pit = St.provinces.find(TCHAR_TO_UTF8(*Kv.Key));
+		if (Pit == St.provinces.end()) continue;
+		const pa250::Province& P = Pit->second;
+		int32 Idx = 0;
+		if (P.farm_level > 0) AddIcon(Kv.Value, Idx++, FLinearColor(0.35f, 0.55f, 0.25f));
+		if (P.workshop_level > 0) AddIcon(Kv.Value, Idx++, FLinearColor(0.55f, 0.40f, 0.20f));
+		if (P.depot_level > 0) AddIcon(Kv.Value, Idx++, FLinearColor(0.45f, 0.35f, 0.25f));
+		if (P.fort_level > 0) AddIcon(Kv.Value, Idx++, FLinearColor(0.35f, 0.35f, 0.40f));
+		if (P.church) AddIcon(Kv.Value, Idx++, FLinearColor(0.85f, 0.85f, 0.80f));
+		if (P.militia_muster) AddIcon(Kv.Value, Idx++, FLinearColor(0.20f, 0.30f, 0.55f));
+	}
 }
 
 float APA250ProvinceMapActor::TownWashRadiusPx(const FString& Id, const TMap<FString, FVector2D>& HotspotUV,
@@ -1785,6 +2246,10 @@ void APA250ProvinceMapActor::RefreshTownOwnership()
 			}
 		}
 		ApplyShapeColor(Ring, TownOwnerColor(Owner));
+		if (UStaticMeshComponent** Fill = FillById.Find(ProvinceId))
+		{
+			ApplyShapeColor(*Fill, TownFillColor(Owner));
+		}
 		if (UStaticMeshComponent** Wash = WashById.Find(ProvinceId))
 		{
 			ApplyTownWash(*Wash, Owner);
@@ -1821,7 +2286,51 @@ void APA250ProvinceMapActor::RefreshHotspotVisibility()
 		}
 		const bool bShow = bMajor || bDetail || Kv.Key == SelectedProvinceId;
 		Kv.Value->SetVisibility(bShow);
-		Kv.Value->SetWorldSize(Kv.Key == SelectedProvinceId ? GCaptionSelectedSizeUU : GCaptionSizeUU);
+		if (UStaticMeshComponent** Plate = CaptionPlateById.Find(Kv.Key))
+		{
+			(*Plate)->SetVisibility(bShow);
+		}
+	}
+
+	// Constant on-screen size: marks ~14 px, captions ~15 px (selected ~18 px). They never grow
+	// past the reserved sizes (24 UU ring, 19/23 UU caption) used for army-slot placement, so
+	// zooming in only shrinks them toward their town.
+	const float PxPerUU = MeasurePxPerUU();
+	const bool bRescale = PxPerUU > 0.f && !FMath::IsNearlyEqual(PxPerUU, LastMarkerPxPerUU, LastMarkerPxPerUU * 0.01f + 1e-4f);
+	const float RingUU = PxPerUU > 0.f ? FMath::Clamp(TownMarkPx / PxPerUU, 6.f, 24.f) : 24.f;
+	const float CapScale = PxPerUU > 0.f ? FMath::Clamp(TownCaptionPx / (PxPerUU * GCaptionSizeUU), 0.4f, 1.f) : 1.f;
+	if (bRescale || SelectedProvinceId != LastMarkerSelection)
+	{
+		LastMarkerPxPerUU = PxPerUU;
+		LastMarkerSelection = SelectedProvinceId;
+		for (const TPair<FString, FVector2D>& Kv : LabelUV)
+		{
+			if (UStaticMeshComponent** Ring = RingById.Find(Kv.Key))
+			{
+				(*Ring)->SetWorldScale3D(FVector(RingUU / 100.f, RingUU / 100.f, 1.f));
+			}
+			if (UStaticMeshComponent** Fill = FillById.Find(Kv.Key))
+			{
+				(*Fill)->SetWorldScale3D(FVector(RingUU * 0.55f / 100.f, RingUU * 0.55f / 100.f, 1.f));
+			}
+			if (UTextRenderComponent** Cap = CaptionById.Find(Kv.Key))
+			{
+				const bool bSel = Kv.Key == SelectedProvinceId;
+				const float Size = (bSel ? GCaptionSelectedSizeUU : GCaptionSizeUU) * CapScale;
+				const FVector At =
+					UVToWorld(Kv.Value, 5.5f) + FVector(GCaptionOffsetUV.X * MapWidthUU, GCaptionOffsetUV.Y * MapHeightUU, 0.f) * CapScale;
+				(*Cap)->SetWorldSize(Size);
+				(*Cap)->SetWorldLocation(At);
+				if (UStaticMeshComponent** Plate = CaptionPlateById.Find(Kv.Key))
+				{
+					// Left-aligned, vertically centred text: back it with a soft oval a little larger than the text.
+					const float TextW = (*Cap)->GetTextLocalSize().Y > 0.f ? (*Cap)->GetTextLocalSize().Y
+																	  : (*Cap)->Text.ToString().Len() * Size * 0.55f;
+					(*Plate)->SetWorldLocation(FVector(At.X + TextW * 0.5f, At.Y, At.Z - 0.3f));
+					(*Plate)->SetWorldScale3D(FVector((TextW + Size * 1.6f) * 1.25f / 100.f, Size * 2.0f / 100.f, 1.f));
+				}
+			}
+		}
 	}
 	if (SelectionHalo)
 	{
@@ -1830,6 +2339,7 @@ void APA250ProvinceMapActor::RefreshHotspotVisibility()
 		if (SelUV)
 		{
 			SelectionHalo->SetWorldLocation(UVToWorld(*SelUV, 4.5f));
+			SelectionHalo->SetWorldScale3D(FVector(RingUU * 1.6f / 100.f, RingUU * 1.6f / 100.f, 1.f));
 		}
 	}
 }
@@ -1914,6 +2424,11 @@ void APA250ProvinceMapActor::FrameCamera()
 	if (UCameraComponent* CC = MapCamera->GetCameraComponent())
 	{
 		CC->SetProjectionMode(ECameraProjectionMode::Orthographic);
+		// OrthoW is a width. The project's default axis constraint (AspectRatio_MaintainYFOV) makes the
+		// engine treat it as the view height instead, so the map showed ~aspect x more than framed
+		// (1.78x at 16:9): black bands past the map edge and clamps that did not match the view.
+		CC->bOverrideAspectRatioAxisConstraint = true;
+		CC->SetAspectRatioAxisConstraint(EAspectRatioAxisConstraint::AspectRatio_MaintainXFOV);
 		CC->SetOrthoWidth(OrthoW);
 		CC->SetConstraintAspectRatio(false);
 		CC->SetOrthoNearClipPlane(1.f);

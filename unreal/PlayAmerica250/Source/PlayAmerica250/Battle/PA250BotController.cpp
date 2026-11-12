@@ -1,4 +1,5 @@
 #include "PA250BotController.h"
+#include "Mounted/PA250MountedSoldier.h"
 #include "EngineUtils.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "MusketWeapon.h"
@@ -212,20 +213,11 @@ bool APA250BotController::TryBayonet(ARFCharacter* Me, ARFCharacter* Enemy, floa
 		const bool bEnemyReloading = Enemy->Musket && Enemy->Musket->IsReloading();
 		if (Dist < T.ChargeRangeCm || (bEnemyReloading && Dist < T.ChargeVsReloadRangeCm))
 		{
-			const FPA250MeleeTuningValues& MV = Me->MeleeComponent->GetValues();
 			State = EBotState::Charge;
 			SetFocus(Enemy);
 			MoveToward(Me, Enemy->GetActorLocation(), 80.f);
-			if (Dist <= MV.ThrustReachCm + MV.ThrustRadiusCm)
-			{
-				Me->MeleeComponent->DoThrust();
-			}
-			else if (Dist <= MV.ChargeLungeCm && Me->MeleeComponent->GetChargeCooldownRemaining() <= 0.f
-				&& FVector::DotProduct(Me->GetActorForwardVector().GetSafeNormal2D(),
-					(Enemy->GetActorLocation() - Me->GetActorLocation()).GetSafeNormal2D()) > 0.94f) // dash goes where he faces
-			{
-				Me->MeleeComponent->DoCharge();
-			}
+			MeleeAttack(Me, Enemy, Dist, FVector::DotProduct(Me->GetActorForwardVector().GetSafeNormal2D(),
+				(Enemy->GetActorLocation() - Me->GetActorLocation()).GetSafeNormal2D()) > 0.94f); // dash goes where he faces
 			return true;
 		}
 	}
@@ -233,13 +225,49 @@ bool APA250BotController::TryBayonet(ARFCharacter* Me, ARFCharacter* Enemy, floa
 }
 
 
+void APA250BotController::MeleeAttack(ARFCharacter* Me, ARFCharacter* Target, float Dist, bool bFacing)
+{
+	UPA250MeleeComponent* Melee = Me ? Me->MeleeComponent.Get() : nullptr;
+	if (!Melee || !Target) return;
+	const FPA250MeleeTuningValues& MV = Melee->GetValues();
+	FPA250BotMeleeView V;
+	V.DistCm = Dist;
+	V.ThrustReachCm = MV.ThrustReachCm + MV.ThrustRadiusCm;
+	V.ButtReachCm = MV.ButtStrokeReachCm + 35.f;
+	V.LungeCm = MV.ChargeLungeCm;
+	V.bFoeGuardsMe = Target->MeleeComponent && Target->MeleeComponent->ResolveGuard(Me->GetActorLocation()) != EPA250Guard::None;
+	V.bReadsGuard = bReadsGuard;
+	V.bResting = MeleeRest > 0.f;
+	V.bChargeReady = Melee->GetChargeCooldownRemaining() <= 0.f;
+	V.bFacing = bFacing;
+	switch (PA250ChooseMeleeMove(V))
+	{
+	case EPA250BotMelee::Thrust:
+		if (Melee->DoThrust()) bLastMoveWasButt = false;
+		break;
+	case EPA250BotMelee::Butt:
+		if (Melee->DoButtStroke()) bLastMoveWasButt = true;
+		break;
+	case EPA250BotMelee::Charge:
+		if (Melee->DoCharge()) bLastMoveWasButt = false;
+		break;
+	default:
+		break;
+	}
+}
+
 void APA250BotController::ApplyCombatProfile(const FPA250TrainingProfile& InTraining, const FPA250TacticalRole& InRole, int32 Seed)
 {
 	Training = InTraining;
 	Role = InRole;
 	ReloadParams = InTraining.ToReloadParams();
 	ReloadRng.Initialize(Seed);
+	AimScale = UPA250CombatProfiles::AimScaleFor(Seed, InTraining.AimVariance);
 	bHasCombatProfile = true;
+	if (ARFCharacter* Me = Cast<ARFCharacter>(GetPawn()))
+	{
+		Me->MisfireChance = InTraining.MisfireChance;
+	}
 }
 
 float APA250BotController::ComputeStress01(const ARFCharacter* Me) const
@@ -298,6 +326,28 @@ void APA250BotController::Tick(float DeltaSeconds)
 	}
 	// AI reload runs every frame (not in the 0.2-0.35 s think gate) so its press timing is exact.
 	TickReload(Me);
+	// Hand to hand has a rhythm: after a blow a man needs a moment before the next (less with training),
+	// unless his butt-stroke has just staggered his man, when the thrust follows at once.
+	MeleeRest = FMath::Max(0.f, MeleeRest - DeltaSeconds);
+	if (const UPA250MeleeComponent* Melee = Me->MeleeComponent)
+	{
+		const bool bBusyNow = Melee->IsBusy();
+		if (bWasMeleeBusy && !bBusyNow)
+		{
+			const bool bFollowUp = bLastMoveWasButt && Melee->GetLastBlow() == EPA250Blow::Hit;
+			MeleeRest = bFollowUp ? 0.f : Training.MeleeRecoverSeconds * FMath::FRandRange(0.7f, 1.3f);
+			bReadsGuard = FMath::FRand() < Training.MeleeSkill;
+			bLastMoveWasButt = false;
+		}
+		bWasMeleeBusy = bBusyNow;
+	}
+	// A wounded man flinches: whatever aim he had taken is lost.
+	if (Me->ConsumeFlinch())
+	{
+		bReactionRolled = false;
+		ReactionTimer = FMath::Max(ReactionTimer, 0.6f);
+	}
+	Me->MisfireStress = bHasCombatProfile ? ComputeStress01(Me) : 0.f;
 
 	ThinkTimer -= DeltaSeconds;
 	ReactionTimer = FMath::Max(0.f, ReactionTimer - DeltaSeconds);
@@ -313,6 +363,9 @@ void APA250BotController::Tick(float DeltaSeconds)
 	float Dist = 0.f;
 	ARFCharacter* Enemy = FindNearestEnemy(Me, Dist);
 	const bool bLoaded = Me->Musket && Me->Musket->CanFire();
+
+	// Dragoons ride, dismount and remount on their own; on foot they fall through to the skirmisher below.
+	if (TickDragoon(Me, Enemy, Dist)) return;
 
 	// In a formed squad: the squad decides where to stand, when to fire and whether to run.
 	if (HasFormationOrder())
@@ -339,13 +392,11 @@ void APA250BotController::Tick(float DeltaSeconds)
 			if (Target && Me->MeleeComponent)
 			{
 				const float D = FVector::Dist(Target->GetActorLocation(), Me->GetActorLocation());
-				const FPA250MeleeTuningValues& MV = Me->MeleeComponent->GetValues();
 				State = EBotState::Charge;
 				SetFocus(Target);
 				MoveComp->MaxWalkSpeed = Me->SprintSpeed;
 				MoveToward(Me, Target->GetActorLocation(), 60.f);
-				if (D <= MV.ThrustReachCm + MV.ThrustRadiusCm) Me->MeleeComponent->DoThrust();
-				else if (D <= MV.ChargeLungeCm && Me->MeleeComponent->GetChargeCooldownRemaining() <= 0.f) Me->MeleeComponent->DoCharge();
+				MeleeAttack(Me, Target, D, true);
 				return;
 			}
 		}
@@ -355,6 +406,7 @@ void APA250BotController::Tick(float DeltaSeconds)
 		const bool bAtSpot = FVector::Dist2D(Me->GetActorLocation(), Form.Target) <= ArriveCm;
 		if (Form.bPresent && Form.Contact.IsValid())
 		{
+			if (Me->MeleeComponent) Me->MeleeComponent->Present(0.3f); // musket to the shoulder on "Present!"
 			SetFocus(Form.Contact.Get());
 			State = EBotState::Aim;
 		}
@@ -385,7 +437,9 @@ void APA250BotController::Tick(float DeltaSeconds)
 				const FVector Muzzle = Me->Musket->GetMuzzleLocation()->GetComponentLocation();
 				const FVector Aim = Enemy->GetActorLocation() + FVector(0.f, 0.f, 20.f)
 					+ Enemy->GetVelocity() * (Dist / FMath::Max(Me->Musket->GetProjectileSpeed(), 1.f));
-				const FVector Dir = FMath::VRandCone((Aim - Muzzle).GetSafeNormal(), FMath::DegreesToRadians(AimErrorDegrees));
+				// Rested on the wall he is behind, a skirmisher's aim tightens.
+				const float Rested = Form.bInCover ? Role.RestedAimScale : 1.f;
+				const FVector Dir = FMath::VRandCone((Aim - Muzzle).GetSafeNormal(), FMath::DegreesToRadians(AimErrorDegrees * Rested));
 				if (Me->FireMusketAt(Muzzle + Dir * Dist))
 				{
 					State = EBotState::Fire;
@@ -501,4 +555,55 @@ void APA250BotController::Tick(float DeltaSeconds)
 	}
 	State = bLoaded ? EBotState::Advance : EBotState::Reload;
 	MoveToward(Me, SlotLoc, 120.f);
+}
+
+bool APA250BotController::TickDragoon(ARFCharacter* Me, ARFCharacter* Enemy, float Dist)
+{
+	if (!Me || Me->UnitClass != TEXT("dragoon")) return false;
+	// Thrown from a horse that went down under him: nothing to order until he is on his feet.
+	if (Me->IsThrownFromHorse()) return true;
+	APA250ControlPoint* Goal = PickGoal(Me);
+	if (!Goal && Objective.IsValid()) Goal = Objective.Get();
+	const FVector GoalLoc = Goal ? Goal->GetActorLocation() : Me->GetActorLocation();
+	APA250MountedSoldier* Horse = Me->GetOwnHorse();
+	FPA250DragoonView V;
+	V.bMounted = Me->IsMounted();
+	V.bHorseAlive = Horse && !Horse->IsHorseDead();
+	V.EnemyDistCm = Enemy ? Dist : -1.f;
+	V.GoalDistCm = FVector::Dist2D(Me->GetActorLocation(), GoalLoc);
+	V.HorseDistCm = Horse ? FVector::Dist2D(Me->GetActorLocation(), Horse->GetActorLocation()) : TNumericLimits<float>::Max();
+	V.bReturning = LastDragoonAct == EPA250DragoonAct::ReturnToHorse || LastDragoonAct == EPA250DragoonAct::Mount;
+	// Still dropping in at spawn: nothing to decide until the horse has its feet on the ground.
+	if (V.bMounted && !Me->GetCharacterMovement()->IsMovingOnGround()) return true;
+	const EPA250DragoonAct Act = PA250DragoonDecide(V);
+	if (Act != LastDragoonAct)
+	{
+		static const TCHAR* Names[] = {TEXT("ride"), TEXT("dismount"), TEXT("fight on foot"), TEXT("back to horse"), TEXT("mount")};
+		UE_LOG(LogTemp, Display, TEXT("PA250 dragoon: %s %s (enemy %.0f m, post %.0f m, horse %s)"), *Me->GetName(),
+			Names[static_cast<int32>(Act)], V.EnemyDistCm / 100.f, V.GoalDistCm / 100.f,
+			V.bHorseAlive ? *FString::Printf(TEXT("%.0f m"), V.HorseDistCm / 100.f) : TEXT("lost"));
+		LastDragoonAct = Act;
+	}
+	switch (Act)
+	{
+	case EPA250DragoonAct::Ride:
+		Me->SetMountedGait(PA250DragoonGait(V.GoalDistCm));
+		State = EBotState::Advance;
+		MoveToward(Me, GoalLoc, PA250DragoonGoalNearCm * 0.6f);
+		return true;
+	case EPA250DragoonAct::Dismount:
+		StopMovement();
+		Me->PicketHorse();
+		return true;
+	case EPA250DragoonAct::ReturnToHorse:
+		State = EBotState::Advance;
+		if (Horse) MoveToward(Me, Horse->GetActorLocation(), PA250DragoonMountReachCm * 0.5f);
+		return true;
+	case EPA250DragoonAct::Mount:
+		StopMovement();
+		Me->MountHorse(Horse, /*bForce=*/false); // waits out a reload (MountHorse refuses mid-reload)
+		return true;
+	default:
+		return false;
+	}
 }

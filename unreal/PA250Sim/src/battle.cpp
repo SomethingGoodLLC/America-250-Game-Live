@@ -65,14 +65,61 @@ std::map<std::string, int> gate_tickets_by_stores(const CampaignState& state, co
     return tickets;
 }
 
-// North Bridge is one British company, not the column on the road. That company
-// does not outnumber the provincials who actually reached the crossing.
+// Shares a clamped spend total across factions in proportion to their raw claims, so the
+// after-battle report can never claim more cartridges or powder than the magazine held.
+std::map<std::string, int> allocate_spend(const std::map<std::string, int>& raw, int total) {
+    std::map<std::string, int> out;
+    long raw_sum = 0;
+    for (const auto& kv : raw) raw_sum += std::max(0, kv.second);
+    for (const auto& kv : raw) {
+        out[kv.first] = (total > 0 && raw_sum > 0)
+                            ? static_cast<int>(static_cast<long>(std::max(0, kv.second)) * total / raw_sum)
+                            : 0;
+    }
+    int assigned = 0;
+    for (const auto& kv : out) assigned += kv.second;
+    // Hand the rounding remainder back, one at a time in faction order, never past a raw claim.
+    while (assigned < total) {
+        bool progressed = false;
+        for (auto& kv : out) {
+            if (assigned >= total) break;
+            if (kv.second < std::max(0, raw.at(kv.first))) {
+                ++kv.second;
+                ++assigned;
+                progressed = true;
+            }
+        }
+        if (!progressed) break;
+    }
+    return out;
+}
+
+// North Bridge is one British detachment, not the column on the road. It does not outnumber the
+// provincials who actually reached the crossing. The cap is shared across the column's classes in
+// proportion (largest remainder, class order breaks ties), so a mixed column sends a mixed company.
 void limit_bridge_company(std::map<std::string, int>& british, int provincial_units) {
-    auto it = british.find("line_infantry");
-    if (it == british.end()) return;
-    int company = std::min(std::max(0, it->second), 6);
+    int total = 0;
+    for (const auto& kv : british) total += std::max(0, kv.second);
+    int company = std::min(total, 6);
     if (provincial_units > 0 && company > provincial_units) company = provincial_units;
-    it->second = company;
+    if (total <= company) return;
+    std::map<std::string, int> out;
+    std::vector<std::pair<int, std::string>> rest;  // (-remainder, class)
+    int given = 0;
+    for (const auto& kv : british) {
+        const int n = std::max(0, kv.second);
+        out[kv.first] = n * company / total;
+        given += out[kv.first];
+        rest.push_back({-(n * company % total), kv.first});
+    }
+    std::sort(rest.begin(), rest.end());
+    for (const auto& r : rest) {
+        if (given >= company) break;
+        if (r.first == 0) break;
+        ++out[r.second];
+        ++given;
+    }
+    british = out;
 }
 
 }  // namespace
@@ -123,12 +170,17 @@ BattleSetup build_battle_setup(const CampaignState& state, const std::string& pr
     b.workshop_level = pit->second.workshop_level;
     b.depot_level = pit->second.depot_level;
     b.fort_level = pit->second.fort_level;
+    b.church = pit->second.church;
+    // Muster helps only a defender fighting on its own ground (UE reads this flag for the side).
+    b.militia_muster = pit->second.militia_muster && b.defender_faction == pit->second.owner;
     const int workshop_bonus =
         std::max(0, pit->second.workshop_level) * workshop_cartridges_per_level();
     // Physical magazine only. The workshop bonus raises the owner's militia tickets;
     // it is not extra cartridges the fight can spend past what the province holds.
-    const int stored_cartridges = province_ledger(state, province).cartridges;
+    const ProvinceStores& magazine = province_ledger(state, province);
+    const int stored_cartridges = magazine.cartridges;
     b.province_cartridges = stored_cartridges;
+    b.province_powder = magazine.powder;
     b.force_notes = "sourced approximation — not a precise muster roll";
     for (const auto& tag : pit->second.terrain) b.terrain_tags.push_back(tag);
     // The clock pauses on contact, so the attacker's previous province is the edge just marched.
@@ -165,6 +217,12 @@ BattleSetup build_battle_setup(const CampaignState& state, const std::string& pr
             s.morale = detail::clamp_int(s.morale + 3 * pit->second.fort_level, 0, 100);
             s.readiness = detail::clamp_int(s.readiness + 2 * pit->second.fort_level, 0, 100);
         }
+        // Meeting House: defender on its own ground only (matches the catalog text and the note).
+        if (a->faction == pit->second.owner && a->faction == b.defender_faction) {
+            const int church_morale = building_battle_morale(pit->second);
+            if (church_morale != 0)
+                s.morale = detail::clamp_int(s.morale + church_morale, 0, 100);
+        }
         // Farms/depots stock the magazine and steady the force that fights here.
         if (a->faction == pit->second.owner && logistics_ready > 0) {
             s.readiness = detail::clamp_int(s.readiness + logistics_ready, 0, 100);
@@ -196,6 +254,14 @@ BattleSetup build_battle_setup(const CampaignState& state, const std::string& pr
             "Farm L" + std::to_string(pit->second.farm_level) + "/Depot L" +
             std::to_string(pit->second.depot_level) + " " + pit->second.name +
             ": owner readiness +" + std::to_string(logistics_ready) + "; faster reinforcement");
+    }
+    if (b.defender_faction == pit->second.owner && building_battle_morale(pit->second) != 0) {
+        b.modifier_notes.push_back("Meeting House " + pit->second.name + ": defender morale +" +
+                                   std::to_string(building_battle_morale(pit->second)));
+    }
+    if (b.militia_muster) {
+        b.modifier_notes.push_back("Militia Muster " + pit->second.name +
+                                   ": extra defender militia companies");
     }
     return b;
 }
@@ -278,8 +344,12 @@ CampaignState apply_battle_result(const CampaignState& in, const BattleResult& r
     for (const auto& kv : r.cartridges_spent) total_cart_spent += std::max(0, kv.second);
     for (const auto& kv : r.powder_spent) total_powder_spent += std::max(0, kv.second);
 
-    // If UE omitted spend, derive from fielded tickets (2 cartridges per engaged, clamped).
-    if (total_cart_spent <= 0) {
+    // Prefer live shot counts from UE when present; else cartridges_spent; else fielded×2.
+    int total_shots = 0;
+    for (const auto& kv : r.shots_fired) total_shots += std::max(0, kv.second);
+    if (total_shots > 0) {
+        total_cart_spent = total_shots;
+    } else if (total_cart_spent <= 0) {
         for (const auto& fk : fielded_by_army) {
             auto it = in.armies.find(fk.first);
             if (it == in.armies.end()) continue;
@@ -309,7 +379,7 @@ CampaignState apply_battle_result(const CampaignState& in, const BattleResult& r
         it->second.readiness = detail::clamp_int(it->second.readiness - 10 - lost, 0, 100);
     }
 
-    // Morale, retreat, destruction.
+    // Morale, personal-kill bump, retreat / shatter / destruction.
     std::string retreat = r.retreat_province;
     {
         auto pit = s.provinces.find(r.province_id);
@@ -319,21 +389,43 @@ CampaignState apply_battle_result(const CampaignState& in, const BattleResult& r
                 if (kv.second.province == retreat && kv.second.faction == r.winner) ok = false;
         if (!ok) retreat = choose_retreat(in, r.province_id, loser);
     }
+    const int personal_morale = std::min(5, std::max(0, r.personal_kills));
     std::map<std::string, int> morale_delta;
+    std::string loser_fate = "none";
+    std::string retreat_to;
+    int flee_fit = 0;     // remaining fit on loser when retreating (light drop)
+    int shatter_fit = 0;  // remaining fit when shattered (heavy salvage)
     for (auto& kv : s.armies) {
         Army& a = kv.second;
         if (kv.first != pb.attacker_army && kv.first != pb.defender_army) continue;
         if (a.province != r.province_id) continue;
-        const int before = a.morale;
         if (a.faction == r.winner) {
-            a.morale = detail::clamp_int(a.morale + 5, 0, 100);
+            int bump = 5;
+            if (a.faction == s.player_faction) bump += personal_morale;
+            a.morale = detail::clamp_int(a.morale + bump, 0, 100);
         } else {
             a.morale = detail::clamp_int(a.morale - 20, 0, 100);
-            if (detail::total_units(a) > 0 && !retreat.empty()) {
+            if (a.faction == s.player_faction && personal_morale > 0)
+                a.morale = detail::clamp_int(a.morale + personal_morale, 0, 100);
+            const int fit = detail::total_units(a);
+            if (fit <= 0) {
+                loser_fate = "destroyed";
+            } else if (a.morale <= 10) {
+                loser_fate = "shattered";
+                shatter_fit = fit;
+            } else if (!retreat.empty()) {
+                loser_fate = "retreated";
+                flee_fit = fit;
+                retreat_to = retreat;
                 a.previous_province = a.province;
                 a.province = retreat;
+            } else {
+                loser_fate = "shattered";
+                shatter_fit = fit;
             }
         }
+        auto before_it = in.armies.find(kv.first);
+        const int before = before_it != in.armies.end() ? before_it->second.morale : a.morale;
         morale_delta[kv.first] = a.morale - before;
     }
     for (const std::string& aid : {pb.attacker_army, pb.defender_army}) {
@@ -342,14 +434,53 @@ CampaignState apply_battle_result(const CampaignState& in, const BattleResult& r
         it->second.path.clear();
         it->second.hours_into_edge = 0;
     }
+
+    // Salvage from enemy dead + flight/shatter (credited to battle province magazine).
+    int loser_killed = 0;
+    {
+        auto lit = r.losses.find(loser);
+        if (lit != r.losses.end())
+            for (const auto& ck : lit->second) loser_killed += std::max(0, ck.second);
+    }
+    int scav_cart = loser_killed * 1;
+    int scav_powder = loser_killed / 4;
+    int scav_muskets = loser_killed / 2;
+    if (loser_fate == "retreated") {
+        scav_cart += flee_fit / 10;
+    } else if (loser_fate == "shattered") {
+        scav_cart += shatter_fit * 2;
+        scav_powder += shatter_fit / 2;
+        scav_muskets += shatter_fit / 2;
+    }
+    scav_muskets = std::min(scav_muskets, muskets_lost);
+    scav_cart = std::max(0, scav_cart);
+    scav_powder = std::max(0, scav_powder);
+    scav_muskets = std::max(0, scav_muskets);
+    pst.cartridges += scav_cart;
+    pst.powder += scav_powder;
+    pst.muskets += scav_muskets;
+
     for (auto it = s.armies.begin(); it != s.armies.end();) {
         if ((it->first == pb.attacker_army || it->first == pb.defender_army) &&
-            detail::total_units(it->second) <= 0) {
-            detail::add_log(s, "army destroyed: " + it->first);
+            (detail::total_units(it->second) <= 0 ||
+             (it->second.faction == loser &&
+              (loser_fate == "shattered" || loser_fate == "destroyed")))) {
+            if (loser_fate == "shattered" && it->second.faction == loser)
+                detail::add_log(s, "army shattered: " + it->first);
+            else
+                detail::add_log(s, "army destroyed: " + it->first);
+            if (it->second.faction == loser && loser_fate == "none") loser_fate = "destroyed";
             it = s.armies.erase(it);
         } else {
             ++it;
         }
+    }
+    if (loser_fate == "none") {
+        // Winner wiped the field with no surviving loser army entry.
+        bool loser_alive = false;
+        for (const std::string& aid : {pb.attacker_army, pb.defender_army})
+            if (s.armies.count(aid) && s.armies.at(aid).faction == loser) loser_alive = true;
+        if (!loser_alive) loser_fate = "destroyed";
     }
 
     // Ownership: the winner takes the ground when they held the objective.
@@ -399,6 +530,17 @@ CampaignState apply_battle_result(const CampaignState& in, const BattleResult& r
         ch.province_id = r.province_id;
         detail::record_resource_change(s, ch);
     }
+    if (scav_cart > 0 || scav_powder > 0 || scav_muskets > 0) {
+        ResourceChange ch;
+        ch.reason = "Scavenged the field at " + r.province_id + ": +" + std::to_string(scav_cart) +
+                    " cartridges, +" + std::to_string(scav_powder) + " powder, +" +
+                    std::to_string(scav_muskets) + " muskets";
+        ch.cartridges = scav_cart;
+        ch.powder = scav_powder;
+        ch.muskets = scav_muskets;
+        ch.province_id = r.province_id;
+        detail::record_resource_change(s, ch);
+    }
 
     std::string ownership_line;
     if (ownership_reason == "held_objective") {
@@ -426,6 +568,12 @@ CampaignState apply_battle_result(const CampaignState& in, const BattleResult& r
     report.wounded = r.wounded;
     report.ownership_reason = ownership_reason;
     report.defender_reward_support = defender_reward;
+    report.personal_kills = std::max(0, r.personal_kills);
+    report.retreat_to = retreat_to;
+    report.loser_fate = loser_fate;
+    report.scavenged_cartridges = scav_cart;
+    report.scavenged_powder = scav_powder;
+    report.scavenged_muskets = scav_muskets;
     if (defender_reward > 0)
         report.change_reasons.push_back("Defended " + s.provinces.at(r.province_id).name + ": +5 Support");
     report.change_reasons.push_back(ownership_line);
@@ -435,25 +583,46 @@ CampaignState apply_battle_result(const CampaignState& in, const BattleResult& r
                                         std::to_string(total_powder_spent) + " powder, -" +
                                         std::to_string(muskets_lost) + " muskets");
     }
+    if (scav_cart || scav_powder || scav_muskets) {
+        report.change_reasons.push_back("Scavenged the field: +" + std::to_string(scav_cart) +
+                                        " cart, +" + std::to_string(scav_powder) + " powder, +" +
+                                        std::to_string(scav_muskets) + " muskets");
+    }
+    if (personal_morale > 0)
+        report.change_reasons.push_back("Your marksmanship: +" + std::to_string(personal_morale) +
+                                        " Morale (" + std::to_string(report.personal_kills) + " kills)");
+    if (loser_fate == "retreated" && !retreat_to.empty()) {
+        const std::string dest =
+            s.provinces.count(retreat_to) ? s.provinces.at(retreat_to).name : retreat_to;
+        report.change_reasons.push_back("Loser retreated to " + dest);
+    } else if (loser_fate == "shattered") {
+        report.change_reasons.push_back("Loser army shattered and dispersed");
+    } else if (loser_fate == "destroyed") {
+        report.change_reasons.push_back("Loser army destroyed");
+    }
     report.change_reasons.push_back("Gold unchanged by battle (" + std::to_string(gold_before) + ")");
-    // Split spent across sides for the report (proportional to fielded, clamped total).
+    // Split the actual (stock-clamped) spend across sides for the report: raw claims come
+    // from shots, then cartridges_spent, else the fielded share, scaled to what was deducted.
     int fielded_all = 0;
     for (const auto& fk : fielded_by_army) fielded_all += fk.second;
+    std::map<std::string, int> raw_cart, raw_powder;
     for (const std::string& aid : {pb.attacker_army, pb.defender_army}) {
         auto it = in.armies.find(aid);
         if (it == in.armies.end()) continue;
         const int engaged = fielded_by_army.count(aid) ? fielded_by_army.at(aid) : 0;
         int cart = 0;
-        if (r.cartridges_spent.count(it->second.faction))
+        if (r.shots_fired.count(it->second.faction))
+            cart = std::max(0, r.shots_fired.at(it->second.faction));
+        else if (r.cartridges_spent.count(it->second.faction))
             cart = std::max(0, r.cartridges_spent.at(it->second.faction));
         else if (fielded_all > 0)
             cart = total_cart_spent * engaged / fielded_all;
-        report.cartridges_spent[it->second.faction] = cart;
-        int pwd = 0;
-        if (r.powder_spent.count(it->second.faction))
-            pwd = std::max(0, r.powder_spent.at(it->second.faction));
-        report.powder_spent[it->second.faction] = pwd;
+        raw_cart[it->second.faction] = cart;
+        raw_powder[it->second.faction] =
+            r.powder_spent.count(it->second.faction) ? std::max(0, r.powder_spent.at(it->second.faction)) : 0;
     }
+    report.cartridges_spent = allocate_spend(raw_cart, total_cart_spent);
+    report.powder_spent = allocate_spend(raw_powder, total_powder_spent);
     report.morale_delta = morale_delta;
     s.progress.last_battle_report = report;
 

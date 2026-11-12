@@ -44,10 +44,16 @@ void URFHealthComponent::OnTakeAnyDamage(AActor* DamagedActor, float Damage, con
 		LastDamageLocation = InstigatedBy->GetPawn()->GetActorLocation();
 		bHasLastDamageLocation = true;
 	}
-	CurrentHealth = FMath::Clamp(CurrentHealth - Applied, 0.f, MaxHealth);
+	const float Floor = FMath::Min(MinHealthAfterNextDamage, CurrentHealth);
+	MinHealthAfterNextDamage = 0.f;
+	CurrentHealth = FMath::Clamp(CurrentHealth - Applied, FMath::Max(0.f, Floor), MaxHealth);
 	if (CurrentHealth <= 0.f)
 	{
 		LastInstigator = InstigatedBy;
 		OnDied.Broadcast(GetOwner());
+	}
+	else
+	{
+		OnWounded.Broadcast(Applied, bHasLastDamageLocation ? LastDamageLocation : GetOwner()->GetActorLocation());
 	}
 }

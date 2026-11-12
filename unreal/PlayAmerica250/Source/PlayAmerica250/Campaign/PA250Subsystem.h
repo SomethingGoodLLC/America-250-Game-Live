@@ -49,6 +49,8 @@ public:
 	static FString ScenarioPath();
 	static FString CorrespondenceCatalogPath();
 	static FString LogisticsTuningPath();
+	static FString BuildingsCatalogPath();
+	static FString ProvinceSizesPath();
 	static FString SavePath();
 	bool EnsureCorrespondenceCatalog(FString& OutError);
 	static FString TracePath();
@@ -121,6 +123,41 @@ public:
 							  int32 Paper, FString& OutError);
 	bool DevelopProvince(const FString& ProvinceId, const FString& Track, FString& OutError);
 	FString GetProvinceDevelopmentJson() const;
+	/** City View: timed build/upgrade, demolish, cancel. Gold via resource_changes + HudEpoch. */
+	UFUNCTION(BlueprintCallable, Category = "PA250|CityView")
+	bool StartConstruction(const FString& ProvinceId, const FString& BuildingId, FString& OutError);
+	UFUNCTION(BlueprintCallable, Category = "PA250|CityView")
+	bool CancelConstruction(const FString& ProvinceId, const FString& BuildingId, FString& OutError);
+	UFUNCTION(BlueprintCallable, Category = "PA250|CityView")
+	bool DemolishBuilding(const FString& ProvinceId, const FString& BuildingId, FString& OutError);
+	/** Treasury: borrow / repay one loan step; the budget the 1st of the month will settle. */
+	UFUNCTION(BlueprintCallable, Category = "PA250|Treasury")
+	bool TakeLoan(FString& OutError);
+	UFUNCTION(BlueprintCallable, Category = "PA250|Treasury")
+	bool RepayLoan(FString& OutError);
+	UFUNCTION(BlueprintPure, Category = "PA250|Treasury")
+	FString GetTreasuryJson() const;
+	UFUNCTION(BlueprintPure, Category = "PA250|Treasury")
+	int32 GetMonthlyNetGold() const;
+	/** Raise a company in a town the player holds / send a mustering company home (full return). */
+	UFUNCTION(BlueprintCallable, Category = "PA250|CityView")
+	bool StartRecruitment(const FString& ProvinceId, const FString& UnitId, FString& OutError);
+	UFUNCTION(BlueprintCallable, Category = "PA250|CityView")
+	bool CancelRecruitment(const FString& ProvinceId, FString& OutError);
+	UFUNCTION(BlueprintPure, Category = "PA250|CityView")
+	FString GetRecruitmentPreview(const FString& ProvinceId, const FString& UnitId) const;
+	UFUNCTION(BlueprintPure, Category = "PA250|CityView")
+	FString GetCityViewJson(const FString& ProvinceId) const;
+	UFUNCTION(BlueprintPure, Category = "PA250|CityView")
+	FString GetBuildingPreview(const FString& ProvinceId, const FString& BuildingId) const;
+	UFUNCTION(BlueprintPure, Category = "PA250|CityView")
+	int32 GetProvinceSlotCount(const FString& ProvinceId) const;
+	/** Newest sim ledger line ("Build Fort, Lexington: -45 gold"); the City View status echoes it so
+	 *  the panel, the ledger and the top bar always quote the same amount. */
+	UFUNCTION(BlueprintPure, Category = "PA250|CityView")
+	FString GetLastResourceChangeReason() const;
+	/** Sim tuning + City View catalog/sizes. Each file is optional: the sim keeps its defaults. */
+	static void LoadSimDataFiles();
 	bool StartCartridgeCraft(const FString& ProvinceId, const FString& ArmyId, int32 Workers, int32 Powder,
 							 int32 Lead, int32 Paper, FString& OutError);
 	FString GetLastBattleReportJson() const;

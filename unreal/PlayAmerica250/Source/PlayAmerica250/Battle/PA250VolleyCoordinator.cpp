@@ -132,6 +132,12 @@ bool UPA250VolleyCoordinator::VolleyReadyToCall(int32 SafeReady, int32 LiveNum, 
 	return bFormed || NotReadyTime >= MaxWaitSeconds;
 }
 
+float UPA250VolleyCoordinator::VolleyShotDelay(int32 OrderFromRight, float RollingFileSeconds, float JitterSeconds, float Rand01)
+{
+	return FMath::Max(0, OrderFromRight) * FMath::Max(0.f, RollingFileSeconds)
+		+ FMath::Max(0.f, JitterSeconds) * FMath::Clamp(Rand01, 0.f, 1.f);
+}
+
 bool UPA250VolleyCoordinator::ShouldDischargePending(int32 SquadEpoch, int32 EntryEpoch, bool bAlive, bool bCanFire, bool bLaneClear, bool bTargetAlive)
 {
 	return SquadEpoch == EntryEpoch && bAlive && bCanFire && bLaneClear && bTargetAlive;
@@ -194,6 +200,7 @@ void UPA250VolleyCoordinator::CancelVolleyOrders(FSquad& Sq, const TCHAR* Reason
 void UPA250VolleyCoordinator::DischargeOne(ARFCharacter* Shooter, ARFCharacter* Enemy, const FVector& AimAt)
 {
 	if (!Shooter || !Shooter->Musket || !Shooter->Musket->CanFire()) return;
+	if (Shooter->IsPlayerControlled()) return; // a man the player has taken over fires when the player says
 	const float Dist = FVector::Dist(Shooter->GetActorLocation(), AimAt);
 	RecordEngagement(Dist);
 	++Engagements;
@@ -223,12 +230,23 @@ void UPA250VolleyCoordinator::ScheduleVolley(FSquad& Sq, const TArray<ARFCharact
 	Sq.PendingShots.Reset();
 	if (!GameMode.IsValid() || !GameMode->GetWorld()) return;
 	const UPA250BotTuning* BT = GameMode->GetBotTuning();
-	const float Jitter = BT ? FMath::Max(0.f, BT->Values.VolleyFireJitterSeconds) : 0.1f;
+	// Drill shows in the sound of the volley: regulars crash together, the less trained fire raggedly.
+	const float Jitter = (BT ? FMath::Max(0.f, BT->Values.VolleyFireJitterSeconds) : 0.1f) * Sq.Training.VolleyRaggedness;
+	// The opening volley of a fight is fired together; after it a drilled line keeps up a rolling fire.
+	const float Rolling = Sq.VolleysThisFight > 0 ? Sq.Training.RollingFireFileSeconds : 0.f;
 	const float EngageMax = BT ? BT->Values.EngageMaxCm : 8000.f;
 	const float Now = GameMode->GetWorld()->GetTimeSeconds();
 	UWorld* World = GameMode->GetWorld();
 
-	for (ARFCharacter* C : EligibleShooters)
+	// Right of the line first (X = lateral, right +, as in FormationOffsets).
+	const FVector Right(-Sq.Facing.Y, Sq.Facing.X, 0.f);
+	TArray<ARFCharacter*> Shooters = EligibleShooters;
+	Shooters.RemoveAll([](const ARFCharacter* C) { return C == nullptr; });
+	Shooters.StableSort([&](const ARFCharacter& A, const ARFCharacter& B) {
+		return FVector::DotProduct(A.GetActorLocation(), Right) > FVector::DotProduct(B.GetActorLocation(), Right);
+	});
+
+	for (ARFCharacter* C : Shooters)
 	{
 		if (!C || C->IsDead() || !C->Musket || !C->Musket->CanFire()) continue;
 		ARFCharacter* Enemy = ResolveVolleyTarget(Sq, C, EngageMax);
@@ -240,10 +258,11 @@ void UPA250VolleyCoordinator::ScheduleVolley(FSquad& Sq, const TArray<ARFCharact
 		P.Shooter = C;
 		P.Target = Enemy;
 		P.AimPoint = AimAt;
-		P.FireAtTime = Now + (Jitter > 0.f ? FMath::FRandRange(0.f, Jitter) : 0.f);
+		P.FireAtTime = Now + VolleyShotDelay(Sq.PendingShots.Num(), Rolling, Jitter, Jitter > 0.f ? FMath::FRand() : 0.f);
 		P.Epoch = Sq.VolleyEpoch;
 		Sq.PendingShots.Add(P);
 	}
+	if (Sq.PendingShots.Num() > 0) ++Sq.VolleysThisFight;
 	Sq.DebugReason = Sq.PendingShots.Num() > 0 ? TEXT("firing") : TEXT("waiting_lane");
 }
 
@@ -1141,6 +1160,7 @@ void UPA250VolleyCoordinator::TickFormation(FSquad& Sq, const TArray<ARFCharacte
 			: TEXT("cancelled_contact");
 		if (Sq.Stage != EVolleyCall::None || Sq.PendingShots.Num() > 0) CancelVolleyOrders(Sq, Why);
 		else { Sq.NotReadyTime = 0.f; Sq.DebugReason = Why; }
+		if (!Sq.bEngaged) Sq.VolleysThisFight = 0; // the next contact opens with a full volley again
 	}
 	else
 	{
@@ -1336,7 +1356,9 @@ FString UPA250VolleyCoordinator::MoraleTraceJson() const
 
 bool UPA250VolleyCoordinator::ShouldJoinSquad(const ARFCharacter* C)
 {
-	return C && !C->IsDead() && !C->FactionId.IsNone() && !C->IsPlayerControlled() && !Cast<APlayerController>(C->GetController());
+	// Dragoons ride and fight on their own (APA250BotController::TickDragoon), never in a volley squad.
+	return C && !C->IsDead() && !C->FactionId.IsNone() && !C->IsPlayerControlled() && !Cast<APlayerController>(C->GetController())
+		&& C->UnitClass != TEXT("dragoon");
 }
 
 void UPA250VolleyCoordinator::Tick(float DeltaSeconds)

@@ -53,6 +53,8 @@ SPRITES = (
     # Opaque columns: 225-1534 (the column), 1576-1805 (a lone straggler); cut the gap.
     Sprite("Marching_Infantry.png", "army_british_marching.png", keep_x=(0, 1555)),
     Sprite("Firing_Infantry.png", "army_british_firing.png"),
+    # Painted militia company (supplied 2026-11-11): officer pointing, four men aiming.
+    Sprite("Massachusetts_Militia.png", "army_militia.png"),
 )
 
 

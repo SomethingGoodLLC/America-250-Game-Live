@@ -304,13 +304,82 @@ std::vector<std::string> CampaignController::approve_transfer_order(
 
 std::vector<std::string> CampaignController::develop_province_action(const std::string& province_id,
                                                                      const std::string& track) {
+    return start_construction_action(province_id, track);
+}
+
+std::vector<std::string> CampaignController::start_construction_action(const std::string& province_id,
+                                                                       const std::string& building_id) {
     if (!started_ || flow_ != Flow::Campaign) return {detail::err("not_in_campaign")};
     if (state_.pending_battle.active) return {detail::err("battle_pending")};
     std::string error;
-    CampaignState next = develop_province(state_, province_id, track, error);
+    CampaignState next = start_construction(state_, province_id, building_id, error);
     if (!error.empty()) return {detail::err(error)};
     state_ = next;
-    record("develop", province_id + ":" + track);
+    record("construct", province_id + ":" + building_id);
+    return {};
+}
+
+std::vector<std::string> CampaignController::cancel_construction_action(const std::string& province_id,
+                                                                        const std::string& building_id) {
+    if (!started_ || flow_ != Flow::Campaign) return {detail::err("not_in_campaign")};
+    std::string error;
+    CampaignState next = cancel_construction(state_, province_id, building_id, error);
+    if (!error.empty()) return {detail::err(error)};
+    state_ = next;
+    record("cancel_construct", province_id + ":" + building_id);
+    return {};
+}
+
+std::vector<std::string> CampaignController::start_recruitment_action(const std::string& province_id,
+                                                                      const std::string& unit_id) {
+    if (!started_ || flow_ != Flow::Campaign) return {detail::err("not_in_campaign")};
+    std::string error;
+    CampaignState next = start_recruitment(state_, province_id, unit_id, error);
+    if (!error.empty()) return {detail::err(error)};
+    state_ = next;
+    record("muster", province_id + ":" + unit_id);
+    return {};
+}
+
+std::vector<std::string> CampaignController::cancel_recruitment_action(const std::string& province_id) {
+    if (!started_ || flow_ != Flow::Campaign) return {detail::err("not_in_campaign")};
+    std::string error;
+    CampaignState next = cancel_recruitment(state_, province_id, error);
+    if (!error.empty()) return {detail::err(error)};
+    state_ = next;
+    record("cancel_muster", province_id);
+    return {};
+}
+
+std::vector<std::string> CampaignController::take_loan_action() {
+    if (!started_ || flow_ != Flow::Campaign) return {detail::err("not_in_campaign")};
+    std::string error;
+    CampaignState next = take_loan(state_, error);
+    if (!error.empty()) return {detail::err(error)};
+    state_ = next;
+    record("borrow", "");
+    return {};
+}
+
+std::vector<std::string> CampaignController::repay_loan_action() {
+    if (!started_ || flow_ != Flow::Campaign) return {detail::err("not_in_campaign")};
+    std::string error;
+    CampaignState next = repay_loan(state_, error);
+    if (!error.empty()) return {detail::err(error)};
+    state_ = next;
+    record("repay", "");
+    return {};
+}
+
+std::vector<std::string> CampaignController::demolish_building_action(const std::string& province_id,
+                                                                     const std::string& building_id) {
+    if (!started_ || flow_ != Flow::Campaign) return {detail::err("not_in_campaign")};
+    if (state_.pending_battle.active) return {detail::err("battle_pending")};
+    std::string error;
+    CampaignState next = demolish_building(state_, province_id, building_id, error);
+    if (!error.empty()) return {detail::err(error)};
+    state_ = next;
+    record("demolish", province_id + ":" + building_id);
     return {};
 }
 

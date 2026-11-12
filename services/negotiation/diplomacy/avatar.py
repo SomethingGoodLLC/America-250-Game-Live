@@ -42,6 +42,35 @@ DEFAULT_ELEVENLABS_VOICE = (
     "JBFqnCBsd6RMkjVDRZzb"  # George (premade) when ELEVENLABS_VOICE_ID is unset
 )
 DEFAULT_ELEVENLABS_MODEL = "eleven_multilingual_v2"
+# This account allows 3 parallel requests; a reply streamed as 6 sentences got a 429 on the overflow and that
+# sentence fell back to macOS `say` (a different voice mid-reply). Queue here instead, and retry a 429.
+_ELEVEN_SLOTS: dict[Any, asyncio.Semaphore] = {}
+TAIL_SILENCE_S = 0.08  # ElevenLabs pads each clip with ~0.35 s of silence; with the room's 0.25 s drain wait
+# that left ~0.6 s holes between the sentences of one reply.
+
+
+def _eleven_slot() -> asyncio.Semaphore:
+    loop = asyncio.get_running_loop()  # one semaphore per event loop (tests run several)
+    if loop not in _ELEVEN_SLOTS:
+        _ELEVEN_SLOTS[loop] = asyncio.Semaphore(max(1, int(os.getenv("ELEVENLABS_CONCURRENCY", "2"))))
+    return _ELEVEN_SLOTS[loop]
+
+
+def trim_tail_silence(pcm: bytes, rate: int, keep_s: float = TAIL_SILENCE_S) -> bytes:
+    """Cut trailing near-silence from 16-bit mono PCM, keeping `keep_s`. The start is untouched, so the
+    character timings used for lip-sync stay valid."""
+    import array
+
+    a = array.array("h")
+    a.frombytes(pcm[: len(pcm) & ~1])
+    peak = max((abs(v) for v in a[:: max(1, len(a) // 20000)]), default=0)
+    floor = max(200, int(peak * 0.02))
+    end = len(a)
+    while end > 0 and abs(a[end - 1]) <= floor:
+        end -= 1
+    if end == 0:
+        return pcm
+    return a[: min(len(a), end + int(keep_s * rate))].tobytes()
 
 
 @dataclass
@@ -163,13 +192,18 @@ async def _tts_elevenlabs(text: str, wav_path: Path, voice: EnvoyVoice, previous
         body["previous_text"] = previous_text
     timeout = float(os.getenv("ELEVENLABS_TIMEOUT", "30"))
     try:
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            r = await client.post(
-                ELEVENLABS_URL.format(voice_id=voice.voice_id),
-                params={"output_format": f"pcm_{ELEVENLABS_RATE}"},
-                headers={"xi-api-key": key},
-                json=body,
-            )
+        async with _eleven_slot(), httpx.AsyncClient(timeout=timeout) as client:
+            for attempt in range(4):
+                r = await client.post(
+                    ELEVENLABS_URL.format(voice_id=voice.voice_id),
+                    params={"output_format": f"pcm_{ELEVENLABS_RATE}"},
+                    headers={"xi-api-key": key},
+                    json=body,
+                )
+                if r.status_code != 429 or attempt == 3:
+                    break
+                logger.info("ElevenLabs busy (429); retrying", attempt=attempt + 1, envoy=voice.envoy_id)
+                await asyncio.sleep(0.4 * (attempt + 1))
     except httpx.HTTPError as e:
         logger.warning(
             "ElevenLabs TTS failed",
@@ -198,11 +232,12 @@ async def _tts_elevenlabs(text: str, wav_path: Path, voice: EnvoyVoice, previous
     if len(pcm) < 2:
         logger.warning("ElevenLabs TTS failed", reason="empty audio", body=r.text[:300])
         return None
+    pcm = trim_tail_silence(pcm, ELEVENLABS_RATE)
     with wave.open(str(wav_path), "wb") as w:
         w.setnchannels(1)
         w.setsampwidth(2)
         w.setframerate(ELEVENLABS_RATE)
-        w.writeframes(pcm[: len(pcm) & ~1])
+        w.writeframes(pcm)
     return {"alignment": data.get("alignment")}
 
 

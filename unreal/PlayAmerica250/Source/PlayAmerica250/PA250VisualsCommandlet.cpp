@@ -192,6 +192,32 @@ int32 UPA250VisualsCommandlet::Main(const FString& Params)
 					TEXT("hit reaction: struck from the front, the body rocks back over planted feet"));
 				Check(BonesValid(), TEXT("hit reaction: every body bone is finite with a unit rotation"));
 
+				// Clubbed musket: hands up over the shoulder, then driven down and forward.
+				FPA250MeleePose Raised = Dirs;
+				Raised.Raise = 1.f;
+				Anim->SetMeleePose(Raised);
+				Refresh();
+				const FVector HandUp = At(TEXT("hand_r"));
+				const bool bRaisedValid = BonesValid();
+				FPA250MeleePose Down = Dirs;
+				Down.Chop = 1.f;
+				Anim->SetMeleePose(Down);
+				Refresh();
+				const FVector HandDown = At(TEXT("hand_r"));
+				UE_LOG(LogTemp, Display, TEXT("PA250.Visuals measure club (cm, vs idle): hand_r raised %s  hand_r down %s"), *(HandUp - Hand0).ToCompactString(), *(HandDown - Hand0).ToCompactString());
+				Check(HandUp.Z - Hand0.Z > 40.f && HandDown.X - Hand0.X > 40.f && HandUp.Z - HandDown.Z > 20.f, TEXT("club: hands go up over the shoulder, then down and forward"));
+				Check(bRaisedValid && BonesValid(), TEXT("club: every body bone is finite with a unit rotation"));
+
+				// Reload drill: the right hand goes where the drill sends it (here: up to the mouth).
+				FPA250MeleePose Bite = Dirs;
+				Bite.Reload = 1.f;
+				Bite.ReloadRightHandCS = Dirs.ForwardCS * 13.f + Dirs.RightCS * 3.f + FVector(0, 0, 156.f);
+				Anim->SetMeleePose(Bite);
+				Refresh();
+				const FVector BiteWant = British->GetActorTransform().InverseTransformPosition(M->GetComponentTransform().TransformPosition(Bite.ReloadRightHandCS));
+				UE_LOG(LogTemp, Display, TEXT("PA250.Visuals measure reload: hand_r %.1f cm from the mouth target"), FVector::Dist(At(TEXT("hand_r")), BiteWant));
+				Check(FVector::Dist(At(TEXT("hand_r")), BiteWant) < 6.f && BonesValid(), TEXT("reload: the right hand reaches the drill's target (bite the cartridge), bones valid"));
+
 				Anim->SetMeleePose(FPA250MeleePose());
 				Refresh();
 				Check(FVector::Dist(At(TEXT("hand_r")), Hand0) < 3.f && FVector::Dist(At(TEXT("pelvis")), Pelvis0) < 3.f, TEXT("melee pose: no weights leaves the clip pose alone"));

@@ -618,8 +618,10 @@
    "faction": "british",
    "province": "boston",
    "units": {
-    "line_infantry": 24,
-    "militia": 0
+    "grenadier": 5,
+    "light_infantry": 6,
+    "line_infantry": 12,
+    "officer": 1
    },
    "morale": 80
   },
@@ -630,7 +632,8 @@
    "province": "concord",
    "units": {
     "line_infantry": 4,
-    "militia": 18
+    "militia": 17,
+    "officer": 1
    },
    "sick": {},
    "wounded": {},

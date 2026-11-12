@@ -1311,7 +1311,10 @@ async def ws_control(ws: WebSocket, sid: str):
         # Pre-rendered lip-synced lines (scripts/render_stock_lines.py) the room plays as video.
         faction = sess["diplomacy_context"].faction
         stock = VIDEO_STOCK_DIR
-        clips = {p.stem.split("_", 1)[1]: str(p) for p in sorted(stock.glob(f"{faction}_*.mp4"))} if stock.is_dir() else {}
+        # Off by default: the existing clips were rendered from the retired painted portrait, and the envoy is
+        # now a living figure at the table. PA250_STOCK_VIDEO=1 offers them again once re-rendered.
+        use_stock = os.getenv("PA250_STOCK_VIDEO", "0") == "1" and stock.is_dir()
+        clips = {p.stem.split("_", 1)[1]: str(p) for p in sorted(stock.glob(f"{faction}_*.mp4"))} if use_stock else {}
         texts = {name: (stock / f"{faction}_{name}.txt").read_text().strip() for name in clips
                  if (stock / f"{faction}_{name}.txt").exists()}
         await send_yaml({"type": "envoy_stock", "clips": clips, "texts": texts})

@@ -343,6 +343,165 @@ static void test_battle_apply() {
     CHECK(after.provinces.at("boston").owner == "british");
 }
 
+static void test_battle_retreat_destination() {
+    CampaignState s = fresh();
+    s.armies["british_regulars"].province = "lexington";
+    s.armies["continental_militia"].province = "lexington";
+    s.armies["continental_militia"].previous_province = "lincoln";
+    s.armies["continental_militia"].morale = 70;
+    s.province_stores["lexington"].muskets = 20;
+    s.province_stores["lexington"].cartridges = 80;
+    s.pending_battle = {true, "lexington", "british_regulars", "continental_militia"};
+    BattleResult r;
+    r.province_id = "lexington";
+    r.winner = kBritish;
+    r.objective_holder = kBritish;
+    r.losses[kContinental]["militia"] = 2;
+    r.retreat_province = "lincoln";
+    CampaignState after = apply_battle_result(s, r);
+    CHECK(after.armies.count("continental_militia") == 1);
+    CHECK(after.armies.at("continental_militia").province == "lincoln");
+    CHECK(after.progress.last_battle_report.loser_fate == "retreated");
+    CHECK(after.progress.last_battle_report.retreat_to == "lincoln");
+}
+
+static void test_battle_morale_shatter() {
+    CampaignState s = fresh();
+    s.armies["british_regulars"].province = "lexington";
+    s.armies["continental_militia"].province = "lexington";
+    s.armies["continental_militia"].morale = 25;  // -20 → 5 ≤ 10 → shatter
+    s.province_stores["lexington"].muskets = 30;
+    s.province_stores["lexington"].cartridges = 100;
+    s.province_stores["lexington"].powder = 20;
+    const int cart_before = s.province_stores.at("lexington").cartridges;
+    s.pending_battle = {true, "lexington", "british_regulars", "continental_militia"};
+    BattleResult r;
+    r.province_id = "lexington";
+    r.winner = kBritish;
+    r.objective_holder = kBritish;
+    r.losses[kContinental]["militia"] = 2;
+    CampaignState after = apply_battle_result(s, r);
+    CHECK(after.armies.count("continental_militia") == 0);
+    CHECK(after.progress.last_battle_report.loser_fate == "shattered");
+    CHECK(after.progress.last_battle_report.scavenged_cartridges > 0);
+    bool saw_shatter = false;
+    for (const auto& line : after.log)
+        if (line.find("army shattered:") != std::string::npos) saw_shatter = true;
+    CHECK(saw_shatter);
+    CHECK(after.province_stores.at("lexington").cartridges > cart_before - 200);
+}
+
+static void test_battle_personal_kills_morale() {
+    CampaignState s = fresh();
+    s.armies["british_regulars"].province = "lexington";
+    s.armies["continental_militia"].province = "lexington";
+    const int morale0 = s.armies.at("continental_militia").morale;
+    s.province_stores["lexington"].muskets = 20;
+    s.province_stores["lexington"].cartridges = 80;
+    s.pending_battle = {true, "lexington", "british_regulars", "continental_militia"};
+    BattleResult r;
+    r.province_id = "lexington";
+    r.winner = kContinental;
+    r.objective_holder = kContinental;
+    r.losses[kBritish]["line_infantry"] = 1;
+    r.personal_kills = 4;
+    CampaignState after = apply_battle_result(s, r);
+    CHECK(after.armies.at("continental_militia").morale == morale0 + 5 + 4);
+    CHECK(after.progress.last_battle_report.personal_kills == 4);
+    CHECK(after.progress.last_battle_report.morale_delta.at("continental_militia") == 9);
+    // Cap at +5 from personal kills.
+    s.pending_battle = {true, "lexington", "british_regulars", "continental_militia"};
+    r.personal_kills = 20;
+    CampaignState capped = apply_battle_result(s, r);
+    CHECK(capped.armies.at("continental_militia").morale == morale0 + 5 + 5);
+}
+
+static void test_battle_scavenge_from_losses() {
+    CampaignState s = fresh();
+    s.armies["british_regulars"].province = "lexington";
+    s.armies["continental_militia"].province = "lexington";
+    s.armies["continental_militia"].previous_province = "lincoln";
+    s.armies["continental_militia"].morale = 70;
+    s.province_stores["lexington"].muskets = 40;
+    s.province_stores["lexington"].cartridges = 100;
+    s.province_stores["lexington"].powder = 40;
+    const int muskets_before = s.province_stores.at("lexington").muskets;
+    const int cart_before = s.province_stores.at("lexington").cartridges;
+    const int powder_before = s.province_stores.at("lexington").powder;
+    s.pending_battle = {true, "lexington", "british_regulars", "continental_militia"};
+    BattleResult r;
+    r.province_id = "lexington";
+    r.winner = kBritish;
+    r.objective_holder = kBritish;
+    r.losses[kContinental]["militia"] = 4;
+    r.cartridges_spent[kBritish] = 10;
+    r.cartridges_spent[kContinental] = 10;
+    r.retreat_province = "lincoln";
+    // After losses: fit = 22-4 = 18 → flee drop cart = 18/10 = 1
+    // From killed: cart 4, powder 1, muskets 2
+    CampaignState after = apply_battle_result(s, r);
+    const auto& br = after.progress.last_battle_report;
+    CHECK(br.loser_fate == "retreated");
+    CHECK(br.scavenged_cartridges == 4 + 1);
+    CHECK(br.scavenged_powder == 1);
+    CHECK(br.scavenged_muskets == 2);
+    // Net magazine: -20 cart spent +5 scavenged; -0 powder spent +1 scavenged; -4 muskets +2 scavenged
+    CHECK(after.province_stores.at("lexington").cartridges == cart_before - 20 + 5);
+    CHECK(after.province_stores.at("lexington").powder == powder_before + 1);
+    CHECK(after.province_stores.at("lexington").muskets == muskets_before - 4 + 2);
+}
+
+static void test_battle_shots_spend_report() {
+    CampaignState s = fresh();
+    s.armies["british_regulars"].province = "lexington";
+    s.armies["continental_militia"].province = "lexington";
+    s.armies["continental_militia"].previous_province = "lincoln";
+    s.armies["continental_militia"].morale = 70;
+    s.province_stores["lexington"].muskets = 40;
+    s.province_stores["lexington"].cartridges = 30;  // less than the shots fired
+    s.province_stores["lexington"].powder = 5;       // less than the misfire waste claimed
+    s.pending_battle = {true, "lexington", "british_regulars", "continental_militia"};
+    BattleResult r;
+    r.province_id = "lexington";
+    r.winner = kBritish;
+    r.objective_holder = kBritish;
+    r.losses[kContinental]["militia"] = 2;
+    r.shots_fired[kBritish] = 100;
+    r.shots_fired[kContinental] = 50;
+    r.powder_spent[kBritish] = 10;
+    r.powder_spent[kContinental] = 10;
+    r.personal_kills = 3;  // the player lost, but his shots still steady his own army
+    r.retreat_province = "lincoln";
+    CampaignState after = apply_battle_result(s, r);
+    const auto& br = after.progress.last_battle_report;
+    // The magazine held 30 cartridges: the AAR cannot claim 150 were spent from it.
+    int report_cart = 0;
+    for (const auto& kv : br.cartridges_spent) report_cart += kv.second;
+    CHECK(report_cart == 30);
+    CHECK(br.cartridges_spent.at(kBritish) == 20);       // proportional share of the clamped total
+    CHECK(br.cartridges_spent.at(kContinental) == 10);
+    int report_powder = 0;
+    for (const auto& kv : br.powder_spent) report_powder += kv.second;
+    CHECK(report_powder == 5);
+    CHECK(after.province_stores.at("lexington").cartridges == br.scavenged_cartridges);
+    CHECK(after.province_stores.at("lexington").powder == br.scavenged_powder);
+    // Loser-side personal kills: -20 for the loss, +3 for his own kills.
+    CHECK(after.armies.at("continental_militia").morale == 70 - 20 + 3);
+    CHECK(br.personal_kills == 3);
+    // The new report/result fields survive the save and the wire formats.
+    CampaignState loaded = deserialize(serialize(after));
+    CHECK(loaded.progress.last_battle_report.personal_kills == 3);
+    CHECK(loaded.progress.last_battle_report.loser_fate == "retreated");
+    CHECK(loaded.progress.last_battle_report.retreat_to == "lincoln");
+    CHECK(loaded.progress.last_battle_report.scavenged_cartridges == br.scavenged_cartridges);
+    BattleResult wire = result_from_json(result_to_json(r));
+    CHECK(wire.personal_kills == 3);
+    CHECK(wire.shots_fired.at(kBritish) == 100);
+    const std::string report_json = report_to_json(br);
+    CHECK(report_json.find("\"loser_fate\":\"retreated\"") != std::string::npos);
+    CHECK(report_json.find("\"scavenged_cartridges\":") != std::string::npos);
+}
+
 static void test_shared_clause_vectors() {
     const std::string dir = g_vector_dir();
     DIR* d = opendir(dir.c_str());
@@ -582,10 +741,8 @@ static void test_concord_bridge_company() {
     late.pending_battle = {true, "concord", "british_regulars", "continental_militia"};
     late.armies.at("british_regulars").province = "concord";
     late.armies.at("continental_militia").province = "concord";
-    late.armies.at("british_regulars").units["line_infantry"] = 17;
-    late.armies.at("british_regulars").units["militia"] = 0;
-    late.armies.at("continental_militia").units["line_infantry"] = 1;
-    late.armies.at("continental_militia").units["militia"] = 4;
+    late.armies.at("british_regulars").units = {{"line_infantry", 17}, {"militia", 0}};
+    late.armies.at("continental_militia").units = {{"line_infantry", 1}, {"militia", 4}};
     late.province_stores["concord"].muskets = 40;
     late.province_stores["concord"].cartridges = 80;
     BattleSetup worn = build_battle_setup(late, "concord");
@@ -606,7 +763,17 @@ static void test_concord_bridge_company() {
     early.province_stores["concord"].muskets = 40;
     early.province_stores["concord"].cartridges = 80;
     BattleSetup open = build_battle_setup(early, "concord");
-    CHECK(open.sides.at("british").tickets.at("line_infantry") == 6);
+    // The opening column is mixed (line, grenadiers, light infantry, an officer): the company of six
+    // is drawn from each in proportion, and every class it sends is one the column has.
+    int company = 0;
+    for (const auto& kv : open.sides.at("british").tickets) {
+        company += kv.second;
+        CHECK(kv.second <= early.armies.at("british_regulars").units.at(kv.first));
+    }
+    CHECK(company == 6);
+    CHECK(open.sides.at("british").tickets.at("line_infantry") == 3);
+    CHECK(open.sides.at("british").tickets.at("grenadier") == 1);
+    CHECK(open.sides.at("british").tickets.at("light_infantry") == 2);
     int full = 0;
     for (const auto& kv : open.sides.at("continental").tickets) full += std::max(0, kv.second);
     CHECK(full > 6);
@@ -1098,7 +1265,9 @@ static void test_logistics_edges() {
         int spent = 0;
         for (const auto& kv : after.progress.last_battle_report.cartridges_spent)
             spent += kv.second;
-        CHECK(after.province_stores.at("lexington").cartridges == cart0 - spent);
+        // Magazine = before − spent + scavenged (enemy dead / flight).
+        CHECK(after.province_stores.at("lexington").cartridges ==
+              cart0 - spent + after.progress.last_battle_report.scavenged_cartridges);
         CHECK(spent > 0);
     }
     // A second capacity investment cannot be charged while the first is still underway,
@@ -1223,8 +1392,13 @@ static void test_province_supply_and_battle_ledger() {
         const int before = s.province_stores.at("concord").cartridges;
         const int support0 = s.local_support;
         CampaignState after = apply_battle_result(s, r);
-        CHECK(after.province_stores.at("concord").cartridges == 0);
-        CHECK(after.province_stores.at("concord").cartridges == before - before);
+        // Spend clamps to stock; scavenged cartridges from British dead + light flee drop.
+        // killed=1 → +1 cart; flee_fit=23 → +2 cart.
+        CHECK(after.progress.last_battle_report.loser_fate == "retreated");
+        CHECK(after.progress.last_battle_report.scavenged_cartridges == 3);
+        CHECK(after.province_stores.at("concord").cartridges ==
+              before - before + after.progress.last_battle_report.scavenged_cartridges);
+        CHECK(after.province_stores.at("concord").cartridges == 3);
         // Defender win awards +5 Support (continental_militia is the defender).
         CHECK(after.local_support == support0 + 5);
         CHECK(after.provinces.at("concord").owner == "continental");
@@ -1331,7 +1505,7 @@ static void test_province_supply_and_battle_ledger() {
         CHECK(b.sides.at("continental").cartridge_budget == 8);
         CHECK(b.sides.at("british").cartridge_budget == 0);
         const int prov = ticket_sum(b.sides.at("continental").tickets);
-        const int brit = b.sides.at("british").tickets.at("line_infantry");
+        const int brit = ticket_sum(b.sides.at("british").tickets);
         CHECK(prov > 1);
         CHECK(brit <= 6);
         CHECK(brit <= prov);
@@ -1727,6 +1901,13 @@ static void test_opening_war_l5_l7() {
     }
 }
 
+static void advance_build_hours(CampaignState& s, int hours) {
+    for (int i = 0; i < hours; ++i) {
+        s = advance_hour(s).state;
+        if (s.pending_battle.active) s.pending_battle = {};
+    }
+}
+
 static void test_province_development() {
     CampaignState s = fresh();
     ensure_logistics_defaults(s);
@@ -1738,13 +1919,17 @@ static void test_province_development() {
     CHECK(bad.player_gold == 500);
     bad = approve_purchase(s, "boston", 0, 1, 0, 0, 0, 0, 0, err);
     CHECK(!err.empty());
-    // Farm: cost from tuning, level up, development total and supply rise.
+    // Farm: gold charged on start; level rises after build hours.
     const int cost0 = development_cost("farm", 0);
     CHECK(cost0 > 0);
     s = develop_province(s, "concord", "farm", err);
     CHECK(err.empty());
-    CHECK(s.provinces.at("concord").farm_level == 1);
+    CHECK(s.provinces.at("concord").farm_level == 0);
     CHECK(s.player_gold == 500 - cost0);
+    CHECK(!s.progress.construction_jobs.empty());
+    CHECK(s.progress.construction_jobs.back().building_id == "farm");
+    advance_build_hours(s, building_build_hours("farm"));
+    CHECK(s.provinces.at("concord").farm_level == 1);
     CHECK(province_development(s.provinces.at("concord")) ==
           province_development(fresh().provinces.at("concord")) + 1);
     CHECK(effective_supply_value(s.provinces.at("concord")) ==
@@ -1784,6 +1969,558 @@ static void test_province_development() {
     CampaignState loaded = deserialize(serialize(s));
     CHECK(loaded.provinces.at("concord").farm_level == development_max_level());
     CHECK(state_hash(loaded) == state_hash(s));
+}
+
+static void test_city_view_buildings() {
+    // The shipped catalog/size files (not only the built-in defaults) drive slots and costs.
+    if (!buildings_catalog_loaded())
+        load_buildings_catalog(read_text_file(g_data_dir() + "/buildings_catalog.json"));
+    if (!province_sizes_loaded())
+        load_province_sizes(read_text_file(g_data_dir() + "/province_sizes.json"));
+    CHECK(buildings_catalog_loaded());
+    CHECK(province_sizes_loaded());
+    CampaignState s = fresh();
+    ensure_logistics_defaults(s);
+    s.player_gold = 500;
+    std::string err;
+    CHECK(province_slot_count("lexington") == 3);
+    CHECK(province_slots_occupied(s, "lexington") == 0);
+    // Start Fort: gold drops, job underway, level still 0.
+    const int fort_cost = building_cost("fort", 0);
+    CHECK(fort_cost > 0);
+    s = start_construction(s, "lexington", "fort", err);
+    CHECK(err.empty());
+    CHECK(s.player_gold == 500 - fort_cost);
+    CHECK(s.provinces.at("lexington").fort_level == 0);
+    CHECK(province_slots_occupied(s, "lexington") == 1);
+    CHECK(!s.resource_changes.empty());
+    CHECK(s.resource_changes.back().gold == -fort_cost);
+    // Unaffordable preview.
+    CampaignState poor = s;
+    poor.player_gold = 0;
+    const std::string preview = building_preview(poor, "lexington", "farm");
+    CHECK(preview.find("Unavailable") != std::string::npos);
+    // Complete Fort.
+    advance_build_hours(s, building_build_hours("fort"));
+    CHECK(s.provinces.at("lexington").fort_level == 1);
+    CHECK(province_slots_occupied(s, "lexington") == 1);
+    // Fill remaining slots then block a 4th.
+    s = start_construction(s, "lexington", "farm", err);
+    CHECK(err.empty());
+    advance_build_hours(s, building_build_hours("farm"));
+    s = start_construction(s, "lexington", "workshop", err);
+    CHECK(err.empty());
+    advance_build_hours(s, building_build_hours("workshop"));
+    CHECK(province_slots_occupied(s, "lexington") == 3);
+    CampaignState blocked = start_construction(s, "lexington", "depot", err);
+    CHECK(err == "no_free_slot");
+    CHECK(blocked.player_gold == s.player_gold);
+    // Upgrade in place at full slots: no free slot needed, slot count unchanged.
+    const int up_cost = building_cost("fort", 1);
+    CHECK(up_cost > fort_cost);
+    const int gold_up = s.player_gold;
+    s = start_construction(s, "lexington", "fort", err);
+    CHECK(err.empty());
+    CHECK(s.player_gold == gold_up - up_cost);
+    CHECK(province_slots_occupied(s, "lexington") == 3);
+    advance_build_hours(s, building_build_hours("fort"));
+    CHECK(s.provinces.at("lexington").fort_level == 2);
+    CHECK(province_slots_occupied(s, "lexington") == 3);
+    // Demolish Fort: 10% salvage of base * level, slot frees, refund in resource_changes.
+    const int gold_before = s.player_gold;
+    s = demolish_building(s, "lexington", "fort", err);
+    CHECK(err.empty());
+    CHECK(s.provinces.at("lexington").fort_level == 0);
+    CHECK(s.player_gold == gold_before + (fort_cost * 2 * 10) / 100);
+    CHECK(!s.resource_changes.empty());
+    CHECK(s.resource_changes.back().gold == (fort_cost * 2 * 10) / 100);
+    CHECK(province_slots_occupied(s, "lexington") == 2);
+    // Cancel in-progress: 100% of paid gold back, slot frees.
+    CampaignState x = fresh();
+    x.player_gold = 500;
+    const int farm_cost = building_cost("farm", 0);
+    x = start_construction(x, "lexington", "farm", err);
+    CHECK(err.empty());
+    CHECK(x.player_gold == 500 - farm_cost);
+    x = cancel_construction(x, "lexington", "farm", err);
+    CHECK(err.empty());
+    CHECK(x.player_gold == 500);
+    CHECK(province_slots_occupied(x, "lexington") == 0);
+    CHECK(!x.resource_changes.empty());
+    CHECK(x.resource_changes.back().gold == farm_cost);
+    x = cancel_construction(x, "lexington", "farm", err);
+    CHECK(err == "no_construction");
+    // Church + militia: construct, complete, battle notes, save/load mid-job.
+    CampaignState c = fresh();
+    c.player_gold = 500;
+    c = start_construction(c, "lexington", "church", err);
+    CHECK(err.empty());
+    CampaignState mid = deserialize(serialize(c));
+    CHECK(!mid.progress.construction_jobs.empty());
+    CHECK(mid.progress.construction_jobs.back().building_id == "church");
+    CHECK(mid.progress.construction_jobs.back().hours_remaining > 0);
+    const int support_before_church = c.local_support;
+    advance_build_hours(c, building_build_hours("church"));
+    CHECK(c.provinces.at("lexington").church);
+    CHECK(c.local_support == support_before_church + 5);
+    // Monthly drip: +1 Support per completed Meeting House.
+    const int support_before_drip = c.local_support;
+    buildings_monthly_tick(c);
+    CHECK(c.local_support == std::min(100, support_before_drip + 1));
+    c = start_construction(c, "lexington", "militia_muster", err);
+    CHECK(err.empty());
+    advance_build_hours(c, building_build_hours("militia_muster"));
+    CHECK(c.provinces.at("lexington").militia_muster);
+    // Battle setup lists new buildings when defender owns the ground.
+    c.pending_battle.active = true;
+    c.pending_battle.province = "lexington";
+    c.pending_battle.attacker_army = "british_regulars";
+    c.pending_battle.defender_army = "continental_militia";
+    c.armies.at("british_regulars").province = "lexington";
+    c.armies.at("continental_militia").province = "lexington";
+    c.provinces.at("lexington").owner = kContinental;
+    BattleSetup setup = build_battle_setup(c, "lexington");
+    CHECK(setup.valid);
+    CHECK(setup.church);
+    CHECK(setup.militia_muster);
+    bool saw_church = false, saw_muster = false;
+    for (const auto& note : setup.modifier_notes) {
+        if (note.find("Meeting House") != std::string::npos) saw_church = true;
+        if (note.find("Militia Muster") != std::string::npos) saw_muster = true;
+    }
+    CHECK(saw_church);
+    CHECK(saw_muster);
+    CampaignState loaded = deserialize(serialize(c));
+    CHECK(loaded.provinces.at("lexington").church);
+    CHECK(loaded.provinces.at("lexington").militia_muster);
+    CHECK(state_hash(loaded) == state_hash(c));
+    // Demolishing the Meeting House takes back the +5 it gave: no Support from rebuild loops.
+    {
+        CampaignState dm = c;
+        dm.pending_battle = {};
+        const int sup = dm.local_support;
+        dm = demolish_building(dm, "lexington", "church", err);
+        CHECK(err.empty());
+        CHECK(!dm.provinces.at("lexington").church);
+        CHECK(dm.local_support == sup - 5);
+        CHECK(dm.resource_changes.back().local_support == -5);
+        CHECK(dm.resource_changes.back().gold == (building_cost("church", 0) * 10) / 100);
+    }
+    // Finished and cancelled jobs are dropped, so the save does not grow with every build.
+    CHECK(c.progress.construction_jobs.empty());
+    CHECK(x.progress.construction_jobs.empty());
+    // Buildings help only a defender on its own ground: no muster flag, note or church morale
+    // when the British hold the town the militia is defending.
+    {
+        CampaignState e = c;
+        e.provinces.at("lexington").owner = kBritish;
+        BattleSetup es = build_battle_setup(e, "lexington");
+        CHECK(es.valid);
+        CHECK(!es.militia_muster);
+        for (const auto& note : es.modifier_notes) {
+            CHECK(note.find("Militia Muster") == std::string::npos);
+            CHECK(note.find("Meeting House") == std::string::npos);
+        }
+        CHECK(es.sides.at(kBritish).morale == e.armies.at("british_regulars").morale);
+        CHECK(setup.sides.at(kContinental).morale ==
+              std::min(100, c.armies.at("continental_militia").morale + 2));
+    }
+    // The greyed-out reason and the sim's verdict come from one check: every option the City
+    // View marks available starts, every other one is refused and carries a reason.
+    {
+        CampaignState v = fresh();
+        v.player_gold = 60;
+        const auto view = nlohmann::json::parse(city_view_json(v, "lexington"));
+        CHECK(view.at("yours").get<bool>());
+        CHECK(view.at("options").size() == 6);
+        for (const auto& opt : view.at("options")) {
+            std::string e2;
+            start_construction(v, "lexington", opt.at("building_id").get<std::string>(), e2);
+            CHECK(opt.at("available").get<bool>() == e2.empty());
+            CHECK(opt.at("available").get<bool>() == opt.at("reason").get<std::string>().empty());
+        }
+        v.player_gold = 0;
+        CHECK(building_preview(v, "lexington", "farm").find("need 30 gold") != std::string::npos);
+        CHECK(building_preview(v, "boston", "farm").find("not your province") != std::string::npos);
+    }
+    // A town lost mid-build abandons the works: no refund, and no free building for the taker.
+    {
+        CampaignState l = fresh();
+        l.player_gold = 500;
+        l = start_construction(l, "lexington", "fort", err);
+        CHECK(err.empty());
+        const int gold_after_start = l.player_gold;
+        l.provinces.at("lexington").owner = kBritish;
+        advance_build_hours(l, building_build_hours("fort"));
+        CHECK(l.provinces.at("lexington").fort_level == 0);
+        CHECK(l.progress.construction_jobs.empty());
+        CHECK(province_slots_occupied(l, "lexington") == 0);
+        bool saw_abandon = false;
+        for (const auto& ch : l.resource_changes)
+            if (ch.reason.find("abandoned") != std::string::npos) saw_abandon = true;
+        CHECK(saw_abandon);
+        (void)gold_after_start;
+    }
+}
+
+static int detail_total(const Army& a) {
+    int n = 0;
+    for (const auto& kv : a.units) n += std::max(0, kv.second);
+    return n;
+}
+
+static void test_recruitment() {
+    if (!buildings_catalog_loaded())
+        load_buildings_catalog(read_text_file(g_data_dir() + "/buildings_catalog.json"));
+    if (!province_sizes_loaded())
+        load_province_sizes(read_text_file(g_data_dir() + "/province_sizes.json"));
+    CampaignState s = fresh();
+    ensure_logistics_defaults(s);
+    s.player_gold = 500;
+    s.local_support = 50;
+    std::string err;
+    // No Militia Muster in Lexington yet: the sim refuses and says which building is missing.
+    CampaignState no = start_recruitment(s, "lexington", "militia_company", err);
+    CHECK(err == "needs_building");
+    CHECK(no.player_gold == 500);
+    CHECK(recruitment_preview(s, "lexington", "militia_company").find("Militia Muster") != std::string::npos);
+    CHECK(start_recruitment(s, "boston", "militia_company", err).player_gold == 500);
+    CHECK(err == "not_your_province");
+    // With the building: gold and provisions leave on start, the men arrive after two days.
+    s.provinces.at("lexington").militia_muster = true;
+    s.province_stores["lexington"].provisions = 10;
+    CHECK(province_manpower_cap(s, "lexington") == 6);
+    const int armies_before = static_cast<int>(s.armies.size());
+    s = start_recruitment(s, "lexington", "militia_company", err);
+    CHECK(err.empty());
+    CHECK(s.player_gold == 480);
+    CHECK(s.province_stores.at("lexington").provisions == 7);
+    CHECK(s.provinces.at("lexington").manpower_used == 6);
+    CHECK(s.progress.recruit_jobs.size() == 1);
+    CHECK(s.resource_changes.back().gold == -20);
+    // One company at a time per town; and mid-muster state survives a save.
+    start_recruitment(s, "lexington", "militia_company", err);
+    CHECK(err == "already_mustering");
+    CampaignState mid = deserialize(serialize(s));
+    CHECK(mid.progress.recruit_jobs.size() == 1);
+    CHECK(mid.provinces.at("lexington").manpower_used == 6);
+    CHECK(state_hash(mid) == state_hash(s));
+    advance_build_hours(s, 47);
+    CHECK(static_cast<int>(s.armies.size()) == armies_before);
+    advance_build_hours(s, 1);
+    // No army stood in Lexington, so the company is a new army there.
+    CHECK(s.progress.recruit_jobs.empty());
+    CHECK(static_cast<int>(s.armies.size()) == armies_before + 1);
+    std::string raised;
+    for (const auto& kv : s.armies)
+        if (kv.first.rfind("raised_lexington_", 0) == 0) raised = kv.first;
+    CHECK(!raised.empty());
+    if (!raised.empty()) {
+        CHECK(s.armies.at(raised).faction == kContinental);
+        CHECK(s.armies.at(raised).province == "lexington");
+        CHECK(s.armies.at(raised).units.at("militia") == 6);
+        CHECK(s.armies.at(raised).name == "Lexington Company");
+    }
+    // The month's men are spent: a second company must wait for the 1st.
+    start_recruitment(s, "lexington", "militia_company", err);
+    CHECK(err == "no_manpower");
+    buildings_monthly_tick(s);
+    CHECK(s.provinces.at("lexington").manpower_used == 0);
+    // Regulars need a Fort and muskets in the town magazine.
+    start_recruitment(s, "lexington", "provincial_regulars", err);
+    CHECK(err == "needs_building");
+    s.provinces.at("lexington").fort_level = 1;
+    s.province_stores["lexington"].muskets = 1;
+    start_recruitment(s, "lexington", "provincial_regulars", err);
+    CHECK(err == "insufficient_muskets");
+    s.province_stores["lexington"].muskets = 5;
+    const int gold_reg = s.player_gold;
+    s = start_recruitment(s, "lexington", "provincial_regulars", err);
+    CHECK(err.empty());
+    CHECK(s.province_stores.at("lexington").muskets == 1);
+    // Dismissing the muster returns purse, arms, rations and manpower.
+    CampaignState back = cancel_recruitment(s, "lexington", err);
+    CHECK(err.empty());
+    CHECK(back.player_gold == gold_reg);
+    CHECK(back.province_stores.at("lexington").muskets == 5);
+    CHECK(back.provinces.at("lexington").manpower_used == 0);
+    CHECK(back.progress.recruit_jobs.empty());
+    cancel_recruitment(back, "lexington", err);
+    CHECK(err == "no_muster");
+    // Completed regulars join the company already standing in the town.
+    advance_build_hours(s, 96);
+    CHECK(static_cast<int>(s.armies.size()) == armies_before + 1);
+    if (!raised.empty() && s.armies.count(raised)) {
+        CHECK(s.armies.at(raised).units.at("line_infantry") == 4);
+        CHECK(s.armies.at(raised).units.at("militia") == 6);
+    }
+    // A raised company that reaches the scripted army's town is absorbed by it, not the reverse.
+    if (!raised.empty() && s.armies.count(raised)) {
+        const int main_before = s.armies.at("continental_militia").units.at("militia");
+        s.armies.at(raised).province = s.armies.at("continental_militia").province;
+        merge_idle_player_armies(s);
+        CHECK(!s.armies.count(raised));
+        CHECK(s.armies.count("continental_militia") == 1);
+        CHECK(s.armies.at("continental_militia").units.at("militia") == main_before + 6);
+        CHECK(s.armies.at("continental_militia").units.at("line_infantry") == 4 + 4);
+        CHECK(static_cast<int>(s.armies.size()) == armies_before);
+    }
+    // A town lost mid-muster: the men scatter, nothing joins anyone.
+    CampaignState l = fresh();
+    l.player_gold = 500;
+    l.local_support = 50;
+    l.provinces.at("lexington").militia_muster = true;
+    l.province_stores["lexington"].provisions = 10;
+    l = start_recruitment(l, "lexington", "militia_company", err);
+    CHECK(err.empty());
+    l.provinces.at("lexington").owner = kBritish;
+    advance_build_hours(l, 48);
+    CHECK(l.progress.recruit_jobs.empty());
+    CHECK(l.armies.size() == fresh().armies.size());
+    // The snapshot the town panel reads agrees with the sim's verdicts.
+    CampaignState v = fresh();
+    v.player_gold = 500;
+    const auto view = nlohmann::json::parse(city_view_json(v, "concord"));
+    // Four companies a Continental player can raise; the British ones are not offered.
+    CHECK(view.at("recruits").size() == 5);  // militia, regulars, rifles, officer, light horse
+    for (const auto& r : view.at("recruits")) {
+        std::string e2;
+        start_recruitment(v, "concord", r.at("unit_id").get<std::string>(), e2);
+        CHECK(r.at("available").get<bool>() == e2.empty());
+        CHECK(!r.at("unit_class").get<std::string>().empty());
+        CHECK(!r.at("role").get<std::string>().empty());
+        CHECK(r.at("unit_id").get<std::string>() != "grenadier_company");
+    }
+    start_recruitment(v, "concord", "grenadier_company", err);
+    CHECK(err == "unknown_unit");
+    // Both opening armies field more than one class to choose from.
+    {
+        int brit = 0, cont = 0;
+        for (const auto& kv : v.armies.at("british_regulars").units) brit += kv.second > 0 ? 1 : 0;
+        for (const auto& kv : v.armies.at("continental_militia").units) cont += kv.second > 0 ? 1 : 0;
+        CHECK(brit >= 2);
+        CHECK(cont >= 2);
+        CHECK(detail_total(v.armies.at("british_regulars")) == 24);
+        CHECK(detail_total(v.armies.at("continental_militia")) == 22);
+    }
+    // Rifle companies: not before the Continental chapter; then three riflemen with their own rifles.
+    {
+        CampaignState r = fresh();
+        ensure_logistics_defaults(r);
+        r.player_gold = 500;
+        r.local_support = 50;
+        r.provinces.at("lexington").militia_muster = true;
+        r.province_stores["lexington"].provisions = 10;
+        r.province_stores["lexington"].muskets = 0;
+        start_recruitment(r, "lexington", "rifle_company", err);
+        CHECK(err == "not_yet");
+        CHECK(recruitment_preview(r, "lexington", "rifle_company").find("14 June 1775") != std::string::npos);
+        r.progress.chapter_continental = true;
+        r = start_recruitment(r, "lexington", "rifle_company", err);
+        CHECK(err.empty());
+        CHECK(r.player_gold == 455);
+        advance_build_hours(r, 5 * 24);
+        int riflemen = 0;
+        for (const auto& kv : r.armies)
+            if (kv.second.province == "lexington" && kv.second.units.count("rifleman"))
+                riflemen += kv.second.units.at("rifleman");
+        CHECK(riflemen == 3);
+        // An officer is one man, raised the same way, and joins the company standing there.
+        r = start_recruitment(r, "lexington", "field_officer", err);
+        CHECK(err.empty());
+        advance_build_hours(r, 2 * 24);
+        int officers = 0;
+        for (const auto& kv : r.armies)
+            if (kv.second.province == "lexington" && kv.second.units.count("officer"))
+                officers += kv.second.units.at("officer");
+        CHECK(officers == 1);
+    }
+    // Light horse (GAME INVENTION): needs a Farm for the horses and carbines from the magazine.
+    {
+        CampaignState d = fresh();
+        ensure_logistics_defaults(d);
+        d.player_gold = 500;
+        d.local_support = 50;
+        d.provinces.at("lexington").farm_level = 0;
+        d.province_stores["lexington"].provisions = 10;
+        d.province_stores["lexington"].muskets = 5;
+        start_recruitment(d, "lexington", "light_horse", err);
+        CHECK(err == "needs_building");
+        start_recruitment(d, "lexington", "dragoon_troop", err);
+        CHECK(err == "unknown_unit");  // the British troop is not the Continental player's to raise
+        d.provinces.at("lexington").farm_level = 1;
+        d = start_recruitment(d, "lexington", "light_horse", err);
+        CHECK(err.empty());
+        CHECK(d.player_gold == 440);
+        CHECK(d.province_stores.at("lexington").muskets == 2);
+        advance_build_hours(d, 6 * 24);
+        int dragoons = 0;
+        for (const auto& kv : d.armies)
+            if (kv.second.province == "lexington" && kv.second.units.count("dragoon"))
+                dragoons += kv.second.units.at("dragoon");
+        CHECK(dragoons == 3);
+    }
+    CHECK(view.at("forces").size() == 1);
+    CHECK(view.at("forces")[0].at("yours").get<bool>());
+    CHECK(view.at("forces")[0].contains("fit"));
+    const auto enemy = nlohmann::json::parse(city_view_json(v, "boston"));
+    CHECK(!enemy.at("forces")[0].contains("fit"));  // enemy strength is not disclosed
+}
+
+static void test_treasury() {
+    if (!buildings_catalog_loaded())
+        load_buildings_catalog(read_text_file(g_data_dir() + "/buildings_catalog.json"));
+    CampaignState s = fresh();
+    ensure_logistics_defaults(s);
+    s.player_gold = 100;
+    // The projection is the settlement: what treasury_json promises is what the 1st of the month does.
+    const auto view = nlohmann::json::parse(treasury_json(s));
+    CHECK(view.at("gold").get<int>() == 100);
+    CHECK(view.at("debt").get<int>() == 0);
+    CHECK(view.at("income_total").get<int>() > 0);
+    CHECK(view.at("expense_total").get<int>() > 0);  // the seeded militia draws pay
+    CHECK(view.at("net").get<int>() == monthly_net_gold(s));
+    int levy = 0;
+    for (const auto& pk : s.provinces)
+        if (pk.second.owner == s.player_faction) levy += town_levy_gold(pk.second);
+    const int net = monthly_net_gold(s);
+    CampaignState m = s;
+    m.player_gold += levy;  // the clock credits the levy, then calls the monthly tick
+    buildings_monthly_tick(m);
+    CHECK(m.player_gold == 100 + net);
+    CHECK(m.progress.treasury_debt == 0);
+    CHECK(m.progress.pay_arrears_months == 0);
+    // Workshops turn out muskets into their own town's magazine.
+    CHECK(s.provinces.at("concord").workshop_level == 1);
+    CHECK(m.province_stores.at("concord").muskets == s.province_stores.at("concord").muskets + 1);
+    // Army pay scales with the army: six more militia cost six more gold a month.
+    CampaignState big = s;
+    big.armies.at("continental_militia").units["militia"] += 6;
+    CHECK(monthly_net_gold(big) == net - 6);
+    // A Depot level adds trade income (and its upkeep is already counted once it stands).
+    CampaignState trade = s;
+    trade.provinces.at("concord").depot_level += 1;
+    CHECK(monthly_net_gold(trade) == net + 8);
+    // Loans: borrow in steps up to the credit limit, repay in steps, interest is an expense.
+    std::string err;
+    CampaignState b = take_loan(s, err);
+    CHECK(err.empty());
+    CHECK(b.player_gold == 200);
+    CHECK(b.progress.treasury_debt == 100);
+    CHECK(monthly_net_gold(b) == net - 5);
+    CampaignState r = repay_loan(b, err);
+    CHECK(err.empty());
+    CHECK(r.player_gold == 100);
+    CHECK(r.progress.treasury_debt == 0);
+    repay_loan(r, err);
+    CHECK(err == "no_debt");
+    CampaignState maxed = s;
+    int loans = 0;
+    for (; loans < 100; ++loans) {
+        CampaignState next = take_loan(maxed, err);
+        if (!err.empty()) break;
+        maxed = next;
+    }
+    CHECK(err == "credit_exhausted");
+    CHECK(maxed.progress.treasury_debt <= treasury_credit_limit(maxed));
+    CHECK(maxed.progress.treasury_debt + 100 > treasury_credit_limit(maxed));
+    // An empty purse borrows to meet the month's bills...
+    CampaignState poor = s;
+    poor.player_gold = 0;
+    poor.armies.at("continental_militia").units["militia"] = 400;  // pay far beyond the levy
+    const int need = -monthly_net_gold(poor);
+    CHECK(need > 0);
+    CampaignState ps = poor;
+    ps.player_gold += levy;
+    buildings_monthly_tick(ps);
+    CHECK(ps.player_gold == 0);
+    CHECK(ps.progress.treasury_debt == need);
+    CHECK(ps.progress.pay_arrears_months == 0);
+    // ...and past the credit limit the army goes unpaid: morale and Support fall.
+    CampaignState broke = poor;
+    broke.progress.treasury_debt = treasury_credit_limit(broke);
+    const int morale_before = broke.armies.at("continental_militia").morale;
+    const int support_before = broke.local_support;
+    broke.player_gold += levy;
+    buildings_monthly_tick(broke);
+    CHECK(broke.player_gold == 0);
+    CHECK(broke.progress.pay_arrears_months == 1);
+    CHECK(broke.armies.at("continental_militia").morale == morale_before - 8);
+    CHECK(broke.local_support < support_before + 2);  // -3, less any Meeting House drip
+    // Debt and arrears survive a save.
+    CampaignState loaded = deserialize(serialize(broke));
+    CHECK(loaded.progress.treasury_debt == broke.progress.treasury_debt);
+    CHECK(loaded.progress.pay_arrears_months == 1);
+    CHECK(state_hash(loaded) == state_hash(broke));
+}
+
+static void test_enemy_economy() {
+    if (!buildings_catalog_loaded())
+        load_buildings_catalog(read_text_file(g_data_dir() + "/buildings_catalog.json"));
+    CampaignState s = fresh();
+    ensure_logistics_defaults(s);
+    CHECK(enemy_faction(s) == kBritish);
+    CHECK(s.progress.enemy_gold == 60);
+    // Boston: levy + depot trade + the subsidy by sea, against pay for 24 regulars and upkeep.
+    const int net = enemy_monthly_net_gold(s);
+    const int men0 = s.armies.at("british_regulars").units.at("line_infantry");
+    CampaignState m = s;
+    const int prov0 = m.province_stores.at("boston").provisions;
+    const int musk0 = m.province_stores.at("boston").muskets;
+    settle_enemy_budget(m);
+    CHECK(m.progress.enemy_arrears_months == 0);
+    // Month one: paid in full, too little to spare for a company; ships land provisions.
+    CHECK(m.progress.enemy_gold == 60 + net);
+    CHECK(m.armies.at("british_regulars").units.at("line_infantry") == men0);
+    CHECK(m.province_stores.at("boston").provisions == prov0 + 12);
+    CHECK(m.armies.at("british_regulars").morale == s.armies.at("british_regulars").morale);
+    // A full chest buys men: the cheapest British company, armed and fed from Boston's magazine.
+    CampaignState rich = s;
+    rich.progress.enemy_gold = 200;
+    settle_enemy_budget(rich);
+    CHECK(rich.armies.at("british_regulars").units.at("line_infantry") == men0 + 4);
+    CHECK(rich.progress.enemy_gold == 200 + net - 40);
+    CHECK(rich.province_stores.at("boston").muskets == musk0 - 4);
+    CHECK(rich.province_stores.at("boston").provisions == prov0 + 12 - 4);
+    // More men cost more pay: the next month's balance is worse by 2 gold a man.
+    CHECK(enemy_monthly_net_gold(rich) == net - 8);
+    // An empty magazine stops recruiting even with gold in the chest.
+    CampaignState bare = s;
+    bare.progress.enemy_gold = 200;
+    bare.province_stores["boston"].muskets = 0;
+    settle_enemy_budget(bare);
+    CHECK(bare.armies.at("british_regulars").units.at("line_infantry") == men0);
+    // An army larger than the chest can pay goes unpaid: no credit, morale falls, no recruiting.
+    CampaignState broke = s;
+    broke.progress.enemy_gold = 0;
+    broke.armies.at("british_regulars").units["line_infantry"] = 200;
+    const int morale0 = broke.armies.at("british_regulars").morale;
+    const int cont_morale0 = broke.armies.at("continental_militia").morale;
+    settle_enemy_budget(broke);
+    CHECK(broke.progress.enemy_gold == 0);
+    CHECK(broke.progress.enemy_arrears_months == 1);
+    CHECK(broke.armies.at("british_regulars").morale == morale0 - 8);
+    CHECK(broke.armies.at("british_regulars").units.at("line_infantry") == 200);
+    CHECK(broke.armies.at("continental_militia").morale == cont_morale0);  // not the player's army
+    // The player's purse and ledger are untouched by the other side's accounts.
+    CHECK(broke.player_gold == s.player_gold);
+    CHECK(broke.progress.treasury_debt == 0);
+    // Losing the harbour town ends the subsidy.
+    CampaignState cut = s;
+    cut.provinces.at("boston").owner = kContinental;
+    CHECK(enemy_monthly_net_gold(cut) < net - 40 + 1);
+    // The town panel hears of an unpaid garrison, never the size of the chest.
+    const auto view = nlohmann::json::parse(city_view_json(broke, "boston"));
+    CHECK(view.at("garrison_unpaid_months").get<int>() == 1);
+    CHECK(view.at("supplied_by_sea").get<bool>());
+    CHECK(!view.contains("enemy_gold"));
+    const auto own = nlohmann::json::parse(city_view_json(broke, "concord"));
+    CHECK(own.at("garrison_unpaid_months").get<int>() == 0);
+    // Saved with the campaign.
+    CampaignState loaded = deserialize(serialize(broke));
+    CHECK(loaded.progress.enemy_gold == 0);
+    CHECK(loaded.progress.enemy_arrears_months == 1);
+    CHECK(state_hash(loaded) == state_hash(broke));
 }
 
 static void test_commander_and_knox_gates() {
@@ -1866,6 +2603,11 @@ inline int run_all(Reporter& rep, const std::string& data_dir, const std::string
         {"ceasefire_blocks", test_ceasefire_blocks},
         {"save_load", test_save_load},
         {"battle_apply", test_battle_apply},
+        {"battle_retreat_destination", test_battle_retreat_destination},
+        {"battle_morale_shatter", test_battle_morale_shatter},
+        {"battle_personal_kills_morale", test_battle_personal_kills_morale},
+        {"battle_scavenge_from_losses", test_battle_scavenge_from_losses},
+        {"battle_shots_spend_report", test_battle_shots_spend_report},
         {"shared_clause_vectors", test_shared_clause_vectors},
         {"controller_flow", test_controller_flow},
         {"jailbreak_spoken", test_jailbreak_spoken},
@@ -1878,6 +2620,10 @@ inline int run_all(Reporter& rep, const std::string& data_dir, const std::string
         {"commander_and_knox_gates", test_commander_and_knox_gates},
         {"province_supply_and_battle_ledger", test_province_supply_and_battle_ledger},
         {"province_development", test_province_development},
+        {"city_view_buildings", test_city_view_buildings},
+        {"recruitment", test_recruitment},
+        {"treasury", test_treasury},
+        {"enemy_economy", test_enemy_economy},
         {"opening_war_l3_loop", test_opening_war_l3_loop},
         {"opening_war_l5_l7", test_opening_war_l5_l7},
     };

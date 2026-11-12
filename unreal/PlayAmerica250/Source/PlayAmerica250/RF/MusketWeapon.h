@@ -38,6 +38,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Weapon")
 	bool Fire(FVector Direction = FVector::ZeroVector, bool bIsAiming = false, float OwnerSpeed = 0.f, float AccuracyScale = 1.f);
 
+	/** Flash in the pan: the priming burns, the charge does not. No ball; the piece must be loaded again. */
+	bool Misfire();
+
 	UFUNCTION(BlueprintCallable, Category = "Weapon")
 	void StartReload();
 
@@ -112,8 +115,17 @@ public:
 	/** Barrel pitch limit (deg), up or down. Kept near the view limit so a high aim still raises the musket. */
 	static constexpr float MaxBarrelPitch = 85.f;
 	USceneComponent* GetMuzzleLocation() const { return MuzzleLocation; }
+	/** Visual only: show or hide the pack's socket bayonet on the muzzle (created on first use). */
+	void SetBayonetFixed(bool bFixed);
+	bool IsBayonetFixed() const { return bBayonetFixed; }
+	/** Visual only: 0..1 how far the musket leaves the aim line for a body-driven hold (the reload drill),
+	 *  and the world rotation it takes there. Set by the melee component. */
+	float BodyPoseAlpha = 0.f;
+	FQuat BodyPoseRotation = FQuat::Identity;
 	/** Visual only: extra barrel pitch (deg, + = muzzle up) on top of the aim, set by the melee component (butt-stroke). */
 	float MeleePitchOffset = 0.f;
+	/** Visual only: extra barrel yaw (deg, + = muzzle to the right), for the guard carried across the body. */
+	float MeleeYawOffset = 0.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weapon")
 	TObjectPtr<UMusketTuning> Tuning;
@@ -123,6 +135,15 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weapon")
 	EPA250ReloadPreset ActivePreset = EPA250ReloadPreset::Authentic;
+
+	// ---- Soldier class kit (PA250UnitClasses), set by the battle game mode. 1 = the plain musket. ----
+	/** Aim cone multiplier of this piece (a rifle shoots straighter). */
+	float ClassSpreadScale = 1.f;
+	/** Stretches the damage falloff and maximum range of its ball. */
+	float ClassRangeScale = 1.f;
+	/** Reload time multiplier, player and AI alike: every step of the drill runs this much slower
+	 *  (> 1) or faster (< 1). The class's own scale times any officer bonus. */
+	float ReloadTimeScale = 1.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weapon")
 	FMusketTuningValues DefaultTuning;
@@ -153,6 +174,11 @@ protected:
 	float FireAnimRemaining = 0.f;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Weapon")
 	TObjectPtr<USceneComponent> MuzzleLocation;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UStaticMeshComponent> BayonetMesh;
+	bool bBayonetFixed = false;
+	bool bBayonetTried = false;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Weapon")
 	EMusketState State = EMusketState::Loaded;

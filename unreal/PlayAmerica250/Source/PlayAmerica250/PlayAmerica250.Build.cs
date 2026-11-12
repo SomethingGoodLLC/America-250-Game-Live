@@ -41,6 +41,7 @@ public class PlayAmerica250 : ModuleRules
 		PublicIncludePaths.Add("PlayAmerica250/Campaign");
 		PublicIncludePaths.Add("PlayAmerica250/Battle");
 		PublicIncludePaths.Add("PlayAmerica250/Diplomacy");
+		PublicIncludePaths.Add("PlayAmerica250/UI");
 
 		PublicIncludePaths.AddRange(new string[] {
 			"PlayAmerica250",

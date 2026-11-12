@@ -6,6 +6,8 @@
 #include "RFHealthComponent.generated.h"
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnDied, AActor*, Victim);
+/** A hit the man survived: damage applied and where it came from. */
+DECLARE_MULTICAST_DELEGATE_TwoParams(FOnWounded, float, const FVector&);
 
 UCLASS(ClassGroup = (Combat), meta = (BlueprintSpawnableComponent))
 class PLAYAMERICA250_API URFHealthComponent : public UActorComponent
@@ -24,6 +26,8 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "Health")
 	FOnDied OnDied;
 
+	FOnWounded OnWounded;
+
 	/** Controller that dealt the killing blow (valid inside OnDied). */
 	UPROPERTY(BlueprintReadOnly, Category = "Health")
 	TObjectPtr<AController> LastInstigator;
@@ -35,6 +39,10 @@ public:
 	/** True after at least one damage event this life. */
 	UPROPERTY(BlueprintReadOnly, Category = "Health")
 	bool bHasLastDamageLocation = false;
+
+	/** One-shot: the next damage event cannot take health below this (then it resets to 0). Set by the
+	 *  melee component for frontal blows, after every multiplier, so a full-health man is never run through in one. */
+	float MinHealthAfterNextDamage = 0.f;
 
 	UFUNCTION(BlueprintPure, Category = "Health")
 	bool IsDead() const { return CurrentHealth <= 0.f; }

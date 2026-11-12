@@ -2,17 +2,21 @@
 """Import campaign-map army illustrations and the sprite material.
 
 Inputs (prepared by tools/art/prepare_army_sprites.py):
-  Content/PA250/Source/ArmyArt/army_{provincial_regulars,british_marching,british_firing,ground_oval}.png
+  Content/PA250/Source/ArmyArt/army_{provincial_regulars,british_marching,british_firing,militia,ground_oval}.png
   Content/PA250/Source/ArmyArt/town_wash_disc.png
 Outputs:
-  /Game/PA250/Textures/Army/T_Army_{ProvincialRegulars,BritishMarching,BritishFiring,GroundOval}
+  /Game/PA250/Textures/Army/T_Army_{ProvincialRegulars,BritishMarching,BritishFiring,Militia,GroundOval}
   /Game/PA250/Textures/Army/T_Map_TownWash
   /Game/PA250/Materials/M_MapSprite
     (unlit, translucent; params Sprite, UVRect, Tint, Opacity)
+  /Game/PA250/Materials/M_MapText (unlit copy of the engine text material)
 
 Run with the editor closed:
   UnrealEditor-Cmd PlayAmerica250.uproject -run=pythonscript \
     -script=<abs>/Scripts/import_army_art.py -unattended -nullrhi
+
+PA250_ARMY_ART_ONLY=T_Army_Militia (comma list) imports just those textures and leaves
+every other asset, including the materials, untouched.
 """
 
 from __future__ import annotations
@@ -32,6 +36,7 @@ SPRITES = (
     ("army_provincial_regulars.png", "T_Army_ProvincialRegulars"),
     ("army_british_marching.png", "T_Army_BritishMarching"),
     ("army_british_firing.png", "T_Army_BritishFiring"),
+    ("army_militia.png", "T_Army_Militia"),
     ("army_ground_oval.png", "T_Army_GroundOval"),
     ("town_wash_disc.png", "T_Map_TownWash"),
 )
@@ -170,7 +175,49 @@ def build_material(default_tex: unreal.Texture2D) -> unreal.Material:
     return mat
 
 
+TEXT_MAT_PATH = "/Game/PA250/Materials/M_MapText"
+ENGINE_TEXT_MAT = "/Engine/EngineMaterials/DefaultTextMaterialTranslucent"
+
+
+def build_text_material() -> unreal.Material:
+    """Unlit copy of the engine text material: same font sample and opacity.
+
+    The engine material is default-lit (base colour = vertex colour), so the campaign
+    key light turned dark map captions pastel. Unlit, with emissive = vertex colour,
+    shows the TextRender colour exactly.
+    """
+    mel = unreal.MaterialEditingLibrary
+    src = unreal.load_asset(ENGINE_TEXT_MAT)
+    tools = unreal.AssetToolsHelpers.get_asset_tools()
+    mat = tools.duplicate_asset(
+        os.path.basename(TEXT_MAT_PATH), os.path.dirname(TEXT_MAT_PATH), src
+    )
+    if mat is None:
+        raise RuntimeError(f"could not duplicate {ENGINE_TEXT_MAT}")
+    base = unreal.MaterialProperty.MP_BASE_COLOR
+    vc = mel.get_material_property_input_node(mat, base)
+    if vc is None:
+        raise RuntimeError("engine text material has no base colour input")
+    _set(mat, "shading_model", unreal.MaterialShadingModel.MSM_UNLIT)
+    mel.connect_material_property(vc, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
+    mel.recompile_material(mat)
+    unreal.EditorAssetLibrary.save_loaded_asset(mat)
+    shading = mat.get_editor_property("shading_model")
+    _log(f"material {mat.get_path_name()} shading={shading}")
+    return mat
+
+
 def main() -> int:
+    only = {n for n in os.environ.get("PA250_ARMY_ART_ONLY", "").split(",") if n}
+    if only:
+        unknown = only - {name for _, name in SPRITES}
+        if unknown:
+            raise RuntimeError(f"unknown textures {sorted(unknown)}")
+        for src, name in SPRITES:
+            if name in only:
+                import_texture(os.path.join(SRC_DIR, src), name)
+        _log(f"OK (only {sorted(only)})")
+        return 0
     texs = [import_texture(os.path.join(SRC_DIR, src), name) for src, name in SPRITES]
     # Rebuilding an existing M_MapSprite while the army token CDO references it asserts
     # (!IsRooted) in UE 5.8 and the material is never saved. Build it only when missing;
@@ -179,6 +226,10 @@ def main() -> int:
         _log(f"material {MAT_PATH} exists; kept (delete it to rebuild)")
     else:
         build_material(texs[0])
+    if unreal.EditorAssetLibrary.does_asset_exist(TEXT_MAT_PATH):
+        _log(f"material {TEXT_MAT_PATH} exists; kept (delete it to rebuild)")
+    else:
+        build_text_material()
     _log("OK")
     return 0
 

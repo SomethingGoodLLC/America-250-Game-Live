@@ -58,6 +58,19 @@ UPA250CombatProfiles::UPA250CombatProfiles()
 	Trainings[0].AimErrorDegrees = 2.0f;
 	Trainings[1].AimErrorDegrees = 2.5f;
 	Trainings[2].AimErrorDegrees = 3.0f;
+	// Fire discipline: regulars fire as one and then roll by files; the less drilled fire raggedly
+	// and fumble the priming more often.     ragged  rolling  misfire  man-to-man
+	const float Fire[3][4] = {
+		{0.6f, 0.14f, 0.03f, 0.15f},  // Veteran
+		{2.8f, 0.00f, 0.06f, 0.25f},  // Trained
+		{5.5f, 0.00f, 0.10f, 0.40f}}; // Recruit
+	for (int32 i = 0; i < 3; ++i)
+	{
+		Trainings[i].VolleyRaggedness = Fire[i][0];
+		Trainings[i].RollingFireFileSeconds = Fire[i][1];
+		Trainings[i].MisfireChance = Fire[i][2];
+		Trainings[i].AimVariance = Fire[i][3];
+	}
 
 	//                     cover  open  files  indiv  withdraw  exposed  reposition  cooldown
 	Roles.Add(MakeRole(TEXT("Line"), false, false, 1.0f, false, false, 0.f, 2000.f, 15.f));
@@ -65,17 +78,58 @@ UPA250CombatProfiles::UPA250CombatProfiles()
 	Roles.Add(MakeRole(TEXT("Irregular"), true, true, 1.6f, true, true, 4000.f, 3000.f, 12.f));
 	Roles[1].bCautiousCharge = true; // Light
 	Roles[2].bCautiousCharge = true; // Irregular
+	// Hand to hand: regulars were drilled with the bayonet, most provincials were not.
+	//                       recover  reads a guard
+	const float Melee[3][2] = {{0.45f, 0.85f}, {0.70f, 0.60f}, {1.00f, 0.35f}};
+	for (int32 i = 0; i < 3; ++i)
+	{
+		Trainings[i].MeleeRecoverSeconds = Melee[i][0];
+		Trainings[i].MeleeSkill = Melee[i][1];
+	}
+	// A musket rested on a wall or fence shoots straighter: skirmishers in cover are the marksmen.
+	Roles[1].RestedAimScale = 0.75f;
+	Roles[2].RestedAimScale = 0.7f;
 
 	// Lexington 1775 starting point (editable). Set continental/line_infantry to Veteran for an exact match.
 	Assignments.Add(Assign(TEXT("british"), TEXT("line_infantry"), TEXT("Veteran"), TEXT("Line")));
 	Assignments.Add(Assign(TEXT("continental"), TEXT("line_infantry"), TEXT("Trained"), TEXT("Line")));
 	// Minute companies drilled regularly and included French & Indian War veterans: Trained, not raw.
 	Assignments.Add(Assign(TEXT("continental"), TEXT("militia"), TEXT("Trained"), TEXT("Irregular")));
+	for (const FPA250CombatAssignment& A : ClassAssignments()) Assignments.Add(A);
+}
+
+const TArray<FPA250CombatAssignment>& UPA250CombatProfiles::ClassAssignments()
+{
+	// The 1775 flank companies and the leaders. Grenadiers and officers fight in the line; the light
+	// company skirmishes; riflemen are irregulars who keep their distance (their rifle is in the class kit).
+	static const TArray<FPA250CombatAssignment> Extra = {
+		Assign(TEXT("british"), TEXT("grenadier"), TEXT("Veteran"), TEXT("Line")),
+		Assign(TEXT("british"), TEXT("light_infantry"), TEXT("Veteran"), TEXT("Light")),
+		Assign(TEXT("british"), TEXT("officer"), TEXT("Veteran"), TEXT("Line")),
+		Assign(TEXT("continental"), TEXT("rifleman"), TEXT("Trained"), TEXT("Irregular")),
+		Assign(TEXT("continental"), TEXT("officer"), TEXT("Trained"), TEXT("Line")),
+		// Dragoons fight dismounted as skirmishers (GAME INVENTION for 1775).
+		Assign(TEXT("british"), TEXT("dragoon"), TEXT("Veteran"), TEXT("Light")),
+		Assign(TEXT("continental"), TEXT("dragoon"), TEXT("Trained"), TEXT("Light")),
+	};
+	return Extra;
 }
 
 UPA250CombatProfiles* UPA250CombatProfiles::MakeRuntimeDefaults()
 {
 	return NewObject<UPA250CombatProfiles>();
+}
+
+float UPA250CombatProfiles::AimScaleFor(int32 Seed, float Variance)
+{
+	const float V = FMath::Clamp(Variance, 0.f, 0.9f);
+	FRandomStream Rng(static_cast<int32>(HashCombine(static_cast<uint32>(Seed), 0x9E3779B9u)));
+	return 1.f + Rng.FRandRange(-V, V);
+}
+
+float UPA250CombatProfiles::MisfireChanceAt(float Base, float Stress01)
+{
+	return FMath::Clamp(Base * (1.f + FMath::Clamp(Stress01, 0.f, 1.f)), 0.f, 0.5f);
 }
 
 const FPA250CombatAssignment* UPA250CombatProfiles::FindAssignment(FName Faction, FName UnitClass) const
@@ -87,6 +141,11 @@ const FPA250CombatAssignment* UPA250CombatProfiles::FindAssignment(FName Faction
 	for (const FPA250CombatAssignment& A : Assignments)
 	{
 		if (A.Faction.IsNone() && A.UnitClass == UnitClass) return &A; // class-only rule
+	}
+	// A DA_CombatProfiles saved before a class existed has no row for it: use the built-in one.
+	for (const FPA250CombatAssignment& A : ClassAssignments())
+	{
+		if (A.Faction == Faction && A.UnitClass == UnitClass) return &A;
 	}
 	return nullptr;
 }

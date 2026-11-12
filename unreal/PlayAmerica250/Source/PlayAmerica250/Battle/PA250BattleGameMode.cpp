@@ -37,6 +37,7 @@
 #include "PA250MeleeComponent.h"
 #include "PA250MeleeTuning.h"
 #include "PA250SpawnScreen.h"
+#include "PA250UnitClasses.h"
 #include "PA250VolleyCoordinator.h"
 #include "PA250WeaponTuning.h"
 #include "PA250Smoke.h"
@@ -118,9 +119,22 @@ UMusketTuning* APA250BattleGameMode::GetTuning() const
 
 void APA250BattleGameMode::NotifyShot(ARFCharacter* Shooter, const FVector& Dir, bool bHit)
 {
+	if (Shooter && !Shooter->FactionId.IsNone())
+	{
+		ShotsFiredByFaction.FindOrAdd(Shooter->FactionId)++;
+	}
 	if (Volleys)
 	{
 		Volleys->NotifyShot(Shooter, Dir, bHit);
+	}
+}
+
+void APA250BattleGameMode::RecordMisfire(FName Faction)
+{
+	++Misfires;
+	if (!Faction.IsNone())
+	{
+		MisfiresByFaction.FindOrAdd(Faction)++;
 	}
 }
 
@@ -569,6 +583,26 @@ void APA250BattleGameMode::EnsureInitialized()
 	SoldiersPerUnit = FMath::Max(1, SoldiersPerUnit);
 
 	PlayerFaction = ToName(Setup.player_faction);
+	// Debug battles only (launched straight into the map): -PA250ExtraUnits=continental:dragoon:2,british:dragoon:2
+	// adds units to this fight's tickets. Never a campaign battle, so no campaign state is touched.
+	if (FString Extra; bDebugBattle && FParse::Value(FCommandLine::Get(), TEXT("PA250ExtraUnits="), Extra, /*bShouldStopOnSeparator=*/false))
+	{
+		TArray<FString> Items;
+		Extra.ParseIntoArray(Items, TEXT(","));
+		for (const FString& Item : Items)
+		{
+			TArray<FString> Parts;
+			Item.ParseIntoArray(Parts, TEXT(":"));
+			const auto SideIt = Parts.Num() == 3 ? Setup.sides.find(TCHAR_TO_UTF8(*Parts[0])) : Setup.sides.end();
+			if (SideIt == Setup.sides.end() || FCString::Atoi(*Parts[2]) <= 0)
+			{
+				UE_LOG(LogTemp, Warning, TEXT("PA250 battle: -PA250ExtraUnits item '%s' ignored (side:class:units)"), *Item);
+				continue;
+			}
+			SideIt->second.tickets[TCHAR_TO_UTF8(*Parts[1])] += FCString::Atoi(*Parts[2]);
+			UE_LOG(LogTemp, Display, TEXT("PA250 battle: debug extra units %s %s +%s"), *Parts[0], *Parts[1], *Parts[2]);
+		}
+	}
 	for (const auto& KV : Setup.sides)
 	{
 		const FName Faction = ToName(KV.first);
@@ -637,6 +671,7 @@ void APA250BattleGameMode::BeginPlay()
 	if (!bAutoplayBots)
 	{
 		FPA250BattleAudio::PlayBattleBegins(this);
+		FPA250BattleAudio::StartAmbience(this);
 	}
 	StartTime = GetWorld()->GetTimeSeconds();
 	Banner = FString::Printf(TEXT("Battle of %s"), UTF8_TO_TCHAR(Setup.province_name.c_str()));
@@ -656,6 +691,13 @@ void APA250BattleGameMode::BeginPlay()
 	for (const auto& KV : InitialPool)
 	{
 		SpawnInitialForces(KV.Key, BotsPerSide);
+	}
+	// One ticket of the player's side is kept for the player: bot deaths and bleed cannot spend it and
+	// bots are not reinforced from it, so he can always rejoin once (see FPA250TicketLedger::Held).
+	// Set after the opening deployment, which is not a reinforcement.
+	if (!bAutoplayBots && Ledger.Remaining(PlayerFaction) > 0)
+	{
+		Ledger.Held.Add(PlayerFaction, 1);
 	}
 	if (APlayerController* PC = GetWorld()->GetFirstPlayerController())
 	{
@@ -682,9 +724,21 @@ void APA250BattleGameMode::BeginPlay()
 	}
 	FTimerHandle H;
 	GetWorldTimerManager().SetTimer(H, FTimerDelegate::CreateLambda([this]() { if (!bBattleOver) Banner.Reset(); }), 4.f, false);
+	// Engine debug text (renderer warnings in yellow) does not belong over the battle. -PA250ScreenMessages keeps it.
+	if (GAreScreenMessagesEnabled && !FParse::Param(FCommandLine::Get(), TEXT("PA250ScreenMessages")))
+	{
+		GAreScreenMessagesEnabled = false;
+		bRestoreScreenMessages = true;
+	}
 	MaybeStartPreviewCapture();
 	MaybeStartFpsSample();
 	MaybeStartMeleeProbe();
+	MaybeStartClassPortraits();
+	// A moment after BeginPlay, so the player's pawn and its musket exist whatever the spawn order.
+	FTimerHandle ClassPick;
+	GetWorldTimerManager().SetTimer(ClassPick, FTimerDelegate::CreateWeakLambda(this, [this]() {
+		if (!bBattleOver && GetWorld()) MaybeOpenClassPick(GetWorld()->GetFirstPlayerController());
+	}), 0.3f, false);
 }
 
 APA250ControlPoint* APA250BattleGameMode::FindGreenPost() const
@@ -730,7 +784,10 @@ void APA250BattleGameMode::SpectateNextSoldier(APlayerController* PC, const AAct
 	{
 		if (*It == Exclude || It->IsDead()) continue;
 		if (!Any) Any = *It;
-		if (It->FactionId == PlayerFaction)
+		// -PA250SpectateSide=british: watch the other side (to check its soldiers in a real window).
+		FString Side;
+		const FName Watch = FParse::Value(FCommandLine::Get(), TEXT("PA250SpectateSide="), Side) && !Side.IsEmpty() ? FName(*Side) : PlayerFaction;
+		if (It->FactionId == Watch)
 		{
 			ApplyLowCinematicSpectator(PC, *It);
 			return;
@@ -835,8 +892,31 @@ void APA250BattleGameMode::MaybeStartPreviewCapture()
 					if (GetWorld()->LineTraceSingleByChannel(Hit, M + FVector(0, 0, 500), M - FVector(0, 0, 2000), ECC_WorldStatic))
 						M.Z = Hit.ImpactPoint.Z + 140.f;
 					Bank->AddShot(M, FVector(1.f, 0.f, 0.03f));
+					Bank->AddPanFlash(M - FVector(110.f, 0.f, 0.f), FVector(1.f, 0.f, 0.03f), false);
 				}
 			}), 1.f + 3.f * V, false);
+		}
+		// Just before the "fresh" still: balls going to ground ahead of the line, and two men hit.
+		for (int32 Pass = 0; Pass < 2; ++Pass)
+		{
+			FTimerHandle Strikes;
+			GetWorldTimerManager().SetTimer(Strikes, FTimerDelegate::CreateWeakLambda(this, [this, Pass]() {
+				UPA250SmokeSubsystem* Bank = GetWorld()->GetSubsystem<UPA250SmokeSubsystem>();
+				const APA250ControlPoint* Green = nullptr;
+				for (const TWeakObjectPtr<APA250ControlPoint>& WP : Posts)
+					if (WP.IsValid() && WP->PostId == TEXT("green")) Green = WP.Get();
+				if (!Bank || !Green) return;
+				for (int32 i = 0; i < (Pass == 0 ? 8 : 2); ++i)
+				{
+					FVector At = Green->GetActorLocation() + (Pass == 0
+						? FVector(-1350.f + 60.f * (i % 3), -560.f + i * 160.f, 0.f)
+						: FVector(-1250.f, -200.f + i * 400.f, 0.f));
+					FHitResult Hit;
+					if (GetWorld()->LineTraceSingleByChannel(Hit, At + FVector(0, 0, 500), At - FVector(0, 0, 2000), ECC_WorldStatic))
+						At.Z = Hit.ImpactPoint.Z + (Pass == 0 ? 0.f : 120.f);
+					Bank->AddImpact(At, Pass == 0 ? FVector::UpVector : FVector(-1.f, 0.f, 0.f), Pass == 1);
+				}
+			}), Pass == 0 ? 5.0f : 5.3f, false);
 		}
 	}
 	// Settle lighting / Lumen before the first still.
@@ -1007,6 +1087,89 @@ void APA250BattleGameMode::PollPreviewFile(const FString& SavedPath, const FStri
 
 void APA250BattleGameMode::MaybeStartFpsSample()
 {
+	// -PA250BattleShots=20,45,70: stills of the running battle (with HUD) at those game-seconds,
+	// written to Saved/PA250/battle_shot_<n>.png. For checking how the fight looks in a real window.
+	FString ShotTimes;
+	if (FParse::Value(FCommandLine::Get(), TEXT("PA250BattleShots="), ShotTimes, /*bShouldStopOnSeparator=*/false))
+	{
+		TArray<FString> Parts;
+		ShotTimes.ParseIntoArray(Parts, TEXT(","));
+		for (int32 i = 0; i < Parts.Num(); ++i)
+		{
+			const float At = FCString::Atof(*Parts[i]);
+			if (At <= 0.f) continue;
+			FTimerHandle Shot;
+			GetWorldTimerManager().SetTimer(Shot, FTimerDelegate::CreateWeakLambda(this, [this, i]() {
+				const FString Path = FPaths::ConvertRelativePathToFull(
+					FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("PA250"), FString::Printf(TEXT("battle_shot_%d.png"), i + 1)));
+				int32 Fallen = 0;
+				for (TActorIterator<ARFCharacter> It(GetWorld()); It; ++It) Fallen += It->IsDead() ? 1 : 0;
+				const UPA250SmokeSubsystem* Bank = GetWorld()->GetSubsystem<UPA250SmokeSubsystem>();
+				UE_LOG(LogTemp, Display, TEXT("PA250 battle shot %d: fallen_on_field=%d puffs=%d misfires=%d -> %s"),
+					i + 1, Fallen, Bank ? Bank->NumPuffs() : 0, Misfires, *Path);
+				FScreenshotRequest::RequestScreenshot(Path, /*bShowUI=*/true, /*bAddFilenameSuffix=*/false);
+			}), At, false);
+		}
+	}
+	// -PA250HurtProbe=<s>: the player takes a 60-point wound at that game-second (to see the wounded view with -PA250BattleShots).
+	float HurtAt = 0.f;
+	if (FParse::Value(FCommandLine::Get(), TEXT("PA250HurtProbe="), HurtAt) && HurtAt > 0.f && !bAutoplayBots)
+	{
+		FTimerHandle Hurt;
+		GetWorldTimerManager().SetTimer(Hurt, FTimerDelegate::CreateWeakLambda(this, [this]() {
+			APlayerController* PC = GetWorld()->GetFirstPlayerController();
+			ARFCharacter* Me = PC ? Cast<ARFCharacter>(PC->GetPawn()) : nullptr;
+			if (Me) UGameplayStatics::ApplyDamage(Me, 60.f, nullptr, nullptr, nullptr);
+			UE_LOG(LogTemp, Display, TEXT("PA250 hurt probe: player health now %.0f"), Me && Me->HealthComponent ? Me->HealthComponent->CurrentHealth : -1.f);
+		}), HurtAt, false);
+	}
+	// -PA250TakeoverProbe: at 8 s the player's side loses its reserves and the player is killed; the log
+	// then says whether he came back as one of the men still standing. Real window, no autoplay.
+	if ((FParse::Param(FCommandLine::Get(), TEXT("PA250TakeoverProbe")) || FString(FCommandLine::Get()).Contains(TEXT("PA250TakeoverProbe="))) && !bAutoplayBots)
+	{
+		FTimerHandle Kill;
+		GetWorldTimerManager().SetTimer(Kill, FTimerDelegate::CreateWeakLambda(this, [this]() {
+			APlayerController* PC = GetWorld()->GetFirstPlayerController();
+			ARFCharacter* Me = PC ? Cast<ARFCharacter>(PC->GetPawn()) : nullptr;
+			// -PA250TakeoverProbe=held leaves the one ticket held for the player (he gets the spawn screen instead).
+			FString ProbeMode;
+			FParse::Value(FCommandLine::Get(), TEXT("PA250TakeoverProbe="), ProbeMode);
+			Ledger.Pool.FindOrAdd(PlayerFaction) = ProbeMode == TEXT("held") ? Ledger.HeldFor(PlayerFaction) : 0;
+			UE_LOG(LogTemp, Display, TEXT("PA250 takeover probe: reserves set to 0, killing player pawn %s"), Me ? *Me->GetName() : TEXT("(none)"));
+			if (Me) UGameplayStatics::ApplyDamage(Me, 10000.f, nullptr, nullptr, nullptr);
+		}), 8.f, false);
+		// Held mode: the spawn screen must be up after the death cam; press its button.
+		FTimerHandle Press;
+		GetWorldTimerManager().SetTimer(Press, FTimerDelegate::CreateWeakLambda(this, [this]() {
+			const bool bUp = SpawnScreen && SpawnScreen->IsInViewport();
+			UE_LOG(LogTemp, Display, TEXT("PA250 takeover probe: after death cam spawn_screen=%d remaining=%d held=%d"),
+				bUp, Ledger.Remaining(PlayerFaction), Ledger.HeldFor(PlayerFaction));
+			// What the screen's button does (UPA250SpawnScreen::Confirm).
+			APlayerController* PC = GetWorld()->GetFirstPlayerController();
+			if (bUp && PC && RequestSpawn(PC, SpawnScreen->SelectedClass, nullptr))
+			{
+				SpawnScreen->RemoveFromParent();
+				PC->SetInputMode(FInputModeGameOnly());
+				PC->bShowMouseCursor = false;
+			}
+		}), 8.f + DeathCamSeconds + 1.f, false);
+		FTimerHandle Report;
+		GetWorldTimerManager().SetTimer(Report, FTimerDelegate::CreateWeakLambda(this, [this]() {
+			APlayerController* PC = GetWorld()->GetFirstPlayerController();
+			const ARFCharacter* Me = PC ? Cast<ARFCharacter>(PC->GetPawn()) : nullptr;
+			const bool bOk = Me && !Me->IsDead() && Me->IsPlayerControlled() && Me->FactionId == PlayerFaction
+				&& Me->InputComponent != nullptr && PC->GetViewTarget() == Me && !PC->bShowMouseCursor;
+			UE_LOG(LogTemp, Display, TEXT("PA250 takeover probe tickets: remaining=%d held=%d"), Ledger.Remaining(PlayerFaction), Ledger.HeldFor(PlayerFaction));
+			UE_LOG(LogTemp, Display, TEXT("PA250 takeover probe %s: pawn=%s alive=%d player=%d input=%d view=%d cursor=%d spawn_screen=%d notice='%s'"),
+				bOk ? TEXT("PASSED") : TEXT("FAILED"), Me ? *Me->GetName() : TEXT("(none)"), Me && !Me->IsDead(), Me && Me->IsPlayerControlled(),
+				Me && Me->InputComponent != nullptr, PC && Me && PC->GetViewTarget() == Me, PC && PC->bShowMouseCursor,
+				SpawnScreen && SpawnScreen->IsInViewport(), *GetBannerText());
+			const FString Path = FPaths::ConvertRelativePathToFull(FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("PA250"), TEXT("takeover_probe.png")));
+			FScreenshotRequest::RequestScreenshot(Path, true, false);
+		}), 8.f + DeathCamSeconds + 2.f, false);
+		FTimerHandle Quit;
+		GetWorldTimerManager().SetTimer(Quit, FTimerDelegate::CreateLambda([]() { FPlatformMisc::RequestExit(false); }), 8.f + DeathCamSeconds + 5.f, false);
+	}
 	if (!FParse::Param(FCommandLine::Get(), TEXT("PA250FpsSample")))
 	{
 		return;
@@ -1079,14 +1242,196 @@ FName APA250BattleGameMode::ChooseClassFor(FName Faction, FName Preferred) const
 	{
 		return Preferred;
 	}
-	if (P->Contains(Preferred))
+	// The class asked for, while the army still has men of it.
+	if (ClassMenLeft(Faction, Preferred) > 0)
 	{
 		return Preferred;
 	}
+	// Otherwise the class with the most men left (name order breaks ties, so it is deterministic).
 	TArray<FName> Names;
 	P->GetKeys(Names);
 	Names.Sort(FNameLexicalLess());
-	return Names.Num() > 0 ? Names[0] : Preferred;
+	FName Best;
+	int32 BestLeft = 0;
+	for (const FName& N : Names)
+	{
+		const int32 Left = ClassMenLeft(Faction, N);
+		if (Left > BestLeft)
+		{
+			BestLeft = Left;
+			Best = N;
+		}
+	}
+	if (!Best.IsNone())
+	{
+		return Best;
+	}
+	// Every class is spent on paper (bleed and the ticket floor can leave a man to field): keep the
+	// request if the army ever had that class, else its first class.
+	if (P->FindRef(Preferred) > 0)
+	{
+		return Preferred;
+	}
+	for (const FName& N : Names)
+	{
+		if (P->FindRef(N) > 0) return N;
+	}
+	return P->Contains(Preferred) || Names.Num() == 0 ? Preferred : Names[0];
+}
+
+int32 APA250BattleGameMode::ClassMenLeft(FName Faction, FName UnitClass) const
+{
+	const TMap<FName, int32>* P = InitialPool.Find(Faction);
+	const int32 Start = (P ? FMath::Max(0, P->FindRef(UnitClass)) : 0) * FMath::Max(1, SoldiersPerUnit);
+	const TMap<FName, int32>* Dead = Ledger.Deaths.Find(Faction);
+	return FMath::Max(0, Start - (Dead ? Dead->FindRef(UnitClass) : 0));
+}
+
+TArray<APA250BattleGameMode::FClassChoice> APA250BattleGameMode::GetClassChoices(FName Faction) const
+{
+	TArray<FClassChoice> Out;
+	const TMap<FName, int32>* P = InitialPool.Find(Faction);
+	if (!P)
+	{
+		return Out;
+	}
+	TArray<FName> Names;
+	P->GetKeys(Names);
+	const TArray<FName>& Order = PA250UnitClasses::DisplayOrder();
+	Names.Sort([&Order](const FName& A, const FName& B) {
+		const int32 IA = Order.IndexOfByKey(A), IB = Order.IndexOfByKey(B);
+		if (IA != IB) return (IA < 0 ? MAX_int32 : IA) < (IB < 0 ? MAX_int32 : IB);
+		return A.LexicalLess(B);
+	});
+	for (const FName& N : Names)
+	{
+		if (P->FindRef(N) <= 0) continue; // the army has none of these
+		FClassChoice C;
+		C.Id = N;
+		C.MenLeft = ClassMenLeft(Faction, N);
+		C.Alive = CountAlive(Faction, N);
+		Out.Add(C);
+	}
+	return Out;
+}
+
+FName APA250BattleGameMode::GetControllerClass(const AController* Controller) const
+{
+	for (const auto& KV : ControllerClass)
+	{
+		if (KV.Key.Get() == Controller) return KV.Value;
+	}
+	return NAME_None;
+}
+
+bool APA250BattleGameMode::RekitPlayer(APlayerController* PC, FName UnitClass)
+{
+	ARFCharacter* Me = PC ? Cast<ARFCharacter>(PC->GetPawn()) : nullptr;
+	if (bBattleOver || !Me || Me->IsDead() || Me->FactionId != PlayerFaction || ClassMenLeft(PlayerFaction, UnitClass) <= 0)
+	{
+		return false;
+	}
+	ControllerClass.Add(PC, UnitClass);
+	ConfigureSoldier(Me, PlayerFaction, UnitClass);
+	UE_LOG(LogTemp, Display, TEXT("PA250 class: player takes the field as %s (%s)"), *UnitClass.ToString(),
+		PA250UnitClasses::KitFor(PlayerFaction, UnitClass).Label);
+	return true;
+}
+
+void APA250BattleGameMode::MaybeOpenClassPick(APlayerController* PC)
+{
+	// Battlefront-style: choose your class before the fight when the army has more than one. Scripted
+	// runs (previews, probes, FPS samples) keep the default soldier; -PA250ClassPick forces the screen.
+	if (!PC || bAutoplayBots || FApp::IsUnattended())
+	{
+		return;
+	}
+	const FString Cmd(FCommandLine::Get());
+	const bool bForce = FParse::Param(FCommandLine::Get(), TEXT("PA250ClassPick"));
+	if (!bForce)
+	{
+		for (const TCHAR* Probe : {TEXT("PA250NoClassPick"), TEXT("PA250Preview="), TEXT("PA250BattleShots="), TEXT("PA250HurtProbe"),
+				 TEXT("PA250TakeoverProbe"), TEXT("PA250FpsSample"), TEXT("PA250MeleeProbe"), TEXT("PA250ClassPortraits")})
+		{
+			if (Cmd.Contains(Probe)) return;
+		}
+	}
+	int32 Open = 0;
+	for (const FClassChoice& C : GetClassChoices(PlayerFaction)) Open += C.MenLeft > 0 ? 1 : 0;
+	if (Open < 2 || !Cast<ARFCharacter>(PC->GetPawn()))
+	{
+		return;
+	}
+	bOpeningClassPick = true;
+	// He cannot move while he chooses, so he cannot be hurt either (at most 30 s of it).
+	if (APawn* Me = PC->GetPawn()) Me->SetCanBeDamaged(false);
+	FTimerHandle Guard;
+	GetWorldTimerManager().SetTimer(Guard, FTimerDelegate::CreateWeakLambda(this, [this]() {
+		// Only the protection lapses; the picker stays an opening pick until he deploys or falls.
+		const APlayerController* P = GetWorld() ? GetWorld()->GetFirstPlayerController() : nullptr;
+		if (APawn* Me = P ? P->GetPawn() : nullptr) Me->SetCanBeDamaged(true);
+	}), 30.f, false);
+	ShowSpawnScreen(PC);
+	UE_LOG(LogTemp, Display, TEXT("PA250 class: opening class pick shown (%d classes)"), Open);
+}
+
+void APA250BattleGameMode::EndOpeningClassPick()
+{
+	bOpeningClassPick = false;
+	const APlayerController* PC = GetWorld() ? GetWorld()->GetFirstPlayerController() : nullptr;
+	if (APawn* Me = PC ? PC->GetPawn() : nullptr) Me->SetCanBeDamaged(true);
+}
+
+int32 APA250BattleGameMode::CountAlive(FName Faction) const
+{
+	int32 N = 0;
+	for (TActorIterator<ARFCharacter> It(GetWorld()); It; ++It)
+	{
+		if (!It->IsDead() && It->FactionId == Faction) ++N;
+	}
+	return N;
+}
+
+void APA250BattleGameMode::TickOfficers(float DeltaSeconds)
+{
+	// Volley fire under an officer's eye (GAMEPLAY SETTING): men near a living officer of their side
+	// aim steadier and load faster. Twice a second is plenty; the values live in PA250UnitClasses.
+	OfficerTimer -= DeltaSeconds;
+	if (OfficerTimer > 0.f)
+	{
+		return;
+	}
+	OfficerTimer = 0.5f;
+	TArray<ARFCharacter*> Men, Officers;
+	for (TActorIterator<ARFCharacter> It(GetWorld()); It; ++It)
+	{
+		if (It->IsDead()) continue;
+		Men.Add(*It);
+		if (PA250UnitClasses::KitFor(It->FactionId, It->UnitClass).bOfficer) Officers.Add(*It);
+	}
+	for (ARFCharacter* C : Men)
+	{
+		bool bNear = false;
+		for (const ARFCharacter* O : Officers)
+		{
+			if (O != C && O->FactionId == C->FactionId && PA250UnitClasses::InOfficerRange(C->GetActorLocation(), O->GetActorLocation()))
+			{
+				bNear = true;
+				break;
+			}
+		}
+		C->bNearOfficer = bNear;
+		C->OfficerAccuracyScale = bNear ? PA250UnitClasses::OfficerSpreadScale : 1.f;
+		if (C->Musket)
+		{
+			// The whole kit, not only the officer bonus: a soldier configured before his musket was
+			// spawned (the player's first pawn) still gets his class's firelock here.
+			const FPA250UnitClassKit& Kit = PA250UnitClasses::KitFor(C->FactionId, C->UnitClass);
+			C->Musket->ClassSpreadScale = Kit.SpreadScale;
+			C->Musket->ClassRangeScale = Kit.RangeScale;
+			C->Musket->ReloadTimeScale = Kit.ReloadScale * (bNear ? PA250UnitClasses::OfficerReloadScale : 1.f);
+		}
+	}
 }
 
 bool APA250BattleGameMode::CanSpawn(FName Faction) const
@@ -1132,6 +1477,8 @@ void APA250BattleGameMode::ConfigureSoldier(ARFCharacter* Soldier, FName Faction
 		return;
 	}
 	Soldier->SetTeam(Faction, UnitClass);
+	// The class's kit: health, pace, his firelock and how hard he hits. Bots and the player alike.
+	const FPA250UnitClassKit& Kit = PA250UnitClasses::KitFor(Faction, UnitClass);
 	FVector Anchor = FVector(-500.f, -1000.f, 120.f);
 	if (Posts.Num() > 0 && Posts[0].IsValid())
 	{
@@ -1142,7 +1489,8 @@ void APA250BattleGameMode::ConfigureSoldier(ARFCharacter* Soldier, FName Faction
 		FromGreen.Z = 0.f;
 		// Far spawns are pulled in to 55 m from the Green, so the two sides start ~110 m apart:
 		// room to form ranks and march into the 40-80 m musket band (28 m put lines face to face).
-		if (!Soldier->IsPlayerControlled() && FromGreen.Size() > 7000.f)
+		// Dragoons stay back at their side's start: a mounted reserve that rides up before getting down.
+		if (!Soldier->IsPlayerControlled() && FromGreen.Size() > 7000.f && UnitClass != TEXT("dragoon"))
 		{
 			Soldier->SetActorLocation(Anchor + FromGreen.GetSafeNormal() * 5500.f + FVector(0.f, 0.f, 40.f), false, nullptr, ETeleportType::TeleportPhysics);
 		}
@@ -1155,7 +1503,7 @@ void APA250BattleGameMode::ConfigureSoldier(ARFCharacter* Soldier, FName Faction
 	}
 	if (Soldier->HealthComponent)
 	{
-		Soldier->HealthComponent->MaxHealth = UnitClass == TEXT("militia") ? 80.f : 100.f;
+		Soldier->HealthComponent->MaxHealth = Kit.MaxHealth;
 		Soldier->HealthComponent->CurrentHealth = Soldier->HealthComponent->MaxHealth;
 	}
 	Soldier->WeaponTuning = WeaponTuningAsset;
@@ -1164,6 +1512,7 @@ void APA250BattleGameMode::ConfigureSoldier(ARFCharacter* Soldier, FName Faction
 	if (Soldier->MeleeComponent)
 	{
 		Soldier->MeleeComponent->Tuning = MeleeTuningAsset;
+		Soldier->MeleeComponent->DamageScale = Kit.MeleeScale;
 	}
 	if (Soldier->Musket)
 	{
@@ -1171,7 +1520,12 @@ void APA250BattleGameMode::ConfigureSoldier(ARFCharacter* Soldier, FName Faction
 		Soldier->Musket->WeaponTuning = WeaponTuningAsset;
 		Soldier->Musket->SetReloadPreset(ReloadPreset == 1 ? EPA250ReloadPreset::Authentic : EPA250ReloadPreset::Arcade);
 		Soldier->Musket->ApplyWeaponTuning();
+		Soldier->Musket->ClassSpreadScale = Kit.SpreadScale;
+		Soldier->Musket->ClassRangeScale = Kit.RangeScale;
+		Soldier->Musket->ReloadTimeScale = Kit.ReloadScale; // TickOfficers adds the officer bonus
 	}
+	Soldier->bNearOfficer = false;
+	Soldier->OfficerAccuracyScale = 1.f;
 	if (APA250BotController* Bot = Cast<APA250BotController>(Soldier->GetController()))
 	{
 		Bot->SetPosts(Posts);
@@ -1183,21 +1537,37 @@ void APA250BattleGameMode::ConfigureSoldier(ARFCharacter* Soldier, FName Faction
 			const uint32 Seed = HashCombine(GetTypeHash(static_cast<uint64>(Setup.seed)), static_cast<uint32>(++BotProfileSerial));
 			Bot->ApplyCombatProfile(CombatProfilesAsset->TrainingFor(Faction, UnitClass),
 				CombatProfilesAsset->RoleFor(Faction, UnitClass), static_cast<int32>(Seed));
-			Bot->AimErrorDegrees = CombatProfilesAsset->TrainingFor(Faction, UnitClass).AimErrorDegrees; // training, not class or side
+			// Training, not class or side; then each man is a slightly better or worse shot than the average.
+			// The firelock matters too: a rifleman's aim cone is a fraction of a musket man's.
+			Bot->AimErrorDegrees = CombatProfilesAsset->TrainingFor(Faction, UnitClass).AimErrorDegrees * Bot->GetAimScale() * Kit.SpreadScale;
 		}
 		Bot->ConfigureCrowd(BotTuningAsset);
 	}
-	Soldier->GetCharacterMovement()->MaxWalkSpeed = 380.f;
+	{
+		const ARFCharacter* Defaults = GetDefault<ARFCharacter>(Soldier->GetClass());
+		Soldier->WalkSpeed = Defaults->WalkSpeed * Kit.SpeedScale;
+		Soldier->SprintSpeed = Defaults->SprintSpeed * Kit.SpeedScale;
+	}
+	Soldier->GetCharacterMovement()->MaxWalkSpeed = 380.f * Kit.SpeedScale;
 	if (Soldier->IsPlayerControlled())
 	{
 		Soldier->GetCharacterMovement()->MaxWalkSpeed = Soldier->WalkSpeed;
+	}
+	// Dragoons (GAME INVENTION for 1775) take the field in the saddle; anyone else leaves his horse.
+	if (UnitClass == TEXT("dragoon"))
+	{
+		if (!Soldier->IsMounted()) Soldier->MountHorse(nullptr, /*bForce=*/true);
+	}
+	else if (Soldier->IsMounted() || Soldier->GetOwnHorse())
+	{
+		Soldier->ReleaseOwnHorse();
 	}
 }
 
 ARFCharacter* APA250BattleGameMode::SpawnBot(FName Faction, FName UnitClass, APA250ControlPoint* PreferredPost, uint32 ClothingSeed)
 {
 	const FName Charged = ChooseClassFor(Faction, UnitClass);
-	if (!CanSpawn(Faction))
+	if (!Ledger.CanReinforce(Faction)) // the ticket held for the human is not for bots
 	{
 		return nullptr;
 	}
@@ -1206,7 +1576,7 @@ ARFCharacter* APA250BattleGameMode::SpawnBot(FName Faction, FName UnitClass, APA
 
 ARFCharacter* APA250BattleGameMode::SpawnBotAt(FName Faction, FName Charged, const FTransform& T, uint32 ClothingSeed)
 {
-	if (!CanSpawn(Faction))
+	if (!Ledger.CanReinforce(Faction))
 	{
 		return nullptr;
 	}
@@ -1241,7 +1611,13 @@ void APA250BattleGameMode::SpawnInitialForces(FName Faction, int32 Count)
 	const TMap<FName, int32>* P = InitialPool.Find(Faction);
 	const UPA250BotTuning* BT = BotTuningAsset;
 	const int32 MilitiaUnits = P ? P->FindRef(TEXT("militia")) : 0;
-	if (!P || !BT || !BT->Values.bMilitiaMuster || MilitiaUnits <= 0)
+	const FString DefenderFaction = UTF8_TO_TCHAR(Setup.defender_faction.c_str());
+	const bool bDefenderSide = Faction.ToString() == DefenderFaction;
+	// Province Militia Muster adds defender companies; scenarios that already muster keep doing so
+	// when the building is absent (no regression).
+	const bool bBuildingMuster = Setup.militia_muster && bDefenderSide;
+	const bool bDoMuster = P && BT && MilitiaUnits > 0 && (BT->Values.bMilitiaMuster || bBuildingMuster);
+	if (!bDoMuster)
 	{
 		SpawnBots(Faction, Count);
 		return;
@@ -1250,6 +1626,12 @@ void APA250BattleGameMode::SpawnInitialForces(FName Faction, int32 Count)
 	for (const auto& KV : *P) Total += KV.Value;
 	int32 Others = 0, Initial = 0, Cap = 0;
 	MusterPlan(Count, MilitiaUnits, Total, BT->Values.MusterInitialFraction, BT->Values.MusterMaxAliveScale, Others, Initial, Cap);
+	if (bBuildingMuster)
+	{
+		Cap += FMath::Max(1, BT->Values.MusterWaveSize);
+		UE_LOG(LogTemp, Display, TEXT("PA250 muster: Militia Muster building adds +%d cap for %s"),
+			   BT->Values.MusterWaveSize, *Faction.ToString());
+	}
 	const int32 MilitiaPlaces = Count - Others;
 	// Non-militia classes, in proportion.
 	TArray<FName> Names;
@@ -1297,7 +1679,7 @@ void APA250BattleGameMode::TickMuster(float DeltaSeconds)
 		Timer = 0.f;
 		int32 AliveSide = 0;
 		for (TActorIterator<ARFCharacter> It(GetWorld()); It; ++It) AliveSide += (!It->IsDead() && It->FactionId == F) ? 1 : 0;
-		const int32 N = MusterWave(KV.Value, CountAlive(F, TEXT("militia")), PoolTotal(F), AliveSide, BT->Values.MusterWaveSize);
+		const int32 N = MusterWave(KV.Value, CountAlive(F, TEXT("militia")), PoolTotal(F) - Ledger.HeldFor(F), AliveSide, BT->Values.MusterWaveSize);
 		if (N <= 0) continue;
 		// A company arrives together from one of the side's muster points (else its normal start).
 		const TArray<TWeakObjectPtr<AActor>>* Points = MusterPoints.Find(F);
@@ -1370,6 +1752,10 @@ bool APA250BattleGameMode::RequestSpawn(AController* Controller, FName UnitClass
 	}
 	ControllerFaction.Add(Controller, Faction);
 	ControllerClass.Add(Controller, Cls);
+	if (Controller->IsA<APlayerController>() && Ledger.DrawHeld(Faction))
+	{
+		ShowNotice(TEXT("Last reserve - fall again and you fight on as one of the men still standing"), 6.f);
+	}
 
 	FTransform T = PickSpawnTransform(Faction, PostOrNull);
 	UClass* PawnClass = DefaultPawnClass;
@@ -1417,7 +1803,80 @@ void APA250BattleGameMode::CloseSpawnScreenToSpectate(APlayerController* PC)
 	if (!PC) return;
 	PC->SetInputMode(FInputModeGameOnly());
 	PC->bShowMouseCursor = false;
+	// Out of reserves is not out of the fight: while any of his side still stand, the player becomes one of them.
+	if (!bAutoplayBots && !bBattleOver)
+	{
+		const ARFCharacter* Mine = Cast<ARFCharacter>(PC->GetPawn());
+		if ((!Mine || Mine->IsDead()) && TakeOverSoldier(PC))
+		{
+			return;
+		}
+		if (!Mine || Mine->IsDead())
+		{
+			ShowNotice(TEXT("No reserves and no men left standing - you can only watch"), 8.f);
+		}
+	}
 	SpectateNextSoldier(PC, PC->GetPawn());
+}
+
+void APA250BattleGameMode::ShowNotice(const FString& Text, float Seconds)
+{
+	Notice = Text;
+	NoticeUntil = GetWorld() ? GetWorld()->GetTimeSeconds() + Seconds : -1.f;
+	UE_LOG(LogTemp, Display, TEXT("PA250 notice: %s"), *Text);
+}
+
+bool APA250BattleGameMode::TakeOverSoldier(APlayerController* PC)
+{
+	if (!PC || bBattleOver || !GetWorld())
+	{
+		return false;
+	}
+	const APawn* Old = PC->GetPawn();
+	ARFCharacter* Best = nullptr;
+	float BestD = TNumericLimits<float>::Max();
+	for (TActorIterator<ARFCharacter> It(GetWorld()); It; ++It)
+	{
+		ARFCharacter* C = *It;
+		if (C->IsDead() || C->FactionId != PlayerFaction || C->IsMounted() || !Cast<APA250BotController>(C->GetController())) continue;
+		const float D = Old ? FVector::DistSquared(C->GetActorLocation(), Old->GetActorLocation()) : 0.f;
+		if (D < BestD)
+		{
+			BestD = D;
+			Best = C;
+		}
+	}
+	if (!Best)
+	{
+		return false;
+	}
+	const FName Cls = Best->UnitClass;
+	if (AController* BotCtl = Best->GetController())
+	{
+		BotCtl->StopMovement();
+		BotCtl->UnPossess();
+		ControllerFaction.Remove(BotCtl);
+		ControllerClass.Remove(BotCtl);
+		BotCtl->Destroy();
+	}
+	PC->Possess(Best); // leaves the body behind
+	ControllerFaction.Add(PC, PlayerFaction);
+	ControllerClass.Add(PC, Cls);
+	// He is the player's man now: none of the bot's habits stay with him.
+	Best->SetDucking(false);
+	Best->MisfireChance = 0.f;
+	Best->MisfireStress = 0.f;
+	Best->SquadId = -1;
+	Best->bInLine = false;
+	Best->GetCharacterMovement()->MaxWalkSpeed = 380.f;
+	if (Best->MeleeComponent) Best->MeleeComponent->SetGuardHeld(false);
+	const FRotator Facing = Best->GetActorRotation();
+	FrameHumanCamera(PC, Best);
+	PC->SetControlRotation(FRotator(-10.f, Facing.Yaw, 0.f));
+	PC->SetViewTarget(Best);
+	const int32 Left = CountAlive(PlayerFaction);
+	ShowNotice(FString::Printf(TEXT("No reserves left - you take the place of a man still standing (%d left)"), Left), 6.f);
+	return true;
 }
 
 APawn* APA250BattleGameMode::SpawnDefaultPawnAtTransform_Implementation(AController* NewPlayer, const FTransform& SpawnTransform)
@@ -1598,6 +2057,24 @@ void APA250BattleGameMode::BleedTickets(float DeltaSeconds)
 		TEXT("british"), PostsOwned(TEXT("british")), TEXT("continental"), PostsOwned(TEXT("continental")), CountPosts());
 }
 
+void APA250BattleGameMode::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	FPA250BattleAudio::StopAmbience();
+	if (bRestoreScreenMessages)
+	{
+		GAreScreenMessagesEnabled = true;
+		bRestoreScreenMessages = false;
+	}
+	Super::EndPlay(EndPlayReason);
+}
+
+bool APA250BattleGameMode::SideIsOut(int32 Pool, int32 InitialUnits, bool bEverFielded, int32 Alive, bool bHumanAliveOnSide)
+{
+	if (bHumanAliveOnSide || Pool > 0) return false;
+	if (InitialUnits > 0) return true;
+	return bEverFielded && Alive <= 0;
+}
+
 void APA250BattleGameMode::CheckTicketExhaustion()
 {
 	// Keep early fights from ending on bleed alone (default MinSecondsBeforeExhaustion ≈ 2 min).
@@ -1610,17 +2087,20 @@ void APA250BattleGameMode::CheckTicketExhaustion()
 	// A side that started with no reinforcement tickets only loses after it has fielded at
 	// least once and been wiped — never on the first Tick before spawn (stores gating used
 	// to leave Continental at 0 tickets and kick Concord back to the map immediately).
-	auto Out = [this](FName F) {
-		if (PoolTotal(F) > 0) return false;
+	// The player's side is never counted out while the player himself is alive on the field
+	// (user decision 2026-11-10): the battle is not lost under a man who is still fighting.
+	bool bHumanAlive = false;
+	if (!bAutoplayBots)
+	{
+		const APlayerController* PC = GetWorld() ? GetWorld()->GetFirstPlayerController() : nullptr;
+		const ARFCharacter* Me = PC ? Cast<ARFCharacter>(PC->GetPawn()) : nullptr;
+		bHumanAlive = Me && !Me->IsDead() && Me->FactionId == PlayerFaction;
+	}
+	auto Out = [this, bHumanAlive](FName F) {
 		int32 Initial = 0;
 		for (const auto& CK : InitialPool.FindRef(F)) Initial += CK.Value;
-		const int32 Alive =
-			CountAlive(F, TEXT("line_infantry")) + CountAlive(F, TEXT("militia"));
-		if (Initial > 0)
-		{
-			return true;
-		}
-		return EverFielded.FindRef(F) && Alive <= 0;
+		const int32 Alive = CountAlive(F);
+		return SideIsOut(PoolTotal(F), Initial, EverFielded.FindRef(F), Alive, bHumanAlive && F == PlayerFaction);
 	};
 	const bool BritOut = Out(TEXT("british"));
 	const bool ContOut = Out(TEXT("continental"));
@@ -1678,10 +2158,15 @@ void APA250BattleGameMode::OnCharacterDied(ARFCharacter* Victim, AController* Vi
 		{
 			if (const ARFCharacter* KillerChar = Cast<ARFCharacter>(Killer->GetPawn()))
 			{
+				// Personal kills are enemy kills by the player's own hand (musket, bayonet or
+				// taken-over soldier alike); a friendly death at his hand is not one.
+				if (Killer->IsLocalPlayerController() && KillerChar->FactionId != Victim->FactionId)
+				{
+					++PersonalKills;
+				}
 				auto Label = [](const ARFCharacter* C, bool bYou) {
 					if (bYou) return FString(TEXT("You"));
-					const FString Side = C->FactionId == TEXT("british") ? TEXT("Regular") : TEXT("Provincial");
-					return C->UnitClass == TEXT("militia") ? FString::Printf(TEXT("%s militia"), *Side) : Side;
+					return FString(PA250UnitClasses::KitFor(C->FactionId, C->UnitClass).Label);
 				};
 				PushKillFeed(FString::Printf(TEXT("%s  x  %s"),
 					*Label(KillerChar, Killer->IsLocalPlayerController()),
@@ -1719,6 +2204,7 @@ void APA250BattleGameMode::OnCharacterDied(ARFCharacter* Victim, AController* Vi
 		{
 			return;
 		}
+		bOpeningClassPick = false; // shot while still choosing: from here it is an ordinary respawn
 		BeginDeathCamThenSpawn(Cast<APlayerController>(VictimController));
 		return;
 	}
@@ -1828,15 +2314,16 @@ void APA250BattleGameMode::Tick(float DeltaSeconds)
 	}
 	BleedTickets(DeltaSeconds);
 	TickMuster(DeltaSeconds);
+	TickOfficers(DeltaSeconds);
 	for (const FName F : {FName(TEXT("british")), FName(TEXT("continental"))})
 	{
-		if (CountAlive(F, TEXT("line_infantry")) + CountAlive(F, TEXT("militia")) > 0)
+		if (CountAlive(F) > 0)
 		{
 			EverFielded.FindOrAdd(F) = true;
 		}
 	}
 	CheckTicketExhaustion();
-	if (SpawnScreen && SpawnScreen->IsInViewport() && !CanSpawn(PlayerFaction))
+	if (SpawnScreen && SpawnScreen->IsInViewport() && !bOpeningClassPick && !CanSpawn(PlayerFaction))
 	{
 		CloseSpawnScreenToSpectate(SpawnScreen->GetOwningPlayer());
 	}
@@ -1879,6 +2366,7 @@ void APA250BattleGameMode::EndBattle(FName Winner, const FString& Reason)
 	}
 	bBattleOver = true;
 	EndReason = Reason;
+	UE_LOG(LogTemp, Display, TEXT("PA250 battle: %d AI misfires (flash in the pan)"), Misfires);
 
 	Result = pa250::BattleResult{};
 	Result.province_id = Setup.province_id;
@@ -1908,21 +2396,39 @@ void APA250BattleGameMode::EndBattle(FName Winner, const FString& Reason)
 			}
 		}
 	}
-	// Cartridges spent: clamp to province stock; prefer side budgets from setup.
+	Result.personal_kills = PersonalKills;
+	// Cartridges from live shots when available; else fielded×2. Clamp to budget / province stock.
 	const int32 ProvinceCart = Setup.province_cartridges;
-	int32 Remaining = ProvinceCart;
+	int32 RemainingCart = ProvinceCart;
+	int32 TotalShots = 0;
+	for (const auto& Kv : ShotsFiredByFaction) TotalShots += Kv.Value;
 	for (const auto& Side : Setup.sides)
 	{
+		const FName SideName = ToName(Side.first);
 		const int32 Fielded = [&]() {
 			int32 N = 0;
 			for (const auto& T : Side.second.tickets) N += std::max(0, T.second);
 			return N;
 		}();
-		int32 Spend = Fielded * 2;
+		int32 Spend = TotalShots > 0 ? ShotsFiredByFaction.FindRef(SideName) : Fielded * 2;
+		if (ShotsFiredByFaction.FindRef(SideName) > 0)
+		{
+			Result.shots_fired[Side.first] = ShotsFiredByFaction.FindRef(SideName);
+		}
 		if (Side.second.cartridge_budget > 0) Spend = FMath::Min(Spend, Side.second.cartridge_budget);
-		Spend = FMath::Clamp(Spend, 0, Remaining);
-		Remaining -= Spend;
+		Spend = FMath::Clamp(Spend, 0, RemainingCart);
+		RemainingCart -= Spend;
 		Result.cartridges_spent[Side.first] = Spend;
+	}
+	// Powder horn waste from misfires (flash in the pan).
+	int32 RemainingPowder = Setup.province_powder;
+	for (const auto& Side : Setup.sides)
+	{
+		const FName SideName = ToName(Side.first);
+		int32 Pw = MisfiresByFaction.FindRef(SideName);
+		Pw = FMath::Clamp(Pw, 0, RemainingPowder);
+		RemainingPowder -= Pw;
+		if (Pw > 0) Result.powder_spent[Side.first] = Pw;
 	}
 	++BattleResultEmitCount;
 	const std::string Loser = Winner == TEXT("british") ? "continental" : "british";

@@ -83,6 +83,24 @@ public:
 
 	// ---- HUD / spawn queries ----
 	int32 TicketsRemaining(FName Faction) const;
+	/** One row of the class picker: a class this side brought to the field. */
+	struct FClassChoice
+	{
+		FName Id;
+		int32 MenLeft = 0; // of this class, standing or in reserve (starting soldiers minus its dead)
+		int32 Alive = 0;
+	};
+	/** Classes the side's army holds, in display order. A class with no men left is listed but cannot be chosen. */
+	TArray<FClassChoice> GetClassChoices(FName Faction) const;
+	/** Men of a class not yet dead: campaign units x SoldiersPerUnit minus the class's deaths. */
+	int32 ClassMenLeft(FName Faction, FName UnitClass) const;
+	/** The class this controller last fought as (NAME_None before its first spawn). */
+	FName GetControllerClass(const AController* Controller) const;
+	/** Opening choice: the living player becomes UnitClass where he stands (no ticket, no respawn). */
+	bool RekitPlayer(APlayerController* PC, FName UnitClass);
+	/** The class picker is up before the player's first shot of the battle (Deploy re-kits, it does not spawn). */
+	bool IsOpeningClassPick() const { return bOpeningClassPick; }
+	void EndOpeningClassPick();
 	int32 TicketsRemaining(FName Faction, FName UnitClass) const;
 	float TimeRemaining() const;
 	FName GetPlayerFaction() const { return PlayerFaction; }
@@ -94,7 +112,15 @@ public:
 	int32 GetBleedPerInterval(FName Faction) const;
 	const TArray<TWeakObjectPtr<APA250ControlPoint>>& GetPosts() const;
 	bool IsBattleOver() const { return bBattleOver; }
-	FString GetBannerText() const { return Banner; }
+	/** The battle banner, or a timed notice to the player while one is up. */
+	FString GetBannerText() const { return (GetWorld() && GetWorld()->GetTimeSeconds() < NoticeUntil) ? Notice : Banner; }
+	void ShowNotice(const FString& Text, float Seconds);
+	/** Pure: has a side lost on tickets? Never while the human player is alive on it; otherwise at 0
+	 *  tickets (a side that started with none only once it has fielded men and been wiped). */
+	static bool SideIsOut(int32 Pool, int32 InitialUnits, bool bEverFielded, int32 Alive, bool bHumanAliveOnSide);
+	/** No reserves left: the player steps into the nearest of his side's men still standing (no ticket
+	 *  is spent, the bot's controller is retired). False when nobody is left to take over. */
+	bool TakeOverSoldier(APlayerController* PC);
 	const pa250::BattleResult& GetResult() const { return Result; }
 	bool IsAutoplayMode() const { return bAutoplayBots; }
 	UMusketTuning* GetTuning() const;
@@ -106,6 +132,9 @@ public:
 	void NotifyProjectileHit(ARFCharacter* Shooter, ARFCharacter* Victim, float Damage);
 	void PushKillFeed(const FString& Line);
 	/** Bots report each finished reload (seconds, fumbles) by training profile for the battle trace. */
+	/** A bot's musket flashed in the pan (battle statistics only; powder horn waste). */
+	void RecordMisfire(FName Faction);
+	int32 GetMisfires() const { return Misfires; }
 	void RecordAIReload(FName Training, float Seconds, int32 Fumbles);
 	/** Where a routing squad runs: the side's spawn area, else Fallback. */
 	FVector GetRearPoint(FName Faction, const FVector& Fallback) const;
@@ -158,6 +187,8 @@ public:
 
 protected:
 	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+	bool bRestoreScreenMessages = false;
 	virtual void Tick(float DeltaSeconds) override;
 	virtual void OnCharacterDied(ARFCharacter* Victim, AController* VictimController, AController* Killer) override;
 	virtual AActor* ChooseRespawnPoint(AController* Controller) override;
@@ -175,6 +206,7 @@ private:
 	void MaybeStartFpsSample();
 	/** -PA250MeleeProbe: stage the player against one enemy, run every melee move, save stills (PA250MeleeProbe.cpp). */
 	void MaybeStartMeleeProbe();
+	void MaybeStartClassPortraits();
 	void GatherPosts();
 	/** Post ownership, which posts can be taken, and how the clock is won, from the BattleSetup. */
 	void ApplyScenarioPreset();
@@ -200,6 +232,11 @@ private:
 	void BleedTickets(float DeltaSeconds);
 	int32 PoolTotal(FName Faction) const;
 	int32 CountAlive(FName Faction, FName UnitClass) const;
+	int32 CountAlive(FName Faction) const;
+	void TickOfficers(float DeltaSeconds);
+	void MaybeOpenClassPick(APlayerController* PC);
+	float OfficerTimer = 0.f;
+	bool bOpeningClassPick = false;
 	AActor* PickStart(FName Faction) const;
 	FTransform PickSpawnTransform(FName Faction, APA250ControlPoint* PreferredPost) const;
 	void ShowSpawnScreen(APlayerController* PC);
@@ -223,6 +260,8 @@ private:
 	int32 PostFlips = 0;
 	float SpacingReportTimer = 5.f;
 	FString Banner;
+	FString Notice;
+	float NoticeUntil = -1.f;
 	FString EndReason;
 	FName PlayerFaction;
 	FName PendingPlayerClass = TEXT("line_infantry");
@@ -257,6 +296,10 @@ private:
 	TObjectPtr<UPA250CombatProfiles> CombatProfilesAsset;
 
 	int32 BotProfileSerial = 0;
+	int32 Misfires = 0;
+	int32 PersonalKills = 0;
+	TMap<FName, int32> ShotsFiredByFaction;
+	TMap<FName, int32> MisfiresByFaction;
 	int32 ClothesSerial = 0;
 	uint32 PlayerClothingSeed = 0;
 	TMap<FName, int32> MusterCap;              // max militia alive for a side (0 = no muster)

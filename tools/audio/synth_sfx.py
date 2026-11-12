@@ -14,7 +14,13 @@ Sounds (several variants each so volleys don't sound copy-pasted):
   impact_ground_N    ball into earth / fence: short dirt burst
   ramrod_N           reload step: iron ramrod clink and scrape
   flint_click        misfire / jam: flint snap, no boom
-  melee_swing        bayonet / butt-stroke swish
+  melee_swing        bayonet / butt-stroke swish (plus melee_swing_N variants)
+  bayonet_clash_N    a thrust caught on a musket: steel on iron and wood, a short ring
+  bayonet_stab_N     the point going home: a wet, close thud (not a ball strike)
+  butt_thud_N        a walnut stock against a man: a hard wooden knock
+  footstep_grass_N   a shoe on turf: soft thump and a brush of grass
+  ambience_dawn      24 s seamless loop for the battlefield before and between the firing: light wind
+                     in the trees and a few birds (the import marks it looping)
   drum_roll          rope-tension field drum: a crescendo roll ending on an accent ("Make ready!")
   march_patriot      fife and drum, "Yankee Doodle" (traditional, public domain; in 1775 a British
                      tune mocking the colonists, taken up by the Americans after Lexington and Concord)
@@ -194,6 +200,121 @@ def melee_swing(seed: int) -> np.ndarray:
     return bandpass(rng.standard_normal(n), 400, 2400) * amp
 
 
+def bayonet_clash(seed: int) -> np.ndarray:
+    rng = np.random.default_rng(seed)
+    n = int(0.55 * SR)
+    t = np.arange(n) / SR
+    # Steel socket-bayonet on an iron barrel: inharmonic partials, lower and longer than a ramrod clink.
+    base = rng.uniform(1050, 1500)
+    ring = sum(
+        np.sin(2 * np.pi * base * r * t + rng.uniform(0, 6.28)) * np.exp(-t / (0.11 / (1 + 0.6 * i))) / (i + 1)
+        for i, r in enumerate((1.0, 2.32, 3.87, 5.61, 8.14))
+    )
+    strike = hp(rng.standard_normal(n), 1800) * env_exp(n, 0.0004, 0.006) * 1.6
+    # The stock takes it too: a woody knock under the ring, then a short scrape as the blades slide.
+    knock = np.sin(2 * np.pi * rng.uniform(190, 260) * t) * env_exp(n, 0.001, 0.03) * 0.7
+    scrape = bandpass(rng.standard_normal(n), 2200, 6500) * env_exp(n, 0.02, 0.05) * 0.22
+    scrape[: int(0.03 * SR)] = 0.0
+    return ring * 0.8 + strike + knock + scrape
+
+
+def bayonet_stab(seed: int) -> np.ndarray:
+    rng = np.random.default_rng(seed)
+    n = int(0.4 * SR)
+    t = np.arange(n) / SR
+    thud = np.sin(2 * np.pi * rng.uniform(70, 95) * t) * env_exp(n, 0.003, 0.06)
+    cloth = bandpass(rng.standard_normal(n), 400, 2200) * env_exp(n, 0.002, 0.03) * 0.6
+    # The wet part: a brief, band-limited tear a few milliseconds behind the thud.
+    wet = bandpass(rng.standard_normal(n), 900, 3800) * env_exp(n, 0.012, 0.045) * 0.45
+    wet *= 0.6 + 0.4 * np.sin(2 * np.pi * rng.uniform(28, 40) * t) ** 2
+    return thud + cloth + np.roll(wet, int(0.012 * SR))
+
+
+def butt_thud(seed: int) -> np.ndarray:
+    rng = np.random.default_rng(seed)
+    n = int(0.32 * SR)
+    t = np.arange(n) / SR
+    wood = sum(
+        np.sin(2 * np.pi * f * t) * env_exp(n, 0.0008, d) * a
+        for f, d, a in ((rng.uniform(160, 210), 0.045, 1.0), (rng.uniform(520, 680), 0.018, 0.5), (rng.uniform(1100, 1500), 0.008, 0.25))
+    )
+    slap = lp(rng.standard_normal(n), 2600, 2) * env_exp(n, 0.0006, 0.012) * 0.9
+    return wood + slap
+
+
+def melee_swing_var(seed: int) -> np.ndarray:
+    # Same swish as melee_swing with its own length and pitch band, so repeated thrusts differ.
+    rng = np.random.default_rng(seed)
+    dur = rng.uniform(0.22, 0.34)
+    n = int(dur * SR)
+    t = np.arange(n) / SR
+    amp = np.sin(np.pi * np.clip(t / (dur * 0.85), 0, 1)) ** 2
+    lo = rng.uniform(350, 600)
+    return bandpass(rng.standard_normal(n), lo, lo * rng.uniform(4.0, 6.0)) * amp
+
+
+def footstep_grass(seed: int) -> np.ndarray:
+    rng = np.random.default_rng(seed)
+    n = int(0.26 * SR)
+    t = np.arange(n) / SR
+    heel = np.sin(2 * np.pi * rng.uniform(70, 95) * t) * env_exp(n, 0.004, 0.035)
+    sole = lp(rng.standard_normal(n), rng.uniform(700, 1100), 2) * env_exp(n, 0.006, 0.04) * 0.9
+    grass = bandpass(rng.standard_normal(n), 2200, 7000) * env_exp(n, 0.02, 0.06) * rng.uniform(0.12, 0.22)
+    return heel * 0.8 + sole + np.roll(grass, int(rng.uniform(0.01, 0.03) * SR))
+
+
+def ambience_dawn(seed: int, seconds: float = 24.0) -> np.ndarray:
+    rng = np.random.default_rng(seed)
+    n = int(seconds * SR)
+    t = np.arange(n) / SR
+    # Every modulation completes whole cycles in the loop length, so the end meets the start.
+    def cyc(k: float, phase: float) -> np.ndarray:
+        return np.sin(2 * np.pi * (k / seconds) * t + phase)
+
+    noise = rng.standard_normal(n + SR)
+    # Circular noise: crossfade the tail into the head so filtered noise has no seam either.
+    fade = np.linspace(0.0, 1.0, SR)
+    body = noise[:n].copy()
+    body[:SR] = noise[n:] * np.sqrt(1.0 - fade) + noise[:SR] * np.sqrt(fade)
+    # Filters start cold, which would click at the loop point: run them over a one-second pre-roll
+    # taken from the end of the (circular) noise and drop it, so the start continues from the end.
+    def circ(f, x: np.ndarray) -> np.ndarray:
+        return f(np.concatenate([x[-SR:], x]))[SR:]
+
+    wind_low = circ(lambda x: lp(x, 220, 2), body) * (0.55 + 0.25 * cyc(2, 0.3) + 0.15 * cyc(5, 1.9))
+    rev = body[::-1].copy()
+    leaves = circ(lambda x: bandpass(x, 1800, 6000), rev) * (0.10 + 0.07 * cyc(3, 2.2) + 0.05 * cyc(7, 0.4)) ** 2 * 9.0
+    out = wind_low * 1.0 + leaves * 0.35
+    # Birds: short rising or falling whistles in small groups, kept clear of the loop point.
+    for _ in range(11):
+        start = rng.uniform(1.0, seconds - 3.0)
+        base = rng.uniform(2400, 4800)
+        gain = rng.uniform(0.02, 0.07)
+        for k in range(int(rng.integers(2, 6))):
+            dur = rng.uniform(0.06, 0.14)
+            m = int(dur * SR)
+            i0 = int((start + k * rng.uniform(0.13, 0.22)) * SR)
+            if i0 + m >= n - SR:
+                break
+            tt = np.arange(m) / SR
+            sweep = base * (1.0 + rng.uniform(-0.18, 0.25) * tt / dur)
+            chirp = np.sin(2 * np.pi * np.cumsum(sweep) / SR) * np.sin(np.pi * tt / dur) ** 2
+            out[i0 : i0 + m] += chirp * gain
+    return out
+
+
+def write_loop(name: str, x: np.ndarray, peak_db: float) -> None:
+    # Like write(), but without normalize()'s end fade: a loop must not dip to silence at the seam.
+    OUT.mkdir(parents=True, exist_ok=True)
+    peak = np.max(np.abs(x)) or 1.0
+    data = (x / peak * (10 ** (peak_db / 20.0)) * 32767.0).astype("<i2")
+    with wave.open(str(OUT / f"{name}.wav"), "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(SR)
+        w.writeframes(data.tobytes())
+
+
 def hit_confirm(seed: int) -> np.ndarray:
     """UI tick for 'you hit him': two short bright blips."""
     rng = np.random.default_rng(seed)
@@ -320,6 +441,15 @@ def main() -> None:
         write(f"ramrod_{i}", ramrod(600 + i), peak_db=-8.0)
     write("flint_click", flint_snap(np.random.default_rng(700)), peak_db=-6.0)
     write("melee_swing", melee_swing(800), peak_db=-6.0)
+    for i in range(1, 4):
+        write(f"melee_swing_{i}", melee_swing_var(810 + i), peak_db=-6.0)
+        write(f"bayonet_clash_{i}", bayonet_clash(820 + i), peak_db=-3.0)
+    for i in range(1, 3):
+        write(f"bayonet_stab_{i}", bayonet_stab(830 + i), peak_db=-3.0)
+        write(f"butt_thud_{i}", butt_thud(840 + i), peak_db=-3.0)
+    for i in range(1, 5):
+        write(f"footstep_grass_{i}", footstep_grass(850 + i), peak_db=-10.0)
+    write_loop("ambience_dawn", ambience_dawn(860), peak_db=-12.0)
     write("hit_confirm", hit_confirm(900), peak_db=-8.0)
     write("kill_confirm", kill_confirm(901), peak_db=-6.0)
     write("drum_roll", drum_roll(1000), peak_db=-4.0)

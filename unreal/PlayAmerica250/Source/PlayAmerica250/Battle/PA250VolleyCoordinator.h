@@ -71,6 +71,10 @@ public:
 
 	/** Pure: enough safe-ready men, or max wait elapsed with at least one safe shooter. */
 	static bool VolleyReadyToCall(int32 SafeReady, int32 LiveNum, float ReadyFraction, float NotReadyTime, float MaxWaitSeconds);
+	/** Pure: seconds after "Fire!" that one man's piece goes off. OrderFromRight is his place among the
+	 *  shooters counted from the right of the line; RollingFileSeconds > 0 makes the fire run down the
+	 *  line, and JitterSeconds * Rand01 is the raggedness on top. */
+	static float VolleyShotDelay(int32 OrderFromRight, float RollingFileSeconds, float JitterSeconds, float Rand01);
 	/** Pure: pending discharge may fire only while the squad epoch still matches and its target lives. */
 	static bool ShouldDischargePending(int32 SquadEpoch, int32 EntryEpoch, bool bAlive, bool bCanFire, bool bLaneClear, bool bTargetAlive);
 	/** Muzzle-to-aim clear of world blocks and living same-faction soldiers. */
@@ -140,6 +144,8 @@ private:
 		float LastChargeEndTime = -1000.f;
 		/** Bumped to invalidate delayed volley shots after cancel. */
 		int32 VolleyEpoch = 0;
+		/** Volleys fired since this contact began: the first is fired together, later ones may roll. */
+		int32 VolleysThisFight = 0;
 		TArray<FPendingVolleyShot> PendingShots;
 		int32 DebugLoaded = 0;
 		int32 DebugFormedReady = 0;

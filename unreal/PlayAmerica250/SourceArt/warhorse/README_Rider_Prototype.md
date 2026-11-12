@@ -50,3 +50,31 @@ The V2 clips correct the right leg direction. The mounted actor also corrects
 the saddle bone's rotation; transform checks confirm the rider remains upright
 through sampled idle and walk frames. Check the result visually for saddle,
 reins, sword grip, and body fit after rebuilding the project.
+
+## Riding in a normal battle
+
+The local `ARFCharacter` player can press **H** (or console `ToggleMounted`) to
+switch to the mounted colonial rider at their current position, and H again to
+return to infantry. Mount while standing on the ground, outside a reload or
+charge. WASD and mouse keep their normal movement/look bindings; left click or
+E plays the sword slash. The riding camera pulls back and up. Death or player
+cleanup removes the mounted visual; normal health, faction and respawn stay on
+the existing battle player. This is a riding prototype: the sword animation has
+no damage trace and collision still uses the player's original capsule.
+
+## Mounted firearms
+
+For the normal battle player: H mounts, then **1 selects sword**, **2 selects the
+musket**, and **3 selects a prototype pistol**. Left mouse fires the equipped gun,
+right mouse aims, and R uses the existing active reload controls (hold R to clear
+a jam). E switches to the sword and slashes. Both guns launch damage-bearing
+projectiles with the player's instigator/faction. The musket uses the existing
+infantry weapon and load state; the pistol has its own state, preserved when
+switching or dismounting. Death/player cleanup removes the pistol.
+
+The mounted rider uses arm IK for firearm carriage, retaining the seated legs.
+The pistol is a simple short barrel/grip placeholder because the project has no
+period pistol mesh; its 55 near / 25 far damage and 200 m/s speed are gameplay
+prototype values. Visual grip, recoil, reload body animation, and saddle contact
+need in-game review. Run `-run=PA250MountedWeapons -unattended -nullrhi` for the
+headless switching, projectile, and ammunition lifecycle checks.

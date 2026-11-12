@@ -58,6 +58,12 @@ protected:
 	FVector2D LastCursorUV = FVector2D(0.5f, 0.5f);
 	static constexpr float DragThresholdPx = 5.f;
 	static constexpr float ArrowPanPxPerSecond = 900.f;
+	/** Hover tooltip for towns and armies; shown after a short still hover. */
+	UPROPERTY(Transient)
+	TObjectPtr<class UPA250MapTooltip> MapTooltip;
+	FString HoverKey;
+	double HoverSince = 0.0;
+	static constexpr double HoverDelaySeconds = 0.25;
 	/** Screen-space drag anchor: press position, view centre and scale at the start of the drag. */
 	bool bDragAnchored = false;
 	FVector2D DragAnchorScreen = FVector2D::ZeroVector;

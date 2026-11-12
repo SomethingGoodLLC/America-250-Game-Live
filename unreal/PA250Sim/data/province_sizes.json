@@ -1,0 +1,23 @@
+{
+  "note": "Gameplay tuning — slot counts by town size. Not historical city ranks.",
+  "sizes": {
+    "small_town": 3,
+    "town": 4,
+    "city": 6
+  },
+  "provinces": {
+    "lexington": "small_town",
+    "lincoln": "small_town",
+    "menotomy": "small_town",
+    "brookline": "small_town",
+    "chelsea": "small_town",
+    "concord": "town",
+    "cambridge": "town",
+    "charlestown": "town",
+    "roxbury": "town",
+    "watertown": "town",
+    "medford": "town",
+    "dorchester": "town",
+    "boston": "city"
+  }
+}

@@ -64,17 +64,88 @@ CampaignState approve_purchase(const CampaignState& state, const std::string& de
 CampaignState approve_transfer(const CampaignState& state, const std::string& source_province,
                                const std::string& dest_province, int powder, int cartridges, int muskets,
                                int bayonets, int provisions, int lead, int paper, std::string& error);
-// Province development (EU4-style: spend gold to raise a track, effects are sim-side).
+// Gold a purchase order would cost (the price approve_purchase charges). Never mutates state.
+int purchase_cost(int powder, int cartridges, int muskets, int bayonets, int provisions, int lead,
+                  int paper);
+// Province development (EU4-style tracks + City View discrete buildings).
 int province_development(const Province& p);  // 1 + farm+workshop+depot+fort
 int effective_supply_value(const Province& p);  // supply_value + farm_level
 int development_cost(const std::string& track, int current_level);  // gold, -1 = unknown track
 int development_max_level();
+// Legacy name: now the same timed start as start_construction (gold on start, level on completion).
 CampaignState develop_province(const CampaignState& state, const std::string& province_id,
                                const std::string& track, std::string& error);
 // Player-facing preview strings (costs/effects) for HUD tooltips — never mutate state.
 std::string development_preview(const CampaignState& state, const std::string& province_id,
                                 const std::string& track);
 std::string aftermath_choice_preview(const CampaignState& state, const std::string& choice);
+
+// City View building catalog / sizes (optional JSON; defaults apply if unloaded).
+void load_buildings_catalog(const std::string& json_text);
+void load_province_sizes(const std::string& json_text);
+bool buildings_catalog_loaded();
+bool province_sizes_loaded();
+int province_slot_count(const std::string& province_id);
+int province_slots_occupied(const CampaignState& state, const std::string& province_id);
+int building_level(const Province& p, const std::string& building_id);
+bool building_present(const Province& p, const std::string& building_id);
+int building_cost(const std::string& building_id, int current_level);  // -1 unknown
+int building_build_hours(const std::string& building_id);
+std::string building_preview(const CampaignState& state, const std::string& province_id,
+                             const std::string& building_id);
+// Start a timed build or upgrade. Gold charged on start. error codes match develop_province plus
+// no_free_slot / already_present / already_building / unknown_building.
+CampaignState start_construction(const CampaignState& state, const std::string& province_id,
+                                 const std::string& building_id, std::string& error);
+CampaignState cancel_construction(const CampaignState& state, const std::string& province_id,
+                                  const std::string& building_id, std::string& error);
+CampaignState demolish_building(const CampaignState& state, const std::string& province_id,
+                                const std::string& building_id, std::string& error);
+void tick_construction_jobs(CampaignState& s);
+void buildings_monthly_tick(CampaignState& s);  // upkeep + church Support drip
+int building_battle_morale(const Province& p);  // Meeting House morale for battle setup
+// Raising troops (GAME INVENTION). A town the player holds musters one company at a time: gold and
+// stores are charged on start, the men arrive after the catalog's days, drawn from the town's
+// monthly manpower. Militia need a Militia Muster in the town; regulars need a Fort and muskets
+// from the town magazine. A company belongs to a faction (the other side's companies are
+// unknown_unit); rifle companies wait for the Continental chapter (not_yet). Unit classes in play:
+// militia, line_infantry, rifleman, officer, dragoon (Continental); line_infantry, grenadier, light_infantry,
+// officer, dragoon (British). Dragoons are a GAME INVENTION for 1775 (they ride, then fight on foot). error codes: unknown_unit / unknown_province / not_your_province / not_yet /
+// battle_pending / already_mustering / needs_building / no_manpower / insufficient_gold /
+// insufficient_muskets / insufficient_provisions / no_muster.
+int province_manpower_cap(const CampaignState& state, const std::string& province_id);
+std::string recruitment_preview(const CampaignState& state, const std::string& province_id,
+                                const std::string& unit_id);
+CampaignState start_recruitment(const CampaignState& state, const std::string& province_id,
+                                const std::string& unit_id, std::string& error);
+CampaignState cancel_recruitment(const CampaignState& state, const std::string& province_id,
+                                 std::string& error);
+void tick_recruitment_jobs(CampaignState& s);
+// A company the player raised that stands idle in a town with another of the player's armies is
+// absorbed by it (a battle is set up between one army per side). Scripted armies are never absorbed.
+void merge_idle_player_armies(CampaignState& s);
+// Treasury (GAME INVENTION, after the bills of credit Massachusetts issued in 1775). On the 1st of
+// each month the province settles: town levies, depot trade and workshop output come in; army
+// pay, building upkeep and interest on debt go out. A shortfall is borrowed automatically up to
+// the credit limit; past it the army goes unpaid (morale and Support fall).
+int town_levy_gold(const Province& p);                    // monthly gold from one town
+int treasury_credit_limit(const CampaignState& state);    // most the province may owe
+int monthly_net_gold(const CampaignState& state);         // projected income - expenses
+std::string treasury_json(const CampaignState& state);    // balance, debt, every line of the budget
+// Borrow / repay one loan step. error: battle_pending / credit_exhausted / no_debt / insufficient_gold.
+CampaignState take_loan(const CampaignState& state, std::string& error);
+CampaignState repay_loan(const CampaignState& state, std::string& error);
+void settle_monthly_budget(CampaignState& s);  // called from buildings_monthly_tick
+// The other side keeps the same accounts (levies, depot trade, workshop muskets, army pay, building
+// upkeep) from its own war chest, plus a subsidy and provisions by sea while it controls the
+// harbour and holds its headquarters town. It cannot borrow: an empty chest means an unpaid army
+// (morale falls). With gold to spare it raises one company a month from the catalog, armed and fed
+// from its own magazine. Called from buildings_monthly_tick after the player's settlement.
+std::string enemy_faction(const CampaignState& state);
+int enemy_monthly_net_gold(const CampaignState& state);
+void settle_enemy_budget(CampaignState& s);
+// Read-only City View snapshot (slots, options, totals) for UE HUD.
+std::string city_view_json(const CampaignState& state, const std::string& province_id);
 
 // Start a cartridge job: reserves powder/lead/paper and commits workers until complete_on_hour.
 CampaignState start_cartridge_job(const CampaignState& state, const std::string& province_id,
@@ -123,5 +194,6 @@ std::string setup_to_json(const BattleSetup& setup);
 BattleSetup setup_from_json(const std::string& json_text);          // throws
 std::string result_to_json(const BattleResult& result);
 BattleResult result_from_json(const std::string& json_text);        // throws
+std::string report_to_json(const BattleReport& report);
 
 }  // namespace pa250

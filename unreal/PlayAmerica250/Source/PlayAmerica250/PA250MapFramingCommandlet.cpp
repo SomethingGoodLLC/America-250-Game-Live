@@ -200,7 +200,8 @@ int32 UPA250MapFramingCommandlet::Main(const FString& Params)
 				   APA250ArmyToken::CompactSymbolPx, APA250ArmyToken::RevealFigurePx, APA250ArmyToken::HideFigurePx);
 			++Failures;
 		}
-		for (const EPA250ArmyArt Art : {EPA250ArmyArt::ProvincialRegulars, EPA250ArmyArt::BritishMarching, EPA250ArmyArt::BritishFiring})
+		for (const EPA250ArmyArt Art :
+			 {EPA250ArmyArt::ProvincialRegulars, EPA250ArmyArt::BritishMarching, EPA250ArmyArt::BritishFiring, EPA250ArmyArt::Militia})
 		{
 			const FPA250ArmyArtSpec& Spec = APA250ArmyToken::ArtSpec(Art);
 			const UTexture2D* Tex = LoadObject<UTexture2D>(nullptr, Spec.TexturePath);
@@ -237,7 +238,8 @@ int32 UPA250MapFramingCommandlet::Main(const FString& Params)
 			++Failures;
 		}
 	}
-	// Art follows state and troop role only: provincial regulars art never stands for a militia force.
+	// Art follows state and troop role only: provincial regulars art never stands for a militia force,
+	// and the (Patriot) militia art never stands for a British force.
 	{
 		pa250::CampaignState St;
 		auto Make = [](const char* Id, const char* Faction, int Line, int Militia) {
@@ -257,7 +259,8 @@ int32 UPA250MapFramingCommandlet::Main(const FString& Params)
 			EPA250ArmyArt Want;
 		};
 		const FCase Cases[] = {
-			{TEXT("continental militia-majority (slice opening army 4+18)"), Make("c1", "continental", 4, 18), false, false, EPA250ArmyArt::None},
+			{TEXT("continental militia-majority (slice opening army 4+18)"), Make("c1", "continental", 4, 18), false, false, EPA250ArmyArt::Militia},
+			{TEXT("continental militia only, marching and engaged (no variant)"), Make("c4", "continental", 0, 18), true, true, EPA250ArmyArt::Militia},
 			{TEXT("continental regular-majority"), Make("c2", "continental", 12, 4), false, false, EPA250ArmyArt::ProvincialRegulars},
 			{TEXT("continental regulars marching (no variant)"), Make("c3", "continental", 12, 0), true, false, EPA250ArmyArt::ProvincialRegulars},
 			{TEXT("british at rest"), Make("b1", "british", 24, 0), false, false, EPA250ArmyArt::None},
@@ -395,6 +398,57 @@ int32 UPA250MapFramingCommandlet::Main(const FString& Params)
 				}
 			}
 			UE_LOG(LogTemp, Display, TEXT("Framing: town washes checked %d"), UVs.Num());
+
+			// Traced roads: each joins its two towns' hotspots and is a real sim edge; a column halfway
+			// along stands on the road (within 1 UU of a road vertex segment), not on the straight chord.
+			const TSharedPtr<FJsonObject>* RoutesObj = nullptr;
+			const TSharedPtr<FJsonObject>* RouteEdges = nullptr;
+			int32 RoutesChecked = 0;
+			if (Loc->TryGetObjectField(TEXT("routes"), RoutesObj) && (*RoutesObj)->TryGetObjectField(TEXT("edges"), RouteEdges))
+			{
+				for (const TPair<FString, TSharedPtr<FJsonValue>>& R : (*RouteEdges)->Values)
+				{
+					const auto E = Scenario.edges.find(TCHAR_TO_UTF8(*R.Key));
+					if (E == Scenario.edges.end())
+					{
+						UE_LOG(LogTemp, Error, TEXT("Framing: route %s is not a sim edge"), *R.Key);
+						++Failures;
+						continue;
+					}
+					TArray<FVector2D> Road;
+					for (const TSharedPtr<FJsonValue>& P : R.Value->AsObject()->GetArrayField(TEXT("polyline_uv")))
+					{
+						Road.Add(FVector2D(P->AsArray()[0]->AsNumber() * ImgW, P->AsArray()[1]->AsNumber() * ImgH)); // image px
+					}
+					const FVector2D* A = UVs.Find(UTF8_TO_TCHAR(E->second.a.c_str()));
+					const FVector2D* B = UVs.Find(UTF8_TO_TCHAR(E->second.b.c_str()));
+					auto Px = [&](const FVector2D* UV) { return FVector2D(UV->X * ImgW, UV->Y * ImgH); };
+					const bool bEnds = A && B && Road.Num() >= 2 &&
+									   ((FVector2D::Distance(Road[0], Px(A)) < 2.f && FVector2D::Distance(Road.Last(), Px(B)) < 2.f) ||
+										(FVector2D::Distance(Road[0], Px(B)) < 2.f && FVector2D::Distance(Road.Last(), Px(A)) < 2.f));
+					if (!bEnds)
+					{
+						UE_LOG(LogTemp, Error, TEXT("Framing: route %s does not start/end at its towns' hotspots"), *R.Key);
+						++Failures;
+						continue;
+					}
+					const FVector2D Mid = APA250ProvinceMapActor::PointAlongPath(Road, 0.5f);
+					float OnRoad = TNumericLimits<float>::Max();
+					for (int32 k = 0; k + 1 < Road.Num(); ++k)
+					{
+						OnRoad = FMath::Min(OnRoad, FMath::PointDistToSegment(FVector(Mid, 0.f), FVector(Road[k], 0.f), FVector(Road[k + 1], 0.f)));
+					}
+					const float OffChord = FMath::PointDistToSegment(FVector(Mid, 0.f), FVector(Road[0], 0.f), FVector(Road.Last(), 0.f));
+					UE_LOG(LogTemp, Display, TEXT("Framing: route %s halfway point %.1f px from road, %.0f px from straight chord"), *R.Key, OnRoad,
+						   OffChord);
+					if (OnRoad > 1.f)
+					{
+						++Failures;
+					}
+					++RoutesChecked;
+				}
+			}
+			UE_LOG(LogTemp, Display, TEXT("Framing: traced routes checked %d"), RoutesChecked);
 		}
 	}
 

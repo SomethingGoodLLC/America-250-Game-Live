@@ -36,6 +36,16 @@ FString UPA250Subsystem::LogisticsTuningPath()
 	return FPaths::ConvertRelativePathToFull(
 		FPaths::Combine(FPaths::ProjectDir(), TEXT("../PA250Sim/data/logistics_tuning.json")));
 }
+FString UPA250Subsystem::BuildingsCatalogPath()
+{
+	return FPaths::ConvertRelativePathToFull(
+		FPaths::Combine(FPaths::ProjectDir(), TEXT("../PA250Sim/data/buildings_catalog.json")));
+}
+FString UPA250Subsystem::ProvinceSizesPath()
+{
+	return FPaths::ConvertRelativePathToFull(
+		FPaths::Combine(FPaths::ProjectDir(), TEXT("../PA250Sim/data/province_sizes.json")));
+}
 FString UPA250Subsystem::SavePath() { return FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("PA250/campaign.json")); }
 FString UPA250Subsystem::TracePath() { return FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("PA250/autoplay_trace.json")); }
 FString UPA250Subsystem::AutosaveDir() { return FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("Autosaves")); }
@@ -256,6 +266,24 @@ bool UPA250Subsystem::EnsureCorrespondenceCatalog(FString& OutError)
 	}
 }
 
+void UPA250Subsystem::LoadSimDataFiles()
+{
+	// read_text_file throws when a file is missing; the sim then keeps its built-in defaults.
+	auto Load = [](const FString& Path, void (*Fn)(const std::string&)) {
+		try
+		{
+			Fn(pa250::read_text_file(ToStd(Path)));
+		}
+		catch (...)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("PA250 sim data: %s not loaded; using built-in defaults"), *Path);
+		}
+	};
+	Load(LogisticsTuningPath(), &pa250::load_logistics_tuning);
+	Load(BuildingsCatalogPath(), &pa250::load_buildings_catalog);
+	Load(ProvinceSizesPath(), &pa250::load_province_sizes);
+}
+
 bool UPA250Subsystem::NewCampaign(FString& OutError)
 {
 	try
@@ -264,14 +292,7 @@ bool UPA250Subsystem::NewCampaign(FString& OutError)
 		{
 			return false;
 		}
-		try
-		{
-			pa250::load_logistics_tuning(pa250::read_text_file(ToStd(LogisticsTuningPath())));
-		}
-		catch (...)
-		{
-			// Defaults inside the sim apply when the tuning file is missing.
-		}
+		LoadSimDataFiles();
 		Controller.new_campaign(pa250::read_text_file(ToStd(ScenarioPath())));
 		bPaused = true;
 		HourAccumulator = 0.f;
@@ -409,7 +430,12 @@ bool UPA250Subsystem::ApproveTransferOrder(const FString& SourceProvince, const 
 
 bool UPA250Subsystem::DevelopProvince(const FString& ProvinceId, const FString& Track, FString& OutError)
 {
-	const auto Errs = Controller.develop_province_action(ToStd(ProvinceId), ToStd(Track));
+	return StartConstruction(ProvinceId, Track, OutError);
+}
+
+bool UPA250Subsystem::StartConstruction(const FString& ProvinceId, const FString& BuildingId, FString& OutError)
+{
+	const auto Errs = Controller.start_construction_action(ToStd(ProvinceId), ToStd(BuildingId));
 	if (!Errs.empty())
 	{
 		OutError = ToFStr(Errs.front());
@@ -417,6 +443,111 @@ bool UPA250Subsystem::DevelopProvince(const FString& ProvinceId, const FString& 
 	}
 	BumpHudEpoch();
 	return true;
+}
+
+bool UPA250Subsystem::CancelConstruction(const FString& ProvinceId, const FString& BuildingId, FString& OutError)
+{
+	const auto Errs = Controller.cancel_construction_action(ToStd(ProvinceId), ToStd(BuildingId));
+	if (!Errs.empty())
+	{
+		OutError = ToFStr(Errs.front());
+		return false;
+	}
+	BumpHudEpoch();
+	return true;
+}
+
+bool UPA250Subsystem::DemolishBuilding(const FString& ProvinceId, const FString& BuildingId, FString& OutError)
+{
+	const auto Errs = Controller.demolish_building_action(ToStd(ProvinceId), ToStd(BuildingId));
+	if (!Errs.empty())
+	{
+		OutError = ToFStr(Errs.front());
+		return false;
+	}
+	BumpHudEpoch();
+	return true;
+}
+
+bool UPA250Subsystem::TakeLoan(FString& OutError)
+{
+	const auto Errs = Controller.take_loan_action();
+	if (!Errs.empty())
+	{
+		OutError = ToFStr(Errs.front());
+		return false;
+	}
+	BumpHudEpoch();
+	return true;
+}
+
+bool UPA250Subsystem::RepayLoan(FString& OutError)
+{
+	const auto Errs = Controller.repay_loan_action();
+	if (!Errs.empty())
+	{
+		OutError = ToFStr(Errs.front());
+		return false;
+	}
+	BumpHudEpoch();
+	return true;
+}
+
+FString UPA250Subsystem::GetTreasuryJson() const { return ToFStr(pa250::treasury_json(Controller.state())); }
+
+int32 UPA250Subsystem::GetMonthlyNetGold() const
+{
+	return Controller.has_campaign() ? pa250::monthly_net_gold(Controller.state()) : 0;
+}
+
+bool UPA250Subsystem::StartRecruitment(const FString& ProvinceId, const FString& UnitId, FString& OutError)
+{
+	const auto Errs = Controller.start_recruitment_action(ToStd(ProvinceId), ToStd(UnitId));
+	if (!Errs.empty())
+	{
+		OutError = ToFStr(Errs.front());
+		return false;
+	}
+	BumpHudEpoch();
+	return true;
+}
+
+bool UPA250Subsystem::CancelRecruitment(const FString& ProvinceId, FString& OutError)
+{
+	const auto Errs = Controller.cancel_recruitment_action(ToStd(ProvinceId));
+	if (!Errs.empty())
+	{
+		OutError = ToFStr(Errs.front());
+		return false;
+	}
+	BumpHudEpoch();
+	return true;
+}
+
+FString UPA250Subsystem::GetRecruitmentPreview(const FString& ProvinceId, const FString& UnitId) const
+{
+	return ToFStr(pa250::recruitment_preview(Controller.state(), ToStd(ProvinceId), ToStd(UnitId)));
+}
+
+FString UPA250Subsystem::GetCityViewJson(const FString& ProvinceId) const
+{
+	return ToFStr(pa250::city_view_json(Controller.state(), ToStd(ProvinceId)));
+}
+
+FString UPA250Subsystem::GetBuildingPreview(const FString& ProvinceId, const FString& BuildingId) const
+{
+	return ToFStr(pa250::building_preview(Controller.state(), ToStd(ProvinceId), ToStd(BuildingId)));
+}
+
+FString UPA250Subsystem::GetLastResourceChangeReason() const
+{
+	const auto& Changes = Controller.state().resource_changes;
+	return Changes.empty() ? FString() : ToFStr(Changes.back().reason);
+}
+
+int32 UPA250Subsystem::GetProvinceSlotCount(const FString& ProvinceId) const
+{
+	return pa250::province_slot_count(ToStd(ProvinceId));
 }
 
 FString UPA250Subsystem::GetProvinceDevelopmentJson() const
@@ -429,9 +560,12 @@ FString UPA250Subsystem::GetProvinceDevelopmentJson() const
 		First = false;
 		const pa250::Province& P = Kv.second;
 		Out += FString::Printf(
-			TEXT("\"%s\":{\"dev\":%d,\"farm\":%d,\"workshop\":%d,\"depot\":%d,\"fort\":%d,\"supply\":%d}"),
+			TEXT("\"%s\":{\"dev\":%d,\"farm\":%d,\"workshop\":%d,\"depot\":%d,\"fort\":%d,\"church\":%s,"
+				 "\"militia_muster\":%s,\"slots\":%d,\"occupied\":%d,\"supply\":%d}"),
 			UTF8_TO_TCHAR(P.id.c_str()), pa250::province_development(P), P.farm_level, P.workshop_level,
-			P.depot_level, P.fort_level, pa250::effective_supply_value(P));
+			P.depot_level, P.fort_level, P.church ? TEXT("true") : TEXT("false"),
+			P.militia_muster ? TEXT("true") : TEXT("false"), pa250::province_slot_count(P.id),
+			pa250::province_slots_occupied(Controller.state(), P.id), pa250::effective_supply_value(P));
 	}
 	Out += TEXT("}");
 	return Out;
@@ -452,21 +586,9 @@ bool UPA250Subsystem::StartCartridgeCraft(const FString& ProvinceId, const FStri
 
 FString UPA250Subsystem::GetLastBattleReportJson() const
 {
-	return ToFStr(pa250::result_to_json([&]() {
-		pa250::BattleResult R;
-		const pa250::BattleReport& Br = Controller.state().progress.last_battle_report;
-		R.province_id = Br.province_id;
-		R.winner = Br.winner;
-		R.objective_holder = Br.objective_holder;
-		R.objectives_held = Br.objectives_held;
-		R.losses = Br.losses;
-		R.wounded = Br.wounded;
-		R.cartridges_spent = Br.cartridges_spent;
-		R.powder_spent = Br.powder_spent;
-		R.morale_delta = Br.morale_delta;
-		R.province_owner_after = Br.province_owner_after;
-		return R;
-	}()));
+	// The report itself, not a rebuilt BattleResult: fate, scavenged stores and the
+	// attributed change lines only exist on BattleReport.
+	return ToFStr(pa250::report_to_json(Controller.state().progress.last_battle_report));
 }
 
 FString UPA250Subsystem::GetShipmentsJson() const
@@ -605,6 +727,7 @@ bool UPA250Subsystem::LoadCampaign(FString& OutError)
 	{
 		return false;
 	}
+	LoadSimDataFiles();
 	std::string Err;
 	const bool bOk = Controller.load(ToStd(SavePath()), Err);
 	if (!bOk)

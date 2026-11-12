@@ -55,6 +55,37 @@ struct Province {
     int workshop_level = 0;  // faster cartridge manufacture
     int depot_level = 0;     // faster shipments into this province
     int fort_level = 0;      // defender morale/readiness bonus at this province
+    // Discrete City View buildings (non-stackable). Soft-default false on old saves.
+    bool church = false;          // Meeting House — Support
+    bool militia_muster = false;  // Militia Muster — defender muster bonus
+    int manpower_used = 0;        // men raised here this month (resets on the 1st)
+};
+
+// Timed muster of one company in a town. Gold and stores are charged on start; on completion the
+// men join the player's army standing in the town, or form a new one there.
+struct RecruitJob {
+    std::string id;
+    std::string province_id;
+    std::string unit_id;     // catalog id (militia_company | provincial_regulars)
+    std::string unit_class;  // Army.units key (militia | line_infantry)
+    int men = 0;
+    int hours_remaining = 0;
+    int hours_total = 0;
+    int paid_gold = 0;
+    int paid_muskets = 0;
+    int paid_provisions = 0;
+};
+
+// Timed City View construction. Gold is charged on start; completion applies the building.
+struct ConstructionJob {
+    std::string id;
+    std::string province_id;
+    std::string building_id;  // farm|workshop|depot|fort|church|militia_muster
+    bool is_upgrade = false;
+    int hours_remaining = 0;
+    int hours_total = 0;
+    int paid_gold = 0;
+    std::string status;  // underway | complete | cancelled
 };
 
 struct Army {
@@ -168,6 +199,12 @@ struct BattleReport {
     std::string ownership_reason;            // held_objective | stores_forfeit | unchanged
     std::vector<std::string> change_reasons; // player-facing attributed deltas
     int defender_reward_support = 0;
+    int personal_kills = 0;
+    std::string retreat_to;  // loser's destination when retreated; empty otherwise
+    std::string loser_fate;  // retreated | shattered | destroyed | none
+    int scavenged_cartridges = 0;
+    int scavenged_powder = 0;
+    int scavenged_muskets = 0;
 };
 
 // One attributed treasury/stores/support delta (soft-default empty on old saves).
@@ -257,6 +294,14 @@ struct CampaignProgress {
     DetachedCommander commander;
     std::vector<PersonnelCommitment> personnel_commitments;
     std::vector<CartridgeJob> cartridge_jobs;
+    std::vector<ConstructionJob> construction_jobs;
+    std::vector<RecruitJob> recruit_jobs;
+    int treasury_debt = 0;     // gold owed on the province's bills of credit
+    int pay_arrears_months = 0;  // consecutive monthly settlements the army went unpaid
+    // The other side's war chest: the same monthly accounts, no credit. It is never shown to the
+    // player as a number; unpaid months reach the player only as reports.
+    int enemy_gold = 60;
+    int enemy_arrears_months = 0;
     BattleReport last_battle_report;
     std::vector<std::string> resolved_event_ids;
     std::vector<std::string> received_source_ids;
@@ -436,12 +481,15 @@ struct BattleSetup {
     std::vector<std::string> terrain_tags;
     std::map<std::string, SideSetup> sides;  // keyed by faction
     int province_cartridges = 0;            // stock at fight start (authoritative cap)
+    int province_powder = 0;                // raw powder at fight start (misfire waste cap)
     std::string force_notes = "sourced approximation — not a precise muster roll";
     // Contested-province development (0 when absent / old saves).
     int farm_level = 0;
     int workshop_level = 0;
     int depot_level = 0;
     int fort_level = 0;
+    bool church = false;
+    bool militia_muster = false;  // defender owns a Militia Muster here; UE raises its muster cap
     std::map<std::string, std::string> initial_post_holders;  // post_id -> faction
     std::vector<std::string> modifier_notes;                 // sourced lines for pre-battle UI
 };
@@ -455,6 +503,8 @@ struct BattleResult {
     std::map<std::string, int> cartridges_spent;               // faction -> spent
     std::map<std::string, int> powder_spent;                   // faction -> spent (rare)
     std::map<std::string, int> morale_delta;                   // army_id -> delta (optional input)
+    std::map<std::string, int> shots_fired;                    // faction -> successful discharges
+    int personal_kills = 0;  // deaths caused by the local player
     std::string retreat_province;  // loser's retreat; empty = sim chooses
     std::string province_owner_after;  // filled by apply when ownership flips
 };

@@ -216,7 +216,7 @@ void monthly_supply(CampaignState& s) {
     int gold_gain = 0;
     for (const auto& pk : s.provinces) {
         if (pk.second.owner != s.player_faction) continue;
-        const int add = 15 * effective_supply_value(pk.second);
+        const int add = town_levy_gold(pk.second);
         s.player_gold += add;
         gold_gain += add;
         if (pk.second.farm_level > 0) {
@@ -236,6 +236,7 @@ void monthly_supply(CampaignState& s) {
     } else {
         detail::add_log(s, "monthly supply accrual");
     }
+    buildings_monthly_tick(s);
 }
 
 void decay_grievance(CampaignState& s) {

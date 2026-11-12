@@ -14,7 +14,7 @@ void FPA250SmokePuff::Step(float Dt, const FVector& Wind)
 	Age += Dt;
 	// Muzzle jet: the cloud is blown out a few metres and stops within about a second.
 	Vel *= FMath::Exp(-2.2f * Dt);
-	Pos += (Vel + Wind * FMath::Min(1.f, Age / 2.f) + FVector(0.f, 0.f, 10.f)) * Dt;
+	Pos += (Vel + Wind * (WindShare * FMath::Min(1.f, Age / 2.f)) + FVector(0.f, 0.f, Rise)) * Dt;
 }
 
 float FPA250SmokePuff::Size() const
@@ -62,11 +62,7 @@ void UPA250SmokeSubsystem::AddShot(const FVector& Muzzle, const FVector& Directi
 	const float Start[3] = {55.f, 100.f, 150.f};
 	for (int32 i = 0; i < 3; ++i)
 	{
-		if (Puffs.Num() >= MaxPuffs)
-		{
-			Puffs.RemoveAt(0, EAllowShrinking::No); // oldest goes first
-		}
-		FPA250SmokePuff P;
+		FPA250SmokePuff& P = NewPuff();
 		P.Pos = Muzzle + Dir * Ahead[i] + Rng.GetUnitVector() * 15.f;
 		P.Vel = Dir * Speed[i] + Rng.GetUnitVector() * 25.f;
 		P.Life = Rng.FRandRange(22.f, 32.f);
@@ -74,10 +70,74 @@ void UPA250SmokeSubsystem::AddShot(const FVector& Muzzle, const FVector& Directi
 		P.Size1 = Rng.FRandRange(420.f, 600.f);
 		P.Peak = Rng.FRandRange(0.42f, 0.6f);
 		P.Spin = Rng.FRandRange(0.f, 2.f * PI);
-		Puffs.Add(P);
 	}
 	bForceRebuild = true;
 	Flash(Muzzle + Dir * 40.f);
+}
+
+FPA250SmokePuff& UPA250SmokeSubsystem::NewPuff()
+{
+	if (Puffs.Num() >= MaxPuffs)
+	{
+		Puffs.RemoveAt(0, EAllowShrinking::No); // oldest goes first
+	}
+	return Puffs.AddDefaulted_GetRef();
+}
+
+void UPA250SmokeSubsystem::AddPanFlash(const FVector& Lock, const FVector& Direction, bool bFlashOnly)
+{
+	// The pan sits on the right of the lock and vents up and outward, beside the firer's face.
+	const FVector Dir = Direction.GetSafeNormal();
+	const FVector Side = FVector::CrossProduct(FVector::UpVector, Dir).GetSafeNormal();
+	const FVector At = Lock + Dir * 12.f + Side * 6.f + FVector(0.f, 0.f, 8.f);
+	FPA250SmokePuff& P = NewPuff();
+	P.Pos = At;
+	P.Vel = Side * 90.f + FVector(0.f, 0.f, 150.f) + Rng.GetUnitVector() * 20.f;
+	P.Life = Rng.FRandRange(3.f, 4.5f);
+	P.Size0 = 18.f;
+	P.Size1 = Rng.FRandRange(110.f, 150.f);
+	P.Peak = bFlashOnly ? 0.6f : 0.45f;
+	P.Rise = 25.f;
+	P.Spin = Rng.FRandRange(0.f, 2.f * PI);
+	bForceRebuild = true;
+	if (bFlashOnly) Flash(At, 0.3f);
+}
+
+void UPA250SmokeSubsystem::AddImpact(const FVector& Where, const FVector& Normal, bool bHitMan)
+{
+	const FVector N = Normal.IsNearlyZero() ? FVector::UpVector : Normal.GetSafeNormal();
+	const int32 Count = bHitMan ? 1 : 2;
+	for (int32 i = 0; i < Count; ++i)
+	{
+		FPA250SmokePuff& P = NewPuff();
+		P.bPowder = false;
+		P.Pos = Where + N * 8.f;
+		P.Spin = Rng.FRandRange(0.f, 2.f * PI);
+		if (bHitMan)
+		{
+			P.Vel = N * 120.f + Rng.GetUnitVector() * 40.f;
+			P.Life = 0.55f;
+			P.Size0 = 8.f;
+			P.Size1 = 70.f;
+			P.Peak = 0.7f;
+			P.Tint = FLinearColor(0.30f, 0.02f, 0.015f);
+			P.Rise = -40.f;
+			P.WindShare = 0.3f;
+		}
+		else
+		{
+			// A spurt thrown off the surface, then a slower cloud that hangs and drifts a moment.
+			P.Vel = (N * (i == 0 ? 420.f : 160.f) + Rng.GetUnitVector() * 70.f);
+			P.Life = i == 0 ? Rng.FRandRange(0.9f, 1.3f) : Rng.FRandRange(1.8f, 2.4f);
+			P.Size0 = i == 0 ? 12.f : 25.f;
+			P.Size1 = i == 0 ? 110.f : 190.f;
+			P.Peak = i == 0 ? 0.9f : 0.55f;
+			P.Tint = FLinearColor(0.30f, 0.24f, 0.17f);
+			P.Rise = i == 0 ? -60.f : 5.f;
+			P.WindShare = 0.5f;
+		}
+	}
+	bForceRebuild = true;
 }
 
 void UPA250SmokeSubsystem::MergeAged()
@@ -114,7 +174,7 @@ void UPA250SmokeSubsystem::MergeAged()
 	}
 }
 
-void UPA250SmokeSubsystem::Flash(const FVector& Where)
+void UPA250SmokeSubsystem::Flash(const FVector& Where, float Strength)
 {
 	EnsureMesh();
 	if (!Host) return;
@@ -131,8 +191,10 @@ void UPA250SmokeSubsystem::Flash(const FVector& Where)
 		L->SetVisibility(false);
 		Flashes.Add(L);
 		FlashAge.Add(FlashSeconds);
+		FlashStrength.Add(1.f);
 	}
 	const int32 I = NextFlash++ % Flashes.Num();
+	FlashStrength[I] = Strength;
 	Flashes[I]->SetWorldLocation(Where);
 	Flashes[I]->SetVisibility(true);
 	FlashAge[I] = 0.f;
@@ -145,7 +207,7 @@ void UPA250SmokeSubsystem::TickFlashes(float DeltaTime)
 		if (FlashAge[i] >= FlashSeconds) continue;
 		FlashAge[i] += DeltaTime;
 		const float K = FMath::Clamp(1.f - FlashAge[i] / FlashSeconds, 0.f, 1.f);
-		Flashes[i]->SetIntensity(1200.f * K * K);
+		Flashes[i]->SetIntensity(1200.f * FlashStrength[i] * K * K);
 		if (K <= 0.f) Flashes[i]->SetVisibility(false);
 	}
 }
@@ -224,7 +286,6 @@ void UPA250SmokeSubsystem::RebuildMesh()
 	// Fixed-size buffers (MaxPuffs quads) so the section is only created once; unused quads collapse.
 	TArray<FVector> V; TArray<FVector> N; TArray<FVector2D> UV; TArray<FLinearColor> C;
 	V.Reserve(MaxPuffs * 4); N.Reserve(MaxPuffs * 4); UV.Reserve(MaxPuffs * 4); C.Reserve(MaxPuffs * 4);
-	const FLinearColor Smoke(0.80f, 0.79f, 0.76f);
 	for (int32 q = 0; q < MaxPuffs; ++q)
 	{
 		if (q < Order.Num())
@@ -236,7 +297,9 @@ void UPA250SmokeSubsystem::RebuildMesh()
 			const FVector U = (Up * Co - Right * S) * H;
 			V.Append({P.Pos - R - U, P.Pos + R - U, P.Pos + R + U, P.Pos - R + U});
 			// The first instant glows with the burning charge, then it is plain smoke.
-			FLinearColor Col = FLinearColor::LerpUsingHSV(FLinearColor(1.f, 0.78f, 0.45f), Smoke, FMath::Clamp(P.Age / 0.12f, 0.f, 1.f));
+			FLinearColor Col = P.bPowder
+				? FLinearColor::LerpUsingHSV(FLinearColor(1.f, 0.78f, 0.45f), P.Tint, FMath::Clamp(P.Age / 0.12f, 0.f, 1.f))
+				: P.Tint;
 			Col.A = P.Opacity();
 			C.Append({Col, Col, Col, Col});
 		}

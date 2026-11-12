@@ -6,7 +6,7 @@ const FPA250FactionLook& UPA250FactionVisuals::LookFor(FName Faction, FName Unit
 	{
 		return British;
 	}
-	if (UnitClass == TEXT("militia"))
+	if (UnitClass == TEXT("militia") || UnitClass == TEXT("rifleman"))
 	{
 		return Militia;
 	}

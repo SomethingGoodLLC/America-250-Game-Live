@@ -68,6 +68,17 @@ public:
                                                     int provisions, int lead, int paper);
     std::vector<std::string> develop_province_action(const std::string& province_id,
                                                      const std::string& track);
+    std::vector<std::string> start_construction_action(const std::string& province_id,
+                                                       const std::string& building_id);
+    std::vector<std::string> cancel_construction_action(const std::string& province_id,
+                                                        const std::string& building_id);
+    std::vector<std::string> demolish_building_action(const std::string& province_id,
+                                                     const std::string& building_id);
+    std::vector<std::string> start_recruitment_action(const std::string& province_id,
+                                                      const std::string& unit_id);
+    std::vector<std::string> cancel_recruitment_action(const std::string& province_id);
+    std::vector<std::string> take_loan_action();
+    std::vector<std::string> repay_loan_action();
     std::vector<std::string> start_cartridge_craft(const std::string& province_id,
                                                    const std::string& army_id, int workers, int powder,
                                                    int lead, int paper);

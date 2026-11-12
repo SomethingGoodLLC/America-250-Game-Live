@@ -17,7 +17,10 @@
 #include "Animation/AnimSingleNodeInstance.h"
 #include "AnimationRuntime.h"
 #include "GameFramework/Pawn.h"
+#include "GameFramework/PlayerController.h"
 #include "RFCharacter.h"
+#include "Components/SphereComponent.h"
+#include "Mounted/PA250MountedSoldier.h"
 #include "PA250SoldierAnimInstance.h"
 #include "Engine/SkeletalMeshSocket.h"
 
@@ -89,6 +92,44 @@ AMusketWeapon::AMusketWeapon()
 	}
 
 	ProjectileClass = AMusketProjectile::StaticClass();
+}
+
+void AMusketWeapon::SetBayonetFixed(bool bFixed)
+{
+	bBayonetFixed = bFixed;
+	if (bFixed && !BayonetMesh && !bBayonetTried && AnimatedMesh && AnimatedMesh->GetSkeletalMeshAsset())
+	{
+		bBayonetTried = true;
+		// The pack ships its bayonet as a separate static mesh in the musket's own space (the _Y_0 pair).
+		UStaticMesh* Mesh = LoadObject<UStaticMesh>(nullptr, TEXT("/Game/HS_WeaponPack_01/Meshes/Bayonet/SM_HS_WP01_Bayonet_Y_0.SM_HS_WP01_Bayonet_Y_0"), nullptr, LOAD_NoWarn | LOAD_Quiet);
+		if (!Mesh) return;
+		const FReferenceSkeleton& Ref = AnimatedMesh->GetSkeletalMeshAsset()->GetRefSkeleton();
+		const int32 FireBone = Ref.FindBoneIndex(TEXT("b_gun_Fire")), TriggerBone = Ref.FindBoneIndex(TEXT("b_gun_Trigger"));
+		if (FireBone == INDEX_NONE || TriggerBone == INDEX_NONE) return;
+		const FVector Tip = FAnimationRuntime::GetComponentSpaceTransformRefPose(Ref, FireBone).GetLocation();
+		const FVector Barrel = (Tip - FAnimationRuntime::GetComponentSpaceTransformRefPose(Ref, TriggerBone).GetLocation()).GetSafeNormal();
+		const FBoxSphereBounds B = Mesh->GetBounds();
+		BayonetMesh = NewObject<UStaticMeshComponent>(this, TEXT("BayonetMesh"));
+		BayonetMesh->SetStaticMesh(Mesh);
+		BayonetMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		BayonetMesh->SetupAttachment(AnimatedMesh);
+		// Modelled in place (its bounds already sit at the muzzle): attach as is. Otherwise it was modelled
+		// at the origin: lay its long axis along the barrel with its socket end on the muzzle.
+		const bool bInPlace = FVector::Dist(B.Origin, Tip) < 2.f * B.SphereRadius + 10.f;
+		if (!bInPlace)
+		{
+			const FVector Ext = B.BoxExtent;
+			const FVector Long = Ext.X >= Ext.Y && Ext.X >= Ext.Z ? FVector::XAxisVector : Ext.Y >= Ext.Z ? FVector::YAxisVector : FVector::ZAxisVector;
+			const FQuat Turn = FQuat::FindBetweenNormals(Long, Barrel);
+			const float Half = FVector::DotProduct(Ext, Long);
+			BayonetMesh->SetRelativeRotation(Turn);
+			BayonetMesh->SetRelativeLocation(Tip + Barrel * (Half - 6.f) - Turn.RotateVector(B.Origin));
+		}
+		BayonetMesh->RegisterComponent();
+		UE_LOG(LogTemp, Display, TEXT("PA250 bayonet: %s on %s (mesh origin %s extent %s, muzzle %s)"), bInPlace ? TEXT("in place") : TEXT("laid along the barrel"),
+			*GetNameSafe(GetOwner()), *B.Origin.ToCompactString(), *B.BoxExtent.ToCompactString(), *Tip.ToCompactString());
+	}
+	if (BayonetMesh) BayonetMesh->SetVisibility(bFixed);
 }
 
 void AMusketWeapon::BeginPlay()
@@ -281,7 +322,7 @@ bool AMusketWeapon::Fire(FVector Direction, bool bIsAiming, float OwnerSpeed, fl
 		if (OwnerSpeed < T.Accuracy.MoveSpeedThreshold) Spread *= T.Accuracy.StillSpreadScale;
 		else Spread *= T.Accuracy.MovingSpreadScale;
 	}
-	Spread *= FMath::Max(0.05f, AccuracyScale);
+	Spread *= FMath::Max(0.05f, AccuracyScale) * FMath::Max(0.05f, ClassSpreadScale);
 	if (Spread > 0.01f)
 	{
 		Dir = FMath::VRandCone(Dir, FMath::DegreesToRadians(Spread));
@@ -303,12 +344,18 @@ bool AMusketWeapon::Fire(FVector Direction, bool bIsAiming, float OwnerSpeed, fl
 			// Falloff applied on hit via stored near damage; projectile carries near damage and range metadata.
 			BaseDamage = WeaponTuning->Values.TorsoDamageNear;
 			Ball->WeaponTuning = WeaponTuning;
+			Ball->RangeScale = FMath::Max(0.1f, ClassRangeScale);
 		}
 		else
 		{
 			BaseDamage = GetTuning().Damage;
 		}
 		Ball->Damage = BaseDamage * (1.f + Bonus);
+		// A rider's ball never strikes his own horse (or his own seat volume).
+		if (const ARFCharacter* Rider = Cast<ARFCharacter>(GetOwner()); Rider && Rider->GetMountedVisual())
+		{
+			Ball->GetCollisionComponent()->IgnoreActorWhenMoving(Rider->GetMountedVisual(), true);
+		}
 		Ball->GetProjectileMovement()->InitialSpeed = Speed;
 		Ball->GetProjectileMovement()->MaxSpeed = Speed;
 		Ball->FinishSpawning(SpawnTransform);
@@ -323,6 +370,15 @@ bool AMusketWeapon::Fire(FVector Direction, bool bIsAiming, float OwnerSpeed, fl
 		FPA250BattleAudio::PlayMusketShot(this, Location);
 	}
 	SpawnMuzzleSmoke(Location, Rotation);
+	// A musket going off close beside the player is felt: a volley from his own line jolts the view.
+	if (const APlayerController* PC = GetWorld()->GetFirstPlayerController())
+	{
+		ARFCharacter* Near = Cast<ARFCharacter>(PC->GetPawn());
+		if (Near && Near != GetOwner() && !Near->IsDead() && FVector::DistSquared(Near->GetActorLocation(), Location) < 600.f * 600.f)
+		{
+			Near->PunchFOV(0.7f);
+		}
+	}
 	if (AnimatedMesh && FireAnim)
 	{
 		AnimatedMesh->PlayAnimation(FireAnim, false);
@@ -331,6 +387,28 @@ bool AMusketWeapon::Fire(FVector Direction, bool bIsAiming, float OwnerSpeed, fl
 
 	StartReload();
 	return Ball != nullptr;
+}
+
+bool AMusketWeapon::Misfire()
+{
+	if (!CanFire() || !GetWorld())
+	{
+		return false;
+	}
+	const FVector Muzzle = MuzzleLocation->GetComponentLocation();
+	const FVector Dir = MuzzleLocation->GetForwardVector();
+	FPA250BattleAudio::PlayAt(this, TEXT("flint_click"), GetActorLocation(), EPA250SoundRange::Near, 1.f, 0.08f);
+	if (UPA250SmokeSubsystem* Bank = GetWorld()->GetSubsystem<UPA250SmokeSubsystem>())
+	{
+		Bank->AddPanFlash(GetActorLocation(), Dir, true);
+	}
+	if (AnimatedMesh && FireAnim)
+	{
+		AnimatedMesh->PlayAnimation(FireAnim, false); // the lock still falls
+		FireAnimRemaining = FireAnim->GetPlayLength();
+	}
+	StartReload();
+	return true;
 }
 
 void AMusketWeapon::StartReload()
@@ -401,7 +479,7 @@ void AMusketWeapon::Tick(float DeltaSeconds)
 	if (State != EMusketState::Loaded)
 	{
 		CurrentReloadSeconds += DeltaSeconds;
-		Sequencer.Tick(DeltaSeconds);
+		Sequencer.Tick(DeltaSeconds / FMath::Clamp(ReloadTimeScale, 0.25f, 4.f));
 		if (Sequencer.IsJammed())
 		{
 			Sequencer.TryClearJam(bReloadHeld, DeltaSeconds);
@@ -414,13 +492,16 @@ void AMusketWeapon::Tick(float DeltaSeconds)
 
 float AMusketWeapon::ReloadAnimAlpha(EActiveReloadPhase Phase, float PhaseProgress)
 {
-	// The pack's 4.2 s reload is spread evenly over the three drill phases.
+	// Measured on the pack's 4.2 s reload: the ramrod is drawn, rammed and returned over the first 75 %,
+	// and nothing but the lock moves after that. So the rod stays home while he primes, all of its travel
+	// happens in the ramming phase, and the rest plays as he recovers. (Spread evenly, the rod was already
+	// out of the stock while his hand was still at the cartridge box.)
 	const float P = FMath::Clamp(PhaseProgress, 0.f, 1.f);
 	switch (Phase)
 	{
-	case EActiveReloadPhase::PrimePan:    return (0.f + P) / 3.f;
-	case EActiveReloadPhase::RamCharge:   return (1.f + P) / 3.f;
-	case EActiveReloadPhase::ShoulderAim: return (2.f + P) / 3.f;
+	case EActiveReloadPhase::PrimePan:    return 0.f;
+	case EActiveReloadPhase::RamCharge:   return 0.75f * P;
+	case EActiveReloadPhase::ShoulderAim: return 0.75f + 0.25f * P;
 	case EActiveReloadPhase::Idle:
 	case EActiveReloadPhase::Complete:    return 1.f;
 	default:                              return -1.f; // miss delay / jam: hold the pose
@@ -437,7 +518,9 @@ void AMusketWeapon::UpdateVisuals(float DeltaSeconds)
 		Aim.Pitch = FMath::Clamp(FRotator::NormalizeAxis(Aim.Pitch), -MaxBarrelPitch, MaxBarrelPitch);
 		Aim.Roll = 0.f;
 		if (!RootComponent->IsUsingAbsoluteRotation()) RootComponent->SetUsingAbsoluteRotation(true);
-		RootComponent->SetWorldRotation(Aim.Quaternion() * FRotator(MeleePitchOffset, 0.f, 0.f).Quaternion());
+		FQuat Rot = Aim.Quaternion() * FRotator(MeleePitchOffset, MeleeYawOffset, 0.f).Quaternion();
+		if (BodyPoseAlpha > 0.f) Rot = FQuat::Slerp(Rot, BodyPoseRotation, FMath::Clamp(BodyPoseAlpha, 0.f, 1.f)).GetNormalized();
+		RootComponent->SetWorldRotation(Rot);
 	}
 	if (!AnimatedMesh)
 	{
@@ -511,8 +594,14 @@ void AMusketWeapon::PoseSupportHand()
 	}
 	const FTransform BodyToWorld = Body->GetComponentTransform();
 	const FVector SpotWorld = AnimatedMesh->GetBoneLocation(TEXT("b_gun_LeftHandSpot"), EBoneSpaces::WorldSpace);
-	T.SpotFromGripCS = BodyToWorld.InverseTransformVector(SpotWorld - GetActorLocation());
+	// From the hand, not the musket root: clubbing slides the musket through the hand to grip the barrel.
+	const FVector GripWorld = GripName.IsNone() ? GetActorLocation() : Body->GetSocketLocation(GripName);
+	T.SpotFromGripCS = BodyToWorld.InverseTransformVector(SpotWorld - GripWorld);
+	// Reloading, the musket is parked on the body, not carried by the right hand: give the spot outright.
+	T.SpotCS = BodyToWorld.InverseTransformPosition(SpotWorld);
+	T.bSpotAbsolute = BodyPoseAlpha > 0.5f;
 	T.GunUpCS = BodyToWorld.InverseTransformVectorNoScale(GetActorUpVector());
+	T.GunForwardCS = BodyToWorld.InverseTransformVectorNoScale(GetActorForwardVector());
 	T.PoleFromShoulderCS = BodyToWorld.InverseTransformVectorNoScale(-Soldier->GetActorRightVector()) * 40.f
 		+ BodyToWorld.InverseTransformVectorNoScale(FVector(0.f, 0.f, -30.f));
 
@@ -524,6 +613,17 @@ void AMusketWeapon::PoseSupportHand()
 	{
 		const float D = FVector::DotProduct(RefHand.GetRotation().RotateVector(Axis), FVector::UpVector);
 		if (D > Best) { Best = D; T.HandBackAxis = Axis; }
+	}
+	if (const int32 RightRef = Ref.FindBoneIndex(TEXT("hand_r")); RightRef != INDEX_NONE)
+	{
+		const FTransform RefRight = FAnimationRuntime::GetComponentSpaceTransformRefPose(Ref, RightRef);
+		float BestRight = -2.f;
+		for (const FVector Axis : {FVector::XAxisVector, FVector::YAxisVector, FVector::ZAxisVector,
+			-FVector::XAxisVector, -FVector::YAxisVector, -FVector::ZAxisVector})
+		{
+			const float D = FVector::DotProduct(RefRight.GetRotation().RotateVector(Axis), FVector::UpVector);
+			if (D > BestRight) { BestRight = D; T.RightHandBackAxis = Axis; }
+		}
 	}
 	if (T.SpotFromGripCS.ContainsNaN() || T.GunUpCS.ContainsNaN() || T.PoleFromShoulderCS.ContainsNaN())
 	{
@@ -559,5 +659,6 @@ void AMusketWeapon::SpawnMuzzleSmoke(const FVector& Location, const FRotator& Ro
 	if (UPA250SmokeSubsystem* Bank = GetWorld() ? GetWorld()->GetSubsystem<UPA250SmokeSubsystem>() : nullptr)
 	{
 		Bank->AddShot(Location, Rotation.Vector());
+		Bank->AddPanFlash(GetActorLocation(), Rotation.Vector(), false);
 	}
 }

@@ -27,6 +27,9 @@ struct PLAYAMERICA250_API FPA250BattleAudio
 	/** Play a bank at a location with distance falloff for its range. Returns true if a sound was started. */
 	static bool PlayAt(const UObject* Ctx, const FString& Bank, const FVector& Location, EPA250SoundRange Range,
 		float Volume = 1.f, float PitchJitter = 0.06f);
+	/** Play Bank, or Fallback when Bank has no assets yet (new sounds stay optional). */
+	static bool PlayAtOr(const UObject* Ctx, const FString& Bank, const FString& Fallback, const FVector& Location,
+		EPA250SoundRange Range, float Volume = 1.f, float PitchJitter = 0.06f);
 	/** A musket shot: near shots crack, far ones (> 60 m from the listener) use the distant boom. Volleys are thinned. */
 	static bool PlayMusketShot(const UObject* Ctx, const FVector& Muzzle);
 	/** A shouted line (rate-limited per key so a squad doesn't stutter the same order). */
@@ -40,6 +43,14 @@ struct PLAYAMERICA250_API FPA250BattleAudio
 	/** Looping campaign music (/Game/PA250/Audio/Music/campaign_theme). Silent if missing. */
 	static bool StartCampaignMusic(const UObject* Ctx, float Volume = 0.4f);
 	static void StopCampaignMusic();
+
+	/** The battlefield's own sound under everything else: wind and birds, looping (SFX "ambience_dawn"). */
+	static bool StartAmbience(const UObject* Ctx, float Volume = 0.35f);
+	static void StopAmbience();
+	/** A step on turf at Location. Only steps near the listener are played. bOwn = the listener's own feet. */
+	static bool PlayFootstep(const UObject* Ctx, const FVector& Location, bool bOwn);
+	/** Steps farther than this from the listener are not played at all. */
+	static constexpr float FootstepHearCm = 1800.f;
 
 	/** Where the local player hears from (camera), if any. */
 	static bool GetListener(const UObject* Ctx, FVector& Out);

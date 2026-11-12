@@ -621,54 +621,22 @@ int development_cost(const std::string& track, int current_level) {
     return base + std::max(0, current_level) * std::max(0, tuning().dev_cost_growth);
 }
 
+int purchase_cost(int powder, int cartridges, int muskets, int bayonets, int provisions, int lead,
+                  int paper) {
+    return std::max(0, powder) * tuning().gold_per_powder +
+           std::max(0, cartridges) * tuning().gold_per_cartridge +
+           std::max(0, muskets) * tuning().gold_per_musket +
+           std::max(0, bayonets) * tuning().gold_per_bayonet +
+           std::max(0, provisions) * tuning().gold_per_provision +
+           std::max(0, lead) * tuning().gold_per_lead + std::max(0, paper) * tuning().gold_per_paper;
+}
+
 CampaignState develop_province(const CampaignState& state, const std::string& province_id,
                                const std::string& track, std::string& error) {
-    error.clear();
-    CampaignState s = state;
-    ensure_logistics_defaults(s);
-    auto pit = s.provinces.find(province_id);
-    if (pit == s.provinces.end()) {
-        error = "unknown_province";
-        return state;
-    }
-    if (pit->second.owner != s.player_faction) {
-        error = "not_your_province";
-        return state;
-    }
-    if (s.pending_battle.active) {
-        error = "battle_pending";
-        return state;
-    }
-    int* level = nullptr;
-    if (track == "farm") level = &pit->second.farm_level;
-    if (track == "workshop") level = &pit->second.workshop_level;
-    if (track == "depot") level = &pit->second.depot_level;
-    if (track == "fort") level = &pit->second.fort_level;
-    if (!level) {
-        error = "unknown_track";
-        return state;
-    }
-    if (*level >= development_max_level()) {
-        error = "max_level";
-        return state;
-    }
-    const int cost = development_cost(track, *level);
-    if (s.player_gold < cost) {
-        error = "insufficient_gold";
-        return state;
-    }
-    s.player_gold -= cost;
-    ++(*level);
-    {
-        std::string track_label = track;
-        if (!track_label.empty()) track_label[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(track_label[0])));
-        ResourceChange ch;
-        ch.reason = track_label + ", " + pit->second.name + ": -" + std::to_string(cost) + " gold";
-        ch.gold = -cost;
-        ch.province_id = province_id;
-        detail::record_resource_change(s, ch);
-    }
-    return s;
+    // Timed City View construction (gold on start). Tracks only.
+    CampaignState next = start_construction(state, province_id, track, error);
+    if (error == "unknown_building") error = "unknown_track";
+    return error.empty() ? next : state;
 }
 
 std::string development_preview(const CampaignState& state, const std::string& province_id,
@@ -751,10 +719,7 @@ CampaignState approve_purchase(const CampaignState& state, const std::string& de
         error = "empty_order";
         return state;
     }
-    const int cost = powder * tuning().gold_per_powder + cartridges * tuning().gold_per_cartridge +
-                     muskets * tuning().gold_per_musket + bayonets * tuning().gold_per_bayonet +
-                     provisions * tuning().gold_per_provision + lead * tuning().gold_per_lead +
-                     paper * tuning().gold_per_paper;
+    const int cost = purchase_cost(powder, cartridges, muskets, bayonets, provisions, lead, paper);
     if (s.player_gold < cost) {
         error = "insufficient_gold";
         return state;
@@ -1276,6 +1241,8 @@ void tick_logistics(CampaignState& s, std::vector<Interrupt>& interrupts) {
     reset_clerk_day(s);
     release_due_personnel_commitments(s);
     tick_cartridge_jobs(s);
+    tick_construction_jobs(s);
+    tick_recruitment_jobs(s);
     deliver_due_shipments(s, &interrupts);
     resolve_due_letters(s, &interrupts);
     rest_armies_hourly(s);

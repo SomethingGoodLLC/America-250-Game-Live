@@ -13,13 +13,28 @@ struct FPA250TicketLedger
 	float BleedAccum = 0.f;
 	int32 BleedTicks = 0;
 
+	/** Tickets held back per side for the human player (0 or 1): deaths and bleed cannot take the pool
+	 *  below this, and bots are not reinforced out of it. Cleared when the human draws it to rejoin. */
+	TMap<FName, int32> Held;
+
 	int32 Remaining(FName Faction) const { return Pool.FindRef(Faction); }
+	int32 HeldFor(FName Faction) const { return FMath::Min(Held.FindRef(Faction), Remaining(Faction)); }
+	/** Bots are reinforced only from what is not held back. */
+	bool CanReinforce(FName Faction) const { return Remaining(Faction) > HeldFor(Faction); }
+	/** The human rejoins on the held ticket: from here it is an ordinary ticket again. Returns true if one was drawn. */
+	bool DrawHeld(FName Faction)
+	{
+		if (HeldFor(Faction) <= 0 || Remaining(Faction) > HeldFor(Faction)) return false;
+		Held.Remove(Faction);
+		return true;
+	}
 
 	/** -1 ticket on death (M6: overrides the B1 spend-on-spawn rule). */
 	void SpendDeath(FName Faction, FName UnitClass)
 	{
+		const int32 Floor = HeldFor(Faction);
 		int32& T = Pool.FindOrAdd(Faction);
-		if (T > 0) --T;
+		if (T > Floor) --T;
 		Deaths.FindOrAdd(Faction).FindOrAdd(UnitClass)++;
 	}
 
@@ -51,8 +66,9 @@ struct FPA250TicketLedger
 		while (BleedAccum >= Interval)
 		{
 			BleedAccum -= Interval;
+			const int32 Floor = HeldFor(Loser);
 			int32& T = Pool.FindOrAdd(Loser);
-			const int32 Take = FMath::Min(T, Amount);
+			const int32 Take = FMath::Clamp(T - Floor, 0, Amount);
 			T -= Take;
 			BleedTicks += Take;
 		}

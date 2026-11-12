@@ -45,6 +45,34 @@ struct PLAYAMERICA250_API FPA250TrainingProfile
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Marksmanship", meta = (ClampMin = "0"))
 	float AimErrorDegrees = 2.5f;
 
+	/** Man-to-man spread in marksmanship: each soldier's aim cone is scaled by 1 +/- this (fixed per man). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Marksmanship", meta = (ClampMin = "0", ClampMax = "0.9"))
+	float AimVariance = 0.25f;
+
+	// ---- Fire discipline (GAMEPLAY SETTINGS, how a squad's fire sounds and looks) ----
+	/** Multiplier on the bot tuning's VolleyFireJitterSeconds: <1 = one crisp crash, >1 = a ragged volley. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fire", meta = (ClampMin = "0"))
+	float VolleyRaggedness = 2.5f;
+
+	/** After the opening volley of a fight the line fires by files, this many seconds apart, rolling
+	 *  from the right of the line to the left. 0 = every volley is fired together. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fire", meta = (ClampMin = "0"))
+	float RollingFireFileSeconds = 0.f;
+
+	/** AI only: chance the priming flashes in the pan and the piece does not go off (worse under stress).
+	 *  The player's musket never misfires. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fire", meta = (ClampMin = "0", ClampMax = "0.5"))
+	float MisfireChance = 0.05f;
+
+	// ---- Hand to hand (AI only, GAMEPLAY SETTINGS) ----
+	/** Seconds a bot needs between one blow and the next (randomised +/-30 %): the opening a quicker man uses. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Melee", meta = (ClampMin = "0"))
+	float MeleeRecoverSeconds = 0.7f;
+
+	/** Chance, per exchange, that he answers a raised guard correctly (closes and uses the butt) instead of thrusting into it. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Melee", meta = (ClampMin = "0", ClampMax = "1"))
+	float MeleeSkill = 0.6f;
+
 	// ---- Cohesion ----
 	/** Scales FormationArriveCm: <1 = men stand closer to their exact place in the ranks. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cohesion", meta = (ClampMin = "0.2"))
@@ -126,6 +154,10 @@ struct PLAYAMERICA250_API FPA250TacticalRole
 	/** How far from his place a man will look for cover. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Role")
 	float CoverSearchCm = 600.f;
+
+	/** Fire-at-will aim cone multiplier while firing from a covered spot (musket rested on the wall). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Role", meta = (ClampMin = "0.2", ClampMax = "1"))
+	float RestedAimScale = 1.f;
 };
 
 USTRUCT(BlueprintType)
@@ -171,6 +203,15 @@ public:
 	const FPA250TacticalRole& RoleNamed(FName Name) const;
 
 	static UPA250CombatProfiles* MakeRuntimeDefaults();
+
+	/** Pure: one man's aim-cone multiplier, fixed by his seed, inside [1 - Variance, 1 + Variance]. */
+	static float AimScaleFor(int32 Seed, float Variance);
+	/** Pure: misfire chance for a shot, raised by stress (doubles at full stress), capped at 0.5. */
+	static float MisfireChanceAt(float Base, float Stress01);
+
+	/** Built-in rows for the classes added after the first asset was saved (grenadier, light_infantry,
+	 *  rifleman, officer). Part of the defaults, and the fallback when an asset has no row for a class. */
+	static const TArray<FPA250CombatAssignment>& ClassAssignments();
 
 private:
 	const FPA250CombatAssignment* FindAssignment(FName Faction, FName UnitClass) const;

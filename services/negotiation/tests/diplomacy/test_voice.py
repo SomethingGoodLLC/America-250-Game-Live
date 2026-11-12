@@ -177,3 +177,41 @@ def test_speech_job_survives_socket_close(
             client.get("/health")
             time.sleep(0.1)
     assert finished == [base_context["faction"]]
+
+
+def test_elevenlabs_429_is_retried_not_spoken_by_say(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """A concurrency 429 must not hand one sentence of a reply to the macOS voice."""
+    monkeypatch.setenv("ELEVENLABS_API_KEY", "k")
+    monkeypatch.setenv("PA250_TTS", "auto")
+    monkeypatch.setattr(avatar, "AUDIO_DIR", tmp_path)
+    ok = json.dumps({"audio_base64": base64.b64encode(b"\x00\x20" * 2400).decode(), "alignment": None})
+    replies = [_Resp(429, b'{"detail":{"code":"concurrent_limit_exceeded"}}', "application/json"),
+               _Resp(200, ok.encode(), "application/json")]
+
+    class Client:
+        def __init__(self, **_: Any) -> None: ...
+        async def __aenter__(self) -> Client:
+            return self
+
+        async def __aexit__(self, *_: Any) -> None: ...
+        async def post(self, url: str, **kw: Any) -> _Resp:
+            return replies.pop(0)
+
+    monkeypatch.setattr(httpx, "AsyncClient", Client)
+
+    async def no_sleep(_: float) -> None: ...
+
+    monkeypatch.setattr(avatar.asyncio, "sleep", no_sleep)
+    out = asyncio.run(avatar.synthesize_line_audio("Good day.", "j429", envoy_id="british"))
+    assert out is not None and out[1] == "elevenlabs" and not replies
+
+
+def test_tail_silence_is_trimmed_and_the_start_kept() -> None:
+    import struct
+
+    voiced = struct.pack("<2400h", *([8000, -8000] * 1200))  # 0.1 s
+    pcm = b"\x00\x00" * 1200 + voiced + b"\x00\x00" * 12000  # 0.05 s lead, 0.5 s tail
+    out = avatar.trim_tail_silence(pcm, 24000)
+    assert out.startswith(b"\x00\x00" * 1200 + voiced)
+    assert len(out) // 2 == 1200 + 2400 + int(avatar.TAIL_SILENCE_S * 24000)
+    assert avatar.trim_tail_silence(b"\x00\x00" * 100, 24000) == b"\x00\x00" * 100  # all silence: untouched

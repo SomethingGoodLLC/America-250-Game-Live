@@ -68,6 +68,13 @@ public:
 	bool GetArmyTokenLocation(const FString& ArmyId, FVector& OutWorld) const;
 	/** One line per army token: id, anchor, representation (for probe logs). */
 	FString DescribeArmyTokens() const;
+	/**
+	 * Hover text for an army (preferred) or a town, from read-only sim state. Your own force shows
+	 * strength and destination; enemy strength and destination stay unreported.
+	 */
+	FString DescribeHover(const FString& ArmyId, const FString& ProvinceId) const;
+	/** World XY box of what is drawn for the hovered army (figures + plate) or town (mark + caption). */
+	FBox2D HoverWorldBox(const FString& ArmyId, const FString& ProvinceId) const;
 	void PanByUV(FVector2D DeltaUV);
 	/** Absolute pan target (screen-space drag); clamped to what the camera can show. */
 	void SetCenterUV(FVector2D CenterUV);
@@ -122,6 +129,8 @@ public:
 	 */
 	/** Illustration for an army from campaign state only (tests call this; see ChooseArmyArt in the .cpp). */
 	static EPA250ArmyArt ArtForArmy(const pa250::CampaignState& St, const pa250::Army& A);
+	/** Point at fraction T (0..1) of a polyline's arc length. */
+	static FVector2D PointAlongPath(const TArray<FVector2D>& Path, float T);
 	static FVector2D ChooseArmyAnchor(const FString& HomeId, const FTownObstacles& Towns, const TArray<FBox2D>& Placed,
 									  const FVector2D& ArtSize, const FVector2D& PlateSize, float& OutOverlap, int32& OutCandidate);
 	/** Centre of the opening campaign view: Boston–Cambridge–Lexington–Concord. */
@@ -146,11 +155,14 @@ protected:
 	void SpawnFramingDecor();
 	void SpawnHotspotMarkers();
 	void RefreshHotspotVisibility();
+	void RefreshBuildingIcons();
 	void RefreshTownOwnership();
 	void ApplyTownWash(UStaticMeshComponent* Wash, const std::string& Owner) const;
 	void RefreshArmyTokens();
 	/** Per frame: measured pixels per UU drives illustration vs compact symbol. */
 	void UpdateArmyLod();
+	/** Per frame: ease each token toward its sim position (presentation only; the sim stays hourly). */
+	void MoveArmyTokens(float DeltaSeconds);
 	void RefreshBattleMarker();
 	void RefreshRoutes();
 	void ApplyCameraPostProcess();
@@ -197,7 +209,25 @@ protected:
 	UPROPERTY()
 	TArray<TObjectPtr<UStaticMeshComponent>> TownWashes;
 	TMap<FString, UStaticMeshComponent*> WashById;
+	TMap<FString, UStaticMeshComponent*> RingById;
+	TMap<FString, UStaticMeshComponent*> FillById;
+	/** Soft parchment backing behind each caption (legible over engraved lettering and the colour wash). */
+	TMap<FString, UStaticMeshComponent*> CaptionPlateById;
+	UPROPERTY()
+	TArray<TObjectPtr<UStaticMeshComponent>> CaptionPlates;
+	UPROPERTY()
+	TObjectPtr<UMaterialInterface> MapTextMaterial;
+	float LastMarkerPxPerUU = -1.f;
+	FString LastMarkerSelection;
+	/** Town mark and caption target sizes on screen. */
+	static constexpr float TownMarkPx = 14.f;
+	static constexpr float TownCaptionPx = 15.f;
+	UPROPERTY()
+	TArray<TObjectPtr<UStaticMeshComponent>> BuildingIconMarkers;
 	TMap<FString, float> WashRadiusOverridePx;
+	int32 BuildingIconHudEpoch = -1;
+	/** Buildings the current markers show; the markers are rebuilt only when this changes. */
+	FString BuildingIconSignature;
 
 	TMap<FString, FVector2D> LabelUV;
 	TMap<FString, FVector2D> TokenUV;
@@ -232,4 +262,8 @@ protected:
 	FString LastTokenSig;
 	/** Last logged representation per army (log only on change). */
 	TMap<FString, bool> LoggedIllustrationById;
+	/** Where each army should stand now: its town slot, or part-way along its current edge. */
+	TMap<FString, FVector> ArmyTargetAnchor;
+	/** Traced road polylines (UV) by sim edge id, as stored (first point = one end's hotspot). */
+	TMap<FString, TArray<FVector2D>> RouteUVByEdge;
 };

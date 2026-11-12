@@ -93,3 +93,62 @@ def test_api_failure_propagates_so_caller_can_fall_back(base_context: dict) -> N
 
     with pytest.raises(RuntimeError):
         asyncio.run(run())
+
+
+class _FakeStream:
+    def __init__(self, events: list[Any], final: Any) -> None:
+        self.events, self.final = events, final
+
+    async def __aenter__(self) -> "_FakeStream":
+        return self
+
+    async def __aexit__(self, *_: Any) -> None: ...
+
+    def __aiter__(self) -> Any:
+        async def gen() -> Any:
+            for e in self.events:
+                yield e
+        return gen()
+
+    async def get_final_message(self) -> Any:
+        return self.final
+
+
+def _delta(kind: str, **kw: Any) -> Any:
+    return SimpleNamespace(type="content_block_delta", delta=SimpleNamespace(type=kind, **kw))
+
+
+def _stream_provider(events: list[Any], content: list[Any]) -> ClaudeProvider:
+    final = SimpleNamespace(stop_reason="tool_use", content=content, usage=None, model="m")
+    api = SimpleNamespace(stream=lambda **kw: _FakeStream(events, final))
+    return ClaudeProvider({"client": SimpleNamespace(messages=api, beta=SimpleNamespace(messages=api))})
+
+
+def test_text_drafted_before_the_tool_call_is_not_spoken_twice(base_context: dict) -> None:
+    """2026-11-10: Claude wrote two sentences as text, then the same line in the tool; the envoy said both."""
+    import json as _json
+
+    line = "Mayor of Boston is a handsome title, sir. But a thousand acres is a vague promise."
+    events = [_delta("text_delta", text='Mayor of Boston is a handsome title, sir. But "a thousand acres" is a vague promise.\n'),
+              _delta("input_json_delta", partial_json=_json.dumps({"spoken_line": line, "clauses": []}))]
+    tool = SimpleNamespace(type="tool_use", name="respond_as_envoy", input={"spoken_line": line, "clauses": []})
+    said: list[str] = []
+
+    async def say(s: str) -> None:
+        said.append(s)
+
+    p = _stream_provider(events, [tool])
+    asyncio.run(p.propose_streaming([_turn("player", "hi")], DiplomacyContext(**base_context), "Gage", "Governor", "player", say))
+    assert " ".join(said) == line
+
+
+def test_plain_text_only_answer_is_still_spoken(base_context: dict) -> None:
+    events = [_delta("text_delta", text="I cannot in conscience agree, sir. "), _delta("text_delta", text="Pray, name your terms.")]
+    said: list[str] = []
+
+    async def say(s: str) -> None:
+        said.append(s)
+
+    p = _stream_provider(events, [SimpleNamespace(type="text", text="x")])
+    raw = asyncio.run(p.propose_streaming([_turn("player", "hi")], DiplomacyContext(**base_context), "Gage", "Governor", "player", say))
+    assert " ".join(said) == "I cannot in conscience agree, sir. Pray, name your terms." and raw["clauses"] == []

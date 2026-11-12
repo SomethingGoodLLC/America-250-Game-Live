@@ -56,6 +56,83 @@ struct PLAYAMERICA250_API FPA250MeleeTuningValues
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Feel")
 	float HitStopSeconds = 0.07f;
 
+	/** An enemy's thrust at the player winds up this long (the player needs time to read it and guard). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Thrust")
+	float ThrustWindupVsPlayerSeconds = 0.6f;
+
+	/** Clubbed musket (soldiers with no bayonet: most Patriots in 1775). Slower and shorter than a thrust, but it stops a man longer. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Club")
+	float ClubWindupSeconds = 0.45f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Club")
+	float ClubReachCm = 170.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Club")
+	float ClubRadiusCm = 45.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Club")
+	float ClubDamage = 50.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Club")
+	float ClubStaggerSeconds = 0.6f;
+
+	/** The swing is made from closer in than a thrust. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Club")
+	float ClubStandoffCm = 125.f;
+
+	/** A rush with the clubbed musket (G without a bayonet): less damage than a bayonet charge, a harder shove. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Club")
+	float ClubChargeDamage = 45.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Club")
+	float ClubChargeKnockbackScale = 1.3f;
+
+	/** Guard (hold X): blows from within this angle of the facing are caught on the musket. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Guard")
+	float GuardArcDegrees = 70.f;
+
+	/** A blocked thrust still jars: this share of its damage gets through. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Guard")
+	float BlockDamageScale = 0.15f;
+
+	/** A charge is harder to stop: this share gets through a guard (and he is still thrown back). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Guard")
+	float ChargeBlockDamageScale = 0.3f;
+
+	/** Guard raised no longer than this before the blow lands = parry: no damage, attacker thrown off balance. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Guard")
+	float ParryWindowSeconds = 0.3f;
+
+	/** A parried attacker cannot move or strike this long. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Guard")
+	float ParryStaggerSeconds = 0.9f;
+
+	/** After a parry, a thrust inside this window is a riposte: half the wind-up, RiposteDamageMultiplier damage. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Guard")
+	float RiposteWindowSeconds = 1.3f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Guard")
+	float RiposteDamageMultiplier = 2.f;
+
+	/** Chance a bot gets his musket up when a thrust or charge is launched at his front. Bots block; they never parry. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Guard")
+	float BotGuardChance = 0.35f;
+
+	/** The player's melee kill slows the whole field to this for KillSlowMoSeconds of real time. 0 seconds = off. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Feel")
+	float KillSlowMoScale = 0.35f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Feel")
+	float KillSlowMoSeconds = 0.45f;
+
+	/** No one-blow kills from the front: a thrust or charge that is not from behind (and not a riposte)
+	 *  leaves a man who had at least FrontalMercyHealthFraction of his health with this much. 0 = off. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Feel")
+	float FrontalBlowLeavesHealth = 15.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Feel")
+	float FrontalMercyHealthFraction = 0.5f;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "ButtStroke")
 	float ButtStrokeDamage = 35.f;
 
@@ -69,7 +146,7 @@ struct PLAYAMERICA250_API FPA250MeleeTuningValues
 	float ChargeLungeCm = 600.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Charge")
-	float ChargeDamage = 100.f;
+	float ChargeDamage = 70.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Charge")
 	float ChargeCooldownSeconds = 4.f;

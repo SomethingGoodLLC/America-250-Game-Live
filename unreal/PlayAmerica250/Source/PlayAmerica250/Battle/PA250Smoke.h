@@ -21,6 +21,14 @@ struct FPA250SmokePuff
 	float Size1 = 450.f;
 	float Peak = 0.5f;
 	float Spin = 0.f;
+	/** Settled colour. Powder smoke by default; dust and blood use their own. */
+	FLinearColor Tint = FLinearColor(0.80f, 0.79f, 0.76f);
+	/** Starts with the glow of burning powder (muzzle and pan), not for dust. */
+	bool bPowder = true;
+	/** Vertical drift, cm/s: smoke rises a little, thrown dirt falls back. */
+	float Rise = 10.f;
+	/** How much of the breeze it takes (heavy dust takes less). */
+	float WindShare = 1.f;
 
 	/** Pure: advance by Dt under Wind (cm/s). The muzzle jet decays fast; then the puff drifts and rises. */
 	void Step(float Dt, const FVector& Wind);
@@ -39,8 +47,15 @@ public:
 	/** A musket shot: three puffs blown out along Direction from the muzzle. */
 	void AddShot(const FVector& Muzzle, const FVector& Direction);
 
+	/** The priming pan beside the lock: a small puff thrown up and to the right. With bFlashOnly
+	 *  (a misfire) that puff and a weak flash are all there is. */
+	void AddPanFlash(const FVector& Lock, const FVector& Direction, bool bFlashOnly);
+	/** Where a ball struck: dirt thrown up from the ground or a wall, or a brief red mist on a man. */
+	void AddImpact(const FVector& Where, const FVector& Normal, bool bHitMan);
+
 	int32 NumPuffs() const { return Puffs.Num(); }
-	static constexpr int32 MaxPuffs = 240;
+	const TArray<FPA250SmokePuff>& GetPuffs() const { return Puffs; }
+	static constexpr int32 MaxPuffs = 300;
 	/** The shared battlefield breeze (PA250Wind.h): smoke drifts the way the flags fly. */
 	static FVector Wind();
 	/** Muzzle flash: a brief orange light at the muzzle, also lighting the new smoke. */
@@ -58,7 +73,9 @@ private:
 	/** Fold lingering puffs that occupy the same air, so a long firefight stays under the cap. */
 	void MergeAged();
 
-	void Flash(const FVector& Where);
+	void Flash(const FVector& Where, float Strength = 1.f);
+	FPA250SmokePuff& NewPuff();
+	TArray<float> FlashStrength;
 	void TickFlashes(float DeltaTime);
 
 	TArray<FPA250SmokePuff> Puffs;

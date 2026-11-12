@@ -1497,15 +1497,12 @@ def build_lexington():
 
 
 def make_portrait_assets():
-    """Still portrait + MediaPlayer/MediaTexture, and unlit materials."""
-    src = os.path.abspath(
-        os.path.join(
-            PROJECT,
-            "../../services/negotiation/assets/avatars/"
-            "british_general_frame.jpg",
-        )
-    )
-    still = import_texture(src, "/Game/PA250/Textures", "T_EnvoyPortrait")
+    """The envoy's figure texture + MediaPlayer/MediaTexture, and his materials.
+
+    The envoy is a living man seated across the table, not a picture: SourceArt/envoy/gage_live.png is the
+    Copley portrait of Gage made photoreal with an alpha matte (tools/art/build_envoy_live.py).
+    """
+    still = import_envoy_texture("gage_live.png", "T_EnvoyLive")
     d = "/Game/PA250/Media"
     if unreal.EditorAssetLibrary.does_asset_exist(d + "/MP_Envoy"):
         mp = unreal.EditorAssetLibrary.load_asset(d + "/MP_Envoy")
@@ -1630,18 +1627,35 @@ def make_portrait_assets():
         unreal.EditorAssetLibrary.save_loaded_asset(mat)
         return mat
 
-    atlas = import_lipsync_atlas()
-    # Idle and live speech share one material: cell 0 at rest, cells 1..15 driven by the voice (PollVoice).
-    still_mat = painting_material("M_PortraitStill", atlas, atlas_grid=4) if atlas else painting_material("M_PortraitStill", still)
+    # Live speech deforms the figure's own pixels (M_PortraitWarp, masked by his alpha). M_PortraitStill is
+    # the same material at rest (no "Frame" parameter: the old painted flipbook atlas is retired, so
+    # pa250.LipSync 0 shows him still). M_PortraitVideo keeps the MediaTexture graph for rendered MP4s.
     video_mat = painting_material("M_PortraitVideo", mt)
-    # Live speech deforms the painting itself (M_PortraitWarp); M_PortraitStill (16-cell atlas) is the
-    # fallback behind pa250.LipSync 0. The room shows the warp material at rest.
     warp_mat = make_envoy_face(still)
+    still_path = "/Game/PA250/Materials/M_PortraitStill"
+    if unreal.EditorAssetLibrary.does_asset_exist(still_path):
+        unreal.EditorAssetLibrary.delete_asset(still_path)
+    if unreal.EditorAssetLibrary.duplicate_asset("/Game/PA250/Materials/M_PortraitWarp", still_path):
+        unreal.EditorAssetLibrary.save_asset(still_path)
+    else:
+        LOG("PA250: could not duplicate M_PortraitWarp to M_PortraitStill")
     return warp_mat, video_mat
 
 
 PARLOUR_DIR = "/Game/PA250/Materials/Parlour"
 PARLOUR_TEX_SRC = os.path.abspath(os.path.join(PROJECT, "SourceArt", "parlour"))
+ENVOY_TEX_SRC = os.path.abspath(os.path.join(PROJECT, "SourceArt", "envoy"))
+
+
+def import_envoy_texture(filename, name):
+    """RGBA figure texture (1024x1536, not power of two: no mips, never stream), clamped so warps never wrap."""
+    tex = import_texture(os.path.join(ENVOY_TEX_SRC, filename), "/Game/PA250/Textures", name)
+    if tex:
+        for k, v in (("address_x", unreal.TextureAddress.TA_CLAMP), ("address_y", unreal.TextureAddress.TA_CLAMP),
+                     ("never_stream", True), ("srgb", True)):
+            tex.set_editor_property(k, v)
+        unreal.EditorAssetLibrary.save_loaded_asset(tex)
+    return tex
 PORTRAIT_BRIGHTNESS = 0.35  # emissive share of the lit painting (face stays readable by candlelight)
 PORTRAIT_CROP = 0.42  # width share of the 1.77-1.8:1 still/video shown: a 3:4 oil portrait
 # Manual exposure with physical-camera exposure off: the bias is a compensation (+1 = 2x brighter), not EV100.
@@ -1703,8 +1717,10 @@ else
     P.y += 0.12 * drop * fx * saturate(1.0 + d.y / (Lips.x * 2.0));  // upper lip lifts a little
 }
 float2 Q = P / float2(W, H);
-float3 c = lerp(Texture2DSample(Still, StillSampler, Q).rgb, Texture2DSample(BlinkTex, BlinkTexSampler, Q).rgb, saturate(BlinkAmt));
-return lerp(c, cavCol, cav);
+float4 st = Texture2DSample(Still, StillSampler, Q);
+float3 c = lerp(st.rgb, Texture2DSample(BlinkTex, BlinkTexSampler, Q).rgb, saturate(BlinkAmt));
+float inside = step(0.0, Q.x) * step(Q.x, 1.0) * step(0.0, Q.y) * step(Q.y, 1.0);
+return float4(lerp(c, cavCol, cav), st.a * inside);   // alpha = the figure's matte at the warped position
 """
 
 WARP_SCALARS = ("JawOpen", "LipsWide", "LipsRound", "LipsPressed", "BlinkAmt", "Breath", "HeadX", "HeadY", "Nod", "EyeX", "EyeY")
@@ -1712,10 +1728,11 @@ WARP_VECTORS = ("ImageSize", "Mouth", "Lips", "Jaw", "EyeL", "EyeR", "Head")
 
 
 def warp_painting_material(still, blink, face):
-    """M_PortraitWarp: the painting's own pixels deformed for speech, breathing, drift, eyes and blinks.
+    """M_PortraitWarp: the figure's own pixels deformed for speech, breathing, drift, eyes and blinks.
 
     The game drives the scalar parameters; the vector parameters come from the envoy's face data asset
-    (defaults here = DA_EnvoyFace_british). Canvas, varnish and vignette as on the other portrait materials.
+    (defaults here = DA_EnvoyFace_british). Masked by the figure's alpha (dithered edge), lit by the room
+    with a small emissive share. No canvas, varnish or vignette: he is a man in the room, not a painting.
     """
     name = "M_PortraitWarp"
     path = "/Game/PA250/Materials/" + name
@@ -1723,6 +1740,8 @@ def warp_painting_material(still, blink, face):
         unreal.EditorAssetLibrary.delete_asset(path)
     mat = tools().create_asset(name, "/Game/PA250/Materials", unreal.Material, unreal.MaterialFactoryNew())
     mat.set_editor_property("two_sided", True)
+    mat.set_editor_property("blend_mode", unreal.BlendMode.BLEND_MASKED)
+    mat.set_editor_property("dither_opacity_mask", True)
     mel = unreal.MaterialEditingLibrary
     X = unreal
 
@@ -1733,7 +1752,7 @@ def warp_painting_material(still, blink, face):
         return n
 
     custom = node(X.MaterialExpressionCustom, -700, 0, code=PORTRAIT_WARP_HLSL,
-                  output_type=X.CustomMaterialOutputType.CMOT_FLOAT3, description="PortraitWarp")
+                  output_type=X.CustomMaterialOutputType.CMOT_FLOAT4, description="PortraitWarp")
     names = ["UV", "Still", "BlinkTex", *WARP_VECTORS, *WARP_SCALARS]
     inputs = []
     for n in names:
@@ -1762,55 +1781,39 @@ def warp_painting_material(still, blink, face):
         mel.connect_material_expressions(p, "", custom, sname)
         y += 70
 
-    canvas_uv = node(X.MaterialExpressionMultiply, -950, 450, const_b=3.0)
-    mel.connect_material_expressions(uv, "", canvas_uv, "A")
-    canvas = node(X.MaterialExpressionTextureSampleParameter2D, -750, 400, parameter_name="Canvas",
-                  texture=import_texture_mipped("canvas"))
-    mel.connect_material_expressions(canvas_uv, "", canvas, "UVs")
-    centre = node(X.MaterialExpressionConstant2Vector, -1100, 650, r=0.5, g=0.5)
-    dist = node(X.MaterialExpressionDistance, -950, 650)
-    mel.connect_material_expressions(uv, "", dist, "A"); mel.connect_material_expressions(centre, "", dist, "B")
-    d0 = node(X.MaterialExpressionSubtract, -800, 650, const_b=0.3); mel.connect_material_expressions(dist, "", d0, "A")
-    d1 = node(X.MaterialExpressionMultiply, -650, 650, const_b=1.6); mel.connect_material_expressions(d0, "", d1, "A")
-    d2 = node(X.MaterialExpressionSaturate, -500, 650); mel.connect_material_expressions(d1, "", d2, "")
-    d3 = node(X.MaterialExpressionMultiply, -350, 650, const_b=0.65); mel.connect_material_expressions(d2, "", d3, "A")
-    vignette = node(X.MaterialExpressionOneMinus, -200, 650); mel.connect_material_expressions(d3, "", vignette, "")
-    varnish = node(X.MaterialExpressionVectorParameter, -750, 250, parameter_name="Varnish",
-                   default_value=X.LinearColor(1.0, 0.86, 0.66, 1.0))
-    c1 = node(X.MaterialExpressionMultiply, -450, 0)
-    mel.connect_material_expressions(custom, "", c1, "A"); mel.connect_material_expressions(canvas, "RGB", c1, "B")
-    c2 = node(X.MaterialExpressionMultiply, -300, 0)
-    mel.connect_material_expressions(c1, "", c2, "A"); mel.connect_material_expressions(varnish, "", c2, "B")
-    color = node(X.MaterialExpressionMultiply, -150, 0)
-    mel.connect_material_expressions(c2, "", color, "A"); mel.connect_material_expressions(vignette, "", color, "B")
+    color = node(X.MaterialExpressionComponentMask, -450, 0, r=True, g=True, b=True, a=False)
+    mel.connect_material_expressions(custom, "", color, "")
+    alpha = node(X.MaterialExpressionComponentMask, -450, 120, r=False, g=False, b=False, a=True)
+    mel.connect_material_expressions(custom, "", alpha, "")
     mel.connect_material_property(color, "", X.MaterialProperty.MP_BASE_COLOR)
+    mel.connect_material_property(alpha, "", X.MaterialProperty.MP_OPACITY_MASK)
     glow = node(X.MaterialExpressionScalarParameter, -300, 250, parameter_name="Brightness", default_value=PORTRAIT_BRIGHTNESS)
     emissive = node(X.MaterialExpressionMultiply, -150, 250)
     mel.connect_material_expressions(color, "", emissive, "A"); mel.connect_material_expressions(glow, "", emissive, "B")
     mel.connect_material_property(emissive, "", X.MaterialProperty.MP_EMISSIVE_COLOR)
-    rough = node(X.MaterialExpressionScalarParameter, -150, 400, parameter_name="Roughness", default_value=0.42)
+    rough = node(X.MaterialExpressionScalarParameter, -150, 400, parameter_name="Roughness", default_value=0.8)
     mel.connect_material_property(rough, "", X.MaterialProperty.MP_ROUGHNESS)
     mel.recompile_material(mat)
     unreal.EditorAssetLibrary.save_loaded_asset(mat)
     return mat
 
 
-# Measured on british_general_frame.jpg (1920x1088): see PROGRESS.md "warp lip-sync".
+# Measured on SourceArt/envoy/gage_live.png (1024x1536, whole image shown: crop share 1).
 FACE_BRITISH = {
-    "ImageSize": (1920.0, 1088.0, PORTRAIT_CROP, 0.0),
-    "Mouth": (970.0, 628.0, 89.0, 40.0),   # x, y, half width, max jaw drop (px)
-    "Lips": (16.0, 22.0, 0.0, 0.0),        # upper, lower lip thickness
-    "Jaw": (970.0, 765.0, 130.0, 0.0),     # chin x, y, jaw half width
-    "EyeL": (877.0, 424.0, 40.0, 22.0),
-    "EyeR": (1065.0, 417.0, 40.0, 22.0),
-    "Head": (970.0, 520.0, 230.0, 400.0),
+    "ImageSize": (1024.0, 1536.0, 1.0, 0.0),
+    "Mouth": (587.0, 453.0, 42.0, 19.0),   # x, y, half width, max jaw drop (px)
+    "Lips": (7.0, 13.0, 0.0, 0.0),         # upper, lower lip thickness
+    "Jaw": (585.0, 535.0, 70.0, 0.0),      # chin x, y, jaw half width
+    "EyeL": (509.0, 333.0, 28.0, 14.0),
+    "EyeR": (611.0, 326.0, 28.0, 14.0),
+    "Head": (565.0, 340.0, 200.0, 300.0),
 }
+ENVOY_CM_PER_PX = 0.058  # his head (hair to chin, 450 px) is about 26 cm
 
 
 def make_envoy_face(still, faction="british", face=FACE_BRITISH):
     """Closed-eyes texture + DA_EnvoyFace_<faction> (UPA250EnvoyFaceData) + M_PortraitWarp."""
-    blink_src = os.path.join(PARLOUR_TEX_SRC, "envoy_blink_aligned.png")
-    blink = import_texture(blink_src, "/Game/PA250/Textures", "T_EnvoyPortraitBlink") if os.path.exists(blink_src) else still
+    blink = import_envoy_texture("gage_blink.png", "T_EnvoyLiveBlink") or still
     path = "/Game/PA250/Data/DA_EnvoyFace_" + faction
     if unreal.EditorAssetLibrary.does_asset_exist(path):
         da = unreal.EditorAssetLibrary.load_asset(path)
@@ -1984,10 +1987,10 @@ def parlour_light(label, loc, intensity, color, radius, shadows=True, tag_name=N
 def build_diplomacy():
     """Georgian parlour, 700 x 600 x 320 cm, lit by fire and candles (GAME INVENTION interior).
 
-    North wall: chimney breast with a marble fireplace, the envoy's portrait over the mantel, and a
-    curtained sash window either side. Panelled cream wainscot, green damask above, plank floor, a
-    Turkey carpet under a mahogany table with candles, two chairs. Manual exposure (no auto exposure).
-    The camera sits at the player's chair, so the portrait is the centre of the shot.
+    North wall: chimney breast with a marble fireplace and a curtained sash window either side. Panelled
+    cream wainscot, green damask above, plank floor, a Turkey carpet under a mahogany table with candles,
+    two chairs. The envoy sits in the far chair, facing the player across the table (a masked, lip-synced
+    figure plane tagged Portrait). Manual exposure. The camera is the player's eyes across the table.
     """
     still_mat, _ = make_portrait_assets()
     T = {n: import_texture_mipped(n) for n in
@@ -2081,35 +2084,11 @@ def build_diplomacy():
     parlour_light("FireLight", (0, N + 24, 30), 45.0, (255, 120, 45), 850, tag_name="FireLight", source_radius=20)
     parlour_light("FireGlowLow", (0, N + 80, 6), 8.0, (255, 100, 35), 350, shadows=False, tag_name="FireLight")
 
-    # ---- the envoy's portrait over the mantel (media-fed plane in a gilt frame)
-    # 3:4 canvas (the material crops the 16:9 still/video) in a deep, stepped gilt frame.
-    PW, PH, PZ, F = 96.0, 128.0, 214.0, 16.0
+    # ---- over the mantel: a plain gilt looking-glass (the envoy himself sits at the table, below)
     m_gilt_dark = parlour_mi("MI_Parlour_GiltDark", world, T["marble"], 30, tint=(0.42, 0.29, 0.12), rough=0.55, metal=1.0)
-
-    def ring(name, w_out, h_out, w_in, h_in, depth, y, mat):
-        bw, bh = (w_out - w_in) / 2.0, (h_out - h_in) / 2.0
-        block(name + "_T", (0, y, PZ + (h_in + bh) / 2.0), (w_out, depth, bh), mat)
-        block(name + "_B", (0, y, PZ - (h_in + bh) / 2.0), (w_out, depth, bh), mat)
-        block(name + "_L", (-(w_in + bw) / 2.0, y, PZ), (bw, depth, h_in), mat)
-        block(name + "_R", ((w_in + bw) / 2.0, y, PZ), (bw, depth, h_in), mat)
-
-    block("PortraitBacking", (0, face + 1.5, PZ), (PW + 8, 3, PH + 8), m_wood)
-    ring("PortraitFrame", PW + 2 * F, PH + 2 * F, PW + 8, PH + 8, 6, face + 3, m_gilt)           # outer moulding
-    ring("PortraitFrameOgee", PW + 2 * F - 9, PH + 2 * F - 9, PW + 11, PH + 11, 5, face + 7.5, m_gilt)  # raised ogee
-    ring("PortraitFrameSight", PW + 11, PH + 11, PW, PH, 4, face + 5, m_gilt_dark)               # dark sight edge
-    for i, (cx, cz) in enumerate(((-1, -1), (1, -1), (-1, 1), (1, 1))):
-        block("PortraitFrameBoss_%d" % i, (cx * (PW / 2 + F - 4), face + 9, PZ + cz * (PH / 2 + F - 4)), (9, 5, 9), m_gilt,
-              mesh="/Engine/BasicShapes/Sphere")
-    block("PortraitFrameCrest", (0, face + 7, PZ + PH / 2 + F + 5), (34, 5, 10), m_gilt, mesh="/Engine/BasicShapes/Cylinder", rot=(90, 0, 0))
-    block("PortraitFrameCrestTop", (0, face + 8, PZ + PH / 2 + F + 12), (10, 5, 10), m_gilt, mesh="/Engine/BasicShapes/Sphere")
-    portrait = spawn(unreal.StaticMeshActor, (0, face + 3.5, PZ), (0, 0, 90), "EnvoyPortrait")
-    portrait.set_actor_scale3d(unreal.Vector(PW / 100.0, PH / 100.0, 1.0))
-    comp = portrait.static_mesh_component
-    comp.set_mobility(unreal.ComponentMobility.STATIC)
-    comp.set_static_mesh(unreal.EditorAssetLibrary.load_asset("/Engine/BasicShapes/Plane"))
-    comp.set_material(0, still_mat)
-    comp.set_editor_property("cast_shadow", False)
-    tag(portrait, "Portrait")
+    block("MantelGlass_Frame", (0, face + 2, 205), (88, 4, 64), m_gilt)
+    block("MantelGlass_Sight", (0, face + 4.2, 205), (78, 1, 54), m_gilt_dark)
+    block("MantelGlass_Plate", (0, face + 4.8, 205), (72, 0.6, 48), m_night)
 
     # ---- mantel garniture: candlesticks and a clock
     for sx in (-1, 1):
@@ -2153,13 +2132,26 @@ def build_diplomacy():
     block("Papers_A", (-12, TY + 10, TZ + 0.3), (30, 22, 0.6), m_paper_sheet, rot=(0, 8, 0))
     block("Papers_B", (16, TY + 14, TZ + 0.6), (30, 22, 0.6), m_paper_sheet, rot=(0, -14, 0))
     block("Inkwell", (40, TY + 18, TZ + 3), (6, 6, 6), m_iron, mesh="/Engine/BasicShapes/Cylinder")
-    for name, y, back in (("Chair_Player", TY + 102, 1),):  # the envoy is present as his portrait
+    for name, y, back in (("Chair_Player", TY + 102, 1), ("Chair_Envoy", TY - 102, -1)):
         block(name + "_Seat", (0, y, 46), (56, 52, 5), m_wood)
         block(name + "_Cushion", (0, y, 50), (50, 46, 4), m_velvet)
         block(name + "_Back", (0, y + back * 24, 82), (54, 5, 64), m_wood)
         block(name + "_BackPad", (0, y + back * 21, 84), (40, 2, 46), m_velvet)
         for i, (dx, dy) in enumerate(((-24, -22), (24, -22), (-24, 22), (24, 22))):
             block(name + "_Leg%d" % i, (dx, y + dy, 22), (5, 5, 44), m_wood)
+
+    # ---- the envoy, seated in the far chair: a masked figure plane (waist up; the table hides its lower edge)
+    EW, EH = 1024 * ENVOY_CM_PER_PX, 1536 * ENVOY_CM_PER_PX
+    ENVOY_TOP = 139.0  # seat 46 + seated height 88 to the crown, plus the image's margin above his hair
+    envoy = spawn(unreal.StaticMeshActor, (0, TY - 92, ENVOY_TOP - EH / 2), (0, 0, 90), "EnvoyFigure")
+    envoy.set_actor_scale3d(unreal.Vector(EW / 100.0, EH / 100.0, 1.0))
+    comp = envoy.static_mesh_component
+    comp.set_mobility(unreal.ComponentMobility.STATIC)
+    comp.set_static_mesh(unreal.EditorAssetLibrary.load_asset("/Engine/BasicShapes/Plane"))
+    comp.set_material(0, still_mat)
+    comp.set_editor_property("cast_shadow", False)
+    tag(envoy, "Portrait")  # the game mode finds his mesh by this tag
+    parlour_light("EnvoyKey", (-40, TY + 30, 135), 2.5, (255, 190, 130), 320, shadows=False, source_radius=25)
 
     # ---- low warm fill so the room reads (Lumen does the bounce)
     parlour_light("FillWarm", (0, 150, 140), 3.0, (255, 185, 125), 900, shadows=False, source_radius=60)
@@ -2178,10 +2170,10 @@ def build_diplomacy():
         st.set_editor_property(k, v)
     pp.set_editor_property("settings", st)
 
-    # ---- camera at the player's chair, portrait centred above the dialogue panel
-    cam = spawn(unreal.CameraActor, (0, 250, 148), (3.5, -90, 0), "RoomCamera")
+    # ---- camera: the player's eyes across the table; the envoy's face sits above the dialogue panel
+    cam = spawn(unreal.CameraActor, (0, 175, 128), (-9.5, -90, 0), "RoomCamera")
     cc = cam.get_component_by_class(unreal.CameraComponent)
-    cc.set_editor_property("field_of_view", 62.0)
+    cc.set_editor_property("field_of_view", 42.0)
     tag(cam, "RoomCamera")
     save(les)
     LOG("PA250: built L_DiplomacyRoom (parlour)")

@@ -9,7 +9,9 @@
 #include "PA250BattleGameMode.h"
 #include "PA250WeaponTuning.h"
 #include "PA250BattleAudio.h"
+#include "PA250Smoke.h"
 #include "RFCharacter.h"
+#include "Mounted/PA250MountedSoldier.h"
 #include "UObject/ConstructorHelpers.h"
 
 AMusketProjectile::AMusketProjectile()
@@ -88,19 +90,44 @@ void AMusketProjectile::OnHit(UPrimitiveComponent* HitComp, AActor* OtherActor, 
 		Destroy();
 		return;
 	}
+	// A mounted man is hit through his horse's volumes: the rider volume is the man himself,
+	// the rest is the horse (flesh, but not a man for the shooter's marker or kill credit).
+	ARFCharacter* HitMan = Cast<ARFCharacter>(OtherActor);
+	bool bFlesh = HitMan != nullptr;
+	if (const APA250MountedSoldier* Mount = Cast<APA250MountedSoldier>(OtherActor))
+	{
+		bFlesh = !Mount->IsHorseDead() || Mount->IsRiderComponent(OtherComp);
+		if (Mount->IsRiderComponent(OtherComp)) HitMan = Cast<ARFCharacter>(Mount->GetOwner());
+	}
 	// The player sees where his own ball went - the feedback that teaches the ballistics.
 	if (const APlayerController* LocalPC = GetWorld() ? GetWorld()->GetFirstPlayerController() : nullptr)
 	{
 		if (GetInstigator() && GetInstigator() == LocalPC->GetPawn())
 		{
-			const ARFCharacter* VictimChar = Cast<ARFCharacter>(OtherActor);
+			const ARFCharacter* VictimChar = HitMan;
 			const ARFCharacter* ShooterChar = Cast<ARFCharacter>(GetInstigator());
 			const bool bEnemy = VictimChar && ShooterChar && VictimChar->FactionId != ShooterChar->FactionId;
 			SpawnImpactMarker(GetWorld(), Hit.ImpactPoint, bEnemy);
 		}
 	}
+	// A ball that finds a man already down does nothing more than move him.
+	if (const ARFCharacter* Down = Cast<ARFCharacter>(OtherActor); Down && Down->IsDead())
+	{
+		if (OtherComp && OtherComp->IsSimulatingPhysics())
+		{
+			OtherComp->AddImpulseAtLocation(GetVelocity() * 0.5f, Hit.ImpactPoint);
+		}
+		Destroy();
+		return;
+	}
+	// Seen as well as heard: dirt thrown up where a ball goes to ground, a red mist on a man.
+	if (UPA250SmokeSubsystem* Bank = GetWorld() ? GetWorld()->GetSubsystem<UPA250SmokeSubsystem>() : nullptr)
+	{
+		const bool bMan = bFlesh;
+		Bank->AddImpact(Hit.ImpactPoint, bMan ? -GetVelocity().GetSafeNormal() : FVector(Hit.ImpactNormal), bMan);
+	}
 	// Impact sound: a dull thud on a man, a dirt burst on anything else.
-	FPA250BattleAudio::PlayAt(this, Cast<ARFCharacter>(OtherActor) ? TEXT("impact_body") : TEXT("impact_ground"),
+	FPA250BattleAudio::PlayAt(this, bFlesh ? TEXT("impact_body") : TEXT("impact_ground"),
 		Hit.ImpactPoint, EPA250SoundRange::Near, 1.f, 0.1f);
 	if (OtherActor && OtherActor != this && OtherActor != GetInstigator())
 	{
@@ -108,7 +135,7 @@ void AMusketProjectile::OnHit(UPrimitiveComponent* HitComp, AActor* OtherActor, 
 		if (!bFriendlyFire)
 		{
 			const ARFCharacter* ShooterChar = Cast<ARFCharacter>(GetInstigator());
-			const ARFCharacter* VictimChar = Cast<ARFCharacter>(OtherActor);
+			const ARFCharacter* VictimChar = HitMan;
 			if (ShooterChar && VictimChar && ShooterChar->FactionId == VictimChar->FactionId)
 			{
 				bApply = false;
@@ -120,7 +147,7 @@ void AMusketProjectile::OnHit(UPrimitiveComponent* HitComp, AActor* OtherActor, 
 			const float DistCm = FVector::Dist(SpawnLocation, Hit.ImpactPoint);
 			if (WeaponTuning)
 			{
-				Applied = WeaponTuning->Values.DamageAtDistanceCm(DistCm);
+				Applied = WeaponTuning->Values.DamageAtDistanceCm(DistCm / FMath::Max(0.1f, RangeScale));
 				if (Applied <= 0.f)
 				{
 					Destroy();
@@ -147,7 +174,7 @@ void AMusketProjectile::OnHit(UPrimitiveComponent* HitComp, AActor* OtherActor, 
 			}
 			if (APA250BattleGameMode* GM = GetWorld() ? GetWorld()->GetAuthGameMode<APA250BattleGameMode>() : nullptr)
 			{
-				GM->NotifyProjectileHit(Cast<ARFCharacter>(GetInstigator()), Cast<ARFCharacter>(OtherActor), Applied);
+				GM->NotifyProjectileHit(Cast<ARFCharacter>(GetInstigator()), HitMan, Applied);
 			}
 		}
 	}
@@ -169,6 +196,11 @@ void AMusketProjectile::Tick(float DeltaSeconds)
 		if (!bOwnShot && FVector::Dist(Closest, Listener) < 500.f && FVector::Dist(SpawnLocation, Listener) > 800.f)
 		{
 			bWhizzed = true;
+			// A near miss makes the player start.
+			if (ARFCharacter* Me = PC ? Cast<ARFCharacter>(PC->GetPawn()) : nullptr; Me && !Me->IsDead())
+			{
+				Me->PunchFOV(2.f);
+			}
 			FPA250BattleAudio::PlayAt(this, TEXT("ball_whiz"), Closest, EPA250SoundRange::Whiz, 1.f, 0.12f);
 		}
 	}

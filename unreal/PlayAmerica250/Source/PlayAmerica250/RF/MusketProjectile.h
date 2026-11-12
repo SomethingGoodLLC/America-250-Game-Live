@@ -28,6 +28,9 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Damage")
 	TObjectPtr<UPA250WeaponTuning> WeaponTuning;
 
+	/** Class kit: 2 = damage falls off over twice the distance (a rifle). */
+	float RangeScale = 1.f;
+
 	FVector SpawnLocation = FVector::ZeroVector;
 	FVector PrevLocation = FVector::ZeroVector;
 	bool bHavePrev = false;

@@ -13,15 +13,15 @@ class UMaterialInterface;
 /**
  * Illustration shown for an army at readable zoom. Chosen from campaign state only:
  * a variant is used only when the matching state exists (see APA250ProvinceMapActor::ChooseArmyArt).
- * The art is an artistic reconstruction; figure count never encodes strength. No militia art exists:
- * a militia-majority force keeps the compact symbol.
+ * The art is an artistic reconstruction; figure count never encodes strength.
  */
 enum class EPA250ArmyArt : uint8
 {
 	None,			 // compact symbol at every zoom (no neutral art supplied for this side/state)
 	ProvincialRegulars, // provincial regulars standing with shouldered arms (Continental, mostly line infantry)
 	BritishMarching, // British column on the march (army has a path)
-	BritishFiring	 // British firing line (army is a party to the pending battle)
+	BritishFiring,	 // British firing line (army is a party to the pending battle)
+	Militia			 // painted militia company, officer pointing (Continental, not mostly line infantry)
 };
 
 struct FPA250ArmyArtSpec
@@ -44,14 +44,17 @@ public:
 	APA250ArmyToken();
 
 	/** World height of one standing figure (UU). The map plane is 1600 UU wide. */
-	static constexpr float FigureHeightUU = 16.f;
+	static constexpr float FigureHeightUU = 18.f; // 1.5x the 12 UU of 2026-11-10 (user: enlarge all army art, 2026-11-11)
 	/** Compact counter target size on screen, clamped in world units. */
 	static constexpr float CompactSymbolPx = 38.f;
 	static constexpr float CompactMinUU = 16.f;
 	static constexpr float CompactMaxUU = 34.f;
-	/** Illustration appears when one figure is at least this tall on screen; hides below the lower value. */
-	static constexpr float RevealFigurePx = 22.f;
-	static constexpr float HideFigurePx = 19.f;
+	/**
+	 * Illustration appears when one figure is at least this tall on screen; hides below the lower value.
+	 * Scaled with FigureHeightUU (was 22/19 px at 12 UU), so the art switches on at the same zoom, only larger.
+	 */
+	static constexpr float RevealFigurePx = 33.f;
+	static constexpr float HideFigurePx = 28.5f;
 	/** Name plate text sizes (UU) — game-rendered text, never baked into the art. */
 	static constexpr float NameSizeUU = 15.f;
 	static constexpr float SideSizeUU = 12.f;
@@ -79,12 +82,17 @@ public:
 	/** Per-frame LOD: illustration when readable, otherwise the compact symbol at constant screen size. */
 	void ApplyLod(float PxPerUU);
 
+	/** Move the ground anchor (e.g. a column advancing along its road) and re-lay out every piece from it. */
+	void SetAnchor(const FVector& NewAnchor);
+
 	/** True when the world point is on what is currently drawn (illustration rect or compact disc). */
 	bool HitTest(const FVector& World) const;
 	bool IsShowingIllustration() const { return bShowIllustration; }
 	EPA250ArmyArt GetArt() const { return Art; }
 	/** Currently drawn footprint in world XY (for tests/logs). */
 	FBox2D GetDrawnRect() const;
+	/** Everything this token draws: figures or counter plus the name plate (world XY). */
+	FBox2D GetFootprint() const;
 
 	UPROPERTY(VisibleAnywhere)
 	TObjectPtr<USceneComponent> Root;
@@ -132,11 +140,13 @@ public:
 private:
 	void LayoutCompact(float DiameterUU);
 	void LayoutPlate(float Scale);
+	/** Position-only layout of the illustration, ground oval and rules from the current anchor. */
+	void LayoutArt();
 
 	UPROPERTY()
 	TObjectPtr<UMaterialInterface> SpriteMaterial;
 	UPROPERTY()
-	TObjectPtr<UTexture2D> ArtTextures[4];
+	TObjectPtr<UTexture2D> ArtTextures[5];
 	UPROPERTY()
 	TObjectPtr<UTexture2D> GroundTexture;
 
@@ -146,4 +156,5 @@ private:
 	float CompactDiameterUU = 20.f;
 	float PlateScale = 0.f;
 	FVector2D ArtSizeUU = FVector2D::ZeroVector;
+	FVector2D PlateUU = FVector2D::ZeroVector;
 };

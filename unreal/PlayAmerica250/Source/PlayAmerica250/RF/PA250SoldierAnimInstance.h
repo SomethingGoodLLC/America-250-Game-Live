@@ -7,6 +7,15 @@
 #include "PA250SoldierAnimInstance.generated.h"
 
 class UAnimSequence;
+struct FPA250MountedAim
+{
+    bool bEnabled = false;
+    bool bPistol = false;
+    float AimAlpha = 0.f;
+    float ReloadAlpha = 0.f;
+    float RecoilAlpha = 0.f;
+    FVector DirectionCS = FVector::YAxisVector;
+};
 
 /** Left hand on the musket stock. Game thread fills it; the anim thread reads its own copy. */
 struct FPA250SupportHandTarget
@@ -24,6 +33,14 @@ struct FPA250SupportHandTarget
 	FVector PoleFromShoulderCS = FVector::ZeroVector;
 	/** Hand-bone axis that faced up in the bind pose (the back of the hand). */
 	FVector HandBackAxis = FVector::ZeroVector;
+	/** Left-hand spot in body component space, used instead of SpotFromGripCS when bSpotAbsolute
+	 *  (reloading: the right hand is busy and no longer carries the musket). */
+	FVector SpotCS = FVector::ZeroVector;
+	bool bSpotAbsolute = false;
+	/** Musket forward (butt to muzzle) in body component space. */
+	FVector GunForwardCS = FVector::ZeroVector;
+	/** Same as HandBackAxis, for hand_r. */
+	FVector RightHandBackAxis = FVector::ZeroVector;
 };
 
 /**
@@ -43,6 +60,18 @@ struct FPA250MeleePose
 	float Butt = 0.f;
 	/** 0..1 charge carriage: body low and forward, musket tucked at the hip. */
 	float Level = 0.f;
+	/** 0..1 clubbed musket raised over the right shoulder (wind-up, or carried so in a rush). */
+	float Raise = 0.f;
+	/** 0..1 clubbed musket brought down on him: hands driven forward and down, body thrown in behind it. */
+	float Chop = 0.f;
+	/** 0..1 reload drill: the right hand leaves the stock and works at ReloadRightHandCS (cartridge box,
+	 *  mouth, pan, muzzle, rammer); the left holds the musket. */
+	float Reload = 0.f;
+	FVector ReloadRightHandCS = FVector::ZeroVector;
+	/** 0..1 musket at the shoulder (aiming, presenting, the moment after the shot). */
+	float Shoulder = 0.f;
+	/** 0..1 guard: musket carried high across the body, weight back, knees soft. */
+	float Guard = 0.f;
 	/** Cm the rear foot trails behind the body while a lunge step carries it forward. */
 	float RearFootLagCm = 0.f;
 	/** Hit reaction: the way the blow drives the body (component space), length 0..1. */
@@ -50,7 +79,7 @@ struct FPA250MeleePose
 
 	bool IsActive() const
 	{
-		return Coil > 1.e-3f || Lunge > 1.e-3f || Butt > 1.e-3f || Level > 1.e-3f || RearFootLagCm > 0.1f || !FlinchCS.IsNearlyZero(1.e-3);
+		return Coil > 1.e-3f || Lunge > 1.e-3f || Butt > 1.e-3f || Level > 1.e-3f || Guard > 1.e-3f || Reload > 1.e-3f || Shoulder > 1.e-3f || Raise > 1.e-3f || Chop > 1.e-3f || RearFootLagCm > 0.1f || !FlinchCS.IsNearlyZero(1.e-3);
 	}
 };
 
@@ -67,8 +96,11 @@ struct FPA250SoldierAnimProxy : public FAnimInstanceProxy
 
 	/** Pure: two-bone solve onto the musket. Returns false (pose untouched) on any invalid input. */
 	static bool SolveSupportHand(FCSPose<FCompactPose>& Pose, const FPA250SupportHandTarget& Target);
+	/** Pure: turn the right hand onto the wrist of the stock (palm in, knuckles round it) and close its fingers. */
+	static bool GripRightHand(FCSPose<FCompactPose>& Pose, const FPA250SupportHandTarget& Target);
 	/** Pure: hips, spine, head, legs and right arm for a thrust / charge / butt-stroke / flinch.
 	 *  Feet keep the clip's ground contact (leg IK). Returns false when the skeleton lacks a pelvis. */
+	static bool ApplyMountedAim(FCSPose<FCompactPose>& Pose, const FPA250MountedAim& Aim);
 	static bool ApplyMeleePose(FCSPose<FCompactPose>& Pose, const FPA250MeleePose& Melee);
 
 protected:
@@ -82,6 +114,7 @@ private:
 	float Rate = 1.f;
 	FPA250SupportHandTarget Hand;
 	FPA250MeleePose Melee;
+	FPA250MountedAim MountedAim;
 };
 
 /** Native body anim for the period soldier: one looping locomotion clip, the melee pose layer and the support-hand IK. */
@@ -102,6 +135,8 @@ public:
 	void ClearSupportHandTarget() { SupportHand.bEnabled = false; }
 	const FPA250SupportHandTarget& GetSupportHandTarget() const { return SupportHand; }
 	/** Game thread. Melee body pose weights for the next animation update. */
+	void SetMountedAim(const FPA250MountedAim& In) { MountedAim = In; }
+	const FPA250MountedAim& GetMountedAim() const { return MountedAim; }
 	void SetMeleePose(const FPA250MeleePose& InPose) { MeleePose = InPose; }
 	const FPA250MeleePose& GetMeleePose() const { return MeleePose; }
 
@@ -115,4 +150,5 @@ private:
 	float PlayRate = 1.f;
 	FPA250SupportHandTarget SupportHand;
 	FPA250MeleePose MeleePose;
+	FPA250MountedAim MountedAim;
 };

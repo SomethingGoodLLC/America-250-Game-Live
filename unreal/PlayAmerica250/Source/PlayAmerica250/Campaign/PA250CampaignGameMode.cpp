@@ -13,6 +13,7 @@
 #include "Misc/CommandLine.h"
 #include "PA250CampaignPlayerController.h"
 #include "PA250MapWidget.h"
+#include "UI/PA250CityViewWidget.h"
 #include "PA250ProvinceMapActor.h"
 #include "TimerManager.h"
 #include "Misc/Paths.h"
@@ -154,6 +155,108 @@ void APA250CampaignGameMode::BeginPlay()
 				}
 			}),
 			12.f, false);
+	}
+
+	if (FParse::Param(FCommandLine::Get(), TEXT("PA250CityProbe")))
+	{
+		// Town panel check in a real window: five "Shot showui" captures (build list, works under way,
+		// the Forces and Magazine tabs of the army's town, an enemy city), first at 12 s, then quit. Never saves.
+		auto Step = [this](float At, TFunction<void()> Fn) {
+			FTimerHandle H;
+			GetWorldTimerManager().SetTimer(H, FTimerDelegate::CreateLambda([this, Fn]() {
+				Fn();
+				if (APlayerController* PC = GetWorld()->GetFirstPlayerController()) PC->ConsoleCommand(TEXT("Shot showui"));
+			}), At, false);
+		};
+		Step(12.f, [this]() {
+			if (!MapWidget) return;
+			MapWidget->HandleTownClicked(TEXT("lexington"));
+			if (UPA250CityViewWidget* CV = MapWidget->GetCityView()) CV->SelectPlot(TEXT("+"));
+			UE_LOG(LogTemp, Display, TEXT("CITY_PROBE: lexington build list open=%d"), MapWidget->IsCityViewOpen() ? 1 : 0);
+		});
+		auto Advance = [this](int32 Hours) {
+			FString Err;
+			UPA250Subsystem* PS = UPA250Subsystem::Get(this);
+			const bool bOk = PS && PS->AdvanceHours(Hours, Err);
+			UE_LOG(LogTemp, Display, TEXT("CITY_PROBE: advance %dh ok=%d %s staff=%d battle=%d"), Hours, bOk ? 1 : 0, *Err,
+				   PS && PS->HasStaffEvent() ? 1 : 0, PS && PS->IsBattlePending() ? 1 : 0);
+		};
+		auto Armies = [this]() {
+			FString Out;
+			if (UPA250Subsystem* PS = UPA250Subsystem::Get(this))
+			{
+				for (const auto& Kv : PS->GetState().armies)
+				{
+					int32 Fit = 0;
+					for (const auto& U : Kv.second.units) Fit += U.second;
+					Out += FString::Printf(TEXT("%s@%s=%d "), UTF8_TO_TCHAR(Kv.first.c_str()), UTF8_TO_TCHAR(Kv.second.province.c_str()), Fit);
+				}
+			}
+			return Out;
+		};
+		Step(15.f, [this, Advance]() {
+			UPA250CityViewWidget* CV = MapWidget ? MapWidget->GetCityView() : nullptr;
+			if (!CV) return;
+			// The British march on Concord within hours of the opening, and a pending battle stops
+			// the clock. A 30-day ceasefire through the ordinary diplomacy path (the sim validates
+			// it like any other) keeps the roads quiet long enough to see a muster through.
+			if (UPA250Subsystem* PS = UPA250Subsystem::Get(this))
+			{
+				FString Err;
+				const bool bTalks = PS->BeginDiplomacy(TEXT("british"), Err);
+				const bool bTruce = bTalks && PS->AcceptProposalJson(TEXT("{\"spoken_line\":\"probe\",\"clauses\":[{\"type\":\"ceasefire\",\"days\":30}]}"), Err);
+				UE_LOG(LogTemp, Display, TEXT("CITY_PROBE: ceasefire talks=%d accepted=%d %s"), bTalks ? 1 : 0, bTruce ? 1 : 0, *Err);
+			}
+			CV->RequestBuild(TEXT("militia_muster"));
+			Advance(24);
+			CV->SelectTab(1);
+			CV->RequestRecruit(TEXT("militia_company"));
+			UE_LOG(LogTemp, Display, TEXT("CITY_PROBE: muster started; %s"), *UPA250Subsystem::Get(this)->GetLastResourceChangeReason());
+		});
+		Step(18.f, [this, Advance, Armies]() {
+			Advance(48);
+			UE_LOG(LogTemp, Display, TEXT("CITY_PROBE: after muster armies: %s"), *Armies());
+		});
+		Step(21.f, [this, Advance, Armies]() {
+			// Order the new company to the next town along the road and let it march.
+			if (!MapWidget) return;
+			FString Raised;
+			for (const auto& Kv : UPA250Subsystem::Get(this)->GetState().armies)
+			{
+				if (Kv.first.rfind("raised_", 0) == 0) Raised = UTF8_TO_TCHAR(Kv.first.c_str());
+			}
+			if (!Raised.IsEmpty())
+			{
+				MapWidget->PressSelectArmy(Raised);
+				const FString Msg = MapWidget->HandleTownClicked(TEXT("menotomy"));
+				Advance(3);
+				UE_LOG(LogTemp, Display, TEXT("CITY_PROBE: march order: %s | armies: %s"), *Msg, *Armies());
+			}
+			else
+			{
+				UE_LOG(LogTemp, Warning, TEXT("CITY_PROBE: no raised company found; armies: %s"), *Armies());
+			}
+		});
+		Step(24.f, [this]() {
+			if (!MapWidget) return;
+			MapWidget->ClearSelection();
+			MapWidget->HandleTownClicked(TEXT("concord"));
+			if (UPA250CityViewWidget* CV = MapWidget->GetCityView()) CV->SelectTab(2);
+			UE_LOG(LogTemp, Display, TEXT("CITY_PROBE: concord magazine tab open=%d"), MapWidget->IsCityViewOpen() ? 1 : 0);
+		});
+		Step(27.f, [this]() {
+			if (!MapWidget) return;
+			MapWidget->ClearSelection();
+			MapWidget->HandleTownClicked(TEXT("boston"));
+			MapWidget->PressBorrow();
+			if (!MapWidget->IsTreasuryOpen()) MapWidget->PressTreasuryToggle();
+			UE_LOG(LogTemp, Display, TEXT("CITY_PROBE: boston (enemy) open=%d; treasury %s"), MapWidget->IsCityViewOpen() ? 1 : 0,
+				   *UPA250Subsystem::Get(this)->GetTreasuryJson());
+		});
+		FTimerHandle QuitHandle;
+		GetWorldTimerManager().SetTimer(QuitHandle, FTimerDelegate::CreateLambda([this]() {
+			UKismetSystemLibrary::QuitGame(this, nullptr, EQuitPreference::Quit, false);
+		}), 30.f, false);
 	}
 
 	if (FParse::Param(FCommandLine::Get(), TEXT("PA250Shot")))
@@ -364,6 +467,13 @@ void APA250CampaignGameMode::RunAutoplayCampaign()
 	Finish(Sub, TEXT("autoplay"));
 }
 
+static FVector2D UVOfStatic(const APA250ProvinceMapActor* Map, const FVector& W)
+{
+	FVector2D UV;
+	Map->WorldToUV(W, UV);
+	return UV;
+}
+
 void APA250CampaignGameMode::RunProbeDragFrame()
 {
 	APA250CampaignPlayerController* PC = Cast<APA250CampaignPlayerController>(GetWorld()->GetFirstPlayerController());
@@ -461,6 +571,15 @@ void APA250CampaignGameMode::RunArtProbeStep()
 	const FVector2D LexView(0.29f, 0.215f);
 	const FVector2D BostonView(0.575f, 0.50f);
 	constexpr float CloseZoom = 4.5f;
+	// -PA250ArtProbe=tooltip: overview, then straight to the hover steps (no clock advance, no battle).
+	if (ArtProbeLabel == TEXT("tooltip") && ArtProbeStep == 1)
+	{
+		ArtProbeStep = 19;
+	}
+	if (ArtProbeLabel == TEXT("tooltip") && ArtProbeStep == 21)
+	{
+		ArtProbeStep = 100; // done
+	}
 	const int32 Step = ArtProbeStep++;
 	UE_LOG(LogTemp, Display, TEXT("ART_PROBE: step %d state: %s"), Step, *StateLine());
 	switch (Step)
@@ -469,6 +588,7 @@ void APA250CampaignGameMode::RunArtProbeStep()
 		for (const TCHAR* Path : {TEXT("/Game/PA250/Textures/Army/T_Army_ProvincialRegulars.T_Army_ProvincialRegulars"),
 								  TEXT("/Game/PA250/Textures/Army/T_Army_BritishMarching.T_Army_BritishMarching"),
 								  TEXT("/Game/PA250/Textures/Army/T_Army_BritishFiring.T_Army_BritishFiring"),
+								  TEXT("/Game/PA250/Textures/Army/T_Army_Militia.T_Army_Militia"),
 								  TEXT("/Game/PA250/Textures/Army/T_Army_GroundOval.T_Army_GroundOval")})
 		{
 			if (const UTexture2D* T = LoadObject<UTexture2D>(nullptr, Path))
@@ -671,6 +791,93 @@ void APA250CampaignGameMode::RunArtProbeStep()
 		const FVector2D Back = MapActor->GetZoomCenterUV();
 		UE_LOG(LogTemp, Display, TEXT("ART_PROBE: clamp centre.x=%.4f, after +0.01 pan %.4f (moved %.4f, expect 0.0100)"), AtClamp.X, Back.X,
 			   Back.X - AtClamp.X);
+		break;
+	}
+	case 15:
+	{
+		// March sequence on a fresh scenario (in memory; nothing is saved): wait for the Regulars to set off.
+		FString Err;
+		Sub->NewCampaign(Err);
+		Sub->SetPaused(true);
+		for (int32 i = 0; i < 12 && Sub->GetState().armies.at("british_regulars").path.empty(); ++i)
+		{
+			Sub->AdvanceHours(1, Err);
+		}
+		UE_LOG(LogTemp, Display, TEXT("ART_PROBE: march sequence start; %s"), *StateLine());
+		break;
+	}
+	case 16:
+	case 17:
+	case 18:
+	{
+		// One campaign hour per step; view centred between the column's start town and its next town.
+		FString Err;
+		Sub->AdvanceHours(1, Err);
+		const pa250::CampaignState& St = Sub->GetState();
+		const pa250::Army& B = St.armies.at("british_regulars");
+		FVector2D From = UVOf(MapActor->GetLabelWorld(UTF8_TO_TCHAR(B.province.c_str())));
+		FVector2D To = From;
+		if (!B.path.empty())
+		{
+			const auto E = St.edges.find(B.path.front());
+			if (E != St.edges.end())
+			{
+				const std::string Next = E->second.a == B.province ? E->second.b : E->second.a;
+				To = UVOf(MapActor->GetLabelWorld(UTF8_TO_TCHAR(Next.c_str())));
+			}
+		}
+		MapActor->SetView((From + To) * 0.5f, CloseZoom);
+		UE_LOG(LogTemp, Display, TEXT("ART_PROBE: march hour %d; hours_into_edge=%d; %s"), Step - 15, B.hours_into_edge, *StateLine());
+		// Sample the drawn column for 0.6 s: it should glide to the new sim position, never jump.
+		for (int32 k = 1; k <= 12; ++k)
+		{
+			FTimerHandle H;
+			GetWorldTimerManager().SetTimer(H, FTimerDelegate::CreateLambda([this, k]() {
+				FVector L;
+				if (MapActor && MapActor->GetArmyTokenLocation(TEXT("british_regulars"), L))
+				{
+					UE_LOG(LogTemp, Display, TEXT("ART_PROBE: column t+%.2fs at (%.1f,%.1f)"), 0.05f * k, L.X, L.Y);
+				}
+			}),
+											0.05f * k, false);
+		}
+		const FString Name = FString::Printf(TEXT("%d_march_hour%d"), Step, Step - 15);
+		Shot(*Name);
+		break;
+	}
+	case 19:
+	case 20:
+	{
+		// Hover tooltip through real Slate mouse moves: 19 = your militia, 20 = Boston (a town).
+		const bool bArmy = Step == 19;
+		FVector Target = MapActor->GetLabelWorld(TEXT("boston"));
+		if (bArmy)
+		{
+			MapActor->GetArmyTokenLocation(TEXT("continental_militia"), Target);
+			Target += FVector(0.f, -6.f, 0.f); // on the drawn counter/figures, above the ground anchor
+		}
+		MapActor->SetView(UVOf(Target) + FVector2D(0.03f, 0.02f), CloseZoom);
+		FTimerHandle H;
+		GetWorldTimerManager().SetTimer(H, FTimerDelegate::CreateLambda([this, PC, Target, bArmy]() {
+			FVector2D Px;
+			TSharedPtr<SViewport> VPW = GEngine && GEngine->GameViewport ? GEngine->GameViewport->GetGameViewportWidget() : nullptr;
+			if (!VPW.IsValid() || !PC->ProjectWorldLocationToScreen(Target, Px))
+			{
+				UE_LOG(LogTemp, Error, TEXT("ART_PROBE: hover: cannot project target"));
+				return;
+			}
+			const FGeometry& Geo = VPW->GetCachedGeometry();
+			const FVector2D Abs = Geo.LocalToAbsolute(Px / Geo.Scale);
+			FSlateApplication::Get().SetCursorPos(Abs);
+			FSlateApplication::Get().ProcessMouseMoveEvent(FPointerEvent(0, Abs, Abs - FVector2D(2.f, 2.f), TSet<FKey>(), EKeys::Invalid, 0.f,
+																		 FModifierKeysState()));
+			const FVector W = MapActor->UVToWorld(UVOfStatic(MapActor, Target), 2.f);
+			UE_LOG(LogTemp, Display, TEXT("ART_PROBE: hover %s at px (%.0f,%.0f): \"%s\""), bArmy ? TEXT("army") : TEXT("town"), Px.X, Px.Y,
+				   *MapActor->DescribeHover(bArmy ? MapActor->ArmyAtWorld(W) : FString(), bArmy ? FString() : MapActor->ProvinceAtWorld(W))
+						.Replace(TEXT("\n"), TEXT(" / ")));
+		}),
+										0.4f, false);
+		Shot(bArmy ? TEXT("19_tooltip_army") : TEXT("20_tooltip_town"));
 		break;
 	}
 	default:

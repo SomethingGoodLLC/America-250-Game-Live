@@ -50,6 +50,73 @@ inline bool PA250ShouldDuck(bool bInCover, bool bAtSpot, bool bLoaded, bool bTar
 	return bInCover && bAtSpot && !bRout && !bCharge && !(bLoaded && bTargetInSight);
 }
 
+/** What a bot does with his bayonet this instant. */
+enum class EPA250BotMelee : uint8 { Close, Thrust, Butt, Charge };
+
+struct FPA250BotMeleeView
+{
+	float DistCm = 0.f;
+	float ThrustReachCm = 260.f;   // reach + radius
+	float ButtReachCm = 195.f;
+	float LungeCm = 600.f;
+	bool bFoeGuardsMe = false;     // his musket is up and turned on me
+	bool bReadsGuard = false;      // this exchange I answer a guard properly
+	bool bResting = false;         // still recovering from my last blow
+	bool bChargeReady = false;
+	bool bFacing = true;           // a dash goes where I face
+};
+
+/** Pure: close in, thrust, butt-stroke or charge. A guard read correctly is answered by closing to
+ *  butt-stroke reach and using the stock (the guard-breaker), never by thrusting into it; a man
+ *  recovering from his last blow only closes. */
+inline EPA250BotMelee PA250ChooseMeleeMove(const FPA250BotMeleeView& V)
+{
+	if (V.bResting) return EPA250BotMelee::Close;
+	if (V.bFoeGuardsMe && V.bReadsGuard) return V.DistCm <= V.ButtReachCm ? EPA250BotMelee::Butt : EPA250BotMelee::Close;
+	if (V.DistCm <= V.ThrustReachCm) return EPA250BotMelee::Thrust;
+	if (V.DistCm <= V.LungeCm && V.bChargeReady && V.bFacing) return EPA250BotMelee::Charge;
+	return EPA250BotMelee::Close;
+}
+
+/**
+ * Dragoons (GAME INVENTION for 1775): mounted infantry. They ride to the fight, get down out of musket
+ * range, fight on foot as skirmishers and walk back to their horse to remount when there is ground to cover.
+ */
+enum class EPA250DragoonAct : uint8 { Ride, Dismount, FightOnFoot, ReturnToHorse, Mount };
+
+struct FPA250DragoonView
+{
+	bool bMounted = false;
+	bool bHorseAlive = false;
+	float EnemyDistCm = -1.f; // nearest enemy; < 0 when none is known
+	float GoalDistCm = 0.f;   // to the post he is making for
+	float HorseDistCm = 0.f;  // to his own (picketed) horse
+	bool bReturning = false;  // already walking back to (or mounting) his horse
+};
+
+inline constexpr float PA250DragoonDismountCm = 6000.f;  // get down at the edge of musket range (60 m)
+inline constexpr float PA250DragoonClearCm = 12000.f;    // remount only with no enemy inside 120 m
+inline constexpr float PA250DragoonGoalNearCm = 2500.f;  // at the post: fight there on foot
+inline constexpr float PA250DragoonMountReachCm = 250.f; // close enough to his horse to mount
+
+inline EPA250DragoonAct PA250DragoonDecide(const FPA250DragoonView& V)
+{
+	const bool bEnemyNear = V.EnemyDistCm >= 0.f && V.EnemyDistCm <= PA250DragoonDismountCm;
+	if (V.bMounted) return (bEnemyNear || V.GoalDistCm <= PA250DragoonGoalNearCm) ? EPA250DragoonAct::Dismount : EPA250DragoonAct::Ride;
+	if (!V.bHorseAlive) return EPA250DragoonAct::FightOnFoot;
+	const bool bClear = V.EnemyDistCm < 0.f || V.EnemyDistCm > PA250DragoonClearCm;
+	// Hysteresis: set off for the horse when the post is over 60 m away, keep going until it is within 35 m.
+	const float Need = PA250DragoonGoalNearCm * (V.bReturning ? 1.4f : 2.4f);
+	if (bClear && V.GoalDistCm > Need)
+	{
+		return V.HorseDistCm <= PA250DragoonMountReachCm ? EPA250DragoonAct::Mount : EPA250DragoonAct::ReturnToHorse;
+	}
+	return EPA250DragoonAct::FightOnFoot;
+}
+
+/** Gait for the ground still to cover: gallop beyond 40 m, canter beyond 15 m, else trot. */
+inline uint8 PA250DragoonGait(float DistCm) { return DistCm > 4000.f ? 3 : DistCm > 1500.f ? 2 : 1; }
+
 UCLASS()
 class PLAYAMERICA250_API APA250BotController : public AAIController
 {
@@ -90,6 +157,10 @@ public:
 	const FPA250TrainingProfile& GetTraining() const { return Training; }
 	const FPA250TacticalRole& GetRole() const { return Role; }
 	bool HasCombatProfile() const { return bHasCombatProfile; }
+	/** One hand-to-hand decision against Target (he is already being closed with): see PA250ChooseMeleeMove. */
+	void MeleeAttack(ARFCharacter* Me, ARFCharacter* Target, float Dist, bool bFacing);
+	/** This man's marksmanship relative to his training's average (fixed for his life). */
+	float GetAimScale() const { return AimScale; }
 	/** 0 calm .. 1 overwhelmed, from suppression, squad losses and squad morale. */
 	float ComputeStress01(const ARFCharacter* Me) const;
 	/** Squad formation order (refreshed every frame by the volley coordinator while the squad has 2+ men). */
@@ -118,8 +189,16 @@ private:
 	FPA250AIReloadParams ReloadParams;
 	FRandomStream ReloadRng;
 	bool bHasCombatProfile = false;
+	float AimScale = 1.f;
 	int32 SeenReloads = 0;
 	bool TryBayonet(ARFCharacter* Me, ARFCharacter* Enemy, float Dist, const struct FPA250BotTuningValues& T);
+	/** Dragoon riding and remounting; false when he should fight on foot like any skirmisher this think. */
+	bool TickDragoon(ARFCharacter* Me, ARFCharacter* Enemy, float Dist);
+	EPA250DragoonAct LastDragoonAct = EPA250DragoonAct::FightOnFoot;
+	float MeleeRest = 0.f;
+	bool bWasMeleeBusy = false;
+	bool bReadsGuard = true;
+	bool bLastMoveWasButt = false;
 	FPA250FormationOrder Form;
 	float BaseWalkSpeed = -1.f;
 	float FormOrderAge = 1.0e6f;

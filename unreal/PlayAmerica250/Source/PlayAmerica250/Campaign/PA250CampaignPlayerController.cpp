@@ -2,6 +2,7 @@
 #include "PA250CampaignGameMode.h"
 #include "PA250MapWidget.h"
 #include "PA250ProvinceMapActor.h"
+#include "PA250MapTooltip.h"
 #include "PA250Subsystem.h"
 #include "EngineUtils.h"
 #include "Engine/GameViewportClient.h"
@@ -20,6 +21,15 @@ void APA250CampaignPlayerController::BeginPlay()
 	Super::BeginPlay();
 	ApplyCampaignInputMode();
 	bShowMouseCursor = true;
+	if (IsLocalController())
+	{
+		MapTooltip = CreateWidget<UPA250MapTooltip>(this, UPA250MapTooltip::StaticClass());
+		if (MapTooltip)
+		{
+			MapTooltip->AddToViewport(50); // above the HUD panels; it never takes input
+			MapTooltip->HideTip();
+		}
+	}
 }
 
 void APA250CampaignPlayerController::ApplyCampaignInputMode()
@@ -197,6 +207,58 @@ void APA250CampaignPlayerController::PlayerTick(float DeltaTime)
 	{
 		LastCursorUV = CurUV;
 	}
+
+	// Hover tooltip: army under the cursor (what is drawn), else the town; never while a button is
+	// held or over the HUD, and only after the cursor rests briefly on the same thing.
+	FString HoverArmy;
+	FString HoverTown;
+	if (!bPanning && !bLmbDown && !bMmbDown && bHasUV && !OverHud(this, CurScreen))
+	{
+		const FVector W = Map->UVToWorld(CurUV, 2.f);
+		HoverArmy = Map->ArmyAtWorld(W);
+		if (HoverArmy.IsEmpty())
+		{
+			HoverTown = Map->ProvinceAtWorld(W);
+		}
+	}
+	const double Now = FPlatformTime::Seconds();
+	const FString Key = HoverArmy + TEXT("|") + HoverTown;
+	if (Key != HoverKey)
+	{
+		HoverKey = Key;
+		HoverSince = Now;
+	}
+	if (MapTooltip)
+	{
+		const FString Text = (HoverArmy.IsEmpty() && HoverTown.IsEmpty()) || Now - HoverSince < HoverDelaySeconds
+								 ? FString()
+								 : Map->DescribeHover(HoverArmy, HoverTown);
+		if (Text.IsEmpty())
+		{
+			MapTooltip->HideTip();
+		}
+		else
+		{
+			int32 VX = 0;
+			int32 VY = 0;
+			GetViewportSize(VX, VY);
+			// Project the hovered thing's drawn box to the screen and sit beside it.
+			const FBox2D W = Map->HoverWorldBox(HoverArmy, HoverTown);
+			FBox2D Avoid(ForceInit);
+			if (W.bIsValid)
+			{
+				for (const FVector2D& C : {W.Min, W.Max, FVector2D(W.Min.X, W.Max.Y), FVector2D(W.Max.X, W.Min.Y)})
+				{
+					FVector2D P;
+					if (ProjectWorldLocationToScreen(FVector(C, 14.f), P))
+					{
+						Avoid += P;
+					}
+				}
+			}
+			MapTooltip->ShowBeside(Text, Avoid, CurScreen, FVector2D(VX, VY));
+		}
+	}
 }
 
 APA250ProvinceMapActor* APA250CampaignPlayerController::FindMap() const
@@ -259,10 +321,17 @@ void APA250CampaignPlayerController::OnLeftReleased()
 	const FString ArmyId = Map->ArmyAtWorld(Hit.ImpactPoint);
 	const FString ArmyProv = Map->ProvinceForArmy(ArmyId);
 	const FString Pid = !ArmyProv.IsEmpty() ? ArmyProv : Map->ProvinceAtWorld(Hit.ImpactPoint);
-	if (!Pid.IsEmpty())
+	if (Pid.IsEmpty())
 	{
-		Map->HandleProvinceClick(Pid);
+		return;
 	}
+	// A town click also shows its panel (unless it was a march order); see HandleTownClicked.
+	if (UPA250MapWidget* W = CampaignWidget(this))
+	{
+		W->HandleTownClicked(Pid);
+		return;
+	}
+	Map->HandleProvinceClick(Pid);
 }
 
 void APA250CampaignPlayerController::OnRightClick()

@@ -6,6 +6,7 @@
 #include "Kismet/GameplayStatics.h"
 #include "Sound/SoundAttenuation.h"
 #include "Sound/SoundBase.h"
+#include "Sound/SoundWave.h"
 #include "UObject/StrongObjectPtr.h"
 
 namespace
@@ -112,6 +113,12 @@ bool FPA250BattleAudio::PlayAt(const UObject* Ctx, const FString& Bank, const FV
 	return true;
 }
 
+bool FPA250BattleAudio::PlayAtOr(const UObject* Ctx, const FString& Bank, const FString& Fallback, const FVector& Location,
+	EPA250SoundRange Range, float Volume, float PitchJitter)
+{
+	return PlayAt(Ctx, Pick(Bank) ? Bank : Fallback, Location, Range, Volume, PitchJitter);
+}
+
 bool FPA250BattleAudio::PlayMusketShot(const UObject* Ctx, const FVector& Muzzle)
 {
 	const UWorld* World = Ctx ? Ctx->GetWorld() : nullptr;
@@ -190,6 +197,45 @@ void FPA250BattleAudio::StopCampaignMusic()
 		CampaignMusic()->FadeOut(1.f, 0.f);
 		CampaignMusic().Reset();
 	}
+}
+
+namespace
+{
+TStrongObjectPtr<UAudioComponent>& Ambience()
+{
+	static TStrongObjectPtr<UAudioComponent> C;
+	return C;
+}
+} // namespace
+
+bool FPA250BattleAudio::StartAmbience(const UObject* Ctx, float Volume)
+{
+	Counts().FindOrAdd(TEXT("ambience"))++;
+	if (Ambience() && Ambience()->IsPlaying()) return true;
+	USoundBase* Sound = LoadObject<USoundBase>(nullptr, TEXT("/Game/PA250/Audio/SFX/ambience_dawn.ambience_dawn"), nullptr, LOAD_NoWarn | LOAD_Quiet);
+	if (!Sound || !Ctx || !Ctx->GetWorld()) return false;
+	if (USoundWave* Wave = Cast<USoundWave>(Sound)) Wave->bLooping = true; // a bed, whatever the import flag says
+	UAudioComponent* Comp = UGameplayStatics::SpawnSound2D(Ctx, Sound, Volume, 1.f, 0.f, nullptr, false, true);
+	if (!Comp) return false;
+	Comp->FadeIn(3.f, Volume);
+	Ambience() = TStrongObjectPtr<UAudioComponent>(Comp);
+	return true;
+}
+
+void FPA250BattleAudio::StopAmbience()
+{
+	if (Ambience())
+	{
+		Ambience()->FadeOut(1.5f, 0.f);
+		Ambience().Reset();
+	}
+}
+
+bool FPA250BattleAudio::PlayFootstep(const UObject* Ctx, const FVector& Location, bool bOwn)
+{
+	FVector Listener;
+	if (!bOwn && (!GetListener(Ctx, Listener) || FVector::DistSquared(Listener, Location) > FootstepHearCm * FootstepHearCm)) return false;
+	return PlayAt(Ctx, TEXT("footstep_grass"), Location, EPA250SoundRange::Near, bOwn ? 0.55f : 0.4f, 0.12f);
 }
 
 int32 FPA250BattleAudio::GetPlayCount(const FString& BankOrKey)

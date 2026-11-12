@@ -1,4 +1,6 @@
 #include "PA250BattleHUD.h"
+#include "GameFramework/PlayerController.h"
+#include "InputCoreTypes.h"
 #include "Blueprint/WidgetLayoutLibrary.h"
 #include "Camera/CameraComponent.h"
 #include "MusketWeapon.h"
@@ -16,6 +18,7 @@
 #include "Widgets/Text/STextBlock.h"
 #include "Widgets/Images/SImage.h"
 #include "PA250MeleeComponent.h"
+#include "PA250UnitClasses.h"
 #include "PA250VolleyCoordinator.h"
 #include "Fonts/FontMeasure.h"
 #include "Framework/Application/SlateApplication.h"
@@ -114,6 +117,12 @@ void DrawCenteredText(FSlateWindowElementList& Out, int32 Layer, const FGeometry
 		Text, Font, ESlateDrawEffect::None, FLinearColor(0.f, 0.f, 0.f, C.A * 0.8f));
 	FSlateDrawElement::MakeText(Out, Layer + 1, G.ToPaintGeometry(FVector2f(Size), FSlateLayoutTransform(FVector2f(Pos))),
 		Text, Font, ESlateDrawEffect::None, C);
+}
+/** Controls legend opacity: full for 25 s, gone by 30 s, back while F1 is held. */
+float LegendAlpha(const APlayerController* PC, double Born)
+{
+	if (PC && PC->IsInputKeyDown(EKeys::F1)) return 0.6f;
+	return 0.6f * UPA250BattleHUD::LegendFade(static_cast<float>(FPlatformTime::Seconds() - Born));
 }
 } // namespace
 
@@ -243,12 +252,19 @@ void UPA250BattleHUD::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 	DamageDirTimer = FMath::Max(0.f, DamageDirTimer - InDeltaTime);
 }
 
+float UPA250BattleHUD::LegendFade(float AgeSeconds)
+{
+	if (AgeSeconds <= 25.f) return 1.f;
+	return FMath::Clamp(1.f - (AgeSeconds - 25.f) / 5.f, 0.f, 1.f);
+}
+
 TSharedRef<SWidget> UPA250BattleHUD::RebuildWidget()
 {
 	const FSlateFontInfo Font = FCoreStyle::GetDefaultFontStyle("Bold", 16);
 	const FSlateFontInfo Big = FCoreStyle::GetDefaultFontStyle("Bold", 34);
 	const FSlateFontInfo Small = FCoreStyle::GetDefaultFontStyle("Regular", 14);
 	TWeakObjectPtr<UPA250BattleHUD> WeakThis(this);
+	const double LegendBorn = FPlatformTime::Seconds();
 
 	auto Top = [WeakThis]() {
 		const APA250BattleGameMode* GM = WeakThis.IsValid() ? WeakThis->GameMode.Get() : nullptr;
@@ -298,6 +314,18 @@ TSharedRef<SWidget> UPA250BattleHUD::RebuildWidget()
 		return Extra.IsEmpty() ? FText::GetEmpty() : FText::FromString(Extra.TrimStart());
 	};
 
+	// Who the player is this life, and whether an officer is steadying him.
+	auto ClassLine = [WeakThis]() {
+		const APlayerController* PC = WeakThis.IsValid() ? WeakThis->GetOwningPlayer() : nullptr;
+		const ARFCharacter* Me = PC ? Cast<ARFCharacter>(PC->GetPawn()) : nullptr;
+		if (!Me || Me->IsDead()) return FText::GetEmpty();
+		const FPA250UnitClassKit& Kit = PA250UnitClasses::KitFor(Me->FactionId, Me->UnitClass);
+		FString Line = FString::Printf(TEXT("%s  -  %s"), Kit.Label, Kit.Weapon);
+		if (Kit.bOfficer) Line += TEXT("\nYour men within 15 m aim steadier and load faster");
+		else if (Me->bNearOfficer) Line += TEXT("\nOfficer near: steadier aim, faster loading");
+		return FText::FromString(Line);
+	};
+
 	auto MeP = [WeakThis]() -> const ARFCharacter* {
 		const APlayerController* PC = WeakThis.IsValid() ? WeakThis->GetOwningPlayer() : nullptr;
 		const ARFCharacter* Me = PC ? Cast<ARFCharacter>(PC->GetPawn()) : nullptr;
@@ -305,25 +333,25 @@ TSharedRef<SWidget> UPA250BattleHUD::RebuildWidget()
 	};
 	auto IsReloadingBar = [MeP]() {
 		const ARFCharacter* Me = MeP();
-		return Me && Me->Musket && !Me->Musket->CanFire() && !Me->Musket->IsJammed();
+		return Me && Me->GetEquippedFirearm() && !Me->GetEquippedFirearm()->CanFire() && !Me->GetEquippedFirearm()->IsJammed();
 	};
 
 	auto Reload = [MeP]() {
 		const ARFCharacter* Me = MeP();
-		if (!Me || !Me->Musket) return FText::GetEmpty();
-		if (Me->Musket->IsJammed()) return FText::FromString(TEXT("MUSKET JAMMED  -  hold R to clear"));
-		if (Me->Musket->CanFire()) return FText::FromString(TEXT("Loaded"));
-		return FText::FromString(FString::Printf(TEXT("Reloading   %s"), *Me->Musket->GetReloadPhaseLabel()));
+		if (!Me || !Me->GetEquippedFirearm()) return FText::GetEmpty();
+		if (Me->GetEquippedFirearm()->IsJammed()) return FText::FromString(TEXT("WEAPON JAMMED  -  hold R to clear"));
+		if (Me->GetEquippedFirearm()->CanFire()) return FText::FromString(TEXT("Loaded"));
+		return FText::FromString(FString::Printf(TEXT("Reloading   %s"), *Me->GetEquippedFirearm()->GetReloadPhaseLabel()));
 	};
 	auto ReloadColor = [MeP]() {
 		const ARFCharacter* Me = MeP();
-		if (Me && Me->Musket && Me->Musket->IsJammed()) return FSlateColor(FLinearColor(1.f, 0.3f, 0.2f));
-		if (Me && Me->Musket && Me->Musket->CanFire()) return FSlateColor(FLinearColor(0.75f, 1.f, 0.75f));
+		if (Me && Me->GetEquippedFirearm() && Me->GetEquippedFirearm()->IsJammed()) return FSlateColor(FLinearColor(1.f, 0.3f, 0.2f));
+		if (Me && Me->GetEquippedFirearm() && Me->GetEquippedFirearm()->CanFire()) return FSlateColor(FLinearColor(0.75f, 1.f, 0.75f));
 		return FSlateColor(FLinearColor(1.f, 0.95f, 0.7f));
 	};
 	auto ReloadHint = [MeP]() {
 		const ARFCharacter* Me = MeP();
-		if (!Me || !Me->Musket || Me->Musket->CanFire() || Me->Musket->IsJammed()) return FText::GetEmpty();
+		if (!Me || !Me->GetEquippedFirearm() || Me->GetEquippedFirearm()->CanFire() || Me->GetEquippedFirearm()->IsJammed()) return FText::GetEmpty();
 		return FText::FromString(TEXT("Tap R as the marker crosses the gold zone to load faster  -  3 perfect taps = +15% damage  -  or just wait"));
 	};
 	auto ReloadFlash = [MeP]() {
@@ -346,20 +374,20 @@ TSharedRef<SWidget> UPA250BattleHUD::RebuildWidget()
 	constexpr float BarW = 360.f;
 	auto Zone = [MeP, BarW](bool bPerfect) {
 		const ARFCharacter* Me = MeP();
-		if (!Me || !Me->Musket) return FMargin(0.f);
-		const float S = bPerfect ? Me->Musket->GetPerfectStart() : Me->Musket->GetSweetStart();
-		const float E = bPerfect ? Me->Musket->GetPerfectEnd() : Me->Musket->GetSweetEnd();
+		if (!Me || !Me->GetEquippedFirearm()) return FMargin(0.f);
+		const float S = bPerfect ? Me->GetEquippedFirearm()->GetPerfectStart() : Me->GetEquippedFirearm()->GetSweetStart();
+		const float E = bPerfect ? Me->GetEquippedFirearm()->GetPerfectEnd() : Me->GetEquippedFirearm()->GetSweetEnd();
 		return FMargin(S * BarW, 0.f, (1.f - E) * BarW, 0.f);
 	};
 	auto Marker = [MeP, BarW]() {
 		const ARFCharacter* Me = MeP();
-		const float P = Me && Me->Musket ? FMath::Clamp(Me->Musket->GetReloadProgress(), 0.f, 1.f) : 0.f;
+		const float P = Me && Me->GetEquippedFirearm() ? FMath::Clamp(Me->GetEquippedFirearm()->GetReloadProgress(), 0.f, 1.f) : 0.f;
 		const float L = FMath::Clamp(P * BarW - 2.f, 0.f, BarW - 4.f);
 		return FMargin(L, 0.f, BarW - L - 4.f, 0.f);
 	};
 	auto Fill = [MeP, BarW]() {
 		const ARFCharacter* Me = MeP();
-		const float P = Me && Me->Musket ? FMath::Clamp(Me->Musket->GetReloadProgress(), 0.f, 1.f) : 0.f;
+		const float P = Me && Me->GetEquippedFirearm() ? FMath::Clamp(Me->GetEquippedFirearm()->GetReloadProgress(), 0.f, 1.f) : 0.f;
 		return FMargin(0.f, 0.f, (1.f - P) * BarW, 0.f);
 	};
 
@@ -367,14 +395,23 @@ TSharedRef<SWidget> UPA250BattleHUD::RebuildWidget()
 		const ARFCharacter* Me = MeP();
 		if (!Me || !Me->MeleeComponent) return FText::GetEmpty();
 		const FString Fb = Me->MeleeComponent->GetFeedbackText();
+		// An attack launched at you outranks everything else on this line.
+		if (Me->MeleeComponent->IsThreatened() && !Me->MeleeComponent->IsGuarding()) return FText::FromString(TEXT("!! ATTACK COMING - hold X to guard !!"));
 		if (!Fb.IsEmpty()) return FText::FromString(Fb);
+		if (Me->MeleeComponent->CanRiposte()) return FText::FromString(TEXT(">> He is open - E to riposte <<"));
+		if (Me->MeleeComponent->IsGuarding()) return FText::FromString(TEXT("Guard up  (frontal thrusts blocked)"));
 		const float Cd = Me->MeleeComponent->GetChargeCooldownRemaining();
 		if (Cd > 0.f) return FText::FromString(FString::Printf(TEXT("Bayonet charge ready in %.1fs"), Cd));
 		if (Me->MeleeComponent->FindChargeTarget()) return FText::FromString(TEXT(">> Enemy in reach - press G to CHARGE! <<"));
+		if (!Me->MeleeComponent->HasBayonet()) return FText::FromString(TEXT("No bayonet - E clubs with the musket, G rushes"));
 		return FText::FromString(TEXT("Bayonet charge ready  (G)"));
 	};
 	auto MeleeColor = [MeP]() {
 		const ARFCharacter* Me = MeP();
+		if (Me && Me->MeleeComponent && ((Me->MeleeComponent->IsThreatened() && !Me->MeleeComponent->IsGuarding()) || Me->MeleeComponent->CanRiposte()))
+		{
+			return FSlateColor(FLinearColor(1.f, 0.2f, 0.15f));
+		}
 		if (Me && Me->MeleeComponent && !Me->MeleeComponent->GetFeedbackText().IsEmpty())
 		{
 			return FSlateColor(Me->MeleeComponent->WasFeedbackHit() ? FLinearColor(1.f, 0.4f, 0.3f) : FLinearColor(1.f, 0.9f, 0.5f));
@@ -456,6 +493,8 @@ TSharedRef<SWidget> UPA250BattleHUD::RebuildWidget()
 			[SNew(STextBlock).Font(Font).ColorAndOpacity(FLinearColor::White).Text_Lambda(Top)]]
 		+ SOverlay::Slot().VAlign(VAlign_Top).HAlign(HAlign_Center).Padding(0, 84, 0, 0)
 		[SNew(STextBlock).Font(Small).ColorAndOpacity(FLinearColor(1.f, 0.95f, 0.6f)).Text_Lambda(Capture)]
+		+ SOverlay::Slot().VAlign(VAlign_Top).HAlign(HAlign_Left).Padding(24, 80, 0, 0)
+		[SNew(STextBlock).Font(Small).ColorAndOpacity(FLinearColor(1.f, 0.95f, 0.8f, 0.9f)).ShadowOffset(FVector2D(1, 1)).Text_Lambda(ClassLine)]
 		+ SOverlay::Slot().VAlign(VAlign_Top).HAlign(HAlign_Center).Padding(0, 136, 0, 0)
 		[SNew(STextBlock).Font(FCoreStyle::GetDefaultFontStyle("Bold", 22)).ColorAndOpacity(FLinearColor(1.f, 0.92f, 0.75f))
 			.ShadowOffset(FVector2D(2, 2)).Text_Lambda(Shout)]
@@ -497,10 +536,16 @@ TSharedRef<SWidget> UPA250BattleHUD::RebuildWidget()
 			[SNew(STextBlock).Font(FCoreStyle::GetDefaultFontStyle("Regular", 11)).ColorAndOpacity(FLinearColor(0.85f, 0.85f, 0.85f, 0.85f)).Text_Lambda(ReloadHint)]
 			+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center).Padding(0, 2, 0, 0)
 			[SNew(STextBlock).Font(Font).ShadowOffset(FVector2D(1, 1)).ColorAndOpacity_Lambda(ReloadFlashColor).Text_Lambda(ReloadFlash)]]
-		// Controls legend.
+		// Controls legend: shown for the first half-minute, then only while F1 is held.
 		+ SOverlay::Slot().VAlign(VAlign_Bottom).HAlign(HAlign_Left).Padding(20, 0, 0, 20)
-		[SNew(STextBlock).Font(FCoreStyle::GetDefaultFontStyle("Regular", 11)).ColorAndOpacity(FLinearColor(1.f, 1.f, 1.f, 0.6f)).ShadowOffset(FVector2D(1, 1))
-			.Text(FText::FromString(TEXT("LMB  fire (you stop to shoot)\nRMB  aim down sights     V  swap shoulder\nR  reload - tap in the gold zone, hold to clear a jam\nE  bayonet lunge - steps onto the man in front     Q  butt-stroke (works mid-reload)\nG (or Shift + E)  bayonet charge - 6 m dash toward the enemy in front, first man hit takes 100\n[ / ]  look sensitivity slower / faster")))]
+		[SNew(STextBlock).Font(FCoreStyle::GetDefaultFontStyle("Regular", 10)).ShadowOffset(FVector2D(1, 1))
+			.ColorAndOpacity_Lambda([WeakThis, LegendBorn]() { return FSlateColor(FLinearColor(1.f, 1.f, 1.f, WeakThis.IsValid() ? 0.45f * (1.f - LegendAlpha(WeakThis->GetOwningPlayer(), LegendBorn) / 0.6f) : 0.f)); })
+			.Text(FText::FromString(TEXT("F1 (hold)  controls")))]
+		+ SOverlay::Slot().VAlign(VAlign_Bottom).HAlign(HAlign_Left).Padding(20, 0, 0, 20)
+		[SNew(STextBlock).Font(FCoreStyle::GetDefaultFontStyle("Regular", 11)).ShadowOffset(FVector2D(1, 1))
+			.ColorAndOpacity_Lambda([WeakThis, LegendBorn]() { return FSlateColor(FLinearColor(1.f, 1.f, 1.f, WeakThis.IsValid() ? LegendAlpha(WeakThis->GetOwningPlayer(), LegendBorn) : 0.f)); })
+			.ShadowColorAndOpacity_Lambda([WeakThis, LegendBorn]() { return FLinearColor(0.f, 0.f, 0.f, WeakThis.IsValid() ? LegendAlpha(WeakThis->GetOwningPlayer(), LegendBorn) : 0.f); })
+			.Text(FText::FromString(TEXT("LMB  fire (you stop to shoot)\nRMB  aim down sights     V  swap shoulder\nR  reload - tap in the gold zone, hold to clear a jam\nE  bayonet lunge (no bayonet: clubbed-musket swing) - steps onto the man in front     Q  butt-stroke (works mid-reload, breaks a guard)\nX (hold)  guard - blocks frontal bayonets; raised at the last moment it parries, then E ripostes\nG (or Shift + E)  bayonet charge - 6 m dash toward the enemy in front, first man hit takes 70\n[ / ]  look sensitivity slower / faster")))]
 		+ SOverlay::Slot().VAlign(VAlign_Center).HAlign(HAlign_Center)
 		[SNew(STextBlock).Font(Big).ColorAndOpacity(FLinearColor(1.f, 0.9f, 0.3f)).ShadowOffset(FVector2D(2, 2)).Text_Lambda(Banner)];
 }

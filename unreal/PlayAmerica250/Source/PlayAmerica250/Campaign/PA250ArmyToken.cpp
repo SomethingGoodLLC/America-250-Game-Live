@@ -16,7 +16,10 @@ const FPA250ArmyArtSpec GArtSpecs[] = {
 	{TEXT("/Game/PA250/Textures/Army/T_Army_ProvincialRegulars.T_Army_ProvincialRegulars"), 0.88379f, 1.00000f, 1.7676f, 0.70f},
 	{TEXT("/Game/PA250/Textures/Army/T_Army_BritishMarching.T_Army_BritishMarching"), 1.00000f, 0.84961f, 2.3540f, 0.64f},
 	{TEXT("/Game/PA250/Textures/Army/T_Army_BritishFiring.T_Army_BritishFiring"), 1.00000f, 0.73438f, 2.7234f, 0.77f},
+	// Rear-rank men (hat to shoe ~350 of 512 px); the foreground officer stands taller, as drawn.
+	{TEXT("/Game/PA250/Textures/Army/T_Army_Militia.T_Army_Militia"), 0.57520f, 1.00000f, 1.1504f, 0.68f},
 };
+static_assert(UE_ARRAY_COUNT(GArtSpecs) == static_cast<int32>(EPA250ArmyArt::Militia) + 1, "one art spec per EPA250ArmyArt");
 
 constexpr float GlyphAdvance = 0.55f; // average TextRender glyph width / world size (engine Roboto)
 constexpr float PlateGapUU = 2.5f;	  // feet -> first text line
@@ -113,7 +116,9 @@ FVector2D APA250ArmyToken::FactionFootprintUU(const FString& Faction)
 		const FVector2D F = ArtWorldSize(EPA250ArmyArt::BritishFiring);
 		return FVector2D(FMath::Max(M.X, F.X), FMath::Max(M.Y, F.Y));
 	}
-	return ArtWorldSize(EPA250ArmyArt::ProvincialRegulars);
+	const FVector2D R = ArtWorldSize(EPA250ArmyArt::ProvincialRegulars);
+	const FVector2D Mi = ArtWorldSize(EPA250ArmyArt::Militia);
+	return FVector2D(FMath::Max(R.X, Mi.X), FMath::Max(R.Y, Mi.Y));
 }
 
 FVector2D APA250ArmyToken::PlateSizeUU(const FString& DisplayName, const FString& SideWord)
@@ -134,9 +139,11 @@ APA250ArmyToken::APA250ArmyToken()
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> Plane(TEXT("/Engine/BasicShapes/Plane"));
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> ShapeMat(TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> SpriteMat(TEXT("/Game/PA250/Materials/M_MapSprite.M_MapSprite"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> TextMat(TEXT("/Game/PA250/Materials/M_MapText.M_MapText"));
 	static ConstructorHelpers::FObjectFinder<UTexture2D> TexProvincial(GArtSpecs[1].TexturePath);
 	static ConstructorHelpers::FObjectFinder<UTexture2D> TexMarch(GArtSpecs[2].TexturePath);
 	static ConstructorHelpers::FObjectFinder<UTexture2D> TexFire(GArtSpecs[3].TexturePath);
+	static ConstructorHelpers::FObjectFinder<UTexture2D> TexMilitia(GArtSpecs[4].TexturePath);
 	static ConstructorHelpers::FObjectFinder<UTexture2D> TexGround(TEXT("/Game/PA250/Textures/Army/T_Army_GroundOval.T_Army_GroundOval"));
 
 	UMaterialInterface* Shape = ShapeMat.Succeeded() ? ShapeMat.Object : nullptr;
@@ -153,12 +160,21 @@ APA250ArmyToken::APA250ArmyToken()
 	SelectBar = MakeMesh(this, Root, TEXT("SelectBar"), Bar.Succeeded() ? Bar.Object : nullptr, Shape);
 	NameText = MakeText(this, Root, TEXT("Name"));
 	StrengthText = MakeText(this, Root, TEXT("Strength"));
+	if (TextMat.Succeeded())
+	{
+		// Unlit: the plate prints in its real ink, not lit to pastel by the campaign key light.
+		NameText->SetTextMaterial(TextMat.Object);
+		StrengthText->SetTextMaterial(TextMat.Object);
+		NameText->SetTranslucentSortPriority(5);
+		StrengthText->SetTranslucentSortPriority(5);
+	}
 
 	SpriteMaterial = SpriteMat.Succeeded() ? SpriteMat.Object : nullptr;
 	ArtTextures[0] = nullptr;
 	ArtTextures[1] = TexProvincial.Succeeded() ? TexProvincial.Object : nullptr;
 	ArtTextures[2] = TexMarch.Succeeded() ? TexMarch.Object : nullptr;
 	ArtTextures[3] = TexFire.Succeeded() ? TexFire.Object : nullptr;
+	ArtTextures[4] = TexMilitia.Succeeded() ? TexMilitia.Object : nullptr;
 	GroundTexture = TexGround.Succeeded() ? TexGround.Object : nullptr;
 	if (SpriteMaterial)
 	{
@@ -191,14 +207,13 @@ void APA250ArmyToken::Configure(const FString& InArmyId, const FString& Faction,
 		Art = EPA250ArmyArt::None;
 	}
 	ArtSizeUU = ArtWorldSize(Art);
-	const FVector A = GetActorLocation(); // ground anchor (feet, bottom-centre)
+	PlateUU = PlateSizeUU(DisplayName, SideWord);
 	SetActorScale3D(FVector::OneVector);
 
 	// Illustration quad: exactly the content rect, standing on the anchor.
 	if (Art != EPA250ArmyArt::None)
 	{
 		const FPA250ArmyArtSpec& S = ArtSpec(Art);
-		PlaceAbs(SpriteMesh, A + FVector(0.f, -ArtSizeUU.Y * 0.5f, 1.f), FVector(ArtSizeUU.X / 100.f, ArtSizeUU.Y / 100.f, 1.f));
 		UMaterialInstanceDynamic* MID = Cast<UMaterialInstanceDynamic>(SpriteMesh->GetMaterial(0));
 		if (!MID)
 		{
@@ -213,13 +228,6 @@ void APA250ArmyToken::Configure(const FString& InArmyId, const FString& Faction,
 		}
 		// Translucent: keep a stable draw order between overlapping tokens (ground under figures).
 		SpriteMesh->SetTranslucentSortPriority(bSelected ? 3 : 2);
-		// Ground oval under the whole army (figures and name plate), so neither sits directly on printed
-		// soldiers or script. Opaque core covers the middle; the rim eases to nothing (no edge, no rectangle).
-		const FVector2D PlateUU = PlateSizeUU(DisplayName, SideWord);
-		const float Top = -ArtSizeUU.Y - 2.f;
-		const float Bottom = PlateUU.Y + 1.f;
-		PlaceAbs(GroundMesh, A + FVector(0.f, (Top + Bottom) * 0.5f, 0.3f),
-				 FVector(FMath::Max(ArtSizeUU.X, PlateUU.X) * 1.3f / 100.f, (Bottom - Top) * 1.2f / 100.f, 1.f));
 		GroundMesh->SetTranslucentSortPriority(1);
 		if (UMaterialInstanceDynamic* GMID = GroundMesh->CreateAndSetMaterialInstanceDynamic(0))
 		{
@@ -227,9 +235,6 @@ void APA250ArmyToken::Configure(const FString& InArmyId, const FString& Faction,
 			GMID->SetVectorParameterValue(TEXT("UVRect"), FLinearColor(0.f, 0.f, 1.f, 1.f));
 			GMID->SetScalarParameterValue(TEXT("Opacity"), GroundOpacity);
 		}
-		const float RuleW = ArtSizeUU.X * 0.72f;
-		PlaceAbs(FactionBar, A + FVector(0.f, 0.9f, 0.5f), FVector(RuleW / 100.f, 1.3f / 100.f, 0.01f));
-		PlaceAbs(SelectBar, A + FVector(0.f, 2.6f, 0.5f), FVector(ArtSizeUU.X * 0.86f / 100.f, 1.4f / 100.f, 0.01f));
 		Tint(FactionBar, Fill);
 		Tint(SelectBar, Gold);
 	}
@@ -258,9 +263,41 @@ void APA250ArmyToken::Configure(const FString& InArmyId, const FString& Faction,
 	StrengthText->SetText(FText::FromString(SideWord));
 	StrengthText->SetTextRenderColor(Ink);
 
+	LayoutArt();
 	bShowIllustration = false;
 	PlateScale = 0.f;
 	ApplyLod(0.f);
+}
+
+void APA250ArmyToken::LayoutArt()
+{
+	if (Art == EPA250ArmyArt::None)
+	{
+		return;
+	}
+	const FVector A = GetActorLocation(); // ground anchor (feet, bottom-centre)
+	// Illustration quad: exactly the content rect, standing on the anchor.
+	PlaceAbs(SpriteMesh, A + FVector(0.f, -ArtSizeUU.Y * 0.5f, 1.f), FVector(ArtSizeUU.X / 100.f, ArtSizeUU.Y / 100.f, 1.f));
+	// Ground oval under the whole army (figures and name plate), so neither sits directly on printed
+	// soldiers or script. Opaque core covers the middle; the rim eases to nothing (no edge, no rectangle).
+	const float Top = -ArtSizeUU.Y - 2.f;
+	const float Bottom = PlateUU.Y + 1.f;
+	PlaceAbs(GroundMesh, A + FVector(0.f, (Top + Bottom) * 0.5f, 0.3f),
+			 FVector(FMath::Max(ArtSizeUU.X, PlateUU.X) * 1.3f / 100.f, (Bottom - Top) * 1.2f / 100.f, 1.f));
+	PlaceAbs(FactionBar, A + FVector(0.f, 0.9f, 0.5f), FVector(ArtSizeUU.X * 0.72f / 100.f, 1.3f / 100.f, 0.01f));
+	PlaceAbs(SelectBar, A + FVector(0.f, 2.6f, 0.5f), FVector(ArtSizeUU.X * 0.86f / 100.f, 1.4f / 100.f, 0.01f));
+}
+
+void APA250ArmyToken::SetAnchor(const FVector& NewAnchor)
+{
+	if (NewAnchor.Equals(GetActorLocation(), 0.01f))
+	{
+		return;
+	}
+	SetActorLocation(NewAnchor);
+	LayoutArt();
+	LayoutCompact(CompactDiameterUU);
+	LayoutPlate(PlateScale > 0.f ? PlateScale : 1.f);
 }
 
 void APA250ArmyToken::LayoutPlate(float Scale)
@@ -332,6 +369,15 @@ void APA250ArmyToken::ApplyLod(float PxPerUU)
 	if (BodyMesh) BodyMesh->SetVisibility(!bIllus);
 	if (CrossMeshA) CrossMeshA->SetVisibility(!bIllus);
 	if (CrossMeshB) CrossMeshB->SetVisibility(!bIllus);
+}
+
+FBox2D APA250ArmyToken::GetFootprint() const
+{
+	const FVector A = GetActorLocation();
+	const float S = PlateScale > 0.f ? PlateScale : 1.f;
+	FBox2D Box = GetDrawnRect();
+	Box += FBox2D(FVector2D(A.X - PlateUU.X * S * 0.5f, A.Y), FVector2D(A.X + PlateUU.X * S * 0.5f, A.Y + PlateUU.Y * S));
+	return Box;
 }
 
 FBox2D APA250ArmyToken::GetDrawnRect() const

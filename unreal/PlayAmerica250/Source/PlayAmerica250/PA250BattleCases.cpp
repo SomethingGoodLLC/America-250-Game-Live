@@ -1,4 +1,5 @@
 #include "PA250BattleCases.h"
+#include "PA250UnitClasses.h"
 #include "Components/CapsuleComponent.h"
 #include "PA250BotController.h"
 #include "PA250BattleGameMode.h"
@@ -31,6 +32,7 @@
 #include "PA250BotTuning.h"
 #include "PA250Cover.h"
 #include "PA250Morale.h"
+#include "PA250Smoke.h"
 #include "PA250BattleAudio.h"
 #include "Sound/SoundWave.h"
 #include "GameFramework/PlayerStart.h"
@@ -39,6 +41,7 @@
 #include "PA250VolleyCoordinator.h"
 #include "PA250WeaponTuning.h"
 #include "RFCharacter.h"
+#include "RFHealthComponent.h"
 
 namespace PA250BattleCases
 {
@@ -359,8 +362,8 @@ void RunMelee(FLog& Log)
 	const FPA250MeleeTuningValues& V = T->Values;
 	Log.Check(V.ThrustWindupSeconds == 0.35f && V.ThrustReachCm == 220.f && V.ThrustDamage == 75.f, TEXT("melee: thrust 0.35 s / 2.2 m / 75"));
 	Log.Check(V.ButtStrokeDamage == 35.f && V.ButtStrokeStaggerSeconds == 0.6f, TEXT("melee: butt-stroke 35 + 0.6 s stagger"));
-	Log.Check(V.ChargeLungeCm == 600.f && V.ChargeDamage == 100.f && V.ChargeCooldownSeconds == 4.f && V.ChargeHitRadiusCm >= 70.f,
-		TEXT("melee: charge 6 m / 100 / 4 s, wide sweep"));
+	Log.Check(V.ChargeLungeCm == 600.f && V.ChargeDamage == 70.f && V.ChargeCooldownSeconds == 4.f && V.ChargeHitRadiusCm >= 70.f,
+		TEXT("melee: charge 6 m / 70 / 4 s, wide sweep"));
 
 	const FVector Fwd(1.f, 0.f, 0.f);
 	Log.Check(UPA250MeleeComponent::ComputeHitDamage(75.f, true, Fwd, FVector(1, 0, 0), false, V) == 75.f, TEXT("melee: frontal thrust x1"));
@@ -476,6 +479,70 @@ void RunMelee(FLog& Log)
 		}
 	}
 
+	// Guard, parry, riposte and the no-one-blow-kill rule.
+	{
+		ARFCharacter* Me = W.World->SpawnActor<ARFCharacter>(FVector(0.f, 6000.f, 100.f), FRotator::ZeroRotator);
+		Log.Check(Me && Me->MeleeComponent && Me->HealthComponent, TEXT("melee: spawn guard soldier"));
+		if (Me && Me->MeleeComponent && Me->HealthComponent)
+		{
+			UPA250MeleeComponent* M = Me->MeleeComponent;
+			M->Tuning = T;
+			const FVector Front = Me->GetActorLocation() + FVector(200.f, 0.f, 0.f), Behind = Me->GetActorLocation() - FVector(200.f, 0.f, 0.f);
+			Log.Check(M->ResolveGuard(Front) == EPA250Guard::None, TEXT("guard: no guard, nothing is blocked"));
+			M->SetGuardHeld(true);
+			M->TickComponent(0.05f, LEVELTICK_All, nullptr);
+			Log.Check(M->IsGuarding() && M->ResolveGuard(Front) == EPA250Guard::Parry, TEXT("guard: raised 0.05 s ago, a frontal blow is parried"));
+			Log.Check(M->ResolveGuard(Behind) == EPA250Guard::None, TEXT("guard: nothing covers his back"));
+			M->TickComponent(0.5f, LEVELTICK_All, nullptr);
+			Log.Check(M->ResolveGuard(Front) == EPA250Guard::Block && M->GetBodyPose().Guard > 0.9f, TEXT("guard: held longer than the parry window it only blocks; the body is in the guard pose"));
+			const bool bThrust = M->DoThrust();
+			M->TickComponent(0.02f, LEVELTICK_All, nullptr);
+			Log.Check(bThrust && !M->IsGuarding(), TEXT("guard: thrusting drops the guard"));
+			M->SetGuardHeld(false);
+
+			URFHealthComponent* H = Me->HealthComponent;
+			H->MaxHealth = H->CurrentHealth = 100.f;
+			H->MinHealthAfterNextDamage = V.FrontalBlowLeavesHealth;
+			H->OnTakeAnyDamage(Me, 300.f, nullptr, nullptr, nullptr);
+			Log.Check(H->CurrentHealth == V.FrontalBlowLeavesHealth && !H->IsDead(), TEXT("melee: a frontal blow on a fit man leaves him 15 health, however it multiplies (was 300 = dead)"));
+			H->OnTakeAnyDamage(Me, 70.f, nullptr, nullptr, nullptr);
+			Log.Check(H->IsDead(), TEXT("melee: the floor is spent after one blow; the next one kills"));
+			Log.Check(UPA250MeleeComponent::IsBehind(FVector(1, 0, 0), FVector(-1, 0.2f, 0), V) && !UPA250MeleeComponent::IsBehind(FVector(1, 0, 0), FVector(0, 1, 0), V),
+				TEXT("melee: only a blow from behind (>120 deg) may kill outright"));
+			Log.Check(V.ThrustWindupVsPlayerSeconds > V.ThrustWindupSeconds + 0.5f * V.ParryWindowSeconds, TEXT("melee: a bot's thrust at the player is telegraphed longer than his own"));
+			Me->Destroy();
+		}
+	}
+
+	// Clubbed musket: who has no bayonet, and what E does then.
+	{
+		using C = UPA250MeleeComponent;
+		Log.Check(C::IssuedBayonet(TEXT("british"), TEXT("line_infantry"), 7) && C::IssuedBayonet(TEXT("british"), TEXT("militia"), 7), TEXT("club: every British soldier has a bayonet"));
+		Log.Check(!C::IssuedBayonet(TEXT("continental"), TEXT("militia"), 4) && !C::IssuedBayonet(TEXT("continental"), TEXT("militia"), 0), TEXT("club: Patriot militia have none"));
+		int32 With = 0;
+		for (uint32 Seed = 1; Seed <= 400; ++Seed) With += C::IssuedBayonet(TEXT("continental"), TEXT("line_infantry"), Seed) ? 1 : 0;
+		Log.Check(With == 100, TEXT("club: one Continental line soldier in four has a bayonet, fixed per man"));
+		const float Cw = V.ClubWindupSeconds;
+		Log.Check(C::ClubPose(C::CoilFraction * Cw - 0.001f, Cw, 0.1f).Raise > 0.95f && C::ClubPose(Cw, Cw, 0.1f).Chop == 1.f && C::ClubPose(Cw, Cw, 0.1f).Raise == 0.f
+			&& !C::ClubPose(Cw + 0.1f + C::ThrustRecoverSeconds + 0.01f, Cw, 0.1f).IsActive(), TEXT("club: raised first, down at full weight when the hit lands, then recovers"));
+		Log.Check(V.ClubWindupSeconds > V.ThrustWindupSeconds && V.ClubReachCm < V.ThrustReachCm && V.ClubDamage < V.ThrustDamage && V.ClubStaggerSeconds > V.ThrustHitStaggerSeconds,
+			TEXT("club: slower, shorter and weaker than the bayonet, but it stops a man longer"));
+		ARFCharacter* Farmer = W.World->SpawnActor<ARFCharacter>(FVector(0.f, 9000.f, 100.f), FRotator::ZeroRotator);
+		Log.Check(Farmer && Farmer->MeleeComponent, TEXT("club: spawn militiaman"));
+		if (Farmer && Farmer->MeleeComponent)
+		{
+			Farmer->FactionId = TEXT("continental");
+			Farmer->UnitClass = TEXT("militia");
+			Farmer->MeleeComponent->Tuning = T;
+			Log.Check(!Farmer->MeleeComponent->HasBayonet() && Farmer->MeleeComponent->DoThrust() && Farmer->MeleeComponent->IsClubSwing(), TEXT("club: a militiaman's E is the clubbed swing"));
+			Farmer->MeleeComponent->TickComponent(C::CoilFraction * Cw, LEVELTICK_All, nullptr);
+			Log.Check(Farmer->MeleeComponent->GetBodyPose().Raise > 0.9f, TEXT("club: mid wind-up the musket is up over his shoulder"));
+			Farmer->MeleeComponent->SetBayonetOverride(true);
+			Log.Check(Farmer->MeleeComponent->HasBayonet(), TEXT("club: bayonet can be forced for tests"));
+			Farmer->Destroy();
+		}
+	}
+
 	// Squad charge orders: the same rules for every side (no faction input).
 	{
 		const float R = 3500.f;
@@ -539,6 +606,50 @@ void RunConquest(FLog& Log)
 	Empty.SpendDeath(B, Line);
 	Empty.SpendDeath(B, Line);
 	Log.Check(Empty.Remaining(B) == 0, TEXT("conquest: tickets floor at 0"));
+
+	// Screen clutter and view feedback (pure rules).
+	Log.Check(!ARFCharacter::ShouldShowNameplate(true, false, 3000.f, true) && ARFCharacter::ShouldShowNameplate(true, false, 1200.f, true)
+		&& !ARFCharacter::ShouldShowNameplate(true, false, 1200.f, false), TEXT("look: an enemy is labelled only inside 15 m and in sight"));
+	Log.Check(ARFCharacter::ShouldShowNameplate(false, true, 2400.f, false) && !ARFCharacter::ShouldShowNameplate(false, false, 2400.f, true)
+		&& ARFCharacter::ShouldShowNameplate(false, false, 1000.f, true), TEXT("look: squadmates are labelled to 25 m, other friends to 12 m"));
+	Log.Check(ARFCharacter::NameplateLabel(TEXT("british"), TEXT("line_infantry")).ToString() == TEXT("Regular")
+		&& ARFCharacter::NameplateLabel(TEXT("continental"), TEXT("militia")).ToString() == TEXT("Militia")
+		&& ARFCharacter::NameplateLabel(TEXT("continental"), TEXT("line_infantry")).ToString() == TEXT("Provincial"), TEXT("look: labels are words, not faction ids"));
+	Log.Check(ARFCharacter::ViewStress(1.f, false, 0.f) == 0.f, TEXT("look: an unhurt man not under fire sees the field as it is"));
+	Log.Check(ARFCharacter::ViewStress(1.f, true, 0.f) > 0.2f && ARFCharacter::ViewStress(0.15f, false, 0.f) > ARFCharacter::ViewStress(0.6f, false, 0.f)
+		&& ARFCharacter::ViewStress(1.f, false, 1.f) >= 0.6f && ARFCharacter::ViewStress(0.f, true, 1.f) == 1.f,
+		TEXT("look: the view closes in under fire, more when badly hurt, most on a fresh hit, never past 1"));
+	Log.Check(UPA250BattleHUD::LegendFade(0.f) == 1.f && UPA250BattleHUD::LegendFade(25.f) == 1.f && FMath::IsNearlyEqual(UPA250BattleHUD::LegendFade(27.5f), 0.5f)
+		&& UPA250BattleHUD::LegendFade(40.f) == 0.f, TEXT("look: the controls legend steps back after the first half-minute"));
+	Log.Check(FPA250BattleAudio::Pick(TEXT("footstep_grass")) != nullptr
+		&& LoadObject<USoundBase>(nullptr, TEXT("/Game/PA250/Audio/SFX/ambience_dawn.ambience_dawn")) != nullptr, TEXT("look: footsteps and the dawn ambience are imported"));
+
+	// Losing on tickets: never while the human player is alive on that side.
+	Log.Check(APA250BattleGameMode::SideIsOut(0, 6, true, 5, false), TEXT("exhaustion: 0 tickets = out, even with men standing"));
+	Log.Check(!APA250BattleGameMode::SideIsOut(0, 6, true, 1, true), TEXT("exhaustion: not out while the player is alive on that side"));
+	Log.Check(!APA250BattleGameMode::SideIsOut(3, 6, true, 0, false), TEXT("exhaustion: tickets left = not out"));
+	Log.Check(!APA250BattleGameMode::SideIsOut(0, 0, false, 0, false) && APA250BattleGameMode::SideIsOut(0, 0, true, 0, false)
+		&& !APA250BattleGameMode::SideIsOut(0, 0, true, 2, false), TEXT("exhaustion: a side that started with no tickets is out only once fielded and wiped"));
+
+	// One ticket held for the human player.
+	{
+		FPA250TicketLedger H;
+		H.Pool.Add(B, 3);
+		H.Held.Add(B, 1);
+		Log.Check(H.CanReinforce(B) && H.HeldFor(B) == 1 && !H.DrawHeld(B), TEXT("reserve: with spare tickets bots are reinforced and the held one is not drawn"));
+		for (int32 i = 0; i < 5; ++i) H.SpendDeath(B, Line);
+		Log.Check(H.Remaining(B) == 1 && H.Deaths.FindRef(B).FindRef(Line) == 5, TEXT("reserve: deaths cannot spend the held ticket (but are still counted)"));
+		Log.Check(!H.CanReinforce(B), TEXT("reserve: bots are not reinforced from the held ticket"));
+		for (int32 s3 = 0; s3 < 30; ++s3) H.Bleed(1.f, 5.f, B, 0, C, 3, 3);
+		Log.Check(H.Remaining(B) == 1, TEXT("reserve: bleed cannot spend the held ticket"));
+		Log.Check(H.DrawHeld(B) && H.HeldFor(B) == 0 && H.Remaining(B) == 1 && !H.DrawHeld(B), TEXT("reserve: the human draws it once; it is then an ordinary ticket"));
+		H.SpendDeath(B, Line);
+		Log.Check(H.Remaining(B) == 0 && !H.CanReinforce(B), TEXT("reserve: once drawn, the next death spends it"));
+		FPA250TicketLedger None;
+		None.Pool.Add(B, 0);
+		None.Held.Add(B, 1);
+		Log.Check(None.HeldFor(B) == 0 && !None.CanReinforce(B) && !None.DrawHeld(B), TEXT("reserve: nothing is held from an empty pool"));
+	}
 
 	Log.Check(FPA250TicketLedger::LossesInUnits(9, 4, 5) == 2, TEXT("conquest: 9 deaths / 4 per unit -> 2 units"));
 	Log.Check(FPA250TicketLedger::LossesInUnits(100, 4, 5) == 5, TEXT("conquest: losses capped at starting units"));
@@ -806,8 +917,53 @@ void RunTraining(FLog& Log)
 		&& Profiles->RoleFor(TEXT("british"), TEXT("line_infantry")).Name == TEXT("Line"),
 		TEXT("training: default assignment Veteran/Line, Trained/Line, Trained/Irregular (minutemen)"));
 	const UPA250CombatProfiles* Shipped = LoadObject<UPA250CombatProfiles>(nullptr, TEXT("/Game/PA250/Data/DA_CombatProfiles.DA_CombatProfiles"));
-	Log.Check(Shipped && Shipped->Trainings.Num() == 3 && Shipped->Roles.Num() == 3 && Shipped->Assignments.Num() == 3,
+	Log.Check(Shipped && Shipped->Trainings.Num() == 3 && Shipped->Roles.Num() == 3 && Shipped->Assignments.Num() >= 3,
 		TEXT("training: DA_CombatProfiles exists with the defaults"));
+
+	// Soldier classes (PA250UnitClasses): every class either side can field has a drill and a kit.
+	{
+		Log.Check(Profiles->RoleFor(TEXT("british"), TEXT("light_infantry")).Name == TEXT("Light")
+			&& Profiles->RoleFor(TEXT("british"), TEXT("grenadier")).Name == TEXT("Line")
+			&& Profiles->TrainingFor(TEXT("british"), TEXT("grenadier")).Name == TEXT("Veteran")
+			&& Profiles->RoleFor(TEXT("continental"), TEXT("rifleman")).Name == TEXT("Irregular")
+			&& Profiles->RoleFor(TEXT("continental"), TEXT("officer")).Name == TEXT("Line"),
+			TEXT("classes: grenadiers and officers fight in the line, light infantry and riflemen skirmish"));
+		Log.Check(Shipped && Shipped->RoleFor(TEXT("british"), TEXT("light_infantry")).Name == TEXT("Light")
+			&& Shipped->RoleFor(TEXT("continental"), TEXT("rifleman")).Name == TEXT("Irregular"),
+			TEXT("classes: an asset saved before the new classes still resolves them (built-in rows)"));
+		const FPA250UnitClassKit& Line = PA250UnitClasses::KitFor(TEXT("british"), TEXT("line_infantry"));
+		const FPA250UnitClassKit& Gren = PA250UnitClasses::KitFor(TEXT("british"), TEXT("grenadier"));
+		const FPA250UnitClassKit& Light = PA250UnitClasses::KitFor(TEXT("british"), TEXT("light_infantry"));
+		const FPA250UnitClassKit& Rifle = PA250UnitClasses::KitFor(TEXT("continental"), TEXT("rifleman"));
+		const FPA250UnitClassKit& Mil = PA250UnitClasses::KitFor(TEXT("continental"), TEXT("militia"));
+		Log.Check(Line.MaxHealth == 100.f && Line.SpeedScale == 1.f && Line.SpreadScale == 1.f && Line.RangeScale == 1.f
+			&& Line.ReloadScale == 1.f && Line.MeleeScale == 1.f && Mil.MaxHealth == 80.f,
+			TEXT("classes: the line soldier is the unchanged baseline; militia keep 80 health"));
+		Log.Check(Gren.MaxHealth > Line.MaxHealth && Gren.MeleeScale > Line.MeleeScale && Gren.SpeedScale < Line.SpeedScale,
+			TEXT("classes: grenadiers are tougher and hit harder, and are no faster for it"));
+		Log.Check(Light.SpeedScale > Line.SpeedScale && Light.MaxHealth < Line.MaxHealth && Light.MeleeScale < Line.MeleeScale,
+			TEXT("classes: light infantry are faster and lighter"));
+		Log.Check(Rifle.RangeScale >= 2.f && Rifle.SpreadScale < 0.6f && Rifle.ReloadScale > 1.4f && Rifle.MeleeScale < 1.f
+			&& !UPA250MeleeComponent::IssuedBayonet(TEXT("continental"), TEXT("rifleman"), 4)
+			&& UPA250MeleeComponent::IssuedBayonet(TEXT("british"), TEXT("grenadier"), 3),
+			TEXT("classes: the rifle reaches further and shoots straighter, loads slower, and carries no bayonet"));
+		Log.Check(PA250UnitClasses::KitFor(TEXT("british"), TEXT("officer")).bOfficer && PA250UnitClasses::KitFor(TEXT("continental"), TEXT("officer")).bOfficer
+			&& !Line.bOfficer && !Rifle.bOfficer && PA250UnitClasses::OfficerSpreadScale < 1.f && PA250UnitClasses::OfficerReloadScale < 1.f
+			&& PA250UnitClasses::InOfficerRange(FVector::ZeroVector, FVector(1400.f, 0.f, 0.f))
+			&& !PA250UnitClasses::InOfficerRange(FVector::ZeroVector, FVector(1600.f, 0.f, 0.f)),
+			TEXT("classes: an officer steadies and speeds men within 15 m, not beyond"));
+		Log.Check(&PA250UnitClasses::KitFor(TEXT("british"), TEXT("no_such_class")) == &Line
+			&& ARFCharacter::NameplateLabel(TEXT("british"), TEXT("grenadier")).ToString() == TEXT("Grenadier")
+			&& ARFCharacter::NameplateLabel(TEXT("continental"), TEXT("rifleman")).ToString() == TEXT("Rifleman")
+			&& PA250UnitClasses::TraitLine(Rifle).Contains(TEXT("no bayonet")) && PA250UnitClasses::TraitLine(Rifle).Contains(TEXT("range x2")),
+			TEXT("classes: unknown classes fall back to the line soldier; labels and trait lines read in words"));
+		// A rifle ball keeps its force over twice the distance: at 150 m a musket ball is at its far damage,
+		// a rifle ball (range x2 -> judged as 75 m) is still above it.
+		const FPA250WeaponTuningValues W = UPA250WeaponTuning::MakeRuntimeDefaults()->Values;
+		Log.Check(W.DamageAtDistanceCm(15000.f / Rifle.RangeScale) > W.DamageAtDistanceCm(15000.f)
+			&& W.DamageAtDistanceCm(30000.f) == 0.f && W.DamageAtDistanceCm(30000.f / Rifle.RangeScale) > 0.f,
+			TEXT("classes: rifle damage falloff is stretched by its range scale (still hurts at 300 m)"));
+	}
 
 	const FPA250AIReloadConditions Calm;
 	const int32 N = 2000;
@@ -930,6 +1086,174 @@ void RunTraining(FLog& Log)
 		Log.Check(Musket->TickAIReload(Vet.ToReloadParams(), Calm, Rng) == EActiveReloadHit::None && Musket->CanFire(),
 			TEXT("training: AI planner does nothing to a loaded musket"));
 		Musket->Destroy();
+	}
+
+	// ---- Fire discipline: how each kind of soldier's fire differs ----
+	{
+		const UPA250CombatProfiles* FireProfiles = UPA250CombatProfiles::MakeRuntimeDefaults();
+		const FPA250TrainingProfile& FVet = FireProfiles->TrainingNamed(TEXT("Veteran"));
+		const FPA250TrainingProfile& FTrn = FireProfiles->TrainingNamed(TEXT("Trained"));
+		const FPA250TrainingProfile& FRec = FireProfiles->TrainingNamed(TEXT("Recruit"));
+		Log.Check(FVet.VolleyRaggedness < 1.f && FVet.VolleyRaggedness < FTrn.VolleyRaggedness && FTrn.VolleyRaggedness < FRec.VolleyRaggedness,
+			TEXT("fire: veterans volley crisply, recruits raggedly"));
+		Log.Check(FVet.RollingFireFileSeconds > 0.f && FTrn.RollingFireFileSeconds == 0.f, TEXT("fire: only veterans keep up a rolling fire by files"));
+		Log.Check(FVet.MisfireChance < FTrn.MisfireChance && FTrn.MisfireChance < FRec.MisfireChance && FRec.MisfireChance <= 0.15f,
+			TEXT("fire: misfires are rarer with training and never common"));
+		Log.Check(FireProfiles->RoleNamed(TEXT("Line")).RestedAimScale == 1.f && FireProfiles->RoleNamed(TEXT("Irregular")).RestedAimScale < 1.f
+			&& FireProfiles->RoleNamed(TEXT("Light")).RestedAimScale < 1.f, TEXT("fire: skirmishers shoot straighter from cover, the line does not"));
+
+		Log.Check(UPA250VolleyCoordinator::VolleyShotDelay(0, 0.f, 0.f, 0.7f) == 0.f, TEXT("fire: no jitter, no rolling = all on the same instant"));
+		Log.Check(FMath::IsNearlyEqual(UPA250VolleyCoordinator::VolleyShotDelay(4, 0.f, 0.1f, 0.5f), 0.05f), TEXT("fire: a volley fired together ignores a man's place in the line"));
+		Log.Check(FMath::IsNearlyEqual(UPA250VolleyCoordinator::VolleyShotDelay(4, 0.14f, 0.f, 0.f), 0.56f)
+			&& UPA250VolleyCoordinator::VolleyShotDelay(5, 0.14f, 0.06f, 0.f) > UPA250VolleyCoordinator::VolleyShotDelay(4, 0.14f, 0.06f, 1.f),
+			TEXT("fire: rolling fire runs down the line in order, even at full raggedness"));
+
+		bool bInRange = true, bStable = true;
+		float Lo = 10.f, Hi = 0.f;
+		for (int32 Seed = 1; Seed <= 200; ++Seed)
+		{
+			const float S = UPA250CombatProfiles::AimScaleFor(Seed, 0.25f);
+			bInRange &= S >= 0.75f - KINDA_SMALL_NUMBER && S <= 1.25f + KINDA_SMALL_NUMBER;
+			bStable &= S == UPA250CombatProfiles::AimScaleFor(Seed, 0.25f);
+			Lo = FMath::Min(Lo, S);
+			Hi = FMath::Max(Hi, S);
+		}
+		Log.Check(bInRange && bStable && Hi - Lo > 0.3f, FString::Printf(TEXT("fire: each man's aim is his own, fixed by seed (%.2f..%.2f)"), Lo, Hi));
+		Log.Check(UPA250CombatProfiles::AimScaleFor(7, 0.f) == 1.f, TEXT("fire: no variance = the training's average aim"));
+		Log.Check(UPA250CombatProfiles::MisfireChanceAt(0.05f, 0.f) == 0.05f && FMath::IsNearlyEqual(UPA250CombatProfiles::MisfireChanceAt(0.05f, 1.f), 0.1f)
+			&& UPA250CombatProfiles::MisfireChanceAt(0.4f, 1.f) == 0.5f && UPA250CombatProfiles::MisfireChanceAt(0.f, 1.f) == 0.f,
+			TEXT("fire: stress doubles the misfire chance at most, capped at one in two"));
+	}
+	// ---- Hand to hand: how a bot chooses his blow ----
+	{
+		FPA250BotMeleeView V;
+		V.DistCm = 240.f;
+		Log.Check(PA250ChooseMeleeMove(V) == EPA250BotMelee::Thrust, TEXT("melee ai: in reach of an open man he thrusts"));
+		V.bResting = true;
+		Log.Check(PA250ChooseMeleeMove(V) == EPA250BotMelee::Close, TEXT("melee ai: no second blow while he recovers from the first"));
+		V.bResting = false;
+		V.bFoeGuardsMe = true;
+		Log.Check(PA250ChooseMeleeMove(V) == EPA250BotMelee::Thrust, TEXT("melee ai: a man who does not read the guard thrusts into it"));
+		V.bReadsGuard = true;
+		Log.Check(PA250ChooseMeleeMove(V) == EPA250BotMelee::Close, TEXT("melee ai: reading a guard, he closes instead of thrusting into it"));
+		V.DistCm = 180.f;
+		Log.Check(PA250ChooseMeleeMove(V) == EPA250BotMelee::Butt, TEXT("melee ai: inside butt-stroke reach he breaks the guard with the stock"));
+		V.bFoeGuardsMe = false;
+		V.DistCm = 500.f;
+		V.bChargeReady = true;
+		Log.Check(PA250ChooseMeleeMove(V) == EPA250BotMelee::Charge, TEXT("melee ai: inside the lunge with the charge ready he dashes"));
+		V.bFacing = false;
+		Log.Check(PA250ChooseMeleeMove(V) == EPA250BotMelee::Close, TEXT("melee ai: no dash until he faces his man"));
+		V.bFacing = true;
+		V.DistCm = 900.f;
+		Log.Check(PA250ChooseMeleeMove(V) == EPA250BotMelee::Close, TEXT("melee ai: out of reach he closes"));
+
+		const UPA250CombatProfiles* MeleeProfiles = UPA250CombatProfiles::MakeRuntimeDefaults();
+		const FPA250TrainingProfile& MVet = MeleeProfiles->TrainingNamed(TEXT("Veteran"));
+		const FPA250TrainingProfile& MRec = MeleeProfiles->TrainingNamed(TEXT("Recruit"));
+		Log.Check(MVet.MeleeRecoverSeconds < MRec.MeleeRecoverSeconds && MVet.MeleeSkill > MRec.MeleeSkill && MRec.MeleeSkill > 0.f,
+			TEXT("melee ai: veterans recover faster and answer a guard more often; recruits sometimes do"));
+
+		// On real soldiers: a bot facing a raised guard uses the stock, facing an open man the bayonet.
+		{
+			FScopedTestWorld MW;
+			ARFCharacter* Bot = MW.World ? MW.World->SpawnActor<ARFCharacter>(FVector(0.f, 0.f, 100.f), FRotator::ZeroRotator) : nullptr;
+			ARFCharacter* Foe = MW.World ? MW.World->SpawnActor<ARFCharacter>(FVector(170.f, 0.f, 100.f), FRotator(0.f, 180.f, 0.f)) : nullptr;
+			APA250BotController* Brain = MW.World ? MW.World->SpawnActor<APA250BotController>() : nullptr;
+			Log.Check(Bot && Foe && Brain && Bot->MeleeComponent && Foe->MeleeComponent, TEXT("melee ai: spawn bot, foe and controller"));
+			if (Bot && Foe && Brain && Bot->MeleeComponent && Foe->MeleeComponent)
+			{
+				Bot->SetTeam(TEXT("british"), TEXT("line_infantry"));
+				Foe->SetTeam(TEXT("continental"), TEXT("militia"));
+				Foe->MeleeComponent->SetGuardHeld(true);
+				Foe->MeleeComponent->TickComponent(0.5f, LEVELTICK_All, nullptr);
+				Log.Check(Foe->MeleeComponent->ResolveGuard(Bot->GetActorLocation()) == EPA250Guard::Block, TEXT("melee ai: the foe's guard is up and turned on the bot"));
+				Brain->MeleeAttack(Bot, Foe, 170.f, true);
+				Log.Check(Bot->MeleeComponent->GetVisual() == EPA250MeleeVisual::ButtStroke, TEXT("melee ai: the bot answers the guard with a butt-stroke"));
+				Bot->MeleeComponent->TickComponent(1.f, LEVELTICK_All, nullptr);
+				Foe->MeleeComponent->SetGuardHeld(false);
+				Foe->MeleeComponent->TickComponent(0.1f, LEVELTICK_All, nullptr);
+				Log.Check(!Bot->MeleeComponent->IsBusy() && !Foe->MeleeComponent->IsGuarding(), TEXT("melee ai: swing over, guard down"));
+				Brain->MeleeAttack(Bot, Foe, 170.f, true);
+				Log.Check(Bot->MeleeComponent->GetVisual() == EPA250MeleeVisual::Thrust, TEXT("melee ai: against an open man the bot thrusts"));
+			}
+		}
+		// Sounds: the new banks are on disk, and a missing bank falls back instead of going silent.
+		Log.Check(FPA250BattleAudio::Pick(TEXT("bayonet_clash")) && FPA250BattleAudio::Pick(TEXT("bayonet_stab")) && FPA250BattleAudio::Pick(TEXT("butt_thud")),
+			TEXT("melee audio: clash, stab and stock sounds are imported"));
+		FScopedTestWorld W;
+		AMusketWeapon* Ctx = W.World ? W.World->SpawnActor<AMusketWeapon>() : nullptr;
+		if (Ctx)
+		{
+			const int32 Before = FPA250BattleAudio::GetPlayCount(TEXT("flint_click"));
+			FPA250BattleAudio::PlayAtOr(Ctx, TEXT("no_such_bank"), TEXT("flint_click"), FVector::ZeroVector, EPA250SoundRange::Near);
+			const int32 Clash = FPA250BattleAudio::GetPlayCount(TEXT("bayonet_clash"));
+			FPA250BattleAudio::PlayAtOr(Ctx, TEXT("bayonet_clash"), TEXT("flint_click"), FVector::ZeroVector, EPA250SoundRange::Near);
+			Log.Check(FPA250BattleAudio::GetPlayCount(TEXT("flint_click")) == Before + 1 && FPA250BattleAudio::GetPlayCount(TEXT("bayonet_clash")) == Clash + 1,
+				TEXT("melee audio: a missing bank plays its fallback, a present one plays itself"));
+			Ctx->Destroy();
+		}
+	}
+	// A misfire on a real soldier: no ball, the musket must be loaded again, and the player never misfires.
+	{
+		FScopedTestWorld W;
+		ARFCharacter* Soldier = W.World ? W.World->SpawnActor<ARFCharacter>(FVector(0.f, 0.f, 100.f), FRotator::ZeroRotator) : nullptr;
+		Log.Check(Soldier != nullptr, TEXT("fire: spawn soldier"));
+		if (Soldier)
+		{
+			Soldier->DispatchBeginPlay();
+			Log.Check(Soldier->MisfireChance == 0.f, TEXT("fire: a soldier without a training profile (the player) never misfires"));
+			if (Soldier->Musket && Soldier->Musket->CanFire())
+			{
+				int32 Balls = 0;
+				for (TActorIterator<AMusketProjectile> It(W.World); It; ++It) ++Balls;
+				Soldier->MisfireChance = 0.5f;
+				Soldier->MisfireStress = 1.f; // 0.5 * 2, capped at 0.5: roll until it happens
+				bool bMisfired = false;
+				for (int32 Try = 0; Try < 64 && !bMisfired; ++Try)
+				{
+					if (Soldier->FireMusketAt(FVector(3000.f, 0.f, 100.f)))
+					{
+						Soldier->Musket->GetSequencer().Reset(); // went off: load and try again
+						Soldier->Musket->TickActor(0.01f, LEVELTICK_All, Soldier->Musket->PrimaryActorTick);
+						for (TActorIterator<AMusketProjectile> It(W.World); It; ++It) It->Destroy();
+						Balls = 0;
+						for (TActorIterator<AMusketProjectile> It(W.World); It; ++It) ++Balls;
+						continue;
+					}
+					bMisfired = Soldier->Misfires == 1;
+				}
+				int32 BallsAfter = 0;
+				for (TActorIterator<AMusketProjectile> It(W.World); It; ++It) ++BallsAfter;
+				Log.Check(bMisfired && BallsAfter == Balls, TEXT("fire: a flash in the pan sends no ball"));
+				Log.Check(bMisfired && !Soldier->Musket->CanFire() && Soldier->Musket->IsReloading(), TEXT("fire: after a misfire the musket must be loaded again"));
+				Log.Check(!Soldier->Musket->Misfire(), TEXT("fire: an unloaded musket cannot misfire"));
+			}
+			// A wound he survives staggers him and spoils his aim; a killing one does not flinch a dead man.
+			Soldier->MisfireChance = 0.f;
+			Log.Check(!Soldier->ConsumeFlinch(), TEXT("fire: no flinch before he is hit"));
+			// A pawn takes no damage in a world without a game mode: drive the health component directly.
+			Soldier->HealthComponent->OnTakeAnyDamage(Soldier, 30.f, nullptr, nullptr, nullptr);
+			Log.Check(!Soldier->IsDead() && Soldier->SuppressionTimer > 0.f && Soldier->ConsumeFlinch() && !Soldier->ConsumeFlinch(),
+				TEXT("fire: a wounded man flinches once and his aim suffers"));
+			Soldier->HealthComponent->OnTakeAnyDamage(Soldier, 500.f, nullptr, nullptr, nullptr);
+			Log.Check(Soldier->IsDead() && !Soldier->ConsumeFlinch(), TEXT("fire: the killing shot is a death, not a flinch"));
+			Log.Check(Soldier->GetLifeSpan() >= 30.f, FString::Printf(TEXT("fire: the fallen stay on the field (%.0f s)"), Soldier->GetLifeSpan()));
+		}
+	}
+	// Smoke bookkeeping (pure data): dust falls back and is not powder smoke.
+	{
+		FPA250SmokePuff Dust;
+		Dust.bPowder = false;
+		Dust.Rise = -60.f;
+		Dust.WindShare = 0.f;
+		Dust.Life = 1.f;
+		const float Z0 = Dust.Pos.Z;
+		for (int32 i = 0; i < 50; ++i) Dust.Step(0.01f, FVector(70.f, 30.f, 0.f));
+		Log.Check(Dust.Pos.Z < Z0 && FMath::IsNearlyZero(Dust.Pos.X) && !Dust.IsDead(), TEXT("fire: thrown dirt falls back and ignores the breeze when told to"));
+		FPA250SmokePuff Smoke;
+		for (int32 i = 0; i < 50; ++i) Smoke.Step(0.01f, FVector(70.f, 30.f, 0.f));
+		Log.Check(Smoke.Pos.Z > 0.f && Smoke.Pos.X > 0.f, TEXT("fire: powder smoke still rises and drifts downwind"));
 	}
 }
 

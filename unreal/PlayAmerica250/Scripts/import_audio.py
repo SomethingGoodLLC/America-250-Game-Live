@@ -37,6 +37,10 @@ def import_dir(src_dir, dest_path, prefix=""):
 
 
 import_dir(os.path.join(ROOT, "sfx"), "/Game/PA250/Audio/SFX")
+ambience = unreal.load_asset("/Game/PA250/Audio/SFX/ambience_dawn")
+if ambience:
+    ambience.set_editor_property("looping", True)
+    unreal.EditorAssetLibrary.save_loaded_asset(ambience)
 music = os.path.join(ROOT, "music")
 if os.path.isdir(music):
     import_dir(music, "/Game/PA250/Audio/Music")
