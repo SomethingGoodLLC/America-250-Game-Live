@@ -54,3 +54,47 @@ $installer.WaitForExit()
 4. Record actual tests and limitations in SETUP.md, ARCHITECTURE.md, TEST_RESULTS.md.
 
 The new Git repository deliberately commits only task-owned additions. Imported archive contents are initially untracked, not represented as an invented upstream commit. Apply task commits onto the original repository on Mac; this repository is not a replacement for its history.
+
+## 2026-11-14 — generation, Unreal import and playtest
+
+- MotionBricks checkout `54fc563aeaaf819a753d72cc9fdc6713989cdd43`, package 0.2.0. Git LFS and `uv sync --locked` succeeded. The locked runtime used Python 3.12.16, Warp 1.17, TensorRT 10.8.0.43 and Newton 1.6. Read the runtime, scene preview, ONNX, model card and license material.
+- NVIDIA's stock SOMA example generated two segments of 26 and 50 frames. Scene Preview reached an open Windows app window. Computer Use still returned `Computer Use was not approved to use python` on capture after the user approved the prompt. Scene controls and contact were not inspected there.
+- Installed MSVC Build Tools 2022 17.14.45, MSVC 14.44.35230, Windows SDK 10.0.22621 and .NET Framework 4.8 SDK and targeting pack. VS Installer modify first returned 5007 without elevation and succeeded with Windows administrator elevation. Unreal reported 30.8 GiB physical RAM and 4 physical / 8 logical cores.
+- Full game baseline build failed on existing `dirent.h`, missing `PA250Shaders.h` and C4458 shadowing errors. The normal editor launch could not load the unbuilt `PA250Shaders` module. The main project remains at its existing engine version and the test is hosted separately.
+- Exported the 0.5 m trial and the selected 0.75 m `OneHandedJump0` trial under `../MotionBricksEvaluation`. The latter produced 41 finite frames over 1.333 s. It loaded in UE 5.8.4 as a native animation and clip data asset on Quinn, with an isolated test map.
+- The first rendered version completed scripted tests at 30 and 60 FPS. Visual inspection showed stiff arm behavior and unclear hand contact. Added limb direction matching and adjusted the camera for a second verification pass. See TEST_RESULTS.md for the final measurements and remaining visual issues.
+
+```powershell
+# Commands run from the workspace.
+git -C motionbricks -c safe.directory='C:/Users/user/Documents/ChatGPT/Play America 250/motionbricks' rev-parse HEAD
+& '.\motionbricks\.venv\Scripts\python.exe' '.\America-250-Game-Live\tools\motionbricks\generate_traversal.py' --motionbricks '.\motionbricks' --output '.\MotionBricksEvaluation\Generated' --primitive jump_0_5m
+& '.\motionbricks\.venv\Scripts\python.exe' '.\America-250-Game-Live\tools\motionbricks\generate_traversal.py' --motionbricks '.\motionbricks' --output '.\MotionBricksEvaluation\VaultCandidate' --primitive jump_0_75m --sequence 0
+& '.\motionbricks\.venv\Scripts\python.exe' '.\America-250-Game-Live\tools\motionbricks\generate_traversal.py' --motionbricks '.\motionbricks' --output '.\MotionBricksEvaluation\VaultBenchmark'
+$setup = 'C:\Program Files (x86)\Microsoft Visual Studio\Installer\setup.exe'
+$installer = Start-Process -FilePath $setup -ArgumentList 'modify','--installPath','C:\BuildTools','--quiet','--norestart','--add','Microsoft.Net.Component.4.8.SDK','--add','Microsoft.Net.Component.4.8.TargetingPack' -Verb RunAs -WindowStyle Hidden -PassThru
+$installer.WaitForExit()
+$project = & '.\America-250-Game-Live\tools\motionbricks\prepare_test_host.ps1' -Destination '.\MotionBricksEvaluation\VaultTestHost'
+& 'C:\Program Files\Epic Games\UE_5.8\Engine\Build\BatchFiles\Build.bat' MBTestHostEditor Win64 Development "-Project=$project" -WaitMutex -NoHotReloadFromIDE -NoUBTMakefiles
+```
+
+See SETUP.md for the import and verification commands. The Windows editor emitted an outdated Visual C++ redistributable error but successfully imported and played the test. A later command to update the redistributable was blocked by execution policy. The test is runnable with `-unattended` on the current VM.
+
+## 2026-11-14 — final import and verification
+
+The final host is `../MotionBricksEvaluation/VaultTestHost/MBTestHost.uproject`. The saved test map uses the separate game mode. The final reimport bakes the IK helper tracks to the animated ankles and uses a short montage blend. The rendered tests passed at 30 and 60 FPS caps and captured hand, boot clearance and landing stills. Manual polish remains for planted contacts, the licensed soldier and weapon, and Mac playback. The archive's top-level `.gitignore` rule for `public` applies to Unreal `Public` folders on this Windows checkout, so the two new plugin headers were explicitly staged. Hash comparisons against the archive matched the base project descriptor, startup/input settings and the inspected RF, musket, and melee source files.
+
+```powershell
+# From the workspace root:
+$tools = '.\America-250-Game-Live\tools\motionbricks'
+$target = '.\MotionBricksEvaluation\VaultTestHost'
+$ue = 'C:\Program Files\Epic Games\UE_5.8'
+$project = & "$tools\prepare_test_host.ps1" -Destination $target -RefreshPlugin
+& "$ue\Engine\Build\BatchFiles\Build.bat" MBTestHostEditor Win64 Development "-Project=$project" -WaitMutex -NoHotReloadFromIDE -NoUBTMakefiles
+# The earlier local generated packages were moved to PreviousVaultAssets before the final import.
+$env:PA250_MB_MOTION = (Resolve-Path '.\MotionBricksEvaluation\VaultBenchmark\generated_traversal.json').Path
+$mapScript = (Resolve-Path "$tools\build_test_map.py").Path.Replace('\','/')
+$importLog = Join-Path (Resolve-Path $target).Path 'MBImport_final.log'
+& "$ue\Engine\Binaries\Win64\UnrealEditor-Cmd.exe" $project -run=pythonscript "-script=$mapScript" -unattended -nullrhi -nosplash "-abslog=$importLog"
+& "$tools\launch_test.ps1" -Verify -FPS 30
+& "$tools\launch_test.ps1" -Verify -FPS 60
+```
