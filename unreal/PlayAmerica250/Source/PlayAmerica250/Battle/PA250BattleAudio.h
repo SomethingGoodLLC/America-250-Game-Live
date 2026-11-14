@@ -17,6 +17,16 @@ enum class EPA250SoundRange : uint8
 	Whiz      // a ball going past your ear
 };
 
+/** Pure: how long after it happens a sound DistCm away is heard (battle_rules.json sound). */
+namespace PA250Sound
+{
+inline float DelaySeconds(float DistCm, float SpeedMPerSecond, float NoDelayWithinM)
+{
+	if (SpeedMPerSecond <= 1.f || DistCm <= NoDelayWithinM * 100.f) return 0.f;
+	return DistCm / (SpeedMPerSecond * 100.f);
+}
+}
+
 struct PLAYAMERICA250_API FPA250BattleAudio
 {
 	/** Random variant of a bank, e.g. "musket_fire" -> /Game/PA250/Audio/SFX/musket_fire_3. */

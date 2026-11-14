@@ -135,6 +135,17 @@ public:
 
 	/** Squad index assigned by volley/squad coordinator (-1 = none). */
 	int32 SquadId = -1;
+	/** In a boat on the way in (APA250RowBoat): he neither moves nor fires until he is ashore. */
+	bool bEmbarked = false;
+	/** Knocked off his feet (a round shot passing close): a loose body thrown along Push (cm/s), who
+	 *  gets up again as a thrown rider does. False when he cannot be (dead, mounted, in a boat, down already). */
+	bool KnockDown(const FVector& Push);
+	bool IsKnockedDown() const { return bThrownFromHorse; }
+	/** First person: the camera at his eyes. Z toggles it; third person is the default. */
+	void ToggleFirstPerson();
+	bool IsFirstPerson() const { return bFirstPerson; }
+	/** Where the first-person camera sits from the capsule's centre, in view space (cm). */
+	static FVector FirstPersonOffset() { return FVector(26.f, 0.f, 68.f); }
 
 	UFUNCTION(BlueprintCallable, Category = "Combat")
 	bool FireMusket();
@@ -373,6 +384,8 @@ private:
 	float CurrentArmLength = 220.f;
 	FVector CurrentSocketOffset = FVector(0.f, 60.f, 70.f);
 	float ShoulderSign = 1.f;
+	bool bFirstPerson = false;
+	void OnShovePressed();
 	float FaceControlYawTimer = 0.f;
 	float RecoilPitch = 0.f;
 	float RecoilYaw = 0.f;
@@ -397,6 +410,9 @@ private:
 	void ApplyMountedGaitSpeed();
 	void TickMounted(float DeltaTime);
 	void ThrowRider(const FVector& HorseVelocity);
+	/** The body goes loose (ragdoll) with these velocities: Carry for every part, Topple more the
+	 *  higher the part is above the pelvis, Lift upward. TickThrown stands him up again. */
+	void LooseBody(const FVector& Carry, const FVector& Topple, const FVector& Lift, float RaiseCm);
 	void TickThrown(float DeltaTime);
 	void FinishThrowRecovery();
 	uint8 MountedGait = 0;

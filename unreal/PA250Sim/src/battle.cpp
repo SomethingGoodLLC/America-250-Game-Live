@@ -181,6 +181,8 @@ void load_battle_rules(const std::string& json_text) {
         if (j.contains("field")) {
             const json& f = j.at("field");
             r.bot_budget = f.value("bot_budget", r.bot_budget);
+            r.fps_bar = f.value("frame_rate_bar", r.fps_bar);
+            r.fps_bar_bots = f.value("frame_rate_bar_bots", r.fps_bar_bots);
             r.field_min = f.value("min_per_side", r.field_min);
             r.field_max = f.value("max_per_side", r.field_max);
             r.soldiers_per_unit = f.value("soldiers_per_unit", r.soldiers_per_unit);
@@ -230,6 +232,8 @@ void load_battle_rules(const std::string& json_text) {
                 r.landing_boat_speed_cm = l.value("boat_speed_cm", r.landing_boat_speed_cm);
                 r.landing_row_out_m = l.value("row_out_m", r.landing_row_out_m);
                 r.landing_disembark_seconds = l.value("disembark_seconds", r.landing_disembark_seconds);
+                r.landing_player_wait_seconds = l.value("player_wait_seconds", r.landing_player_wait_seconds);
+                r.landing_boat_spacing_cm = l.value("boat_spacing_cm", r.landing_boat_spacing_cm);
             }
         }
         if (j.contains("guns")) {
@@ -270,6 +274,8 @@ void load_battle_rules(const std::string& json_text) {
             r.cannon_capture_seconds = f.value("capture_seconds", r.cannon_capture_seconds);
             r.cannon_crew_radius_cm = f.value("crew_radius_cm", r.cannon_crew_radius_cm);
             r.cannon_length_cm = f.value("length_cm", r.cannon_length_cm);
+            r.cannon_knockdown_push_cm = f.value("knockdown_push_cm", r.cannon_knockdown_push_cm);
+            r.cannon_dirt_burst_scale = f.value("dirt_burst_scale", r.cannon_dirt_burst_scale);
         }
         if (j.contains("cover")) r.cover_snap_cm = j.at("cover").value("snap_cm", r.cover_snap_cm);
         if (j.contains("works")) {
@@ -287,6 +293,25 @@ void load_battle_rules(const std::string& json_text) {
             r.works_breastwork_slots = f.value("breastwork_slots", r.works_breastwork_slots);
             r.works_breastworks_by_level = f.value("breastworks_by_level", r.works_breastworks_by_level);
             r.works_redoubts_by_level = f.value("redoubts_by_level", r.works_redoubts_by_level);
+        }
+        if (j.contains("smoke")) {
+            const json& f = j.at("smoke");
+            r.smoke_sight_block_opacity = f.value("sight_block_opacity", r.smoke_sight_block_opacity);
+            r.smoke_sight_radius_scale = f.value("sight_radius_scale", r.smoke_sight_radius_scale);
+        }
+        if (j.contains("sound")) {
+            const json& f = j.at("sound");
+            r.sound_speed_m_per_second = f.value("speed_m_per_second", r.sound_speed_m_per_second);
+            r.sound_no_delay_within_m = f.value("no_delay_within_m", r.sound_no_delay_within_m);
+        }
+        if (j.contains("duel")) {
+            const json& f = j.at("duel");
+            r.duel_shove_range_cm = f.value("shove_range_cm", r.duel_shove_range_cm);
+            r.duel_shove_recover_seconds = f.value("shove_recover_seconds", r.duel_shove_recover_seconds);
+            r.duel_shove_stagger_seconds = f.value("shove_stagger_seconds", r.duel_shove_stagger_seconds);
+            r.duel_shove_open_seconds = f.value("shove_open_seconds", r.duel_shove_open_seconds);
+            r.duel_shove_push_cm = f.value("shove_push_cm", r.duel_shove_push_cm);
+            r.duel_shove_cooldown_seconds = f.value("shove_cooldown_seconds", r.duel_shove_cooldown_seconds);
         }
         if (j.contains("remnant")) {
             const json& f = j.at("remnant");
@@ -1296,6 +1321,11 @@ CampaignState apply_battle_result(const CampaignState& in, const BattleResult& r
     report.scavenged_powder = scav_powder;
     report.scavenged_muskets = scav_muskets;
     report.end_reason = r.end_reason;
+    // The kind of fight it was, so the card can say "the works were held" and not "more men standing".
+    {
+        const BattleSetup fought = build_battle_setup(in, r.province_id);
+        report.mode = (fought.valid && fought.mode != "conquest") ? fought.mode : std::string();
+    }
     report.prisoners = prisoners_taken;
     report.siege_hours = siege_hours;
     report.rounds_before = rounds_before;

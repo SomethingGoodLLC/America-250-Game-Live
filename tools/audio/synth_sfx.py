@@ -22,6 +22,12 @@ Sounds (several variants each so volleys don't sound copy-pasted):
   ambience_dawn      24 s seamless loop for the battlefield before and between the firing: light wind
                      in the trees and a few birds (the import marks it looping)
   drum_roll          rope-tension field drum: a crescendo roll ending on an accent ("Make ready!")
+  drum_call_<order>  the drummer repeating an order (follow, line, hold, cover, charge, retire): six
+                     short beatings told apart by ear. GAME INVENTION: written for the game, not the
+                     period's duty calls.
+  cannon_fire_N      a field gun: vent flash, a deep report and a long rolling echo
+
+Only some files: `synth_sfx.py --only drum_call_hold,cannon_fire_1` writes just those (names without .wav).
   march_patriot      fife and drum, "Yankee Doodle" (traditional, public domain; in 1775 a British
                      tune mocking the colonists, taken up by the Americans after Lexington and Concord)
   march_british      fife and drum, an original march written for the game (not a period tune)
@@ -365,6 +371,50 @@ def drum_roll(seed: int) -> np.ndarray:
     return reverb_tail(out, rng, 0.8, 3000, 0.4)
 
 
+# (seconds from the start, accent, flam = a grace stroke just before it)
+DRUM_CALLS = {
+    "follow": [(0.00, 0.9, False), (0.22, 0.7, False), (0.44, 0.7, False), (0.66, 1.3, True)],
+    "line": [(0.00, 1.2, True), (0.34, 0.8, False), (0.50, 0.8, False), (0.84, 1.2, True)],
+    "hold": [(0.00, 1.4, False), (0.55, 1.4, False)],
+    "cover": [(0.00, 0.5, False), (0.06, 0.55, False), (0.12, 0.6, False), (0.18, 0.65, False), (0.24, 0.7, False), (0.42, 1.3, False)],
+    "charge": [(0.00, 0.6, False), (0.16, 0.7, False), (0.30, 0.8, False), (0.42, 0.9, False), (0.52, 1.0, False), (0.60, 1.1, False),
+               (0.67, 1.2, False), (0.73, 1.3, False), (0.90, 1.5, True)],
+    "retire": [(0.00, 1.3, True), (0.40, 1.0, True), (0.80, 0.75, True)],
+}
+
+
+def drum_call(seed: int, pattern: list[tuple[float, float, bool]]) -> np.ndarray:
+    """One beating of the drum for an order: the strokes of `pattern` and a short outdoor echo."""
+    rng = np.random.default_rng(seed)
+    out = np.zeros(int((pattern[-1][0] + 1.3) * SR))
+    for at, accent, flam in pattern:
+        if flam:  # the grace stroke: softer, a few hundredths early
+            g = drum_stroke(rng, accent * 0.45)
+            i = int(max(0.0, at - 0.035) * SR)
+            out[i : i + len(g)] += g[: len(out) - i]
+        s = drum_stroke(rng, accent * rng.uniform(0.95, 1.05))
+        i = int((at + rng.uniform(-0.003, 0.003) + 0.04) * SR)
+        out[i : i + len(s)] += s[: len(out) - i]
+    return reverb_tail(out, rng, 0.7, 3000, 0.35)
+
+
+def cannon_fire(seed: int) -> np.ndarray:
+    """A light field gun: the vent's hiss and flash, a deep report, and a long roll of echo."""
+    rng = np.random.default_rng(seed)
+    n = int(3.2 * SR)
+    t = np.arange(n) / SR
+    vent = bandpass(rng.standard_normal(n), 1500, 7000) * env_exp(n, 0.002, 0.05) * 0.35
+    start = int(0.05 * SR)
+    boom = np.zeros(n)
+    m = n - start
+    tb = np.arange(m) / SR
+    body = np.sin(2 * np.pi * (58 * tb - 16 * tb * tb * np.exp(-tb * 3))) * env_exp(m, 0.004, 0.42)
+    crack = lp(rng.standard_normal(m), 1800, 2) * env_exp(m, 0.001, 0.06) * 1.3
+    rumble = lp(rng.standard_normal(m), 160, 2) * env_exp(m, 0.02, 0.9) * 0.9
+    boom[start:] = 1.4 * body + crack + rumble
+    return reverb_tail(vent + boom, rng, 1.6, 900, 0.5)
+
+
 NOTE = {"A4": 440.0, "B4": 493.88, "C5": 523.25, "C#5": 554.37, "D5": 587.33, "E5": 659.25, "F#5": 739.99,
         "G5": 783.99, "A5": 880.0, "B5": 987.77, "C#6": 1108.73, "D6": 1174.66, "E6": 1318.51, "R": 0.0}
 
@@ -428,6 +478,23 @@ REGULARS_MARCH = [
 
 
 def main() -> None:
+    import sys
+
+    only = set()
+    if "--only" in sys.argv:
+        only = {n.strip() for n in sys.argv[sys.argv.index("--only") + 1].split(",") if n.strip()}
+    new_files = [(f"drum_call_{name}", drum_call(1300 + i, pattern), -4.0) for i, (name, pattern) in enumerate(DRUM_CALLS.items())]
+    new_files += [(f"cannon_fire_{i}", cannon_fire(1400 + i), -1.0) for i in range(1, 3)]
+    if only:
+        wrote = [name for name, x, peak in new_files if name in only]
+        for name, x, peak in new_files:
+            if name in only:
+                write(name, x, peak_db=peak)
+        missing = sorted(only - set(wrote))
+        print(f"wrote {len(wrote)} files to {OUT}" + (f"; not known to --only: {missing}" if missing else ""))
+        return
+    for name, x, peak in new_files:
+        write(name, x, peak_db=peak)
     for i in range(1, 5):
         write(f"musket_fire_{i}", musket_fire(100 + i))
     for i in range(1, 3):

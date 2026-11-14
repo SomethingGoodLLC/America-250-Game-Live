@@ -56,7 +56,7 @@ inline bool PA250ShouldDuck(bool bInCover, bool bAtSpot, bool bLoaded, bool bTar
 }
 
 /** What a bot does with his bayonet this instant. */
-enum class EPA250BotMelee : uint8 { Close, Thrust, Butt, Charge };
+enum class EPA250BotMelee : uint8 { Close, Thrust, Butt, Charge, Shove };
 
 struct FPA250BotMeleeView
 {
@@ -69,6 +69,9 @@ struct FPA250BotMeleeView
 	bool bResting = false;         // still recovering from my last blow
 	bool bChargeReady = false;
 	bool bFacing = true;           // a dash goes where I face
+	float ShoveReachCm = 170.f;    // battle_rules.json duel
+	bool bShoveReady = false;
+	bool bLastWasButt = false;     // my last blow was the stock: vary it
 };
 
 /** Pure: close in, thrust, butt-stroke or charge. A guard read correctly is answered by closing to
@@ -77,7 +80,12 @@ struct FPA250BotMeleeView
 inline EPA250BotMelee PA250ChooseMeleeMove(const FPA250BotMeleeView& V)
 {
 	if (V.bResting) return EPA250BotMelee::Close;
-	if (V.bFoeGuardsMe && V.bReadsGuard) return V.DistCm <= V.ButtReachCm ? EPA250BotMelee::Butt : EPA250BotMelee::Close;
+	if (V.bFoeGuardsMe && V.bReadsGuard)
+	{
+		// The shove opens his guard for the thrust that follows; used turn about with the stock.
+		if (V.bShoveReady && V.bLastWasButt && V.DistCm <= V.ShoveReachCm) return EPA250BotMelee::Shove;
+		return V.DistCm <= V.ButtReachCm ? EPA250BotMelee::Butt : EPA250BotMelee::Close;
+	}
 	if (V.DistCm <= V.ThrustReachCm) return EPA250BotMelee::Thrust;
 	if (V.DistCm <= V.LungeCm && V.bChargeReady && V.bFacing) return EPA250BotMelee::Charge;
 	return EPA250BotMelee::Close;

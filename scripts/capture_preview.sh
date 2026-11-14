@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Capture battle-level preview stills: scripts/capture_preview.sh <label> [lexington|concord]
+# Capture battle-level preview stills: scripts/capture_preview.sh <label> [lexington|concord|harbor]
 # (label: flags | walls | smoke | any). Stills land in docs/preview/<level>_<label>_*.png.
 #
 # On this Mac a second Unreal *game* instance (or a busy, swap-starved machine) makes the engine die at
@@ -9,7 +9,7 @@
 set -u
 LABEL="${1:-smoke}"
 LEVEL="${2:-lexington}"
-case "$LEVEL" in concord) MAP=L_Concord ;; lexington) MAP=L_Lexington ;; *) echo "unknown level $LEVEL"; exit 2 ;; esac
+case "$LEVEL" in concord) MAP=L_Concord ;; lexington) MAP=L_Lexington ;; harbor) MAP=L_Harbor ;; *) echo "unknown level $LEVEL"; exit 2 ;; esac
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 UE="${UE_ROOT:-/Users/Shared/Epic Games/UE_5.8}"
 PROJECT="$ROOT/unreal/PlayAmerica250/PlayAmerica250.uproject"

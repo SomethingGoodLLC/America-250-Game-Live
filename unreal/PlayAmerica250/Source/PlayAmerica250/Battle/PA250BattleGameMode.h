@@ -12,6 +12,7 @@ class APA250ControlPoint;
 class APA250FieldWork;
 class APA250Colours;
 class APA250FieldGun;
+class APA250RowBoat;
 enum class EActiveReloadHit : uint8;
 class ARFCharacter;
 class UMusketTuning;
@@ -181,6 +182,8 @@ public:
 	void NotifyGunTaken(APA250FieldGun* Gun, FName From);
 	void NotifyGunFired(APA250FieldGun* Gun, bool bCanister);
 	void NotifyRoundShot(ARFCharacter* Man, bool bStruck);
+	void NotifyShove(ARFCharacter* By, ARFCharacter* Victim);
+	int32 GetShoves() const { return Shoves; }
 	void NotifyWorkBattered(APA250FieldWork* Work, bool bBroken, FName ByFaction);
 	/** Guns a side has taken and still holds at this moment (BattleResult.guns_taken at the end). */
 	int32 GetGunsTakenBy(FName Faction) const;
@@ -348,6 +351,8 @@ private:
 	void MaybeStartClassPortraits();
 	/** -PA250GunStill: two stills of the first field gun with a soldier beside it, for scale. */
 	void MaybeStartGunStill();
+	/** -PA250LandingStill: stills of a landing: the boats on the way in (12 s) and the men ashore. */
+	void MaybeStartLandingStill();
 	void GatherPosts();
 	/** Post ownership, which posts can be taken, and how the clock is won, from the BattleSetup. */
 	void ApplyScenarioPreset();
@@ -374,6 +379,7 @@ private:
 	int32 RoundShotKnockedDown = 0;     // men knocked off their feet beside its path
 	TMap<FName, int32> WorksBroken;     // works battered below cover, by the side whose shot did it
 	int32 GunCaptures = 0;              // times a gun changed hands
+	int32 Shoves = 0;                   // shoves that landed (battle trace)
 	/** One colours a side at a time: carried by its ensign, fallen, or taken. */
 	UPROPERTY(Transient)
 	TMap<FName, TObjectPtr<APA250Colours>> Colours;
@@ -474,6 +480,22 @@ private:
 	// ---- Assault and landing (PA250BattleModes.h; battle_rules.json modes) ----
 	/** Locks the posts the mode closes, counts posts carried, adds the assault's clock, ends an assault the attacker has carried. */
 	void TickBattleMode();
+	/** Landing: the attacker's men on the field go into boats lying off the landing places. */
+	void SetUpLanding();
+	/** Starts the boats (they wait a little for a player who attacks), seats him, counts men set
+	 *  ashore, and brings on the replacements held back until the first boat is in. */
+	void TickLanding(float DeltaSeconds);
+	/** A replacement for the landing side cannot come on before a boat has reached the shore. */
+	bool HoldsLandingSpawn(FName Faction) const;
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<APA250RowBoat>> Boats;
+	bool bBoatsRowing = false;
+	bool bPlayerRode = false;
+	float BoatsWaited = 0.f;
+	int32 HeldLandingSpawns = 0;
+	int32 MenLanded = 0;
+	int32 MenEmbarked = 0;
+	float FirstBoatInAt = -1.f;
 	TArray<int32> ModeOrder;      // indices into Posts, nearest the attacker's start first
 	int32 ModeCarried = 0;        // posts the attacker holds (assault: carried in order)
 	bool bLanded = false;         // landing: the attacker has held the landing post

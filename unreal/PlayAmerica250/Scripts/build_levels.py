@@ -808,7 +808,108 @@ def _concord_layout():
     }
 
 
-LAYOUTS = {"lexington": _lexington_layout, "concord": _concord_layout}
+def _harbor_layout():
+    """A harbour town for landings (BattleSetup.mode "landing"; L_Harbor). GAME INVENTION
+    throughout: no one place is meant. It stands for any of the campaign's harbour towns (Boston,
+    Charlestown, Chelsea, Dorchester) when an army comes at it over the water. The shore runs east
+    and west at y = 6000 with the sea to the south; boats land on the beach below a landing post, a
+    road climbs past two stone walls to the town green and its meetinghouse, and the heights rise
+    behind. The sea is the layout's "river": one very wide channel along the south edge, so the
+    water surface, the cut of the shore and the unseen blocks that keep men out of the water are
+    the river code's. Starts are marked by role (attacker on the beach, defender in the town), not
+    by side, because either side may be the one that lands."""
+    shore = 6000.0
+    half = 7000.0
+    return {
+        "MAP_NAME": "L_Harbor",
+        "TERRAIN_DEST": "/Game/PA250/Terrain/Harbor", "TERRAIN_NAME": "SM_PA250_TerrainHarbor",
+        "MEADOW_NAME": "M_PA250_MeadowHarbor",
+        "GREEN_XY": (0.0, -3500.0),
+        "OPEN_GROUND": None,
+        "ROADS": (
+            ((-14000.0, 4000.0), (14000.0, 4000.0), 500),   # the shore road
+            ((0.0, 3800.0), (0.0, -3000.0), 500),           # up from the landing place
+            ((0.0, -3500.0), (0.0, -12000.0), 500),         # the town road inland
+            ((0.0, -2500.0), (-7500.0, -2000.0), 450),      # to the meetinghouse
+        ),
+        "MEETINGHOUSE": None, "MEETINGHOUSE_FACING": 0.0, "TAVERN": None, "TAVERN_FACING": 0.0,
+        # The game's fixed three post ids. In a landing the post nearest the attacker's start is
+        # the landing post (PA250Modes::AttackOrder): here, the one above the beach.
+        "POSTS": (
+            ("Objective_Landing", "buckman", (0.0, 3300.0), None, None),
+            ("Objective_Green", "green", (0.0, -3500.0), None, None),
+            ("Objective_Meetinghouse", "meetinghouse", (-7500.0, -1500.0), None, None),
+        ),
+        # Keyed by side for the helpers; the starts themselves are tagged by START_ROLES.
+        "SPAWNS": {"british": ((0.0, 4500.0), 270.0, 250.0), "continental": ((0.0, -9500.0), 90.0, 280.0)},
+        "START_ROLES": {"british": "PA250Attacker", "continental": "PA250Defender"},
+        # Where the boats' bows touch (x, y at the waterline) and the way the men go ashore.
+        "BOAT_LANDINGS": (((-1350.0, shore - 150.0), 270.0), ((-450.0, shore - 150.0), 270.0),
+                          ((450.0, shore - 150.0), 270.0), ((1350.0, shore - 150.0), 270.0)),
+        # A pier (placeholder: planks on posts): (x, y where it leaves the shore, length, width, deck z).
+        "WHARF": (2700.0, shore - 500.0, 3200.0, 420.0, 60.0),
+        "BASE_PADS": ((0.0, -3500.0, 2000),),
+        "TRAMPLED": ((0.0, 3300.0, 500, 1800, 0.5),),
+        "VILLAGE": (
+            ("House_Wharf", "HouseSaltbox", (3300.0, 2500.0), 180, 800),
+            ("Warehouse", "Barn", (-3700.0, 2400.0), 180, 800),
+            ("WharfShed", "WagonShed", (5900.0, 2700.0), 180, 480),
+            ("House_Green_W", "HouseGable", (-2700.0, -5300.0), 90, 800),
+            ("House_Green_E", "HouseCape", (2800.0, -4800.0), 270, 750),
+            ("Barn_Green", "Barn", (5000.0, -7400.0), 270, 800),
+            ("TownMeetinghouse", "Meetinghouse1714", (-9600.0, -3600.0), 90, 1300),
+            ("Well_Green", "Well", (1600.0, -2300.0), 0, 300),
+        ),
+        "FIELDS": (
+            ((9000.0, -3200.0), (2000, 1400), 0.0),
+            ((-5800.0, -9800.0), (2200, 1500), 15.0),
+            ((11000.0, -12500.0), (1800, 2200), 5.0),
+        ),
+        "WOODLOTS": (
+            ((-18000, -18000), 5000, 22), ((0, -20500), 4500, 18), ((17000, -17000), 4800, 18),
+            ((21500, -6000), 3500, 10), ((-22000, -6500), 3500, 10), ((-19000, 1500), 2500, 6), ((19500, 1000), 2500, 6),
+        ),
+        "TREE_COUNT": 14, "TREE_RING": (4500.0, 14000.0),
+        # Stone walls between the beach and the town: the defender's first line, the attacker's first cover.
+        "ROAD_WALLS": (
+            ("Wall_ShoreW", (-6500.0, 1200.0), (-1300.0, 1200.0)),
+            ("Wall_ShoreE", (1300.0, 1200.0), (6500.0, 1200.0)),
+            ("Wall_GreenE", (1300.0, -1400.0), (6000.0, -1400.0)),
+        ),
+        "BATTLE_ROAD_WALLS": (), "PATRIOT_WALLS": (), "PATRIOT_TREES": (),
+        "MUSTER_POINTS": (
+            ("Muster_Continental_North", (0.0, -15000.0)),
+            ("Muster_Continental_South", (6000.0, -12500.0)),
+            ("Muster_Continental_West", (-6000.0, -13000.0)),
+        ),
+        "COMMON_FENCES": (
+            ("Fence_Wharf", (1900.0, 3300.0), (1900.0, 1900.0)),
+            ("Fence_GreenW", (-1500.0, -4300.0), (-1500.0, -6500.0)),
+        ),
+        "TERRAIN_X": (-26000.0, 26000.0), "TERRAIN_Y": (-24000.0, 20000.0), "TERRAIN_CELL": 250.0,
+        "AMP": (18.0, 150.0, 600.0), "AMP_R": (7000.0, 16000.0, 27000.0),
+        # The heights behind the town.
+        "HILLS": (((-9000.0, -14000.0), 8000.0, 1400.0), ((13000.0, -10000.0), 7000.0, 700.0)),
+        "CAUSEWAYS": (),
+        # The sea: a channel `half` wide each side of a line `half` off the shore.
+        "RIVER_PTS": ((-27500.0, shore + half), (-9000.0, shore + half), (9000.0, shore + half), (27500.0, shore + half)),
+        "RIVER_HALF": half, "WATER_Z": -70.0, "RIVER_BED_Z": -320.0,
+        "BRIDGE": None,
+        "NAV": ((0.0, -7000.0), (215, 140, 12)),
+        # Mid-morning, as Concord.
+        "LIGHT": {"sun_rot": (-40, 205, 0), "sun_lux": 11.0, "sun_color": (255, 238, 214), "exposure": 0.35,
+                  "fog_density": 0.005, "white_temp": 6700.0, "gain": (1.04, 1.0, 0.93), "pp": "PP_Morning"},
+        "CAMERAS": (
+            ("Shot_Spawn", (0.0, 5300.0), 230, (-4, 270), 65.0),
+            ("Shot_Green", (2600.0, 600.0), 210, (-3, 250), 60.0),
+            ("Shot_Wide", (-9000.0, 4600.0), 520, (-8, -35), 75.0),
+        ),
+    }
+
+
+LAYOUTS = {"lexington": _lexington_layout, "concord": _concord_layout, "harbor": _harbor_layout}
+# Keys only some layouts carry; reset before a layout is bound so one level's do not leak into the next.
+LAYOUT_DEFAULTS = {"START_ROLES": None, "BOAT_LANDINGS": (), "WHARF": None}
 LAYOUT = None
 
 
@@ -876,6 +977,7 @@ def use_layout(name):
     """Bind one level's layout to the module globals every function here reads."""
     global LAYOUT, PADS, RIVER, MEADOW_TREES
     g = globals()
+    g.update(LAYOUT_DEFAULTS)
     g.update(LAYOUTS[name]())
     LAYOUT = name
     RIVER = _catmull(RIVER_PTS) if RIVER_PTS else []
@@ -2059,7 +2161,97 @@ def place_battle_road(stone, rng):
         # PA250BattleRoad marks the walls flanking the column's approach (PA250BattleCases).
         place_stone_wall(label, p0, p1, stone, rng, group="brwall_", extra_tag="PA250BattleRoad")
     for label, (x, y) in MUSTER_POINTS:
-        tag(spawn(unreal.PlayerStart, (x, y, ground_z(x, y) + 120), (0, 0, 0), label), "continental_muster")
+        # Militia muster inland with the side that holds the town (by role on a level either side may attack).
+        tag(spawn(unreal.PlayerStart, (x, y, ground_z(x, y) + 120), (0, 0, 0), label),
+            (START_ROLES["continental"] + "_muster") if START_ROLES else "continental_muster")
+
+
+WORKS_RING_CM = 1400.0   # breastwork places stand this far out from their post
+WORKS_PER_POST = 6
+GUN_SLOTS_PER_SIDE = 4
+GUN_SLOT_FORWARD_CM = 1300.0
+GUN_SLOT_SPACING_CM = 800.0
+
+
+def _marker_clear(x, y, margin=300.0):
+    """True where a field work or a gun can stand: off buildings, walls, fences, the river and trees
+    (a road is allowed: a breastwork across a road is what a road gets)."""
+    for (bx, by), (w, d, _h) in (b for b in (MEETINGHOUSE, TAVERN) if b):
+        if math.hypot(x - bx, y - by) < 0.5 * math.hypot(w, d) + margin:
+            return False
+    for _label, _asset, (vx, vy), _facing, r in VILLAGE:
+        if math.hypot(x - vx, y - vy) < r + margin:
+            return False
+    if RIVER and river_dist(x, y) < RIVER_HALF + 500 + margin:
+        return False
+    for _name, a, b in all_wall_lines():
+        if _seg_dist(x, y, a, b) < margin:
+            return False
+    for tx, ty in list(MEADOW_TREES) + list(PATRIOT_TREES):
+        if math.hypot(x - tx, y - ty) < margin:
+            return False
+    return True
+
+
+def place_battle_markers():
+    """Markers the battle reads (GAME INVENTION; nothing is drawn): PA250WorksSlot places for field
+    works on a ring round every post, fronting outward, with a redoubt place at the post itself
+    (tag `redoubt`); PA250GunSlot places for each side's guns in a row before its start (tagged
+    with the side). APA250BattleGameMode::SpawnFieldWorks / SpawnFieldGuns use them; a level
+    without them gets made-up places and a Warning in the log."""
+    works = guns = skipped = 0
+    for _label, post_id, (px, py), _owner, _z in POSTS:
+        for k in range(WORKS_PER_POST):
+            ang = math.radians(360.0 * k / WORKS_PER_POST + 30.0)
+            x, y = px + math.cos(ang) * WORKS_RING_CM, py + math.sin(ang) * WORKS_RING_CM
+            if not _marker_clear(x, y):
+                skipped += 1
+                continue
+            m = spawn(unreal.TargetPoint, (x, y, ground_z(x, y) + 20), (0, math.degrees(ang), 0), "WorksSlot_%s_%d" % (post_id, k))
+            tag(m, "PA250WorksSlot")
+            works += 1
+        m = spawn(unreal.TargetPoint, (px, py, ground_z(px, py) + 20), (0, 0, 0), "WorksRedoubt_%s" % post_id)
+        tag(m, "PA250WorksSlot")
+        tag(m, "redoubt")
+    for side in sorted(SPAWNS):
+        (cx, cy), yaw, _sp = SPAWNS[side]
+        fx, fy = math.cos(math.radians(yaw)), math.sin(math.radians(yaw))
+        placed = 0
+        # A row before the front rank; a place that is not clear is tried a little further out.
+        for k in range(GUN_SLOTS_PER_SIDE * 3):
+            if placed >= GUN_SLOTS_PER_SIDE:
+                break
+            col, row = k % GUN_SLOTS_PER_SIDE, k // GUN_SLOTS_PER_SIDE
+            lateral = (col - 0.5 * (GUN_SLOTS_PER_SIDE - 1)) * GUN_SLOT_SPACING_CM
+            ahead = GUN_SLOT_FORWARD_CM + row * 600.0
+            x, y = cx + fx * ahead - fy * lateral, cy + fy * ahead + fx * lateral
+            if not _marker_clear(x, y):
+                skipped += 1
+                continue
+            m = spawn(unreal.TargetPoint, (x, y, ground_z(x, y) + 20), (0, yaw, 0), "GunSlot_%s_%d" % (side.capitalize(), placed))
+            tag(m, "PA250GunSlot")
+            tag(m, START_ROLES[side] if START_ROLES else side)
+            placed += 1
+            guns += 1
+    # Where the boats of a landing touch (the bow's place at the waterline; forward = the way ashore).
+    for i, ((x, y), yaw) in enumerate(BOAT_LANDINGS):
+        tag(spawn(unreal.TargetPoint, (x, y, WATER_Z), (0, yaw, 0), "BoatLanding_%d" % i), "PA250BoatLanding")
+    LOG("PA250: battle markers: %d works places, %d redoubt places, %d gun places, %d boat landings (%d places skipped as not clear)" % (
+        works, len(POSTS), guns, len(BOAT_LANDINGS), skipped))
+
+
+def place_wharf(wood):
+    """PLACEHOLDER ART: a plank pier on posts running out from the shore (blocks in the dark wood).
+    A wharf mesh is listed in PROGRESS.md as art still needed."""
+    if not WHARF:
+        return
+    x, y0, length, width, deck = WHARF
+    block("Wharf_Deck", (x, y0 + length / 2.0, deck), (width, length, 24), wood)
+    n = int(length // 500)
+    for i in range(n + 1):
+        y = y0 + length * i / max(n, 1)
+        for k, side in enumerate((-1.0, 1.0)):
+            block("Wharf_Post_%d_%d" % (i, k), (x + side * (width / 2.0 - 20), y, deck - 220), (36, 36, 480), wood)
 
 
 def place_patriot_cover(stone, wood, canopy, rng):
@@ -2279,7 +2471,10 @@ def build_battlefield(layout):
         make_material(name, rgb)
     terrain = import_terrain_mesh()
 
-    les = new_level(MAPS + "/" + MAP_NAME)
+    # PA250_LEVEL_SUFFIX=_regen builds the level beside the saved one (L_Lexington_regen), so the two
+    # can be compared before the saved one is replaced (Scripts/dump_level_actors.py).
+    level_name = MAP_NAME + os.environ.get("PA250_LEVEL_SUFFIX", "")
+    les = new_level(MAPS + "/" + level_name)
     set_game_mode("PA250BattleGameMode")
 
     # Rolling ground; worn roads come from the meadow material masks.
@@ -2311,6 +2506,7 @@ def build_battlefield(layout):
     place_village()
     if RIVER:
         place_river(stone)
+    place_wharf(WOOD_DARK_MAT)
 
     for label, p0, p1 in ROAD_WALLS:
         place_stone_wall(label, p0, p1, stone, rng)
@@ -2324,15 +2520,21 @@ def build_battlefield(layout):
 
     for side in ("continental", "british"):
         yaw = SPAWNS[side][1]
+        # A level either side may attack on marks its starts by role (APA250BattleGameMode maps
+        # PA250Attacker / PA250Defender to the setup's factions); the others by side.
+        start_tag = START_ROLES[side] if START_ROLES else side
+        start_name = start_tag.replace("PA250", "") if START_ROLES else side.capitalize()
         for i, (x, y) in enumerate(spawn_points(side)):
             tag(spawn(unreal.PlayerStart, (x, y, ground_z(x, y) + 120), (0, yaw, 0),
-                      "Start_%s_%d" % (side.capitalize(), i)), side)
+                      "Start_%s_%d" % (start_name, i)), start_tag)
 
     for label, post_id, xy, initial_owner, z in POSTS:
         a = spawn(unreal.PA250ControlPoint, (xy[0], xy[1], ground_z(*xy) + 140 if z is None else z), (0, 0, 0), label)
         a.set_editor_property("post_id", unreal.Name(post_id))
         if initial_owner:
             a.set_editor_property("initial_owner", unreal.Name(initial_owner))
+
+    place_battle_markers()
 
     (nx, ny), nscale = NAV
     spawn(unreal.NavMeshBoundsVolume, (nx, ny, 0), (0, 0, 0), "NavBounds", scale=nscale)
@@ -2414,7 +2616,7 @@ def build_battlefield(layout):
 
     write_asset_choices()
     save(les)
-    LOG("PA250: built " + MAP_NAME)
+    LOG("PA250: built " + level_name)
 
 
 def build_lexington():
@@ -2425,6 +2627,11 @@ def build_lexington():
 def build_concord():
     """The North Bridge, Concord, mid-morning 19 April 1775 (the concord_bridge fight)."""
     build_battlefield("concord")
+
+
+def build_harbor():
+    """A harbour town with a beach (GAME INVENTION): where a landing is fought."""
+    build_battlefield("harbor")
 
 
 def make_portrait_assets():
@@ -3260,6 +3467,7 @@ BUILDERS = {
     "campaign": build_campaign,
     "lexington": build_lexington,
     "concord": build_concord,
+    "harbor": build_harbor,
     "diplomacy": build_diplomacy,
     "ftest_bot_spacing": build_ftest_bot_spacing,
     "lexington_battle_road": build_lexington_battle_road,

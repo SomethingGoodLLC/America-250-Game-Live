@@ -43,6 +43,8 @@ namespace PA250Squad
 PLAYAMERICA250_API const TCHAR* OrderWords(EPA250SquadOrder Order);
 /** The shouted line for an order ("follow_me", "charge_bayonets", ...), or null when it has none. */
 PLAYAMERICA250_API const TCHAR* OrderVoiceKey(EPA250SquadOrder Order);
+/** The drummer's beating for an order (SFX bank "drum_call_<name>"), told apart by ear. */
+PLAYAMERICA250_API const TCHAR* OrderDrumCall(EPA250SquadOrder Order);
 /** Where a led squad's line stands: behind the leader (FollowMe), on the point given (FormLine, Hold,
  *  TakeCover), else where it stands now. */
 PLAYAMERICA250_API FVector LedAnchor(EPA250SquadOrder Order, const FVector& LeaderLocation, const FVector& LeaderFacing,

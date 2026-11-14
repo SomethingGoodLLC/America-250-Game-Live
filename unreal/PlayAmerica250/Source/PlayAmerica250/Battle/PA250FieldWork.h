@@ -26,6 +26,20 @@ inline float StandingShare(float Built, float Health, float MaxHealth)
 	return FMath::Clamp(Built, 0.f, 1.f) * (MaxHealth > 0.f ? FMath::Clamp(Health / MaxHealth, 0.f, 1.f) : 0.f);
 }
 /** A work stops a ball (and counts as cover) once it stands to CoverShare of its height. */
+/** Marked places in the order they are stood: the ones lying most toward the enemy from the post
+ *  first (index breaks ties, so the order is the same every time). */
+inline TArray<int32> EnemySideFirst(const TArray<FVector>& Places, const FVector& Post, const FVector& TowardEnemy)
+{
+	TArray<int32> Order;
+	TArray<int32> Toward; // hundredths, so near-equal places keep their marked order
+	for (int32 i = 0; i < Places.Num(); ++i)
+	{
+		Order.Add(i);
+		Toward.Add(FMath::RoundToInt(100.f * FVector::DotProduct((Places[i] - Post).GetSafeNormal2D(), TowardEnemy.GetSafeNormal2D())));
+	}
+	Order.StableSort([&Toward](int32 A, int32 B) { return Toward[A] > Toward[B]; });
+	return Order;
+}
 inline bool GivesCover(float Built, float Health, float MaxHealth, float CoverShare)
 {
 	return StandingShare(Built, Health, MaxHealth) >= CoverShare;

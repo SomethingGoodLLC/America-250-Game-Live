@@ -12,6 +12,7 @@
 #include "NavigationSystem.h"
 #include "PA250Cover.h"
 #include "PA250Support.h"
+#include "PA250Smoke.h"
 #include "PA250BattleAudio.h"
 #include "GameFramework/PlayerController.h"
 #include "WorldCollision.h"
@@ -844,9 +845,10 @@ bool UPA250VolleyCoordinator::HasLineOfSight(const ARFCharacter* From, const ARF
 	Params.AddIgnoredActor(To);
 	if (From->Musket) Params.AddIgnoredActor(From->Musket);
 	FHitResult Hit;
-	return !From->GetWorld()->LineTraceSingleByChannel(Hit,
-		PA250Cover::EyePoint(From), To->GetActorLocation() + FVector(0.f, 0.f, 40.f),
-		ECC_Visibility, Params);
+	const FVector Eye = PA250Cover::EyePoint(From), Mark = To->GetActorLocation() + FVector(0.f, 0.f, 40.f);
+	if (From->GetWorld()->LineTraceSingleByChannel(Hit, Eye, Mark, ECC_Visibility, Params)) return false;
+	const UPA250SmokeSubsystem* Smoke = From->GetWorld()->GetSubsystem<UPA250SmokeSubsystem>();
+	return !(Smoke && Smoke->BlocksSight(Eye, Mark));
 }
 
 void UPA250VolleyCoordinator::TickSquads(float DeltaSeconds)
@@ -1804,6 +1806,20 @@ const TCHAR* PA250Squad::OrderVoiceKey(EPA250SquadOrder Order)
 	}
 }
 
+const TCHAR* PA250Squad::OrderDrumCall(EPA250SquadOrder Order)
+{
+	switch (Order)
+	{
+	case EPA250SquadOrder::FollowMe: return TEXT("drum_call_follow");
+	case EPA250SquadOrder::FormLine: return TEXT("drum_call_line");
+	case EPA250SquadOrder::Hold: return TEXT("drum_call_hold");
+	case EPA250SquadOrder::TakeCover: return TEXT("drum_call_cover");
+	case EPA250SquadOrder::Charge: return TEXT("drum_call_charge");
+	case EPA250SquadOrder::FallBack: return TEXT("drum_call_retire");
+	default: return TEXT("drum_roll");
+	}
+}
+
 FVector PA250Squad::LedAnchor(EPA250SquadOrder Order, const FVector& LeaderLocation, const FVector& LeaderFacing,
 	const FVector& OrderPoint, const FVector& CurrentAnchor, float FollowBehindCm)
 {
@@ -2083,7 +2099,24 @@ int32 UPA250VolleyCoordinator::GiveOrder(ARFCharacter* Leader, EPA250SquadOrder 
 		if (Relayed > 0)
 		{
 			MoraleTransitions.FindOrAdd(FString::Printf(TEXT("%s.OrderRelayed"), *Leader->FactionId.ToString())) += Relayed;
-			FPA250BattleAudio::PlayAt(GameMode.Get(), TEXT("drum_roll"), Leader->GetActorLocation() + FVector(0.f, 0.f, 100.f), EPA250SoundRange::Voice, 0.8f, 0.03f);
+		}
+		// A musician who hears the order beats it: each order has its own call, so men (and the
+		// player) know it by ear. From where the drummer stands, and it carries as gunfire does.
+		const FVector* Drummer = nullptr;
+		float Nearest = Verbs.MusicianRelayM * 100.f;
+		for (const FVector& M : Musicians)
+		{
+			const float D = FVector::Dist2D(M, Leader->GetActorLocation());
+			if (D <= Nearest)
+			{
+				Nearest = D;
+				Drummer = &M;
+			}
+		}
+		if (Drummer)
+		{
+			MoraleTransitions.FindOrAdd(FString::Printf(TEXT("%s.DrumCall"), *Leader->FactionId.ToString()))++;
+			FPA250BattleAudio::PlayAtOr(GameMode.Get(), PA250Squad::OrderDrumCall(Order), TEXT("drum_roll"), *Drummer + FVector(0.f, 0.f, 100.f), EPA250SoundRange::Gunfire, 0.9f, 0.02f);
 		}
 	}
 	if (Took > 0)

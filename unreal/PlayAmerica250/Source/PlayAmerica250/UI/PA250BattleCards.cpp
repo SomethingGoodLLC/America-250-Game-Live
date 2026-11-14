@@ -104,8 +104,10 @@ TArray<PA250BattleCards::FRow> PA250BattleCards::SideRows(const pa250::SideSetup
 	return Rows;
 }
 
-FString PA250BattleCards::EndReasonSentence(const std::string& Reason, bool bPlayerWon)
+FString PA250BattleCards::EndReasonSentence(const std::string& Reason, bool bPlayerWon, const std::string& Mode)
 {
+	if (Mode == "assault" && Reason == "time_limit") return bPlayerWon ? TEXT("Your men held their works until the attack was spent.") : TEXT("The enemy held his works until your attack was spent.");
+	if (Mode == "assault" && Reason == "posts_swept") return bPlayerWon ? TEXT("You carried every post of the works.") : TEXT("The enemy carried every post of your works.");
 	if (Reason == "tickets_exhausted") return bPlayerWon ? TEXT("The enemy fought until none were left standing.") : TEXT("Your men fought until none were left standing.");
 	if (Reason == "time_limit") return bPlayerWon ? TEXT("The day ended with more of your men standing.") : TEXT("The day ended with more of the enemy standing.");
 	if (Reason == "force_preserved") return bPlayerWon ? TEXT("You kept more of your force together on the road.") : TEXT("The enemy kept more of his force together on the road.");
@@ -124,7 +126,7 @@ PA250BattleCards::FAfter PA250BattleCards::AfterBattle(const pa250::BattleReport
 	const auto Town = State.provinces.find(Report.province_id);
 	A.Title = FString::Printf(TEXT("Battle of %s"), Town == State.provinces.end() ? *ToF(Report.province_id) : *ToF(Town->second.name));
 	A.Verdict = bWon ? TEXT("Victory") : TEXT("Defeat");
-	A.Reason = EndReasonSentence(Report.end_reason, bWon);
+	A.Reason = EndReasonSentence(Report.end_reason, bWon, Report.mode);
 
 	// Men, as the battle counted them: every man who fell is killed, wounded or a prisoner. A report
 	// saved before battles counted men has only whole units.

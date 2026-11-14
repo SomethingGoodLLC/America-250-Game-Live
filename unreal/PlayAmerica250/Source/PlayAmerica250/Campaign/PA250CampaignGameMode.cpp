@@ -159,6 +159,38 @@ void APA250CampaignGameMode::BeginPlay()
 			12.f, false);
 	}
 
+	if (FParse::Param(FCommandLine::Get(), TEXT("PA250RouteProbe")))
+	{
+		// The routes out of Boston in a real window (the Boston-Dorchester boats were added
+		// 2026-11-14). Display only: the map is shown the garrison's routes; nothing is ordered or saved.
+		Sub->SetPaused(true);
+		FTimerHandle Show, Shot, QuitHandle;
+		GetWorldTimerManager().SetTimer(Show, FTimerDelegate::CreateLambda([this]() {
+			UPA250Subsystem* PS = UPA250Subsystem::Get(this);
+			if (!PS || !MapActor) return;
+			PS->SetPaused(true);
+			MapActor->OnHudSelectionChanged(TEXT("british_garrison"), TEXT("boston"));
+			MapActor->FocusSelected(); // Boston in the middle, so Dorchester below it is in view
+			int32 Water = 0, All = 0;
+			FString Names;
+			for (const auto& Kv : PS->GetState().edges)
+			{
+				if (Kv.second.a != "boston" && Kv.second.b != "boston") continue;
+				++All;
+				const bool bWater = Kv.second.type == "boat" || Kv.second.type == "ferry";
+				Water += bWater ? 1 : 0;
+				Names += FString::Printf(TEXT("%s%s(%s)"), Names.IsEmpty() ? TEXT("") : TEXT(", "), UTF8_TO_TCHAR(Kv.first.c_str()), UTF8_TO_TCHAR(Kv.second.type.c_str()));
+			}
+			UE_LOG(LogTemp, Display, TEXT("ROUTE_PROBE: %d routes out of Boston, %d by water: %s"), All, Water, *Names);
+		}), 11.f, false);
+		GetWorldTimerManager().SetTimer(Shot, FTimerDelegate::CreateLambda([this]() {
+			if (APlayerController* PC = GetWorld()->GetFirstPlayerController()) PC->ConsoleCommand(TEXT("Shot showui"));
+		}), 13.f, false);
+		GetWorldTimerManager().SetTimer(QuitHandle, FTimerDelegate::CreateLambda([this]() {
+			UKismetSystemLibrary::QuitGame(this, nullptr, EQuitPreference::Quit, false);
+		}), 16.f, false);
+	}
+
 	if (FParse::Param(FCommandLine::Get(), TEXT("PA250MapSliceProbe")))
 	{
 		// Siege mark, scoreboard and the left-inspect / right-order split, in a real window.

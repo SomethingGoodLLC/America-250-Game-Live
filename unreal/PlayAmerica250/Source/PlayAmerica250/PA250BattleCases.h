@@ -33,6 +33,7 @@ void RunSquad(FLog& Log);        // the player's file: who is in it, the six ord
 void RunWorks(FLog& Log);        // the fire-over stance, field works by fortification level, where they stand, who mans them, the sapper
 void RunGunnery(FLog& Log);      // field guns: the data, which shot, the drill by crew, overrun and push, the asset's sockets, guns in the setup and the result
 void RunModes(FLog& Log);        // conquest, assault, landing: the order of posts, what is closed, the clock, the boats' course, the level, the card line
+void RunFeel(FLog& Log);         // smoke that hides men, knockdown and dirt, sound late with distance, drum calls, first person, the shove
 void RunSupport(FLog& Log);      // ensign and the colours, musician relay and cadence, surgeon; field caps; the result carries them
 void RunEconomy(FLog& Log);      // Phase 4 as the game's own sim build reads it: ground rules, level costs, powder, the opening accounts
 }

@@ -29,6 +29,17 @@ CLASSES = (
     "continental_militia",
     "continental_rifleman",
     "continental_officer",
+    # The battle pass's classes (2026-11-14).
+    "british_sapper",
+    "british_ensign",
+    "british_musician",
+    "british_surgeon",
+    "british_artilleryman",
+    "continental_sapper",
+    "continental_ensign",
+    "continental_musician",
+    "continental_surgeon",
+    "continental_artilleryman",
 )
 # The capture camera centres the man; this box holds his headgear (a bearskin reaches the top) to his waist.
 BOX = (420, 0, 860, 330)
@@ -36,11 +47,20 @@ BOX = (420, 0, 860, 330)
 
 def main() -> int:
     DST.mkdir(parents=True, exist_ok=True)
-    missing = [name for name in CLASSES if not (SRC / f"{name}.png").is_file()]
+    # --only a,b cuts just those cards, so the others are not written again.
+    names = CLASSES
+    if "--only" in sys.argv:
+        wanted = {n.strip() for n in sys.argv[sys.argv.index("--only") + 1].split(",") if n.strip()}
+        unknown = sorted(wanted - set(CLASSES))
+        if unknown:
+            print(f"not a class card: {', '.join(unknown)}", file=sys.stderr)
+            return 1
+        names = tuple(n for n in CLASSES if n in wanted)
+    missing = [name for name in names if not (SRC / f"{name}.png").is_file()]
     if missing:
         print(f"missing stills in {SRC}: {', '.join(missing)}", file=sys.stderr)
         return 1
-    for name in CLASSES:
+    for name in names:
         still = Image.open(SRC / f"{name}.png").convert("RGB")
         if still.size != (1280, 720):
             print(f"{name}: expected 1280x720, got {still.size}", file=sys.stderr)

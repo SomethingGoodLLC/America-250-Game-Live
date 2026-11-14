@@ -30,7 +30,7 @@ PLAYAMERICA250_API TArray<FRow> SideRows(const pa250::SideSetup& Side);
 PLAYAMERICA250_API FString ModeLine(const pa250::BattleSetup& Setup);
 
 /** Pure: why the fight ended, as the player would say it. */
-PLAYAMERICA250_API FString EndReasonSentence(const std::string& Reason, bool bPlayerWon);
+PLAYAMERICA250_API FString EndReasonSentence(const std::string& Reason, bool bPlayerWon, const std::string& Mode = std::string());
 
 /** The after-battle card as text. */
 struct FAfter

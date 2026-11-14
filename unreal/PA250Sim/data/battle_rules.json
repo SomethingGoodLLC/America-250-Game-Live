@@ -1,8 +1,10 @@
 {
   "note": "GAMEPLAY TUNING, not historical fact. How a battle reads the campaign. Read by the sim (field strength, rounds, sieges) and by the Unreal battle (end conditions, resupply). Every value is a starting value.",
   "field": {
-    "note": "A bot budget is split between the two sides in proportion to their fit soldiers, then each share is clamped. Soldiers on the field per campaign unit: soldiers_per_unit.",
+    "note": "A bot budget is split between the two sides in proportion to their fit soldiers, then each share is clamped. Soldiers on the field per campaign unit: soldiers_per_unit. The budget may be raised only when frame_rate_bar_bots bots hold frame_rate_bar frames a second in 3 samples of 3 at the resolution the game is normally played at (user decision 2026-11-14; -PA250FpsSample, results in PROGRESS.md).",
     "bot_budget": 40,
+    "frame_rate_bar": 45,
+    "frame_rate_bar_bots": 60,
     "min_per_side": 10,
     "max_per_side": 30,
     "soldiers_per_unit": 4
@@ -62,6 +64,25 @@
     "breastworks_by_level": [0, 2, 4, 4],
     "redoubts_by_level": [0, 0, 0, 1]
   },
+  "smoke": {
+    "note": "GAME INVENTION. Powder smoke hides men from the bots (the player sees it for himself). Each puff counts as thick within sight_radius_scale of its width; when the smoke lying on a line of sight adds up to sight_block_opacity or more (0 clear, 1 solid), the man beyond it cannot be seen or fired at. One fresh puff is not enough; the bank a volley leaves is, for some seconds, until it thins and drifts.",
+    "sight_block_opacity": 0.7,
+    "sight_radius_scale": 0.4
+  },
+  "sound": {
+    "note": "Gunfire is heard after it is seen: its sound reaches the player speed_m_per_second later for every metre between them (343 is the real figure). Nothing is delayed inside no_delay_within_m.",
+    "speed_m_per_second": 343,
+    "no_delay_within_m": 20
+  },
+  "duel": {
+    "note": "GAME INVENTION. The shove (B): the musket held across the body and driven into a man within shove_range_cm. It does no harm; it drives him back shove_push_cm, plants him for shove_stagger_seconds and for shove_open_seconds he can neither block nor parry, so the thrust that follows goes home. The shover recovers in shove_recover_seconds and cannot shove again for shove_cooldown_seconds. Thrust, guard, parry, riposte and butt-stroke values stay in DA_MeleeTuning.",
+    "shove_range_cm": 170,
+    "shove_recover_seconds": 0.5,
+    "shove_stagger_seconds": 0.7,
+    "shove_open_seconds": 0.9,
+    "shove_push_cm": 140,
+    "shove_cooldown_seconds": 1.6
+  },
   "remnant": {
     "note": "End condition `routed`: a side with no reserve and this few men standing quits the field after this long (never the human player's side while he is alive on it). From mark_men down, its men are marked on the enemy player's HUD so the last of them can be found.",
     "men": 3,
@@ -85,12 +106,14 @@
       "garrison_share_pct": 67
     },
     "landing": {
-      "note": "GAME INVENTION. The attacker's first wave comes in by boat: boats boats of men_per_boat men start row_out_m off the landing place and row in at boat_speed_cm a second; nobody in a boat can fire or move, and the men are free disembark_seconds after the keel touches. Men beyond the first wave come ashore at the landing place. The post nearest the landing place is the landing post: until the attacker has held it every other post is closed to him; from then on it is the open fight for the posts.",
-      "boats": 3,
+      "note": "GAME INVENTION. The attacker's first wave comes in by boat: up to boats boats of men_per_boat men (as many as the men on the field need) start row_out_m off the landing place and row in at boat_speed_cm a second; nobody in a boat can fire or move, and the men are free disembark_seconds after the keel touches. The boats wait up to player_wait_seconds for the player to take his place. Men beyond the first wave, and every replacement, come ashore at the landing place once the first boat is in. The post nearest the landing place is the landing post: until the attacker has held it every other post is closed to him; from then on it is the open fight for the posts. Boats land at the level's PA250BoatLanding markers, or boat_spacing_cm apart by the attacker's start when it has none.",
+      "boats": 4,
       "men_per_boat": 8,
       "boat_speed_cm": 260,
       "row_out_m": 110,
-      "disembark_seconds": 2
+      "disembark_seconds": 2,
+      "player_wait_seconds": 20,
+      "boat_spacing_cm": 900
     }
   },
   "guns": {
@@ -99,7 +122,7 @@
     "crew_class": "artilleryman"
   },
   "cannon": {
-    "note": "The field gun in a battle (a light 3- or 6-pounder). GAME INVENTION throughout: times and ranges are shortened to the size of the field. crew_men serve one gun; with fewer than min_crew at it, it can be neither worked nor moved. The drill (sponge and load, ram home, prime and lay) takes the three *_seconds with a full crew of gunners; a short crew is slower in proportion and men who are not gunners are slower by untrained_drill_scale. Round shot flies round_shot_range_m at round_shot_speed_m a second, scatters within round_shot_spread_degrees of where the piece was laid (about 1 m at 100 m, 2.6 m at 300 m), goes through round_shot_pierce_men men (round_shot_damage each), knocks down for knockdown_seconds the men within knockdown_radius_cm of its path, takes works_damage off a field work it strikes, and puts morale_pressure for morale_seconds on a squad it ploughs through (and on a side that loses a gun). Inside canister_range_m the gun fires canister: canister_balls musket balls in a cone of canister_cone_degrees. An idle crew pushes its gun at push_speed_cm a second once its own men are follow_gap_m ahead. Enemies within capture_radius_cm with none of the gun's side by it take it after capture_seconds. A man within crew_radius_cm of a gun of his side is serving it. length_cm is the piece from trail to muzzle (the purchased mesh is fitted to it; 333 is its own length).",
+    "note": "The field gun in a battle (a light 3- or 6-pounder). GAME INVENTION throughout: times and ranges are shortened to the size of the field. crew_men serve one gun; with fewer than min_crew at it, it can be neither worked nor moved. The drill (sponge and load, ram home, prime and lay) takes the three *_seconds with a full crew of gunners; a short crew is slower in proportion and men who are not gunners are slower by untrained_drill_scale. Round shot flies round_shot_range_m at round_shot_speed_m a second, scatters within round_shot_spread_degrees of where the piece was laid (about 1 m at 100 m, 2.6 m at 300 m), goes through round_shot_pierce_men men (round_shot_damage each), throws off their feet the men within knockdown_radius_cm of its path (a loose body pushed away at knockdown_push_cm a second, who gets up as a thrown rider does, his aim shaken for knockdown_seconds), throws up dirt_burst_scale times a musket ball's dirt where it strikes, takes works_damage off a field work it strikes, and puts morale_pressure for morale_seconds on a squad it ploughs through (and on a side that loses a gun). Inside canister_range_m the gun fires canister: canister_balls musket balls in a cone of canister_cone_degrees. An idle crew pushes its gun at push_speed_cm a second once its own men are follow_gap_m ahead. Enemies within capture_radius_cm with none of the gun's side by it take it after capture_seconds. A man within crew_radius_cm of a gun of his side is serving it. length_cm is the piece from trail to muzzle (the purchased mesh is fitted to it; 333 is its own length).",
     "crew_men": 4,
     "min_crew": 2,
     "sponge_load_seconds": 6.0,
@@ -125,6 +148,8 @@
     "capture_radius_cm": 500.0,
     "capture_seconds": 4.0,
     "crew_radius_cm": 450.0,
-    "length_cm": 333.0
+    "length_cm": 333.0,
+    "knockdown_push_cm": 320.0,
+    "dirt_burst_scale": 3.0
   }
 }

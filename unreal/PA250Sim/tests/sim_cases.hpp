@@ -2125,6 +2125,17 @@ static void test_battle_modes() {
     CHECK(mode_of("dorchester", "roxbury", 0) == "conquest" && mode_of("dorchester", "roxbury", 1) == "assault");
     CHECK(mode_of("cambridge", "boston", 0) == "conquest");  // Back Bay boats land on a river bank, not in a harbour
     CHECK(mode_of("concord", "lincoln", 2) == "conquest");   // the bridge fight stays the bridge fight
+    // The report keeps the kind of fight (for the card's sentence); the open fight writes nothing.
+    {
+        CampaignState s = battle_at("charlestown");
+        s.armies.at("british_regulars").previous_province = "medford";
+        const CampaignState after = apply_battle_result(s, ended("charlestown", kContinental, "time_limit"));
+        CHECK(after.progress.last_battle_report.mode == "assault");
+        CHECK(deserialize(serialize(after)).progress.last_battle_report.mode == "assault");
+        const CampaignState open_fight = apply_battle_result(battle_at("lexington"), ended("lexington", kContinental, "time_limit"));
+        CHECK(open_fight.progress.last_battle_report.mode.empty());
+        CHECK(serialize(open_fight).find("\"mode\"") == std::string::npos);
+    }
     // The setup's tags still say how he came: disordered from the boats, a chokepoint by the neck.
     {
         CampaignState s = battle_at("dorchester");

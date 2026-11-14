@@ -239,6 +239,7 @@ struct BattleReport {
     int scavenged_powder = 0;
     int scavenged_muskets = 0;
     std::string end_reason;  // BattleResult.end_reason as applied
+    std::string mode;        // the kind of fight it was (BattleSetup.mode); empty for the open fight
     std::map<std::string, std::map<std::string, int>> prisoners;  // faction -> class -> captured (clamped)
     int siege_hours = 0;                    // > 0: a siege began; the town falls after this many hours
     std::vector<std::string> map_changes;   // what changed on the map, in plain words (after-battle card)
@@ -655,6 +656,8 @@ struct BattleRules {
     int bot_budget = 40;            // soldiers on the field, both sides together
     int field_min = 10;             // per side
     int field_max = 30;             // per side
+    float fps_bar = 45.f;           // the frame rate the battle must hold (battle_rules.json field.frame_rate_bar)
+    int fps_bar_bots = 60;          // ...with this many bots, 3 samples of 3, before bot_budget may rise
     int soldiers_per_unit = 4;      // soldiers on the field per campaign unit
     int rounds_per_cartridge = 20;  // one magazine cartridge = this many rounds
     int rounds_min = 3;
@@ -668,11 +671,13 @@ struct BattleRules {
     std::vector<std::string> mode_conquest_presets = {"concord_bridge", "battle_road"};  // scripted fights keep the open fight
     float assault_seconds_per_post = 120.f;    // the clock gains this when the attacker carries a post
     int assault_garrison_share_pct = 67;       // share of the defender's squads that stand at the post under attack
-    int landing_boats = 3;                     // boats in the first wave
+    int landing_boats = 4;                     // most boats in the first wave
     int landing_men_per_boat = 8;
     float landing_boat_speed_cm = 260.f;       // rowing speed
     float landing_row_out_m = 110.f;           // how far off the landing place the boats start
     float landing_disembark_seconds = 2.f;     // from the keel touching to the men being free to move
+    float landing_player_wait_seconds = 20.f;  // the boats wait this long for the player to take his place
+    float landing_boat_spacing_cm = 900.f;     // boats land this far apart when the level marks no places
     int guns_crew_units_per_gun = 1;            // units of the crew class that serve one gun
     std::string guns_crew_class = "artilleryman";
     int colours_support_per_capture = 3;  // Support the player gains for colours taken, and loses for his own
@@ -734,6 +739,19 @@ struct BattleRules {
     int remnant_men = 3;            // no reserve and this few standing: the remnant quits the field
     int remnant_mark_men = 5;       // ...and from this few down they are marked on the enemy player's HUD
     float remnant_seconds = 15.f;
+    // Feel (battle_rules.json "smoke", "sound", "duel"; read only by the Unreal battle).
+    float smoke_sight_block_opacity = 0.7f;   // powder smoke this thick on a line of sight hides the man beyond it
+    float smoke_sight_radius_scale = 0.4f;    // share of a puff's width that counts as thick
+    float sound_speed_m_per_second = 343.f;   // a shot is heard this long after it is seen
+    float sound_no_delay_within_m = 20.f;     // no delay worth hearing inside this
+    float duel_shove_range_cm = 170.f;
+    float duel_shove_recover_seconds = 0.5f;  // the shover's own recovery
+    float duel_shove_stagger_seconds = 0.7f;  // the man shoved cannot move
+    float duel_shove_open_seconds = 0.9f;     // ...and cannot guard or parry
+    float duel_shove_push_cm = 140.f;         // how far he is driven back
+    float duel_shove_cooldown_seconds = 1.6f;
+    float cannon_knockdown_push_cm = 320.f;   // speed a near miss throws a man off his feet at
+    float cannon_dirt_burst_scale = 3.f;      // a round shot's dirt against a musket ball's
 };
 // Why a side's number is what it is (pre-battle card). Rows with the same label belong together:
 // the first is the base value, later ones are signed changes to it.

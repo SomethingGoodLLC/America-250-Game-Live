@@ -475,6 +475,7 @@ json battle_report_to_json(const BattleReport& r) {
     if (!r.casualties.empty()) j["casualties"] = casualties_to_json(r.casualties);
     if (!r.colours_captured.empty()) j["colours_captured"] = r.colours_captured;
     if (!r.guns_taken.empty()) j["guns_taken"] = r.guns_taken;
+    if (!r.mode.empty()) j["mode"] = r.mode;  // written only for an assault or a landing
     return j;
 }
 BattleReport battle_report_from_json(const json& j) {
@@ -514,6 +515,7 @@ BattleReport battle_report_from_json(const json& j) {
     if (j.contains("casualties")) r.casualties = casualties_from_json(j.at("casualties"));
     r.colours_captured = j.value("colours_captured", std::map<std::string, int>{});
     r.guns_taken = j.value("guns_taken", std::map<std::string, int>{});
+    r.mode = j.value("mode", std::string());
     return r;
 }
 json staff_to_json(const StaffState& st) {

@@ -29,6 +29,7 @@
 #include "Battle/PA250Support.h"
 #include "Battle/PA250FieldGun.h"
 #include "Battle/PA250BattleModes.h"
+#include "Battle/PA250RowBoat.h"
 #include "Engine/StaticMeshSocket.h"
 #include "PA250FlagArt.h"
 #include "PA250BattleHUD.h"
@@ -2608,6 +2609,123 @@ void RunSupport(FLog& Log)
 	}
 }
 
+void RunFeel(FLog& Log)
+{
+	const std::string RulesText = pa250::read_text_file(TCHAR_TO_UTF8(*UPA250Subsystem::BattleRulesPath()));
+	Log.Check(RulesText.find("\"smoke\"") != std::string::npos && RulesText.find("\"sound\"") != std::string::npos && RulesText.find("\"duel\"") != std::string::npos,
+		TEXT("feel: battle_rules.json has the smoke, sound and duel blocks"));
+	pa250::load_battle_rules(RulesText);
+	const pa250::BattleRules& R = pa250::battle_rules();
+	Log.Check(R.smoke_sight_block_opacity > 0.f && R.smoke_sight_block_opacity < 1.f && R.smoke_sight_radius_scale > 0.f && FMath::IsNearlyEqual(R.sound_speed_m_per_second, 343.f)
+		&& R.duel_shove_range_cm > 0.f && R.duel_shove_open_seconds > 0.f && R.cannon_knockdown_push_cm > 0.f && R.cannon_dirt_burst_scale > 1.f,
+		TEXT("feel: every value comes from the file"));
+
+	// Smoke hides men: one fresh puff does not, the bank of a volley does, and it clears.
+	{
+		auto Puff = [](const FVector& At, float Age) {
+			FPA250SmokePuff P;
+			P.Pos = At;
+			P.Age = Age;
+			P.Life = 26.f;
+			P.Size0 = 100.f;
+			P.Size1 = 500.f;
+			P.Peak = 0.5f;
+			return P;
+		};
+		const FVector Eye(0.f, 0.f, 150.f), Man(6000.f, 0.f, 130.f);
+		TArray<FPA250SmokePuff> One = {Puff(FVector(300.f, 0.f, 150.f), 1.f)};
+		TArray<FPA250SmokePuff> Bank;
+		// A man's own shot leaves three puffs along his line of fire (AddShot); his neighbours' lie beside them.
+		for (int32 i = 0; i < 3; ++i) Bank.Add(Puff(FVector(250.f + 110.f * i, 0.f, 150.f), 1.5f));
+		for (int32 i = 0; i < 3; ++i) Bank.Add(Puff(FVector(250.f + 110.f * i, 200.f, 150.f), 1.5f));
+		const float Clear = UPA250SmokeSubsystem::SightOpacity({}, Eye, Man, R.smoke_sight_radius_scale);
+		const float Thin = UPA250SmokeSubsystem::SightOpacity(One, Eye, Man, R.smoke_sight_radius_scale);
+		const float Thick = UPA250SmokeSubsystem::SightOpacity(Bank, Eye, Man, R.smoke_sight_radius_scale);
+		Log.Check(Clear == 0.f && Thin > 0.f && Thin < R.smoke_sight_block_opacity && Thick >= R.smoke_sight_block_opacity,
+			FString::Printf(TEXT("feel: one puff dims the line (%.2f), a volley's bank hides the man beyond it (%.2f against %.2f)"), Thin, Thick, R.smoke_sight_block_opacity));
+		const float Beside = UPA250SmokeSubsystem::SightOpacity(Bank, Eye + FVector(0.f, 1500.f, 0.f), Man + FVector(0.f, 1500.f, 0.f), R.smoke_sight_radius_scale);
+		Log.Check(Beside == 0.f, TEXT("feel: a line that passes beside the bank is clear"));
+		TArray<FPA250SmokePuff> Old = Bank;
+		for (FPA250SmokePuff& P : Old) P.Age = 22.f;
+		Log.Check(UPA250SmokeSubsystem::SightOpacity(Old, Eye, Man, R.smoke_sight_radius_scale) < R.smoke_sight_block_opacity, TEXT("feel: the same bank twenty seconds on no longer hides him"));
+		TArray<FPA250SmokePuff> Dust = Bank;
+		for (FPA250SmokePuff& P : Dust) P.bPowder = false;
+		Log.Check(UPA250SmokeSubsystem::SightOpacity(Dust, Eye, Man, R.smoke_sight_radius_scale) == 0.f, TEXT("feel: dust and blood do not hide a man"));
+	}
+	// Sound: late by the distance.
+	{
+		const float Near = PA250Sound::DelaySeconds(1500.f, R.sound_speed_m_per_second, R.sound_no_delay_within_m);
+		const float At100 = PA250Sound::DelaySeconds(10000.f, R.sound_speed_m_per_second, R.sound_no_delay_within_m);
+		const float At300 = PA250Sound::DelaySeconds(30000.f, R.sound_speed_m_per_second, R.sound_no_delay_within_m);
+		Log.Check(Near == 0.f && FMath::IsNearlyEqual(At100, 0.2915f, 0.002f) && FMath::IsNearlyEqual(At300, 3.f * At100, 0.002f),
+			FString::Printf(TEXT("feel: a shot 100 m off is heard %.2f s after its smoke, 300 m off %.2f s; nothing is delayed at 15 m"), At100, At300));
+	}
+	// Drum calls: one for each order, each its own sound, all in the project.
+	{
+		const EPA250SquadOrder Orders[] = {EPA250SquadOrder::FollowMe, EPA250SquadOrder::FormLine, EPA250SquadOrder::Hold, EPA250SquadOrder::TakeCover, EPA250SquadOrder::Charge, EPA250SquadOrder::FallBack};
+		TSet<FString> Names;
+		bool bAllThere = true;
+		for (const EPA250SquadOrder O : Orders)
+		{
+			const FString Name = PA250Squad::OrderDrumCall(O);
+			Names.Add(Name);
+			bAllThere &= FPA250BattleAudio::Pick(Name) != nullptr;
+		}
+		Log.Check(Names.Num() == 6 && bAllThere, FString::Printf(TEXT("feel: six orders have six drum calls, all imported (%d distinct)"), Names.Num()));
+		Log.Check(FPA250BattleAudio::Pick(TEXT("cannon_fire")) != nullptr, TEXT("feel: the field gun has its own report"));
+	}
+	// First person: the camera a hand in front of the eyes.
+	{
+		const FVector Eyes = ARFCharacter::FirstPersonOffset();
+		Log.Check(Eyes.X >= 15.f && Eyes.X <= 40.f && Eyes.Y == 0.f && Eyes.Z >= 55.f && Eyes.Z <= 80.f, TEXT("feel: the first-person camera sits at eye height, in front of his own head"));
+	}
+	// The shove: the bot's choice, and how far the man goes.
+	{
+		FPA250BotMeleeView V;
+		V.DistCm = 150.f;
+		V.bFoeGuardsMe = true;
+		V.bReadsGuard = true;
+		V.bShoveReady = true;
+		V.bLastWasButt = true;
+		V.ShoveReachCm = R.duel_shove_range_cm;
+		Log.Check(PA250ChooseMeleeMove(V) == EPA250BotMelee::Shove, TEXT("feel: against a guard, after the stock, a bot shoves"));
+		V.bLastWasButt = false;
+		Log.Check(PA250ChooseMeleeMove(V) == EPA250BotMelee::Butt, TEXT("feel: the first answer to a guard is still the stock"));
+		V.bLastWasButt = true;
+		V.bShoveReady = false;
+		Log.Check(PA250ChooseMeleeMove(V) == EPA250BotMelee::Butt, TEXT("feel: no shove while it is still recovering"));
+		V.bShoveReady = true;
+		V.bFoeGuardsMe = false;
+		Log.Check(PA250ChooseMeleeMove(V) == EPA250BotMelee::Thrust, TEXT("feel: an unguarded man gets the point, not a shove"));
+		const float Speed = UPA250MeleeComponent::ShoveLaunchSpeed(R.duel_shove_push_cm);
+		Log.Check(Speed > 300.f && Speed < 900.f && UPA250MeleeComponent::ShoveLaunchSpeed(0.f) == 0.f, FString::Printf(TEXT("feel: a shove of %.0f cm launches him at %.0f cm/s"), R.duel_shove_push_cm, Speed));
+	}
+	// Knockdown and the shove on real soldiers.
+	{
+		FScopedTestWorld W;
+		ARFCharacter* A = W.World ? W.World->SpawnActor<ARFCharacter>(FVector(0.f, 0.f, 200.f), FRotator::ZeroRotator) : nullptr;
+		ARFCharacter* B = W.World ? W.World->SpawnActor<ARFCharacter>(FVector(140.f, 0.f, 200.f), FRotator(0.f, 180.f, 0.f)) : nullptr;
+		Log.Check(A && B && A->MeleeComponent && B->MeleeComponent, TEXT("feel: two soldiers stand face to face"));
+		if (A && B && A->MeleeComponent && B->MeleeComponent)
+		{
+			A->FactionId = TEXT("british");
+			B->FactionId = TEXT("continental");
+			B->MeleeComponent->SetGuardHeld(true);
+			B->MeleeComponent->TickComponent(0.05f, LEVELTICK_All, nullptr);
+			const bool bGuarded = B->MeleeComponent->ResolveGuard(A->GetActorLocation()) != EPA250Guard::None;
+			const bool bShoved = A->MeleeComponent->DoShove();
+			Log.Check(bGuarded && bShoved && B->MeleeComponent->IsGuardOpen() && B->MeleeComponent->ResolveGuard(A->GetActorLocation()) == EPA250Guard::None && B->IsMovementLocked(),
+				TEXT("feel: a shove opens a raised guard and plants the man shoved"));
+			Log.Check(!A->MeleeComponent->DoShove() && A->MeleeComponent->GetShoveCooldownRemaining() > 0.f, TEXT("feel: he cannot shove again at once"));
+			A->bEmbarked = true;
+			Log.Check(!A->KnockDown(FVector(300.f, 0.f, 0.f)), TEXT("feel: a man in a boat is not knocked down"));
+			A->bEmbarked = false;
+			Log.Check(B->KnockDown(FVector(300.f, 0.f, 0.f)) && B->IsKnockedDown() && !B->KnockDown(FVector(300.f, 0.f, 0.f)),
+				TEXT("feel: a near miss throws a man off his feet, once"));
+		}
+	}
+}
+
 void RunModes(FLog& Log)
 {
 	pa250::load_battle_rules(pa250::read_text_file(TCHAR_TO_UTF8(*UPA250Subsystem::BattleRulesPath())));
@@ -2664,6 +2782,90 @@ void RunModes(FLog& Log)
 		PA250Modes::BoatCourse(2, 3, Place, Sea, 900.f, R.landing_row_out_m * 100.f, S2, B2);
 		Log.Check(B1.Equals(Place) && FMath::IsNearlyEqual(FVector::Dist(B0, B2), 1800.f) && FMath::IsNearlyEqual(FVector::Dist(S1, B1), R.landing_row_out_m * 100.f)
 			&& FMath::IsNearlyEqual((S0 - B0).GetSafeNormal() | Sea, 1.f), TEXT("modes: three boats land abreast 9 m apart, each rowed straight in from the same distance out"));
+	}
+	// The levels carry the places the battle reads: works and gun places on the two older levels,
+	// and on the harbour level the boats' landing places and starts marked by role.
+	{
+		struct FCount { int32 Works = 0, Redoubts = 0, Posts = 0, Landings = 0, AttackStarts = 0, DefendStarts = 0, SideStarts = 0, Channel = 0; TMap<FName, int32> Guns; };
+		auto CountLevel = [](const TCHAR* Path, FCount& Out) {
+			UWorld* Map = LoadObject<UWorld>(nullptr, Path);
+			if (!Map || !Map->PersistentLevel) return false;
+			for (AActor* A : Map->PersistentLevel->Actors)
+			{
+				if (!A) continue;
+				const bool bRedoubt = A->ActorHasTag(TEXT("redoubt"));
+				Out.Works += (A->ActorHasTag(TEXT("PA250WorksSlot")) && !bRedoubt) ? 1 : 0;
+				Out.Redoubts += (A->ActorHasTag(TEXT("PA250WorksSlot")) && bRedoubt) ? 1 : 0;
+				Out.Posts += A->IsA<APA250ControlPoint>() ? 1 : 0;
+				Out.Landings += A->ActorHasTag(TEXT("PA250BoatLanding")) ? 1 : 0;
+				Out.Channel += A->ActorHasTag(TEXT("PA250Creek")) ? 1 : 0;
+				if (A->ActorHasTag(TEXT("PA250GunSlot")))
+				{
+					for (const FName Side : {FName(TEXT("british")), FName(TEXT("continental")), FName(TEXT("PA250Attacker")), FName(TEXT("PA250Defender"))})
+					{
+						if (A->ActorHasTag(Side)) Out.Guns.FindOrAdd(Side)++;
+					}
+				}
+				if (A->IsA<APlayerStart>())
+				{
+					Out.AttackStarts += A->ActorHasTag(TEXT("PA250Attacker")) ? 1 : 0;
+					Out.DefendStarts += A->ActorHasTag(TEXT("PA250Defender")) ? 1 : 0;
+					Out.SideStarts += (A->ActorHasTag(TEXT("british")) || A->ActorHasTag(TEXT("continental"))) ? 1 : 0;
+				}
+			}
+			return true;
+		};
+		for (const TCHAR* Path : {TEXT("/Game/PA250/Maps/L_Lexington.L_Lexington"), TEXT("/Game/PA250/Maps/L_Concord.L_Concord")})
+		{
+			FCount C;
+			const bool bLoaded = CountLevel(Path, C);
+			Log.Check(bLoaded && C.Works >= 2 * 4 && C.Redoubts == C.Posts && C.Posts == 3,
+				FString::Printf(TEXT("modes: %s marks places for field works about its posts (%d breastwork places, %d redoubt places)"), Path, C.Works, C.Redoubts));
+			Log.Check(bLoaded && C.Guns.FindRef(TEXT("british")) >= 4 && C.Guns.FindRef(TEXT("continental")) >= 4 && C.SideStarts == 28,
+				FString::Printf(TEXT("modes: %s marks 4 gun places a side and keeps its 28 starts (%d, %d, %d)"), Path, C.Guns.FindRef(TEXT("british")), C.Guns.FindRef(TEXT("continental")), C.SideStarts));
+		}
+		FCount H;
+		const bool bHarbor = CountLevel(TEXT("/Game/PA250/Maps/L_Harbor.L_Harbor"), H);
+		Log.Check(bHarbor && H.Posts == 3 && H.Landings >= R.landing_boats && H.Channel > 50,
+			FString::Printf(TEXT("modes: L_Harbor has 3 posts, a landing place for each of the %d boats (%d) and a sea closed to men on foot (%d blocks)"), R.landing_boats, H.Landings, H.Channel));
+		Log.Check(bHarbor && H.AttackStarts == 14 && H.DefendStarts == 14 && H.SideStarts == 0 && H.Guns.FindRef(TEXT("PA250Attacker")) >= 4 && H.Guns.FindRef(TEXT("PA250Defender")) >= 4,
+			FString::Printf(TEXT("modes: L_Harbor marks its starts and gun places by role, so either side can be the one that lands (%d attacker starts, %d defender starts)"), H.AttackStarts, H.DefendStarts));
+		Log.Check(bHarbor && H.Works >= 2 * 4 && H.Redoubts == 3, FString::Printf(TEXT("modes: L_Harbor marks places for field works (%d, %d)"), H.Works, H.Redoubts));
+	}
+	// The ending is told as the kind of fight it was.
+	{
+		Log.Check(FString(PA250EndRules::EndReasonWords(TEXT("time_limit"), TEXT("assault"))).Contains(TEXT("works were held"))
+			&& FString(PA250EndRules::EndReasonWords(TEXT("time_limit"))).Contains(TEXT("more men standing"))
+			&& PA250BattleCards::EndReasonSentence("time_limit", true, "assault").Contains(TEXT("held their works")) && PA250BattleCards::EndReasonSentence("time_limit", true).Contains(TEXT("more of your men")),
+			TEXT("modes: an assault won on the clock is told as works held, not as more men standing"));
+		pa250::CampaignState St = pa250::load_scenario(pa250::read_text_file(TCHAR_TO_UTF8(*UPA250Subsystem::ScenarioPath())));
+		St.armies.at("british_regulars").province = "charlestown";
+		St.armies.at("british_regulars").previous_province = "medford";
+		St.armies.at("continental_militia").province = "charlestown";
+		St.pending_battle = {true, "charlestown", "british_regulars", "continental_militia"};
+		pa250::BattleResult Held;
+		Held.province_id = "charlestown";
+		Held.winner = "continental";
+		Held.end_reason = "time_limit";
+		const pa250::CampaignState After = pa250::apply_battle_result(St, Held);
+		const PA250BattleCards::FAfter Card = PA250BattleCards::AfterBattle(After.progress.last_battle_report, After);
+		Log.Check(After.progress.last_battle_report.mode == "assault" && Card.Reason.Contains(TEXT("held their works")),
+			FString::Printf(TEXT("modes: the report keeps the kind of fight and the card reads: %s"), *Card.Reason));
+	}
+	// The boats themselves.
+	{
+		Log.Check(PA250Boats::BoatsFor(0, 8, 4) == 0 && PA250Boats::BoatsFor(1, 8, 4) == 1 && PA250Boats::BoatsFor(8, 8, 4) == 1 && PA250Boats::BoatsFor(9, 8, 4) == 2
+			&& PA250Boats::BoatsFor(30, 8, 4) == 4 && PA250Boats::BoatsFor(60, 8, 4) == 4, TEXT("modes: the first wave takes as many boats as its men need, never more than the most allowed"));
+		Log.Check(R.landing_boats * R.landing_men_per_boat >= R.field_max, FString::Printf(TEXT("modes: %d boats of %d hold the largest field a side can have (%d)"),
+			R.landing_boats, R.landing_men_per_boat, R.field_max));
+		bool bApart = true;
+		for (int32 i = 0; i < 8; ++i)
+			for (int32 k = i + 1; k < 8; ++k) bApart &= FVector::Dist(PA250Boats::SeatOffset(i, 8), PA250Boats::SeatOffset(k, 8)) >= 100.f;
+		Log.Check(bApart && FMath::Abs(PA250Boats::SeatOffset(0, 8).X) < 300.f && FMath::Abs(PA250Boats::SeatOffset(7, 8).X) < 300.f,
+			TEXT("modes: eight men have a place each in a boat, a metre apart, inside the hull"));
+		Log.Check(PA250Boats::AshoreOffset(0).X >= 400.f && PA250Boats::AshoreOffset(7).X > PA250Boats::AshoreOffset(0).X, TEXT("modes: men are set down in front of the bow, clear of the water"));
+		const float Seconds = PA250Boats::RowSeconds(R.landing_row_out_m * 100.f, R.landing_boat_speed_cm);
+		Log.Check(Seconds > 20.f && Seconds < 90.f, FString::Printf(TEXT("modes: the row in takes %.0f s, long enough to be shot at and short enough to bear"), Seconds));
 	}
 	// The level: a landing is fought on the harbour level when it is built, else on the common.
 	{

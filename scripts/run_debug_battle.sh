@@ -55,6 +55,8 @@ if t.get("held"):
     print(f"  held: first post flip at {h['first_flip_seconds']:.0f} s | down to half their field: {h['half_strength_seconds']} (-1 = never)")
 if t.get("works"):
     print(f"  works {t['works']}")
+if t.get("feel"):
+    print(f"  feel {t['feel']}")
 if t.get("mode", {}).get("name", "conquest") != "conquest":
     print(f"  mode {t['mode']}")
 if t.get("guns", {}).get("on_field"):
