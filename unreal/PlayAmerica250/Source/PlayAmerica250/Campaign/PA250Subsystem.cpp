@@ -1,4 +1,5 @@
 #include "PA250Subsystem.h"
+#include "Misc/PackageName.h"
 #include "Engine/Engine.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
@@ -8,6 +9,7 @@
 #include "HAL/PlatformProcess.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
+#include <algorithm>
 
 namespace
 {
@@ -77,6 +79,7 @@ void UPA250Subsystem::SetCampaignActive(bool bActive)
 void UPA250Subsystem::SetPaused(bool bInPaused)
 {
 	bPaused = bInPaused;
+	bPausedByLetter = false;  // the player's own pause or resume always wins
 	if (bPaused)
 	{
 		HourAccumulator = 0.f;
@@ -116,9 +119,14 @@ void UPA250Subsystem::Tick(float DeltaTime)
 		pa250::TickOutput Out = Controller.advance_one_hour();
 		BumpHudEpoch();
 		MaybeAutosave(Before, Out.state);
+		NoteDispatches(Before, Out.state);
 		if (!Out.interrupts.empty())
 		{
+			// The sim interrupts only for contact and for a letter that needs an answer now.
 			bPaused = true;
+			bPausedByLetter = !Controller.battle_pending() &&
+							  Out.interrupts.end() != std::find(Out.interrupts.begin(), Out.interrupts.end(),
+																pa250::Interrupt::EventPopup);
 			HourAccumulator = 0.f;
 			RouteInterrupt(Out);
 			break;
@@ -137,10 +145,78 @@ void UPA250Subsystem::RouteInterrupt(const pa250::TickOutput& Out)
 		}
 		if (I == pa250::Interrupt::EventPopup)
 		{
-			// Staff briefing / correspondence: UI shows the letter panel; clock stays paused.
+			// A letter that needs an answer now: the panel opens, and answering it resumes the clock.
 			break;
 		}
 	}
+}
+
+void UPA250Subsystem::NoteDispatches(const pa250::CampaignState& Before, const pa250::CampaignState& After)
+{
+	auto Terminal = [](const std::string& Status) {
+		return Status == "delivered" || Status == "refused" || Status == "dismissed";
+	};
+	FString News;
+	for (const auto& Now : After.staff.queue)
+	{
+		const pa250::CorrespondenceItem* Was = nullptr;
+		for (const auto& Old : Before.staff.queue)
+		{
+			if (Old.id == Now.id)
+			{
+				Was = &Old;
+				break;
+			}
+		}
+		if (!Was)
+		{
+			if (Now.awaiting_choice && !pa250::letter_is_timely(Now))
+			{
+				News = FString::Printf(TEXT("A letter has reached the desk: %s. Open it from the desk button when you are ready."),
+									   *ToFStr(Now.subject));
+			}
+			else if (!Now.awaiting_choice && Now.kind != "requisition_aftermath")
+			{
+				News = FString::Printf(TEXT("Filed: %s."), *ToFStr(Now.subject));
+			}
+		}
+		else if (Was->status != "delivered" && Now.status == "delivered" &&
+				 (Now.received_powder > 0 || Now.received_arms > 0 || Now.received_provisions > 0))
+		{
+			News = FString::Printf(TEXT("%s: %s — arrived at the depot: +%d powder, +%d muskets, +%d provisions."),
+								   *ToFStr(After.staff.clerk_name), *ToFStr(Now.subject), Now.received_powder,
+								   Now.received_arms, Now.received_provisions);
+		}
+		else if (!Terminal(Was->status) && Terminal(Now.status))
+		{
+			News = FString::Printf(TEXT("%s: %s — %s"), *ToFStr(After.staff.clerk_name), *ToFStr(Now.subject),
+								   *ToFStr(Now.reason.empty() ? Now.status : Now.reason));
+		}
+	}
+	if (!News.IsEmpty())
+	{
+		LastDispatch = News;
+		++DispatchSerial;
+	}
+}
+
+void UPA250Subsystem::AfterLetterAnswered()
+{
+	const pa250::CampaignState& St = Controller.state();
+	bool bAwaiting = false;
+	for (const auto& C : St.staff.queue)
+	{
+		bAwaiting = bAwaiting || C.awaiting_choice;
+	}
+	if (!bAwaiting)
+	{
+		bDeskOpen = false;
+	}
+	if (bPausedByLetter && St.pending_event_id.empty() && !Controller.battle_pending())
+	{
+		SetPaused(false);  // the letter stopped the clock, so its answer starts it again
+	}
+	BumpHudEpoch();
 }
 
 void UPA250Subsystem::MaybeAutosave(const pa250::CampaignState& Before, const pa250::CampaignState& After)
@@ -370,6 +446,9 @@ bool UPA250Subsystem::ApplyBattleResult(const pa250::BattleResult& Result, FStri
 		OutError = ToFStr(Err);
 		return false;
 	}
+	bUnseenBattleReport = true;  // the campaign map opens the after-battle report by itself
+	// A question that arrives with the result holds the clock; answering it starts the clock again.
+	bPausedByLetter = !Controller.state().pending_event_id.empty() && IsPendingLetterTimely();
 	BumpHudEpoch();
 	return true;
 }
@@ -382,7 +461,7 @@ bool UPA250Subsystem::ChooseLogistics(const FString& LetterId, const FString& Ch
 		OutError = ToFStr(Errs.front());
 		return false;
 	}
-	BumpHudEpoch();
+	AfterLetterAnswered();
 	return true;
 }
 
@@ -394,7 +473,7 @@ bool UPA250Subsystem::ResolveCommander(const FString& Action, FString& OutError)
 		OutError = ToFStr(Errs.front());
 		return false;
 	}
-	BumpHudEpoch();
+	AfterLetterAnswered();
 	return true;
 }
 
@@ -652,6 +731,106 @@ const pa250::CorrespondenceItem* FindAwaitingLetter(const pa250::CampaignState& 
 }
 }
 
+bool UPA250Subsystem::IsStaffPanelOpen() const
+{
+	const pa250::CorrespondenceItem* C = FindAwaitingLetter(Controller.state());
+	if (!C || Controller.battle_pending())
+	{
+		return false;
+	}
+	if (!C->awaiting_choice)
+	{
+		return !Controller.state().pending_event_id.empty();  // a notice left open by an older save
+	}
+	return bDeskOpen || pa250::letter_is_timely(*C);
+}
+
+bool UPA250Subsystem::HasDeskLetter() const
+{
+	const pa250::CorrespondenceItem* C = FindAwaitingLetter(Controller.state());
+	return C && C->awaiting_choice && !Controller.battle_pending() && !IsStaffPanelOpen();
+}
+
+void UPA250Subsystem::OpenDesk()
+{
+	bDeskOpen = true;
+	BumpHudEpoch();
+}
+
+void UPA250Subsystem::CloseDesk()
+{
+	bDeskOpen = false;
+	BumpHudEpoch();
+}
+
+bool UPA250Subsystem::IsPendingLetterTimely() const
+{
+	const pa250::CorrespondenceItem* C = FindAwaitingLetter(Controller.state());
+	return C && pa250::letter_is_timely(*C);
+}
+
+int32 UPA250Subsystem::GetPendingLetterHoursLeft() const
+{
+	const pa250::CorrespondenceItem* C = FindAwaitingLetter(Controller.state());
+	const int64 Lapse = C ? pa250::letter_lapse_hour(*C) : 0;
+	return Lapse > 0 ? static_cast<int32>(FMath::Max<int64>(0, Lapse - Controller.state().now.hour_index)) : -1;
+}
+
+FString UPA250Subsystem::GetDeskChipText() const
+{
+	const pa250::CorrespondenceItem* C = FindAwaitingLetter(Controller.state());
+	if (!C)
+	{
+		return FString();
+	}
+	FString Out = FString::Printf(TEXT("Letter on the desk: %s"), *ToFStr(C->subject));
+	const int32 Left = GetPendingLetterHoursLeft();
+	if (Left >= 0)
+	{
+		Out += Left >= 48 ? FString::Printf(TEXT("  ·  answer within %d days"), (Left + 12) / 24)
+						  : FString::Printf(TEXT("  ·  answer within %d h"), Left);
+	}
+	return Out;
+}
+
+namespace
+{
+const pa250::CorrespondenceCatalogEntry* PendingSourceEntry(const pa250::CampaignState& St)
+{
+	const pa250::CorrespondenceItem* C = FindAwaitingLetter(St);
+	if (!C || C->kind != "source_decision" || C->source_id.empty())
+	{
+		return nullptr;
+	}
+	return pa250::find_correspondence_entry(C->source_id);
+}
+}
+
+int32 UPA250Subsystem::GetPendingLetterChoiceCount() const
+{
+	const pa250::CorrespondenceCatalogEntry* E = PendingSourceEntry(Controller.state());
+	return E ? static_cast<int32>(E->choices.size()) : 0;
+}
+
+FString UPA250Subsystem::GetPendingLetterChoiceId(int32 Index) const
+{
+	const pa250::CorrespondenceCatalogEntry* E = PendingSourceEntry(Controller.state());
+	return (E && Index >= 0 && Index < static_cast<int32>(E->choices.size())) ? ToFStr(E->choices[Index].id) : FString();
+}
+
+FString UPA250Subsystem::GetPendingLetterChoiceLabel(int32 Index) const
+{
+	const pa250::CorrespondenceCatalogEntry* E = PendingSourceEntry(Controller.state());
+	return (E && Index >= 0 && Index < static_cast<int32>(E->choices.size())) ? ToFStr(E->choices[Index].label) : FString();
+}
+
+FString UPA250Subsystem::GetPendingLetterChoiceSummary(int32 Index) const
+{
+	const pa250::CorrespondenceCatalogEntry* E = PendingSourceEntry(Controller.state());
+	return (E && Index >= 0 && Index < static_cast<int32>(E->choices.size())) ? ToFStr(E->choices[Index].effects_summary)
+																		   : FString();
+}
+
 bool UPA250Subsystem::IsPendingLetterAwaitingChoice() const
 {
 	const pa250::CorrespondenceItem* C = FindAwaitingLetter(Controller.state());
@@ -846,7 +1025,24 @@ FName UPA250Subsystem::LevelNameForFlow(EPA250Flow Flow)
 	}
 }
 
+FName UPA250Subsystem::BattleLevelForPreset(const FString& ScenarioPreset)
+{
+	static const TCHAR* Concord = TEXT("/Game/PA250/Maps/L_Concord");
+	if (ScenarioPreset == TEXT("concord_bridge") && FPackageName::DoesPackageExist(Concord))
+	{
+		return FName(Concord);
+	}
+	return LevelNameForFlow(EPA250Flow::Battle);
+}
+
 void UPA250Subsystem::TravelToFlowLevel(UObject* WorldContext) const
 {
+	if (GetFlow() == EPA250Flow::Battle)
+	{
+		const FName Level = BattleLevelForPreset(UTF8_TO_TCHAR(GetBattleSetup().scenario_preset.c_str()));
+		UE_LOG(LogTemp, Display, TEXT("PA250 battle level: %s"), *Level.ToString());
+		UGameplayStatics::OpenLevel(WorldContext, Level);
+		return;
+	}
 	UGameplayStatics::OpenLevel(WorldContext, LevelNameForFlow(GetFlow()));
 }

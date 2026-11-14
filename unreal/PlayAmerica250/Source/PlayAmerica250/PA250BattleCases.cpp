@@ -9,6 +9,7 @@
 #include "EngineUtils.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/StaticMeshActor.h"
+#include "PhysicsEngine/BodySetup.h"
 #include "Engine/World.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #if WITH_EDITOR
@@ -20,6 +21,7 @@
 #include "PA250AimComponent.h"
 #include "PA250BotSpacingTest.h"
 #include "PA250ControlPoint.h"
+#include "Campaign/PA250Subsystem.h"
 #include "PA250FlagArt.h"
 #include "PA250BattleHUD.h"
 #include "PA250FactionVisuals.h"
@@ -172,10 +174,12 @@ void RunWeapon(FLog& Log)
 {
 	UPA250WeaponTuning* Tun = UPA250WeaponTuning::MakeRuntimeDefaults();
 	const FPA250WeaponTuningValues& V = Tun->Values;
-	Log.Check(V.DamageAtDistanceCm(2000.f) == 100.f, TEXT("weapon: 100 inside 40 m"));
-	Log.Check(V.DamageAtDistanceCm(7000.f) == 80.f, TEXT("weapon: 80 at 70 m (linear)"));
-	Log.Check(V.DamageAtDistanceCm(10000.f) == 60.f, TEXT("weapon: 60 at 100 m"));
-	Log.Check(V.DamageAtDistanceCm(19000.f) == 60.f, TEXT("weapon: 60 out to max range"));
+	// Curve of 2026-11-13 (user: a man hit by a ball should go down): full to 60 m, 80 at 100 m.
+	// Before: full to 40 m, 60 at 100 m.
+	Log.Check(V.DamageAtDistanceCm(2000.f) == 100.f && V.DamageAtDistanceCm(6000.f) == 100.f, TEXT("weapon: 100 inside 60 m"));
+	Log.Check(V.DamageAtDistanceCm(8000.f) == 90.f, TEXT("weapon: 90 at 80 m (linear)"));
+	Log.Check(V.DamageAtDistanceCm(10000.f) == 80.f, TEXT("weapon: 80 at 100 m"));
+	Log.Check(V.DamageAtDistanceCm(19000.f) == 80.f, TEXT("weapon: 80 out to max range"));
 	Log.Check(V.DamageAtDistanceCm(25000.f) == 0.f, TEXT("weapon: 0 beyond 200 m"));
 	Log.Check(V.CurrentSpreadDegrees(true, 0.f) < V.CurrentSpreadDegrees(false, 0.f), TEXT("weapon: ADS tighter than hip"));
 	Log.Check(V.CurrentSpreadDegrees(false, 400.f) > V.CurrentSpreadDegrees(false, 0.f), TEXT("weapon: moving widens spread"));
@@ -298,6 +302,32 @@ void RunWeapon(FLog& Log)
 		FString::Printf(TEXT("weapon: jam clears after %.2fs held (want 1.5)"), Held));
 	Log.Check(Musket->GetReloadPhaseLabel().StartsWith(TEXT("1/3")), FString::Printf(TEXT("weapon: reload steps are numbered (%s)"), *Musket->GetReloadPhaseLabel()));
 	Musket->Destroy();
+
+	// The player loads standing or at his ordinary pace, never at a run; bots and riders are not held to it.
+	Log.Check(!ARFCharacter::ReloadBlockedByMovement(true, false, 0.f, 450.f) && !ARFCharacter::ReloadBlockedByMovement(true, false, 450.f, 450.f),
+		TEXT("reload on the move: the player may load standing and at his ordinary pace"));
+	Log.Check(ARFCharacter::ReloadBlockedByMovement(true, false, 650.f, 450.f), TEXT("reload on the move: the player cannot load at a run"));
+	Log.Check(!ARFCharacter::ReloadBlockedByMovement(false, false, 650.f, 450.f) && !ARFCharacter::ReloadBlockedByMovement(true, true, 650.f, 450.f),
+		TEXT("reload on the move: bots and riders are not held to it"));
+	if (AMusketWeapon* Paused = W.World->SpawnActor<AMusketWeapon>())
+	{
+		Paused->WeaponTuning = UPA250WeaponTuning::MakeRuntimeDefaults();
+		Paused->SetReloadPreset(EPA250ReloadPreset::Arcade);
+		Paused->StartReload();
+		Paused->TickActor(0.5f, LEVELTICK_All, Paused->PrimaryActorTick);
+		const EActiveReloadPhase Phase = Paused->GetSequencer().GetPhase();
+		const float Before = Paused->GetSequencer().GetPhaseProgress();
+		const int32 Misses = Paused->GetReloadStats().Miss;
+		Paused->SetReloadPaused(true);
+		for (int32 i = 0; i < 20; ++i) Paused->TickActor(0.5f, LEVELTICK_All, Paused->PrimaryActorTick);
+		Log.Check(Before > 0.f && Paused->IsReloadPaused() && Paused->IsReloading() && Paused->GetSequencer().GetPhase() == Phase && Paused->GetSequencer().GetPhaseProgress() == Before,
+			FString::Printf(TEXT("reload on the move: a paused reload keeps its place over 10 s (%.3f -> %.3f)"), Before, Paused->GetSequencer().GetPhaseProgress()));
+		Log.Check(Paused->CommitReload() == EActiveReloadHit::None && Paused->GetReloadStats().Miss == Misses, TEXT("reload on the move: a press while paused does nothing and is no fumble"));
+		Paused->SetReloadPaused(false);
+		Paused->TickActor(0.2f, LEVELTICK_All, Paused->PrimaryActorTick);
+		Log.Check(Paused->GetSequencer().GetPhase() != Phase || Paused->GetSequencer().GetPhaseProgress() > Before, TEXT("reload on the move: it carries on from the same point once he slows"));
+		Paused->Destroy();
+	}
 
 	// Firing plants a real soldier's feet, then lets him walk again.
 	ARFCharacter* Soldier = W.World->SpawnActor<ARFCharacter>(FVector(0.f, 0.f, 100.f), FRotator::ZeroRotator);
@@ -625,11 +655,19 @@ void RunConquest(FLog& Log)
 		&& LoadObject<USoundBase>(nullptr, TEXT("/Game/PA250/Audio/SFX/ambience_dawn.ambience_dawn")) != nullptr, TEXT("look: footsteps and the dawn ambience are imported"));
 
 	// Losing on tickets: never while the human player is alive on that side.
-	Log.Check(APA250BattleGameMode::SideIsOut(0, 6, true, 5, false), TEXT("exhaustion: 0 tickets = out, even with men standing"));
+	Log.Check(!APA250BattleGameMode::SideIsOut(0, 6, true, 5, false) && APA250BattleGameMode::SideIsOut(0, 6, true, 0, false),
+		TEXT("exhaustion: 0 tickets with men standing is not out; 0 tickets and the last man down is"));
 	Log.Check(!APA250BattleGameMode::SideIsOut(0, 6, true, 1, true), TEXT("exhaustion: not out while the player is alive on that side"));
 	Log.Check(!APA250BattleGameMode::SideIsOut(3, 6, true, 0, false), TEXT("exhaustion: tickets left = not out"));
 	Log.Check(!APA250BattleGameMode::SideIsOut(0, 0, false, 0, false) && APA250BattleGameMode::SideIsOut(0, 0, true, 0, false)
 		&& !APA250BattleGameMode::SideIsOut(0, 0, true, 2, false), TEXT("exhaustion: a side that started with no tickets is out only once fielded and wiped"));
+
+	// A remnant breaks: no reserve, a handful left, never the player's own side while he lives.
+	Log.Check(APA250BattleGameMode::RemnantBreaks(0, APA250BattleGameMode::RemnantMen, false) && APA250BattleGameMode::RemnantBreaks(0, 1, false)
+		&& !APA250BattleGameMode::RemnantBreaks(0, APA250BattleGameMode::RemnantMen + 1, false) && !APA250BattleGameMode::RemnantBreaks(0, 0, false),
+		TEXT("remnant: no reserve and a handful standing breaks; a larger body or nobody does not"));
+	Log.Check(!APA250BattleGameMode::RemnantBreaks(2, 1, false) && !APA250BattleGameMode::RemnantBreaks(0, 1, true),
+		TEXT("remnant: not while a reserve is left, never under a living player"));
 
 	// One ticket held for the human player.
 	{
@@ -939,8 +977,17 @@ void RunTraining(FLog& Log)
 		Log.Check(Line.MaxHealth == 100.f && Line.SpeedScale == 1.f && Line.SpreadScale == 1.f && Line.RangeScale == 1.f
 			&& Line.ReloadScale == 1.f && Line.MeleeScale == 1.f && Mil.MaxHealth == 80.f,
 			TEXT("classes: the line soldier is the unchanged baseline; militia keep 80 health"));
-		Log.Check(Gren.MaxHealth > Line.MaxHealth && Gren.MeleeScale > Line.MeleeScale && Gren.SpeedScale < Line.SpeedScale,
-			TEXT("classes: grenadiers are tougher and hit harder, and are no faster for it"));
+		Log.Check(Gren.MaxHealth == Line.MaxHealth && Gren.MeleeScale > Line.MeleeScale && Gren.SpeedScale < Line.SpeedScale,
+			TEXT("classes: grenadiers hit harder with the bayonet, are no faster, and a ball stops them like a line soldier"));
+		{
+			const FPA250WeaponTuningValues& V = GetDefault<UPA250WeaponTuning>()->Values;
+			float Toughest = 0.f;
+			for (const TCHAR* F : {TEXT("british"), TEXT("continental")})
+				for (const TCHAR* C : {TEXT("line_infantry"), TEXT("grenadier"), TEXT("light_infantry"), TEXT("officer"), TEXT("militia"), TEXT("rifleman")})
+					Toughest = FMath::Max(Toughest, PA250UnitClasses::KitFor(F, C).MaxHealth);
+			Log.Check(V.TorsoDamageFar * V.HeadMultiplier >= Toughest && V.DamageAtDistanceCm(V.FalloffStartMeters * 100.f) >= Toughest,
+				FString::Printf(TEXT("damage: a head hit kills any class at any range, a body hit within %.0f m (toughest %.0f health)"), V.FalloffStartMeters, Toughest));
+		}
 		Log.Check(Light.SpeedScale > Line.SpeedScale && Light.MaxHealth < Line.MaxHealth && Light.MeleeScale < Line.MeleeScale,
 			TEXT("classes: light infantry are faster and lighter"));
 		Log.Check(Rifle.RangeScale >= 2.f && Rifle.SpreadScale < 0.6f && Rifle.ReloadScale > 1.4f && Rifle.MeleeScale < 1.f
@@ -1586,14 +1633,59 @@ void RunBattleRoad(FLog& Log)
 				if (A->ActorHasTag(TEXT("PA250Cover")))
 				{
 					++Cover;
-					// Loaded-not-started level: world transforms aren't computed yet; root relative = world.
-					const FVector L = A->GetRootComponent() ? A->GetRootComponent()->GetRelativeLocation() : FVector::ZeroVector;
-					RoadCover += (L.X > 1500.f && L.X < 7000.f) ? 1 : 0; // between the Green and the British start
+					// The walls along the column's approach carry their own tag (build_levels.py); the
+					// Common is at its 1775 size and bearing now, so an X range no longer picks them out.
+					RoadCover += A->ActorHasTag(TEXT("PA250BattleRoad")) ? 1 : 0;
 				}
 				if (A->IsA<APlayerStart>() && A->ActorHasTag(TEXT("continental_muster"))) ++Muster;
 			}
 			Log.Check(RoadCover >= 12, FString::Printf(TEXT("battle road: walls flank the British approach (%d tagged segments; %d cover in total)"), RoadCover, Cover));
 			Log.Check(Muster == 3, FString::Printf(TEXT("battle road: 3 militia muster points (north, south, west) - found %d"), Muster));
+		}
+	}
+	// Concord has its own level: three posts, a river that stops men and the built bridge.
+	{
+		Log.Check(UPA250Subsystem::BattleLevelForPreset(TEXT("concord_bridge")) == FName(TEXT("/Game/PA250/Maps/L_Concord")),
+			TEXT("concord: the bridge fight travels to L_Concord"));
+		Log.Check(UPA250Subsystem::BattleLevelForPreset(TEXT("battle_road")) == FName(TEXT("/Game/PA250/Maps/L_Lexington"))
+			&& UPA250Subsystem::BattleLevelForPreset(TEXT("lexington_common")) == FName(TEXT("/Game/PA250/Maps/L_Lexington")),
+			TEXT("concord: the Common and Battle Road fights stay on L_Lexington"));
+		UWorld* Map = LoadObject<UWorld>(nullptr, TEXT("/Game/PA250/Maps/L_Concord.L_Concord"));
+		Log.Check(Map && Map->PersistentLevel, TEXT("concord: L_Concord loads"));
+		if (Map && Map->PersistentLevel)
+		{
+			int32 PostCount = 0, Crossing = 0, Channel = 0, Cover = 0, Starts = 0, MenOnly = 0, BridgeHulls = 0;
+			for (AActor* A : Map->PersistentLevel->Actors)
+			{
+				if (!A) continue;
+				if (const AStaticMeshActor* SM = Cast<AStaticMeshActor>(A))
+				{
+					const UStaticMeshComponent* C = SM->GetStaticMeshComponent();
+					// Saved state: every block stops a man. The game narrows them to men only when the
+					// level starts (APA250BattleGameMode::SealLevelRiver), so shot and sight cross the water.
+					if (A->ActorHasTag(TEXT("PA250Creek")) && C && C->GetCollisionEnabled() == ECollisionEnabled::QueryAndPhysics
+						&& C->GetCollisionResponseToChannel(ECC_Pawn) == ECR_Block)
+					{
+						++MenOnly;
+					}
+					if (A->ActorHasTag(TEXT("PA250LevelCrossing")) && C && C->GetStaticMesh() && C->GetStaticMesh()->GetBodySetup()
+						&& C->GetCollisionEnabled() != ECollisionEnabled::NoCollision)
+					{
+						BridgeHulls = C->GetStaticMesh()->GetBodySetup()->AggGeom.ConvexElems.Num();
+					}
+				}
+				PostCount += A->IsA<APA250ControlPoint>() ? 1 : 0;
+				Crossing += A->ActorHasTag(TEXT("PA250LevelCrossing")) ? 1 : 0;
+				Channel += A->ActorHasTag(TEXT("PA250Creek")) ? 1 : 0;
+				Cover += A->ActorHasTag(TEXT("PA250Cover")) ? 1 : 0;
+				Starts += (A->IsA<APlayerStart>() && (A->ActorHasTag(TEXT("british")) || A->ActorHasTag(TEXT("continental")))) ? 1 : 0;
+			}
+			Log.Check(PostCount == 3 && Crossing == 1, FString::Printf(TEXT("concord: 3 posts and 1 built bridge (found %d, %d)"), PostCount, Crossing));
+			Log.Check(Channel >= 62, FString::Printf(TEXT("concord: the river channel and the bridge's sides are closed to men (%d blocks)"), Channel));
+			Log.Check(MenOnly == Channel, FString::Printf(TEXT("concord: every channel block stops a man (%d of %d)"), MenOnly, Channel));
+			// Deck and abutments only: a hull on the railings stopped every ball fired across them.
+			Log.Check(BridgeHulls == 10, FString::Printf(TEXT("concord: the bridge carries deck collision and none on its rails (%d hulls)"), BridgeHulls));
+			Log.Check(Cover >= 40 && Starts == 28, FString::Printf(TEXT("concord: walls for cover and 28 starts (%d, %d)"), Cover, Starts));
 		}
 	}
 	// Cover-line choice: a wall in front of the post (toward the enemy), distinct walls per squad.
@@ -1719,6 +1811,21 @@ void RunScenario(FLog& Log)
 	const bool bGreenMoved = Green->ApplyCapturePressure(TEXT("continental"), 4, 0, 10.f);
 	Log.Check(bGreenMoved && Green->GetHolder() == TEXT("continental"), TEXT("scenario: the crossing changes hands"));
 	Log.Check(Green->GetObjectiveTitle() == TEXT("North Bridge"), TEXT("scenario: the crossing post is the North Bridge"));
+	{
+		// A level-built river: its blocks end up stopping men and nothing else.
+		AStaticMeshActor* Block = W.World->SpawnActor<AStaticMeshActor>(FVector(0.f, 9000.f, 0.f), FRotator::ZeroRotator);
+		Block->Tags.Add(TEXT("PA250Creek"));
+		Block->GetStaticMeshComponent()->SetMobility(EComponentMobility::Movable);
+		Block->GetStaticMeshComponent()->SetCollisionProfileName(TEXT("BlockAll"));
+		const int32 Sealed = APA250BattleGameMode::SealLevelRiver(W.World);
+		const UStaticMeshComponent* C = Block->GetStaticMeshComponent();
+		Log.Check(Sealed == 1 && C->GetCollisionResponseToChannel(ECC_Pawn) == ECR_Block
+			&& C->GetCollisionResponseToChannel(ECC_Visibility) == ECR_Ignore
+			&& C->GetCollisionResponseToChannel(ECC_WorldDynamic) == ECR_Ignore
+			&& C->GetCollisionResponseToChannel(ECC_WorldStatic) == ECR_Ignore,
+			TEXT("scenario: a level river stops men but not shot or sight"));
+		Block->Destroy();
+	}
 	const FPA250CreekBridge Span = APA250BattleGameMode::PlanCreekBridge(FVector(100.f, 200.f, 50.f));
 	Log.Check(Span.SpansCreek(), FString::Printf(TEXT("scenario: deck %.0f cm crosses a %.0f cm creek"), Span.DeckSizeCm.X, Span.CreekSizeCm.X));
 	const int32 Pieces = APA250BattleGameMode::SpawnCreekBridge(W.World, FVector(0.f, 0.f, 0.f));

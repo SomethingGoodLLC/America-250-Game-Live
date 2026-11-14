@@ -165,6 +165,21 @@ int32 UPA250VisualsCommandlet::Main(const FString& Params)
 				Refresh();
 				const FVector Hand0 = At(TEXT("hand_r")), FootL0 = At(TEXT("foot_l")), FootR0 = At(TEXT("foot_r")), Pelvis0 = At(TEXT("pelvis")), Head0 = At(TEXT("head"));
 
+				// Carry: the right hand comes up in front of the hip (the unarmed clip hangs it at the thigh) and the
+				// feet do not move; any other hold takes the carry's share.
+				FPA250MeleePose Carry = Dirs;
+				Carry.Carry = 1.f;
+				Anim->SetMeleePose(Carry);
+				Refresh();
+				const FVector HandC = At(TEXT("hand_r")), FootLC = At(TEXT("foot_l")), FootRC = At(TEXT("foot_r"));
+				UE_LOG(LogTemp, Display, TEXT("PA250.Visuals measure carry (cm, actor space, vs idle): hand_r %s  foot_l %s  foot_r %s"),
+					*(HandC - Hand0).ToCompactString(), *(FootLC - FootL0).ToCompactString(), *(FootRC - FootR0).ToCompactString());
+				Check(HandC.X - Hand0.X > 8.f && FMath::Abs(HandC.Y) < FMath::Abs(Hand0.Y) - 8.f, TEXT("carry: the right hand is brought forward and in toward the body's middle"));
+				Check(FVector::Dist(FootLC, FootL0) < 0.5f && FVector::Dist(FootRC, FootR0) < 0.5f, TEXT("carry: the clip's feet are left where they are"));
+				Check(BonesValid(), TEXT("carry: every body bone is finite with a unit rotation"));
+				Carry.Shoulder = 1.f;
+				Check(Carry.CarryWeight() == 0.f, TEXT("carry: gives way entirely to the shouldered hold"));
+
 				FPA250MeleePose Lunge = Dirs;
 				Lunge.Lunge = 1.f;
 				Lunge.RearFootLagCm = 30.f;

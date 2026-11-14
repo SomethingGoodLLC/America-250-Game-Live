@@ -259,6 +259,87 @@ void APA250CampaignGameMode::BeginPlay()
 		}), 30.f, false);
 	}
 
+	if (FParse::Param(FCommandLine::Get(), TEXT("PA250DeskProbe")))
+	{
+		// Staff-desk check in a real window: fights the first battle through the sim, then captures
+		// ("Shot showui", first at 12 s) the commander's question (the one letter that stops the clock),
+		// the desk button, the supply letter, the running clock with a source letter waiting, and that
+		// letter's choices. Never saves.
+		auto Step = [this](float At, TFunction<void()> Fn) {
+			FTimerHandle H;
+			GetWorldTimerManager().SetTimer(H, FTimerDelegate::CreateLambda([this, Fn]() {
+				Fn();
+				if (APlayerController* PC = GetWorld()->GetFirstPlayerController()) PC->ConsoleCommand(TEXT("Shot showui"));
+			}), At, false);
+		};
+		auto Report = [this](const TCHAR* Stage) {
+			UPA250Subsystem* PS = UPA250Subsystem::Get(this);
+			if (!PS) return;
+			const pa250::YMDH D = pa250::to_ymdh(PS->GetState().now);
+			UE_LOG(LogTemp, Display,
+				   TEXT("DESK_PROBE: %s | %02d-%02d %02dh paused=%d panel=%d timely=%d desk=%d gold=%d | letter='%s' choices=%d | chip='%s' | news='%s'"),
+				   Stage, D.m, D.d, D.h, PS->IsPaused() ? 1 : 0, PS->IsStaffPanelOpen() ? 1 : 0,
+				   PS->IsPendingLetterTimely() ? 1 : 0, PS->HasDeskLetter() ? 1 : 0, PS->GetState().player_gold,
+				   *PS->GetPendingLetterSubject(), PS->GetPendingLetterChoiceCount(), *PS->GetDeskChipText(), *PS->GetLastDispatch());
+		};
+		Step(12.f, [this, Report]() {
+			UPA250Subsystem* PS = UPA250Subsystem::Get(this);
+			if (!PS) return;
+			FString Err;
+			for (int32 i = 0; i < 72 && !PS->IsBattlePending(); ++i) PS->AdvanceHours(1, Err);
+			const FString Field = UTF8_TO_TCHAR(PS->GetState().pending_battle.province.c_str());
+			const bool bBegun = PS->BeginBattle(Err);
+			const bool bDone = bBegun && PS->ApplyBattleResultJson(FString::Printf(
+				TEXT("{\"province_id\":\"%s\",\"winner\":\"continental\",\"objective_holder\":\"continental\",\"losses\":{\"continental\":{\"militia\":1},\"british\":{\"line_infantry\":2}}}"),
+				*Field), Err);
+			PS->AcknowledgeBattleReport();
+			UE_LOG(LogTemp, Display, TEXT("DESK_PROBE: battle at %s begun=%d applied=%d %s"), *Field, bBegun ? 1 : 0, bDone ? 1 : 0, *Err);
+			Report(TEXT("after battle: commander's question"));
+		});
+		Step(13.5f, [Report]() { Report(TEXT("commander's question, settled frame")); });
+		Step(15.f, [this, Report]() {
+			if (MapWidget) MapWidget->PressCommander(TEXT("preserve_force"));
+			Report(TEXT("commander answered (the clock must be running again): desk button"));
+			UPA250Subsystem* PS = UPA250Subsystem::Get(this);
+			if (!PS) return;
+			FString Err;
+			// A ceasefire through the ordinary diplomacy path keeps the roads quiet, so the only
+			// things that could stop the clock from here on are letters and deliveries. Talks pause it;
+			// the probe holds it paused until the supply letter is answered.
+			const bool bTalks = PS->BeginDiplomacy(TEXT("british"), Err);
+			const bool bTruce = bTalks && PS->AcceptProposalJson(TEXT("{\"spoken_line\":\"probe\",\"clauses\":[{\"type\":\"ceasefire\",\"days\":30}]}"), Err);
+			UE_LOG(LogTemp, Display, TEXT("DESK_PROBE: ceasefire talks=%d accepted=%d %s"), bTalks ? 1 : 0, bTruce ? 1 : 0, *Err);
+		});
+		Step(18.f, [this, Report]() {
+			if (UPA250Subsystem* PS = UPA250Subsystem::Get(this)) PS->OpenDesk();
+			Report(TEXT("desk opened: supply letter"));
+		});
+		Step(21.f, [this, Report]() {
+			if (MapWidget) MapWidget->PressLogistics(TEXT("purchase"));
+			if (UPA250Subsystem* PS = UPA250Subsystem::Get(this))
+			{
+				PS->SetSpeedIndex(4);  // 6 h/s: a day and a half before the next capture
+				PS->SetPaused(false);
+			}
+			Report(TEXT("supply answered: clock started by the probe"));
+		});
+		Step(27.f, [this, Report]() { Report(TEXT("6 s of running clock: deliveries and letters must not pause it")); });
+		Step(30.f, [this, Report]() {
+			if (UPA250Subsystem* PS = UPA250Subsystem::Get(this)) PS->OpenDesk();
+			Report(TEXT("desk opened: source letter"));
+		});
+		Step(31.5f, [Report]() { Report(TEXT("source letter, settled frame")); });
+		Step(33.f, [this, Report]() {
+			UPA250Subsystem* PS = UPA250Subsystem::Get(this);
+			if (PS && MapWidget && PS->GetPendingLetterChoiceCount() > 0) MapWidget->PressLogistics(PS->GetPendingLetterChoiceId(0));
+			Report(TEXT("first choice taken"));
+		});
+		FTimerHandle QuitHandle;
+		GetWorldTimerManager().SetTimer(QuitHandle, FTimerDelegate::CreateLambda([this]() {
+			UKismetSystemLibrary::QuitGame(this, nullptr, EQuitPreference::Quit, false);
+		}), 37.f, false);
+	}
+
 	if (FParse::Param(FCommandLine::Get(), TEXT("PA250Shot")))
 	{
 		FTimerHandle ShotHandle;
@@ -397,6 +478,19 @@ void APA250CampaignGameMode::RunAutoplayCampaign()
 
 	if (Sub->AutoplayStage == TEXT("battle_done"))
 	{
+		// Back on the map after a fight: the after-battle report must be up without a click.
+		Check(Sub, Sub->HasUnseenBattleReport() && !MapWidget->BattleReportText().IsEmpty(),
+			TEXT("aftermath: the after-battle report opens by itself on the map"));
+		const FString Path = FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() / TEXT("PA250/after_battle_report.png"));
+		FScreenshotRequest::RequestScreenshot(Path, true, false);
+		Sub->AutoplayStage = TEXT("battle_report_shown");
+		FTimerHandle H;
+		GetWorldTimerManager().SetTimer(H, FTimerDelegate::CreateUObject(this, &APA250CampaignGameMode::RunAutoplayCampaign), 2.f, false);
+		return;
+	}
+	if (Sub->AutoplayStage == TEXT("battle_report_shown"))
+	{
+		Sub->AcknowledgeBattleReport();
 		// Resolve the aftermath staff letter so deliveries/events do not strand later hour advances.
 		ResolveAllStaffEvents(Sub);
 		Check(Sub, Sub->GetState().progress.lexington_fought || Sub->GetState().progress.battles_fought > 0,

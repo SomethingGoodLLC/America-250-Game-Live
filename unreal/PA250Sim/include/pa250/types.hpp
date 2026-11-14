@@ -408,10 +408,28 @@ struct CampaignState {
 };
 
 // Immutable catalog entry (opening-war correspondence registry). Never mutated by choices.
+// Data-driven consequences of a catalog choice (GAMEPLAY TUNING, read from the catalog JSON).
+struct CorrespondenceChoiceEffects {
+    int gold = 0;              // negative = cost; the choice is refused if the treasury is short
+    int local_support = 0;
+    int british_attitude = 0;
+    int provisions = 0;        // to the player's depot; with delivery_hours > 0 it arrives later
+    int powder = 0;
+    int delivery_hours = 0;
+    int army_morale = 0;       // every army of the player's faction
+    int army_readiness = 0;
+    int clerk_load = 0;        // desk slots used today
+    bool any() const {
+        return gold || local_support || british_attitude || provisions || powder || army_morale ||
+               army_readiness || clerk_load;
+    }
+};
+
 struct CorrespondenceChoiceDef {
     std::string id;
     std::string label;
     std::string effects_summary;  // player-facing; amounts are gameplay tuning
+    CorrespondenceChoiceEffects effects;
 };
 
 struct CorrespondenceCatalogEntry {

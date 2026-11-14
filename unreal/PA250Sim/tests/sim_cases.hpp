@@ -1021,16 +1021,21 @@ static void test_logistics_loop() {
     CHECK(!s.progress.last_battle_report.province_id.empty());
     std::vector<Interrupt> ints;
     tick_logistics(s, ints);
-    CHECK(!ints.empty());
-    CHECK(std::find(ints.begin(), ints.end(), Interrupt::EventPopup) != ints.end());
-    CHECK(!s.staff.queue.empty());
-    CHECK(s.staff.queue.back().awaiting_choice);
-    const std::string letter_id = s.staff.queue.back().id;
+    // The supply letter waits on the desk and does not stop the clock; the detached
+    // commander's question arrives beside it and is the one that interrupts.
+    CHECK(s.staff.queue.size() == 2);
+    CHECK(s.staff.queue.front().awaiting_choice);
+    CHECK(!letter_is_timely(s.staff.queue.front()));
+    CHECK(s.staff.queue.front().subject.find("Lexington") != std::string::npos);
+    CHECK(letter_is_timely(s.staff.queue.back()));
+    CHECK(s.pending_event_id == s.staff.queue.back().id);
+    CHECK(std::count(ints.begin(), ints.end(), Interrupt::EventPopup) == 1);
+    const std::string letter_id = s.staff.queue.front().id;
     // Purchase path: gold down, delivery later, no double-count on save/load.
     const int gold0 = s.player_gold;
     s = choose_logistics(s, letter_id, "purchase");
     CHECK(s.player_gold == gold0 - 40);
-    CHECK(!s.staff.queue.back().awaiting_choice);
+    CHECK(!s.staff.queue.front().awaiting_choice);
     const int powder_mid = cont_depot_c(s).powder;
     // Advance to delivery hour.
     for (int i = 0; i < 6; ++i) {
@@ -1163,7 +1168,7 @@ static void test_logistics_edges() {
             if (s.pending_battle.active) s.pending_battle = {};
         }
         CHECK(s.staff.queue.front().status == "delivered");
-        CHECK(s.pending_event_id == lid);
+        CHECK(s.pending_event_id.empty());  // a delivery is a notice, never a popup
         const int powder = cont_depot_c(s).powder;
         const int gold = s.player_gold;
         s = choose_logistics(s, lid, "dismiss");
@@ -1194,9 +1199,12 @@ static void test_logistics_edges() {
         CHECK(s.staff.queue.back().kind == "commander_report");
         CampaignState t = resolve_commander_request(s, "contest_crossing");
         CHECK(t.progress.commander.objective == "preserve_force");
-        CHECK(t.staff.queue.back().awaiting_choice);
+        // The chapter briefing is filed on arrival: nothing to answer, nothing interrupted.
+        CHECK(ints.empty());
+        CHECK(!s.staff.queue.back().awaiting_choice);
+        CHECK(t.staff.queue.back().status == "approved");
         CampaignState u = resolve_commander_request(s, "bogus_action");
-        CHECK(u.staff.queue.back().awaiting_choice);
+        CHECK(u.staff.queue.back().status == "approved");
     }
     {
         CampaignState s = fresh();
@@ -1755,6 +1763,122 @@ static void test_opening_war_l3_loop() {
     // Historical pane text is catalog-backed and not rewritten by a prior decision path.
     CHECK(hist_body.find("Abigail Adams") != std::string::npos);
     CHECK(find_correspondence_entry("L3")->evidence_summary.find("Guards maintained") != std::string::npos);
+}
+
+static void test_desk_letters_do_not_stop_the_clock() {
+    ensure_opening_war_catalog();
+    // Only the detached commander's question interrupts.
+    {
+        CampaignState s = fresh();
+        ensure_logistics_defaults(s);
+        s.progress.lexington_fought = true;
+        s.progress.battles_fought = 1;
+        std::vector<Interrupt> ints;
+        tick_logistics(s, ints);
+        CHECK(s.progress.commander.pending_clarification);
+        CHECK(letter_is_timely(s.staff.queue.back()));
+        CHECK(letter_lapse_hour(s.staff.queue.back()) == 0);
+        CHECK(std::find(ints.begin(), ints.end(), Interrupt::EventPopup) != ints.end());
+    }
+    // A second clash inside the week does not bring the supply letter back.
+    {
+        CampaignState s = fresh();
+        ensure_logistics_defaults(s);
+        s.progress.aftermath_pending = true;
+        std::vector<Interrupt> ints;
+        tick_logistics(s, ints);
+        const size_t letters = s.staff.queue.size();
+        s = choose_logistics(s, s.staff.queue.back().id, "dismiss");
+        s.progress.aftermath_pending = true;
+        s.now.hour_index += 24;
+        tick_logistics(s, ints);
+        CHECK(s.staff.queue.size() == letters);
+        CHECK(!s.progress.aftermath_pending);
+        s.progress.aftermath_pending = true;
+        s.now.hour_index += 24 * 7;
+        tick_logistics(s, ints);
+        CHECK(s.staff.queue.size() == letters + 1);
+    }
+    // An unanswered desk letter is set aside by the clerk after its window.
+    {
+        CampaignState s = fresh();
+        ensure_logistics_defaults(s);
+        s.progress.aftermath_pending = true;
+        std::vector<Interrupt> ints;
+        tick_logistics(s, ints);
+        const std::string lid = s.staff.queue.back().id;
+        const int64_t lapse = letter_lapse_hour(s.staff.queue.back());
+        CHECK(lapse == s.now.hour_index + 72);
+        const int gold = s.player_gold;
+        s.now.hour_index = lapse - 1;
+        tick_logistics(s, ints);
+        CHECK(s.pending_event_id == lid);
+        s.now.hour_index = lapse;
+        tick_logistics(s, ints);
+        CHECK(ints.empty());
+        CHECK(s.pending_event_id.empty());
+        CHECK(s.player_gold == gold);
+        for (const auto& c : s.staff.queue)
+            if (c.id == lid) {
+                CHECK(c.status == "dismissed");
+                CHECK(c.reason.find("Left unanswered") != std::string::npos);
+            }
+    }
+    // L1 is a decision with consequences now; L2 is filed without taking the screen.
+    {
+        CampaignState s = fresh();
+        ensure_logistics_defaults(s);
+        s.progress.lexington_fought = true;
+        s.progress.concord_followup_seeded = true;
+        s.now = from_ymdh(YMDH{1775, 4, 25, 0});
+        clear_staff_desk(s);
+        s.progress.received_source_ids.clear();
+        std::vector<Interrupt> ints;
+        tick_logistics(s, ints);
+        CHECK(ints.empty());
+        CHECK(s.staff.queue.back().source_id == "L1");
+        CHECK(s.staff.queue.back().kind == "source_decision");
+        CHECK(s.staff.queue.back().awaiting_choice);
+        const std::string l1 = s.staff.queue.back().id;
+
+        CampaignState buy = s;
+        const int gold = buy.player_gold;
+        const int prov = cont_depot_c(buy).provisions;
+        buy = choose_logistics(buy, l1, "buy_merchant_stock");
+        CHECK(buy.player_gold == gold - 30);
+        CHECK(cont_depot_c(buy).provisions == prov);  // commit is not receive
+        CHECK(buy.pending_event_id.empty());
+        // Exactly-once: answering again changes nothing.
+        CHECK(choose_logistics(buy, l1, "buy_merchant_stock").player_gold == gold - 30);
+        buy.now.hour_index += 12;
+        ints.clear();
+        tick_logistics(buy, ints);
+        CHECK(cont_depot_c(buy).provisions >= prov + 8);
+
+        CampaignState strict = s;
+        const int support = strict.local_support;
+        const int attitude = strict.relations.at(kBritish);
+        strict = choose_logistics(strict, l1, "enforce_association");
+        CHECK(strict.player_gold == gold + 15);
+        CHECK(strict.local_support == support - 5);
+        CHECK(strict.relations.at(kBritish) == attitude - 3);
+
+        CampaignState poor = s;
+        poor.player_gold = 5;
+        poor = choose_logistics(poor, l1, "buy_merchant_stock");
+        CHECK(poor.player_gold == 5);
+        for (const auto& c : poor.staff.queue)
+            if (c.id == l1) CHECK(c.status == "refused");
+
+        // With L1 answered the next tick files L2: no awaiting letter, no popup.
+        strict.now.hour_index += 1;
+        ints.clear();
+        tick_logistics(strict, ints);
+        CHECK(ints.empty());
+        CHECK(strict.staff.queue.back().source_id == "L2");
+        CHECK(!strict.staff.queue.back().awaiting_choice);
+        CHECK(strict.pending_event_id.empty());
+    }
 }
 
 static void test_opening_war_l5_l7() {
@@ -2626,6 +2750,7 @@ inline int run_all(Reporter& rep, const std::string& data_dir, const std::string
         {"enemy_economy", test_enemy_economy},
         {"opening_war_l3_loop", test_opening_war_l3_loop},
         {"opening_war_l5_l7", test_opening_war_l5_l7},
+        {"desk_letters_do_not_stop_the_clock", test_desk_letters_do_not_stop_the_clock},
     };
     for (auto& c : cases) {
         int before = g_failed();

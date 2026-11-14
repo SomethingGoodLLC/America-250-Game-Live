@@ -150,6 +150,13 @@ public:
 	/** Last reload press result, for the HUD flash (None when it has faded). */
 	EActiveReloadHit GetReloadFeedback() const { return ReloadFeedbackTimer > 0.f ? LastReloadHit : EActiveReloadHit::None; }
 	bool IsSprinting() const { return bSprinting; }
+	/** GAMEPLAY SETTING (user decision 2026-11-14): the player loads standing or at his ordinary pace, never at a
+	 *  run. Pure: true when a player on foot moves faster than his ordinary pace. Bots and riders are not held to it. */
+	static bool ReloadBlockedByMovement(bool bPlayer, bool bMounted, float Speed2D, float OrdinaryPace)
+	{
+		return bPlayer && !bMounted && Speed2D > OrdinaryPace + 30.f;
+	}
+	bool IsReloadBlockedByMovement() const;
 
 	UFUNCTION(BlueprintPure, Category = "Combat")
 	bool IsDead() const { return bIsDead; }

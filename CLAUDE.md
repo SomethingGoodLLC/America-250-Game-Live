@@ -77,6 +77,12 @@ A plan is not final until it:
 - Verify imported assets in a **fresh Unreal process**. The reference importer supports `PA250_FARMHOUSE_VERIFY_ONLY=1`. Check dimensions in centimeters, triangle counts, material graph connections, texture settings, saved collision hulls and compiled Blueprint component transforms/profiles. `StaticMeshEditorSubsystem` may be unavailable in a commandlet: inspect `StaticMesh.body_setup.agg_geom.convex_elems` directly. UE 5.8 subobject gathering can return duplicate handles; deduplicate by the component UObject path, not by mesh name.
 - The first farmhouse is imported at `/Game/PA250/Buildings/ColonialFarmhouse`: `BP_ColonialFarmhouse`, 4 meshes, 13 materials and 33 textures (51 assets). UE 5.8.4 fresh-process validation passed with 6 house and 13 fence collision hulls. It is an exterior-only asset with opaque tinted glazing. Headless validation does not establish rendered appearance, gameplay collision behavior or GPU correctness; use the real-window verification rules above for those.
 
+## Generated images (OpenAI)
+- Use the latest image model: `gpt-image-2.6-sunburst`, quality high (user decision 2026-11-13); `-flare` only for throwaway tests. `PA250_OPENAI_IMAGE_MODEL` overrides. The key is `OPENAI_API_KEY` in `services/negotiation/.env`; never print it.
+- 2.6 takes custom sizes (multiples of 16, aspect up to 3:1, edge up to 3840) and `background: "transparent"`. Keep each raw image beside its processed output (`SourceArt/**/raw`, `plate_raw.png`) so processing reruns offline (`--process-only`).
+- Tools: `tools/art/build_battlefield_textures.py` (tiling surfaces), `build_battlefield_backdrop.py` (horizon treeline strip, aerial ground variation), `build_parlour_plate.py` (the parley room as a photograph from the fixed room camera), `build_envoy_live.py`.
+- A sampler must match its texture (sRGB colour, linear colour, masks, normal). A mismatch compiles to the grey grid material with only a log warning: grep the run log for `Failed to compile Material` after any material change.
+
 ## Map pipeline (`ports/GrandStrategyMac`, TestHost only)
 - The purchased InteractiveMap plugin is read-only. Fixes go in `TestHost/Source/PortHost`; map assets go under `/Game/<MapName>`. The repository must stay private (`port-changes.patch` holds plugin source).
 - Lookup texture: exact unique RGB per region, never filtered. Import as UserInterface (`TC_EditorIcon`), no mips, sRGB off, nearest, never stream; anything else fails silently (white map).

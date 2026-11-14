@@ -60,6 +60,18 @@ CorrespondenceCatalogEntry entry_from_json(const json& j) {
             ch.id = c.value("id", "");
             ch.label = c.value("label", "");
             ch.effects_summary = c.value("effects_summary", "");
+            if (c.contains("effects")) {
+                const json& fx = c.at("effects");
+                ch.effects.gold = fx.value("gold", 0);
+                ch.effects.local_support = fx.value("local_support", 0);
+                ch.effects.british_attitude = fx.value("british_attitude", 0);
+                ch.effects.provisions = fx.value("provisions", 0);
+                ch.effects.powder = fx.value("powder", 0);
+                ch.effects.delivery_hours = fx.value("delivery_hours", 0);
+                ch.effects.army_morale = fx.value("army_morale", 0);
+                ch.effects.army_readiness = fx.value("army_readiness", 0);
+                ch.effects.clerk_load = fx.value("clerk_load", 0);
+            }
             e.choices.push_back(ch);
         }
     }
@@ -129,10 +141,8 @@ CorrespondenceItem* find_awaiting_letter(CampaignState& s) {
     return nullptr;
 }
 
-void push_popup(CampaignState& s, std::vector<Interrupt>* interrupts, const std::string& letter_id) {
-    s.pending_event_id = letter_id;
-    if (interrupts) interrupts->push_back(Interrupt::EventPopup);
-}
+// A source letter goes on top of the desk; it never stops the clock.
+void put_on_desk(CampaignState& s, const std::string& letter_id) { s.pending_event_id = letter_id; }
 
 }  // namespace
 
@@ -255,17 +265,24 @@ void seed_opening_war_correspondence(CampaignState& s, std::vector<Interrupt>* i
         letter.recipient = "committee_of_safety";
         letter.subject = e.source_id + " — " + e.author + " (" + e.document_date + ")";
 
-        const bool playable = e.mode == "playable" && e.activate_decisions && !e.choices.empty();
+        const bool playable = e.activate_decisions && !e.choices.empty();
         if (playable) {
             letter.kind = "source_decision";
             letter.status = "needs_approval";
             letter.awaiting_choice = true;
-            letter.body = format_historical_body(e) + "\n\n----\n\nPLAYABLE ADAPTATION\n" + format_adaptation_body(e);
+            // The question comes first; the document it is drawn from follows for reading.
+            letter.body = "PLAYABLE ADAPTATION\n" + format_adaptation_body(e) + "\n\n----\n\n" + format_historical_body(e);
         } else {
-            // Historical reference / retrospective exhibit: acknowledge only; no rewards.
+            // A source with no decision attached is filed for reading: nothing to answer,
+            // no rewards, and it never takes the screen.
             letter.kind = "historical_notice";
-            letter.status = "needs_approval";
-            letter.awaiting_choice = true;
+            letter.status = "delivered";
+            letter.awaiting_choice = false;
+            letter.decision_id = "filed";
+            letter.decision_applied = true;
+            letter.reason = "Filed for reading. Viewing this source does not change campaign state.";
+            if (!contains_id(s.progress.resolved_event_ids, e.event_id))
+                s.progress.resolved_event_ids.push_back(e.event_id);
             letter.body = format_historical_body(e);
             if (e.source_id == "L2" && s.player_faction == kContinental) {
                 letter.subject = e.source_id + " — Crown draft (retrospective exhibit)";
@@ -277,7 +294,7 @@ void seed_opening_war_correspondence(CampaignState& s, std::vector<Interrupt>* i
 
         s.staff.queue.push_back(letter);
         s.progress.received_source_ids.push_back(e.source_id);
-        push_popup(s, interrupts, letter.id);
+        if (playable) put_on_desk(s, letter.id);
         detail::add_log(s, "correspondence received: " + e.source_id + " (" + e.mode + ")");
         return;  // one new letter per tick
     }
@@ -339,8 +356,12 @@ CampaignState apply_source_decision(const CampaignState& in, const std::string& 
     }
 
     bool known = false;
+    const CorrespondenceChoiceDef* chosen = nullptr;
     for (const auto& ch : entry->choices)
-        if (ch.id == choice) known = true;
+        if (ch.id == choice) {
+            known = true;
+            chosen = &ch;
+        }
     if (!known) {
         letter->awaiting_choice = true;
         detail::add_log(s, "unknown source choice: " + choice);
@@ -531,9 +552,62 @@ CampaignState apply_source_decision(const CampaignState& in, const std::string& 
                 "(distinct from transfer or procurement; gameplay tuning).";
             detail::add_log(s, "L7 conserve_ammunition");
         }
+    } else if (chosen && chosen->effects.any()) {
+        // Catalog-driven consequences (GAMEPLAY TUNING lives in the catalog JSON).
+        const CorrespondenceChoiceEffects& fx = chosen->effects;
+        if (fx.gold < 0 && s.player_gold < -fx.gold) {
+            letter->status = "refused";
+            letter->reason = "The treasury cannot spare " + std::to_string(-fx.gold) + " gold for this.";
+            if (s.pending_event_id == letter->id) s.pending_event_id.clear();
+            return s;
+        }
+        ResourceChange ch;
+        ch.reason = sid + " — " + chosen->label;
+        s.player_gold += fx.gold;
+        ch.gold = fx.gold;
+        if (fx.gold < 0) letter->gold_cost = -fx.gold;
+        const int support_before = s.local_support;
+        s.local_support = detail::clamp_int(s.local_support + fx.local_support, 0, 100);
+        ch.local_support = s.local_support - support_before;
+        if (fx.british_attitude != 0) {
+            auto rit = s.relations.find(kBritish);
+            if (rit != s.relations.end())
+                rit->second = detail::clamp_int(rit->second + fx.british_attitude, -100, 100);
+        }
+        for (auto& kv : s.armies) {
+            if (kv.second.faction != s.player_faction) continue;
+            kv.second.morale = detail::clamp_int(kv.second.morale + fx.army_morale, 0, 100);
+            kv.second.readiness = detail::clamp_int(kv.second.readiness + fx.army_readiness, 0, 100);
+        }
+        s.staff.letters_processed_today += std::max(0, fx.clerk_load);
+        const bool later = fx.delivery_hours > 0 && (fx.provisions > 0 || fx.powder > 0);
+        if (later) {
+            // Commit now, receive later: resolve_due_letters credits the depot exactly once.
+            letter->committed_provisions = std::max(0, fx.provisions);
+            letter->committed_powder = std::max(0, fx.powder);
+            letter->resolve_on_hour = s.now.hour_index + fx.delivery_hours;
+            letter->status = "approved";
+        } else {
+            const std::string depot = default_depot_province(s, s.player_faction);
+            ProvinceStores& st = province_ledger(s, depot);
+            const int prov_before = st.provisions;
+            const int powder_before = st.powder;
+            st.provisions = std::max(0, st.provisions + fx.provisions);
+            st.powder = std::max(0, st.powder + fx.powder);
+            ch.provisions = st.provisions - prov_before;
+            ch.powder = st.powder - powder_before;
+            if (ch.provisions || ch.powder) ch.province_id = depot;
+            letter->status = "delivered";
+        }
+        letter->reason = chosen->label + ". " + chosen->effects_summary;
+        if (later) letter->reason += " In transit: " + std::to_string(fx.delivery_hours) + "h.";
+        detail::record_resource_change(s, ch);
+        detail::add_log(s, sid + " decision: " + choice);
     } else {
-        letter->status = "dismissed";
-        letter->reason = "No playable adaptation for this source.";
+        // A choice with no listed consequences (a deliberate "wait and see").
+        letter->status = "delivered";
+        letter->reason = chosen ? chosen->label + ". " + chosen->effects_summary
+                                : std::string("No playable adaptation for this source.");
     }
 
     if (s.pending_event_id == letter->id) s.pending_event_id.clear();

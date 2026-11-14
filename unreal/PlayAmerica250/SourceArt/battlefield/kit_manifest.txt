@@ -1,0 +1,620 @@
+{
+ "Barn": {
+  "degenerate_triangles": 0,
+  "dimensions_m": [
+   12.600000381469727,
+   10.971382141113281,
+   8.452902793884277
+  ],
+  "hulls": 3,
+  "max_m": [
+   6.300000190734863,
+   4.875349044799805,
+   8.202902793884277
+  ],
+  "mesh": "SM_Barn",
+  "min_m": [
+   -6.300000190734863,
+   -6.096033096313477,
+   -0.25
+  ],
+  "slots": [
+   "DarkVoid",
+   "Fieldstone",
+   "ClapboardWeathered",
+   "OakWeathered",
+   "Iron",
+   "ShingleCedar"
+  ],
+  "triangles": 31322
+ },
+ "Belfry": {
+  "degenerate_triangles": 0,
+  "dimensions_m": [
+   4.3238325119018555,
+   4.74116325378418,
+   9.042293548583984
+  ],
+  "hulls": 2,
+  "max_m": [
+   2.1619162559509277,
+   2.1619162559509277,
+   8.792293548583984
+  ],
+  "mesh": "SM_Belfry",
+  "min_m": [
+   -2.1619162559509277,
+   -2.579246997833252,
+   -0.25
+  ],
+  "slots": [
+   "DarkVoid",
+   "Fieldstone",
+   "ClapboardWeathered",
+   "OakWeathered",
+   "PlankDoor",
+   "Iron",
+   "ShingleCedar"
+  ],
+  "triangles": 9346
+ },
+ "BuckmanTavern": {
+  "degenerate_triangles": 0,
+  "dimensions_m": [
+   14.096656799316406,
+   10.913236141204834,
+   10.386568039655685
+  ],
+  "hulls": 4,
+  "max_m": [
+   7.048328399658203,
+   5.148327827453613,
+   10.1261568069458
+  ],
+  "mesh": "SM_BuckmanTavern",
+  "min_m": [
+   -7.048328399658203,
+   -5.764908313751221,
+   -0.26041123270988464
+  ],
+  "slots": [
+   "DarkVoid",
+   "Fieldstone",
+   "Glass",
+   "PaintedTrim",
+   "PlankDoor",
+   "Iron",
+   "ClapboardOchre",
+   "OakWeathered",
+   "ShingleCedar",
+   "LimeMortar",
+   "BrickHandmade"
+  ],
+  "triangles": 57871
+ },
+ "HitchingRail": {
+  "degenerate_triangles": 0,
+  "dimensions_m": [
+   3.200000047683716,
+   0.15000000596046448,
+   1.2999999523162842
+  ],
+  "hulls": 3,
+  "max_m": [
+   1.600000023841858,
+   0.07500000298023224,
+   1.149999976158142
+  ],
+  "mesh": "SM_HitchingRail",
+  "min_m": [
+   -1.600000023841858,
+   -0.07500000298023224,
+   -0.1499999761581421
+  ],
+  "slots": [
+   "OakWeathered",
+   "Iron"
+  ],
+  "triangles": 60
+ },
+ "HouseCape": {
+  "degenerate_triangles": 0,
+  "dimensions_m": [
+   10.600000381469727,
+   8.626744031906128,
+   7.490495204925537
+  ],
+  "hulls": 4,
+  "max_m": [
+   5.300000190734863,
+   3.975923776626587,
+   7.240495204925537
+  ],
+  "mesh": "SM_HouseCape",
+  "min_m": [
+   -5.300000190734863,
+   -4.650820255279541,
+   -0.25
+  ],
+  "slots": [
+   "DarkVoid",
+   "Fieldstone",
+   "Glass",
+   "PaintedTrim",
+   "PlankDoor",
+   "Iron",
+   "ClapboardWeathered",
+   "OakWeathered",
+   "ShingleCedar",
+   "LimeMortar",
+   "BrickHandmade"
+  ],
+  "triangles": 34112
+ },
+ "HouseGable": {
+  "degenerate_triangles": 0,
+  "dimensions_m": [
+   12.0,
+   9.437924861907959,
+   10.112271308898926
+  ],
+  "hulls": 4,
+  "max_m": [
+   6.0,
+   4.3743462562561035,
+   9.862271308898926
+  ],
+  "mesh": "SM_HouseGable",
+  "min_m": [
+   -6.0,
+   -5.0635786056518555,
+   -0.25
+  ],
+  "slots": [
+   "DarkVoid",
+   "Fieldstone",
+   "Glass",
+   "PaintedTrim",
+   "PlankDoor",
+   "Iron",
+   "ClapboardRed",
+   "OakWeathered",
+   "ShingleCedar",
+   "LimeMortar",
+   "BrickHandmade"
+  ],
+  "triangles": 43417
+ },
+ "HouseSaltbox": {
+  "degenerate_triangles": 0,
+  "dimensions_m": [
+   11.399999618530273,
+   10.669371128082275,
+   9.120372772216797
+  ],
+  "hulls": 4,
+  "max_m": [
+   5.699999809265137,
+   4.974520206451416,
+   8.870372772216797
+  ],
+  "mesh": "SM_HouseSaltbox",
+  "min_m": [
+   -5.699999809265137,
+   -5.694850921630859,
+   -0.25
+  ],
+  "slots": [
+   "DarkVoid",
+   "Fieldstone",
+   "Glass",
+   "ClapboardWeathered",
+   "PlankDoor",
+   "Iron",
+   "OakWeathered",
+   "ShingleCedar",
+   "LimeMortar",
+   "BrickHandmade"
+  ],
+  "triangles": 43190
+ },
+ "Meetinghouse1714": {
+  "degenerate_triangles": 0,
+  "dimensions_m": [
+   17.044723510742188,
+   13.631346702575684,
+   13.593276023864746
+  ],
+  "hulls": 3,
+  "max_m": [
+   8.511420249938965,
+   6.418277740478516,
+   13.343276023864746
+  ],
+  "mesh": "SM_Meetinghouse1714",
+  "min_m": [
+   -8.533303260803223,
+   -7.213068962097168,
+   -0.25
+  ],
+  "slots": [
+   "DarkVoid",
+   "Fieldstone",
+   "Glass",
+   "ClapboardWeathered",
+   "PlankDoor",
+   "Iron",
+   "OakWeathered",
+   "ShingleCedar"
+  ],
+  "triangles": 68527
+ },
+ "NorthBridge": {
+  "degenerate_triangles": 0,
+  "dimensions_m": [
+   14.600000381469727,
+   6.021646022796631,
+   2.3407418727874756
+  ],
+  "hulls": 0,
+  "max_m": [
+   7.300000190734863,
+   3.0254569053649902,
+   1.433301329612732
+  ],
+  "mesh": "SM_NorthBridge",
+  "min_m": [
+   -7.300000190734863,
+   -2.9961891174316406,
+   -0.9074405431747437
+  ],
+  "slots": [
+   "OakWeathered",
+   "Fieldstone",
+   "RoadDirt"
+  ],
+  "triangles": 1864
+ },
+ "NorthBridge1775": {
+  "degenerate_triangles": 0,
+  "dimensions_m": [
+   38.20000076293945,
+   6.017708778381348,
+   5.66671085357666
+  ],
+  "hulls": 10,
+  "max_m": [
+   19.100000381469727,
+   2.9751734733581543,
+   2.0618221759796143
+  ],
+  "mesh": "SM_NorthBridge1775",
+  "min_m": [
+   -19.100000381469727,
+   -3.0425353050231934,
+   -3.604888677597046
+  ],
+  "slots": [
+   "OakWeathered",
+   "Fieldstone",
+   "RoadDirt"
+  ],
+  "triangles": 5724
+ },
+ "OldManse": {
+  "degenerate_triangles": 0,
+  "dimensions_m": [
+   14.100000381469727,
+   10.644209384918213,
+   11.05276870727539
+  ],
+  "hulls": 5,
+  "max_m": [
+   7.050000190734863,
+   4.975151538848877,
+   10.80276870727539
+  ],
+  "mesh": "SM_OldManse",
+  "min_m": [
+   -7.050000190734863,
+   -5.669057846069336,
+   -0.25
+  ],
+  "slots": [
+   "DarkVoid",
+   "Fieldstone",
+   "Glass",
+   "ClapboardWeathered",
+   "PlankDoor",
+   "Iron",
+   "OakWeathered",
+   "ShingleCedar",
+   "LimeMortar",
+   "BrickHandmade"
+  ],
+  "triangles": 58745
+ },
+ "PostRailFence": {
+  "degenerate_triangles": 0,
+  "dimensions_m": [
+   3.1204614639282227,
+   0.12999999523162842,
+   1.5443517565727234
+  ],
+  "hulls": 2,
+  "max_m": [
+   1.5404614210128784,
+   0.06499999761581421,
+   1.3443517684936523
+  ],
+  "mesh": "SM_PostRailFence",
+  "min_m": [
+   -1.5800000429153442,
+   -0.06499999761581421,
+   -0.19999998807907104
+  ],
+  "slots": [
+   "OakWeathered"
+  ],
+  "triangles": 84
+ },
+ "PostRailFenceEnd": {
+  "degenerate_triangles": 0,
+  "dimensions_m": [
+   3.1600000858306885,
+   0.12999999523162842,
+   1.5493845343589783
+  ],
+  "hulls": 3,
+  "max_m": [
+   1.5800000429153442,
+   0.06499999761581421,
+   1.3493845462799072
+  ],
+  "mesh": "SM_PostRailFenceEnd",
+  "min_m": [
+   -1.5800000429153442,
+   -0.06499999761581421,
+   -0.19999998807907104
+  ],
+  "slots": [
+   "OakWeathered"
+  ],
+  "triangles": 96
+ },
+ "Schoolhouse": {
+  "degenerate_triangles": 0,
+  "dimensions_m": [
+   8.899999618530273,
+   7.349581480026245,
+   6.768254280090332
+  ],
+  "hulls": 4,
+  "max_m": [
+   4.449999809265137,
+   3.3248326778411865,
+   6.518254280090332
+  ],
+  "mesh": "SM_Schoolhouse",
+  "min_m": [
+   -4.449999809265137,
+   -4.024748802185059,
+   -0.25
+  ],
+  "slots": [
+   "DarkVoid",
+   "Fieldstone",
+   "Glass",
+   "ClapboardWeathered",
+   "PlankDoor",
+   "Iron",
+   "OakWeathered",
+   "ShingleCedar",
+   "LimeMortar",
+   "BrickHandmade"
+  ],
+  "triangles": 24240
+ },
+ "StoneWall_A": {
+  "degenerate_triangles": 0,
+  "dimensions_m": [
+   4.022435545921326,
+   1.8526954054832458,
+   1.5283236354589462
+  ],
+  "hulls": 1,
+  "max_m": [
+   2.23087739944458,
+   0.9394112229347229,
+   1.349836826324463
+  ],
+  "mesh": "SM_StoneWall_A",
+  "min_m": [
+   -1.7915581464767456,
+   -0.913284182548523,
+   -0.17848680913448334
+  ],
+  "slots": [
+   "Fieldstone"
+  ],
+  "triangles": 7104
+ },
+ "StoneWall_B": {
+  "degenerate_triangles": 0,
+  "dimensions_m": [
+   4.1251736879348755,
+   1.8513653874397278,
+   1.3504081815481186
+  ],
+  "hulls": 1,
+  "max_m": [
+   2.30490779876709,
+   0.9458430409431458,
+   1.227091670036316
+  ],
+  "mesh": "SM_StoneWall_B",
+  "min_m": [
+   -1.8202658891677856,
+   -0.905522346496582,
+   -0.12331651151180267
+  ],
+  "slots": [
+   "Fieldstone"
+  ],
+  "triangles": 7200
+ },
+ "StoneWall_C": {
+  "degenerate_triangles": 0,
+  "dimensions_m": [
+   3.6400468349456787,
+   1.9417895674705505,
+   1.3867981433868408
+  ],
+  "hulls": 1,
+  "max_m": [
+   1.8693444728851318,
+   0.9898387789726257,
+   1.2109898328781128
+  ],
+  "mesh": "SM_StoneWall_C",
+  "min_m": [
+   -1.7707023620605469,
+   -0.9519507884979248,
+   -0.17580831050872803
+  ],
+  "slots": [
+   "Fieldstone"
+  ],
+  "triangles": 8400
+ },
+ "TavernSign": {
+  "degenerate_triangles": 0,
+  "dimensions_m": [
+   1.3500000014901161,
+   0.20000000298023224,
+   4.199999928474426
+  ],
+  "hulls": 1,
+  "max_m": [
+   1.25,
+   0.10000000149011612,
+   4.0
+  ],
+  "mesh": "SM_TavernSign",
+  "min_m": [
+   -0.10000000149011612,
+   -0.10000000149011612,
+   -0.19999992847442627
+  ],
+  "slots": [
+   "OakWeathered",
+   "ClapboardOchre",
+   "PaintedTrim",
+   "Iron"
+  ],
+  "triangles": 120
+ },
+ "WagonShed": {
+  "degenerate_triangles": 0,
+  "dimensions_m": [
+   7.699999809265137,
+   4.826233863830566,
+   3.1359612941741943
+  ],
+  "hulls": 8,
+  "max_m": [
+   3.8499999046325684,
+   2.414966344833374,
+   3.1359612941741943
+  ],
+  "mesh": "SM_WagonShed",
+  "min_m": [
+   -3.8499999046325684,
+   -2.4112675189971924,
+   0.0
+  ],
+  "slots": [
+   "OakWeathered",
+   "ClapboardWeathered",
+   "DarkVoid",
+   "ShingleCedar"
+  ],
+  "triangles": 6720
+ },
+ "Well": {
+  "degenerate_triangles": 0,
+  "dimensions_m": [
+   6.236110329627991,
+   1.9358556270599365,
+   5.051023602485657
+  ],
+  "hulls": 2,
+  "max_m": [
+   5.252749443054199,
+   0.9701519012451172,
+   4.951023578643799
+  ],
+  "mesh": "SM_Well",
+  "min_m": [
+   -0.9833608865737915,
+   -0.9657037258148193,
+   -0.10000002384185791
+  ],
+  "slots": [
+   "Fieldstone",
+   "DarkVoid",
+   "OakWeathered",
+   "PlankDoor",
+   "Iron"
+  ],
+  "triangles": 1416
+ },
+ "Woodpile": {
+  "degenerate_triangles": 0,
+  "dimensions_m": [
+   2.586598753929138,
+   0.7062548995018005,
+   1.3500000834465027
+  ],
+  "hulls": 1,
+  "max_m": [
+   1.3065987825393677,
+   0.35791099071502686,
+   1.2750000953674316
+  ],
+  "mesh": "SM_Woodpile",
+  "min_m": [
+   -1.2799999713897705,
+   -0.3483439087867737,
+   -0.07499998807907104
+  ],
+  "slots": [
+   "OakWeathered"
+  ],
+  "triangles": 1860
+ },
+ "WormFence": {
+  "degenerate_triangles": 0,
+  "dimensions_m": [
+   5.715064525604248,
+   1.3001188039779663,
+   1.016870565712452
+  ],
+  "hulls": 2,
+  "max_m": [
+   2.8573155403137207,
+   0.6500594019889832,
+   1.0618380308151245
+  ],
+  "mesh": "SM_WormFence",
+  "min_m": [
+   -2.8577489852905273,
+   -0.6500594019889832,
+   0.04496746510267258
+  ],
+  "slots": [
+   "OakWeathered"
+  ],
+  "triangles": 120
+ }
+}

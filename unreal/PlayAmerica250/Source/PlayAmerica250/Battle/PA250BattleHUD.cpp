@@ -18,6 +18,7 @@
 #include "Widgets/Text/STextBlock.h"
 #include "Widgets/Images/SImage.h"
 #include "PA250MeleeComponent.h"
+#include "EngineUtils.h"
 #include "PA250UnitClasses.h"
 #include "PA250VolleyCoordinator.h"
 #include "Fonts/FontMeasure.h"
@@ -225,6 +226,29 @@ int32 UPA250BattleHUD::NativePaint(const FPaintArgs& Args, const FGeometry& G, c
 		const FString Sub = bInside ? FString(TEXT("IN ZONE")) : FString::Printf(TEXT("%.0f m"), Meters);
 		DrawCenteredText(Out, Layer + 3, G, Sub, S + FVector2D(0, 0.5f * Box + (bWorking ? 18.f : 11.f)), Small, FLinearColor(1, 1, 1, 0.8f * A));
 	}
+	// The enemy's last men (no reserve, a handful standing) are marked so they can be found:
+	// a diamond over each, pinned to the screen edge when he is out of view, with his distance.
+	const FName Enemy = MyFaction == TEXT("british") ? FName(TEXT("continental")) : FName(TEXT("british"));
+	if (Me && GM->IsMarkedRemnant(Enemy))
+	{
+		for (TActorIterator<ARFCharacter> It(GetWorld()); It; ++It)
+		{
+			if (It->IsDead() || It->FactionId != Enemy) continue;
+			const FVector World = It->GetActorLocation() + FVector(0, 0, 130.f);
+			const FVector Local = CamRot.UnrotateVector(World - CamLoc);
+			FVector2D S;
+			if (!(Local.X > 1.f && UWidgetLayoutLibrary::ProjectWorldLocationToWidgetPosition(PC, World, S, false)))
+			{
+				S = 0.5f * View + FVector2D(Local.Y, -Local.Z).GetSafeNormal() * View.Size();
+			}
+			S.X = FMath::Clamp(S.X, 40.f, View.X - 220.f);
+			S.Y = FMath::Clamp(S.Y, 215.f, View.Y - 70.f);
+			const TArray<FVector2D> Diamond = {S + FVector2D(0, -9), S + FVector2D(9, 0), S + FVector2D(0, 9), S + FVector2D(-9, 0), S + FVector2D(0, -9)};
+			FSlateDrawElement::MakeLines(Out, Layer + 1, G.ToPaintGeometry(), Diamond, ESlateDrawEffect::None, FLinearColor(0, 0, 0, 0.7f), true, 5.f);
+			FSlateDrawElement::MakeLines(Out, Layer + 2, G.ToPaintGeometry(), Diamond, ESlateDrawEffect::None, FactionColor(Enemy), true, 2.5f);
+			DrawCenteredText(Out, Layer + 3, G, FString::Printf(TEXT("%.0f m"), FVector::Dist(CamLoc, World) / 100.f), S + FVector2D(0, 19), Small, FLinearColor(1, 1, 1, 0.9f));
+		}
+	}
 	if (DamageDirTimer > 0.f)
 	{
 		const float A = FMath::Clamp(DamageDirTimer / DamageDirSeconds, 0.f, 1.f);
@@ -275,9 +299,18 @@ TSharedRef<SWidget> UPA250BattleHUD::RebuildWidget()
 			const int32 B = GM->GetBleedPerInterval(F);
 			return B > 0 ? FString::Printf(TEXT(" (-%d/%.0fs)"), B, GM->BleedIntervalSeconds) : FString();
 		};
-		return FText::FromString(FString::Printf(TEXT("BRITISH %d%s          CONTINENTAL %d%s          Time %.0fs"),
-			GM->TicketsRemaining(TEXT("british")), *Bleed(TEXT("british")),
-			GM->TicketsRemaining(TEXT("continental")), *Bleed(TEXT("continental")), GM->TimeRemaining()));
+		// The number is every man the side still has (reserve + on the field), so 0 means beaten.
+		// With the reserve gone it says so, and a breaking remnant shows its countdown.
+		auto Side = [GM, &Bleed](const TCHAR* Label, const TCHAR* F) {
+			FString S = FString::Printf(TEXT("%s %d"), Label, GM->MenRemaining(F));
+			const float Rout = GM->RemnantCountdown(F);
+			if (Rout >= 0.f) S += FString::Printf(TEXT(" breaking %.0fs"), Rout);
+			else if (GM->TicketsRemaining(F) <= 0 && GM->MenRemaining(F) > 0) S += TEXT(" (last men)");
+			else S += Bleed(F);
+			return S;
+		};
+		return FText::FromString(FString::Printf(TEXT("%s          %s          Time %.0fs"),
+			*Side(TEXT("BRITISH"), TEXT("british")), *Side(TEXT("CONTINENTAL"), TEXT("continental")), GM->TimeRemaining()));
 	};
 
 	auto Capture = [WeakThis]() {
@@ -341,6 +374,7 @@ TSharedRef<SWidget> UPA250BattleHUD::RebuildWidget()
 		if (!Me || !Me->GetEquippedFirearm()) return FText::GetEmpty();
 		if (Me->GetEquippedFirearm()->IsJammed()) return FText::FromString(TEXT("WEAPON JAMMED  -  hold R to clear"));
 		if (Me->GetEquippedFirearm()->CanFire()) return FText::FromString(TEXT("Loaded"));
+		if (Me->GetEquippedFirearm()->IsReloadPaused()) return FText::FromString(TEXT("Slow down to reload"));
 		return FText::FromString(FString::Printf(TEXT("Reloading   %s"), *Me->GetEquippedFirearm()->GetReloadPhaseLabel()));
 	};
 	auto ReloadColor = [MeP]() {

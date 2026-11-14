@@ -27,6 +27,8 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "PA250")
 	void PressLoad();
 	void PressLogistics(const FString& Choice);
+	/** Last desk-news serial shown on the message line (-1 until the first look). */
+	int32 SeenDispatchSerial = -1;
 	void PressCommander(const FString& Action);
 	void PressBuyCartridges();
 	void PressBuyMuskets();

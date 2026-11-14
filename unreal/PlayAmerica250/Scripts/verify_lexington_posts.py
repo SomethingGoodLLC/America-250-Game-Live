@@ -2,7 +2,9 @@ import json
 import os
 import unreal
 
-path = "/Game/PA250/Maps/L_Lexington"
+# PA250_POSTS_MAP=L_Concord checks the Concord level instead (same three post ids).
+map_name = os.environ.get("PA250_POSTS_MAP", "L_Lexington")
+path = "/Game/PA250/Maps/" + map_name
 les = unreal.get_editor_subsystem(unreal.LevelEditorSubsystem)
 les.load_level(path)
 actors = unreal.get_editor_subsystem(unreal.EditorActorSubsystem).get_all_level_actors()
@@ -24,7 +26,7 @@ out = {
     and {p["post_id"] for p in posts} >= {"green", "meetinghouse", "buckman"},
 }
 saved = os.path.join(
-    unreal.Paths.project_saved_dir(), "PA250", "lexington_posts_verify.json"
+    unreal.Paths.project_saved_dir(), "PA250", map_name[2:].lower() + "_posts_verify.json"
 )
 os.makedirs(os.path.dirname(saved), exist_ok=True)
 with open(saved, "w") as f:

@@ -361,5 +361,79 @@ void APA250BattleGameMode::MaybeStartMeleeProbe()
 	At(55.65f, [ReloadShot]() { ReloadShot(TEXT("reload_ram_down")); });
 	At(58.4f, [ReloadShot]() { ReloadShot(TEXT("reload_recover")); });
 	At(60.6f, [ReloadShot]() { ReloadShot(TEXT("reload_done")); });
-	At(61.2f, []() { UE_LOG(LogTemp, Display, TEXT("PA250 melee probe: done")); FPlatformMisc::RequestExit(false); });
+
+	// 8. What the player sees of his own soldier, from his own camera behind: the carry (standing, walking,
+	// running), the reload drill standing, and a reload begun and then walked through.
+	auto PlayerView = [this, S, Reset]()
+	{
+		Reset(140.f);
+		APlayerController* PC = GetWorld()->GetFirstPlayerController();
+		if (ARFCharacter* Me = S->Me.Get(); PC && Me) PC->SetViewTarget(Me);
+	};
+	// Speed 0 stops him. The input is fed every frame, as a held key would.
+	TSharedRef<float> DriveSpeed = MakeShared<float>(0.f);
+	{
+		FTimerHandle H;
+		GetWorldTimerManager().SetTimer(H, FTimerDelegate::CreateWeakLambda(this, [S, DriveSpeed]()
+		{
+			ARFCharacter* Me = S->Me.Get();
+			if (!Me || *DriveSpeed <= 0.f) return;
+			Me->GetCharacterMovement()->MaxWalkSpeed = *DriveSpeed;
+			Me->AddMovementInput(S->Fwd, 1.f);
+		}), 0.008f, true);
+	}
+	auto Drive = [S, DriveSpeed](float Speed)
+	{
+		*DriveSpeed = Speed;
+		if (ARFCharacter* Me = S->Me.Get(); Me && Speed <= 0.f) Me->GetCharacterMovement()->MaxWalkSpeed = Me->WalkSpeed;
+	};
+	auto BeginReload = [S]()
+	{
+		if (ARFCharacter* Me = S->Me.Get(); Me && Me->Musket)
+		{
+			Me->Musket->SetReloadPreset(EPA250ReloadPreset::Arcade);
+			Me->Musket->StartReload();
+		}
+	};
+	At(61.2f, PlayerView);
+	At(62.4f, [Shot]() { Shot(TEXT("hold_player_view")); });
+	At(62.5f, [Drive]() { Drive(200.f); });
+	At(63.7f, [Shot]() { Shot(TEXT("hold_player_view_walk")); });
+	At(63.8f, [Drive]() { Drive(450.f); });
+	At(65.f, [Shot]() { Shot(TEXT("hold_player_view_run")); });
+	At(65.1f, [Drive]() { Drive(0.f); });
+	At(66.f, [PlayerView, BeginReload]() { PlayerView(); BeginReload(); });
+	At(67.6f, [ReloadShot]() { ReloadShot(TEXT("reload_player_view_bite")); });
+	At(68.7f, [ReloadShot]() { ReloadShot(TEXT("reload_player_view_prime")); });
+	At(71.1f, [ReloadShot]() { ReloadShot(TEXT("reload_player_view_ram")); });
+	At(77.f, [PlayerView, BeginReload]() { PlayerView(); BeginReload(); });
+	At(78.2f, [ReloadShot]() { ReloadShot(TEXT("reload_player_view_before_walk")); });
+	// Ordinary pace: the loading runs on. At a run (the player only) it stands still until he slows.
+	At(78.3f, [S, Drive]() { if (const ARFCharacter* Me = S->Me.Get()) Drive(Me->WalkSpeed); });
+	At(80.f, [ReloadShot]() { ReloadShot(TEXT("reload_player_view_walking")); });
+	At(80.1f, [S, Drive]() { if (const ARFCharacter* Me = S->Me.Get()) Drive(Me->SprintSpeed); });
+	At(81.f, [ReloadShot]() { ReloadShot(TEXT("reload_player_view_running")); });
+	At(83.2f, [ReloadShot]() { ReloadShot(TEXT("reload_player_view_running_later")); });
+	At(83.3f, [Drive]() { Drive(0.f); });
+	At(85.3f, [ReloadShot]() { ReloadShot(TEXT("reload_player_view_stopped")); });
+	// 9. The same with the player looking back at his own soldier (the mouse turns the camera, not the man).
+	At(86.f, [S, PlayerView]()
+	{
+		PlayerView();
+		if (ARFCharacter* Me = S->Me.Get(); Me && Me->GetController()) Me->GetController()->SetControlRotation(FRotator(-8.f, S->Fwd.Rotation().Yaw + 150.f, 0.f));
+	});
+	At(87.2f, [Shot]() { Shot(TEXT("hold_front_view")); });
+	At(87.3f, BeginReload);
+	At(88.9f, [ReloadShot]() { ReloadShot(TEXT("reload_front_view_bite")); });
+	At(90.f, [ReloadShot]() { ReloadShot(TEXT("reload_front_view_prime")); });
+	At(90.1f, [Drive]() { Drive(200.f); });
+	At(91.6f, [ReloadShot]() { ReloadShot(TEXT("reload_front_view_walking")); });
+	At(95.f, [ReloadShot]() { ReloadShot(TEXT("reload_front_view_walking_later")); });
+	At(95.1f, [Drive]() { Drive(0.f); });
+	At(97.f, [ReloadShot]() { ReloadShot(TEXT("reload_front_view_stopped")); });
+	// Loaded again by now (walking does not stop the loading): the carry seen from in front, standing and walking.
+	At(99.f, [ReloadShot]() { ReloadShot(TEXT("hold_front_view_loaded")); });
+	At(99.1f, [Drive]() { Drive(200.f); });
+	At(100.3f, [Shot]() { Shot(TEXT("hold_front_view_walk")); });
+	At(100.5f, []() { UE_LOG(LogTemp, Display, TEXT("PA250 melee probe: done")); FPlatformMisc::RequestExit(false); });
 }

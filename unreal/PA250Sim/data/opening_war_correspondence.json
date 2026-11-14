@@ -27,10 +27,29 @@
       "requires_lexington": true,
       "requires_chapter_continental": false,
       "requires_resolved_events": [],
-      "activate_decisions": false,
-      "adaptation_relay": "",
-      "adaptation_dispatch": "",
-      "choices": []
+      "activate_decisions": true,
+      "adaptation_relay": "Trading-towns committee (fictional staff relay—not Tudor writing our commander)",
+      "adaptation_dispatch": "Merchants expect the fishing and trade restrictions to bite and are selling down their stock. The committee asks what line the army takes with the trading towns. Amounts below are gameplay tuning—not historical prices.",
+      "choices": [
+        {
+          "id": "buy_merchant_stock",
+          "label": "Buy the merchants' stock before the ports close",
+          "effects_summary": "Gameplay tuning: spend 30 gold now; +8 provisions after 12 hours (paid now, delivered later).",
+          "effects": {"gold": -30, "provisions": 8, "delivery_hours": 12}
+        },
+        {
+          "id": "reassure_trading_towns",
+          "label": "Send assurances to the trading towns",
+          "effects_summary": "Gameplay tuning: uses one clerk slot today; +3 local support. No stores change.",
+          "effects": {"local_support": 3, "clerk_load": 1}
+        },
+        {
+          "id": "enforce_association",
+          "label": "Enforce the Association strictly",
+          "effects_summary": "Gameplay tuning: +15 gold in forfeitures; −5 local support; British attitude −3.",
+          "effects": {"gold": 15, "local_support": -5, "british_attitude": -3}
+        }
+      ]
     },
     {
       "source_id": "L2",
@@ -112,10 +131,29 @@
       "requires_lexington": true,
       "requires_chapter_continental": false,
       "requires_resolved_events": [],
-      "activate_decisions": false,
-      "adaptation_relay": "",
-      "adaptation_dispatch": "",
-      "choices": []
+      "activate_decisions": true,
+      "adaptation_relay": "Provincial Congress clerk (fictional dilemma inspired by the recommendation—not Warren's request to us)",
+      "adaptation_dispatch": "A well-connected gentleman is recommended for an officer's place in your companies; the men have their own favorite. Whom do you put forward? Effects are gameplay tuning—no appointment here is a historical claim.",
+      "choices": [
+        {
+          "id": "appoint_recommended",
+          "label": "Appoint the recommended gentleman",
+          "effects_summary": "Gameplay tuning: +4 local support (patrons obliged); army readiness −5 while he learns the drill.",
+          "effects": {"local_support": 4, "army_readiness": -5}
+        },
+        {
+          "id": "promote_on_merit",
+          "label": "Promote the companies' own choice",
+          "effects_summary": "Gameplay tuning: army morale +5; −2 local support (patrons slighted).",
+          "effects": {"army_morale": 5, "local_support": -2}
+        },
+        {
+          "id": "refer_to_congress",
+          "label": "Refer the place to the Provincial Congress",
+          "effects_summary": "Gameplay tuning: uses one clerk slot today; nothing else changes.",
+          "effects": {"clerk_load": 1}
+        }
+      ]
     },
     {
       "source_id": "L5",
@@ -174,10 +212,29 @@
       "requires_lexington": true,
       "requires_chapter_continental": false,
       "requires_resolved_events": [],
-      "activate_decisions": false,
-      "adaptation_relay": "",
-      "adaptation_dispatch": "",
-      "choices": []
+      "activate_decisions": true,
+      "adaptation_relay": "Committee of Supplies (fictional dilemma—rumored votes are not treasury funds)",
+      "adaptation_dispatch": "Word of Continental pay and supply is only rumor, and one letter urges smaller forces to avoid debt. The committee asks how to plan the coming weeks. Amounts below are gameplay tuning.",
+      "choices": [
+        {
+          "id": "contract_on_rumor",
+          "label": "Contract supplies on the strength of the rumor",
+          "effects_summary": "Gameplay tuning: +10 provisions after 24 hours; −6 local support when creditors learn the vote is unconfirmed.",
+          "effects": {"provisions": 10, "delivery_hours": 24, "local_support": -6}
+        },
+        {
+          "id": "reduce_musters",
+          "label": "Reduce musters to avoid debt",
+          "effects_summary": "Gameplay tuning: +25 gold saved; army readiness −8.",
+          "effects": {"gold": 25, "army_readiness": -8}
+        },
+        {
+          "id": "await_confirmed_funds",
+          "label": "Hold course until funds are confirmed",
+          "effects_summary": "Gameplay tuning: nothing gained and nothing risked.",
+          "effects": {}
+        }
+      ]
     },
     {
       "source_id": "D8",
@@ -197,10 +254,29 @@
       "requires_lexington": true,
       "requires_chapter_continental": true,
       "requires_resolved_events": [],
-      "activate_decisions": false,
-      "adaptation_relay": "",
-      "adaptation_dispatch": "",
-      "choices": []
+      "activate_decisions": true,
+      "adaptation_relay": "Headquarters secretary (fictional staff relay—these instructions were addressed to Washington)",
+      "adaptation_dispatch": "Congress wants returns of forces, stores and provisions, and expects a council of war to be consulted. How much of the staff's week goes to it? Amounts below are gameplay tuning.",
+      "choices": [
+        {
+          "id": "compile_full_returns",
+          "label": "Compile full returns for Congress",
+          "effects_summary": "Gameplay tuning: uses two clerk slots today; +8 provisions from Continental provisioning after 48 hours.",
+          "effects": {"clerk_load": 2, "provisions": 8, "delivery_hours": 48}
+        },
+        {
+          "id": "convene_council",
+          "label": "Convene a council of war",
+          "effects_summary": "Gameplay tuning: spend 10 gold; army readiness +6, army morale +2.",
+          "effects": {"gold": -10, "army_readiness": 6, "army_morale": 2}
+        },
+        {
+          "id": "send_summary_returns",
+          "label": "Send summary returns only",
+          "effects_summary": "Gameplay tuning: no desk time spent; nothing else changes.",
+          "effects": {}
+        }
+      ]
     },
     {
       "source_id": "L7",

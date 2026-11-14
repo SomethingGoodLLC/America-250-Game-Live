@@ -310,7 +310,9 @@ void UPA250MeleeComponent::TickReloadPose(float DeltaTime)
 		}
 		// Any swing, the guard, a blow, or the shot's follow-through interrupts the hands (the reload itself runs on).
 		const bool bFree = Visual == EPA250MeleeVisual::None && !bGuarding && FlinchTime < 0.f && PresentTimer <= 0.f && !IsCharging();
-		if (bFree && ReloadPhase != 0)
+		// The drill is shown standing only. On the move the stride pumped the body under a musket parked in
+		// mid-air; there he carries it in both hands while the loading runs on unseen.
+		if (bFree && ReloadPhase != 0 && Me->GetVelocity().Size2D() < ReloadDrillMaxSpeed)
 		{
 			// Recovering arms: the hold eases back to the carry over the last drill phase.
 			Target = ReloadPhase == static_cast<uint8>(EActiveReloadPhase::ShoulderAim) ? 1.f - Smooth01((ReloadProgress - 0.35f) / 0.6f) : 1.f;
@@ -445,6 +447,7 @@ FPA250MeleePose UPA250MeleeComponent::GetBodyPose() const
 	P.Guard = GuardWeight;
 	P.Shoulder = ShoulderWeight;
 	P.Reload = ReloadWeight;
+	if (const ARFCharacter* Me = OwnerChar(); Me && Me->Musket && Me->IsUsingPeriodSoldier() && !Me->IsMounted()) P.Carry = 1.f;
 	return P;
 }
 
@@ -459,8 +462,10 @@ void UPA250MeleeComponent::PublishPose()
 		// Butt-stroke: muzzle whipped up and back so the butt leads. Coil: the point dips a touch.
 		// Guard: carried high across the body, muzzle up and to the left.
 		// Club: the musket turns end for end (butt up over the shoulder at -70, butt out in front at -190).
-		Me->Musket->MeleePitchOffset = 115.f * Pose.Butt - 6.f * Pose.Coil + 48.f * Pose.Guard - 70.f * Pose.Raise - 190.f * Pose.Chop;
-		Me->Musket->MeleeYawOffset = -24.f * Pose.Guard;
+		// Carry: muzzle up and across to the left, where the left hand can hold it.
+		const float CarryW = Pose.CarryWeight();
+		Me->Musket->MeleePitchOffset = 115.f * Pose.Butt - 6.f * Pose.Coil + 48.f * Pose.Guard - 70.f * Pose.Raise - 190.f * Pose.Chop + CarryPitchDegrees * CarryW;
+		Me->Musket->MeleeYawOffset = -24.f * Pose.Guard + CarryYawDegrees * CarryW;
 		// A man with a bayonet shows one; a man without does not.
 		if (const bool bFixed = HasBayonet(); bFixed != Me->Musket->IsBayonetFixed()) Me->Musket->SetBayonetFixed(bFixed);
 	}

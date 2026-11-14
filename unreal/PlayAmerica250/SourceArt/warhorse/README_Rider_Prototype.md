@@ -78,3 +78,14 @@ period pistol mesh; its 55 near / 25 far damage and 200 m/s speed are gameplay
 prototype values. Visual grip, recoil, reload body animation, and saddle contact
 need in-game review. Run `-run=PA250MountedWeapons -unattended -nullrhi` for the
 headless switching, projectile, and ammunition lifecycle checks.
+
+## Firearm handling polish
+
+Mounted firearms now blend between carry and aim, lower the arms and barrel
+while reloading, and add a short visible recoil that settles after firing.
+Right-click aiming brings the mounted camera closer (330 cm versus 550 cm).
+Selecting a gun refreshes its world rotation before its first tick, and switching
+to an unavailable weapon preserves the current gun. These are procedural pose
+adjustments; visual grip, saddle contact and the placeholder pistol still need
+a rendered review. The headless mounted-weapon check includes aim, reload and
+recoil transitions as well as projectile/ammunition lifecycle checks.

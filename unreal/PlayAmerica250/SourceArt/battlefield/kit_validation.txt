@@ -1,0 +1,48 @@
+{
+ "NorthBridge1775": {
+  "blend": {
+   "hulls": 10,
+   "large_faces": 538,
+   "large_faces_toward_core": 46,
+   "materials": [
+    "OakWeathered",
+    "Fieldstone",
+    "RoadDirt"
+   ],
+   "packed_images": 9,
+   "triangles": 5724
+  },
+  "errors": [],
+  "fbx": {
+   "bounds_error_m": 2.86102294921875e-06,
+   "hulls": 10,
+   "triangles": 5724
+  },
+  "glb": {
+   "bounds_error_m": 0.0,
+   "embedded_images": 9,
+   "materials": 3,
+   "triangles": 5724
+  },
+  "previews": {
+   "front": [
+    1200,
+    900
+   ],
+   "iso": [
+    1200,
+    900
+   ],
+   "side": [
+    1200,
+    900
+   ]
+  }
+ },
+ "_summary": {
+  "assets": 1,
+  "blender": "4.5.3 LTS",
+  "failed": {},
+  "passed": true
+ }
+}

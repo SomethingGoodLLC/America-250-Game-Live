@@ -254,13 +254,15 @@ bool FPA250SoldierAnimProxy::ApplyMeleePose(FCSPose<FCompactPose>& Pose, const F
 	}
 
 	// Legs: the front foot steps out (and lifts mid-step), the rear foot trails and stays down.
-	if (Front.bOK)
+	// A plain carry moves neither hips nor feet: the clip's legs are left exactly as they are.
+	const bool bLegs = !Shift.IsNearlyZero(0.01) || Lunge > 0.f || Coil > 0.f || Chop > 0.f || Lag > 0.f;
+	if (bLegs && Front.bOK)
 	{
 		const FVector Step = F * (42.f * Lunge - 4.f * Coil + 26.f * Chop) + U * (7.f * FMath::Sin(UE_PI * FMath::Max(Lunge, Chop)));
 		const FQuat Flat = Front.Foot0.GetRotation();
 		SolveLimb(Pose, Front.Thigh, Front.Calf, Front.Foot, Front.Foot0.GetLocation() + Step, Front.Knee0 + Shift + Step + F * 60.f, &Flat, true);
 	}
-	if (Rear.bOK)
+	if (bLegs && Rear.bOK)
 	{
 		const FQuat Flat = Rear.Foot0.GetRotation();
 		SolveLimb(Pose, Rear.Thigh, Rear.Calf, Rear.Foot, Rear.Foot0.GetLocation() - F * Lag, Rear.Knee0 + Shift + F * 50.f + R * 15.f, &Flat, true);
@@ -275,6 +277,10 @@ bool FPA250SoldierAnimProxy::ApplyMeleePose(FCSPose<FCompactPose>& Pose, const F
 		FVector Base = Pose.GetComponentSpaceTransform(HandBone).GetLocation();
 		if (Chest.IsValid())
 		{
+			// Carried: the unarmed clips swing the hand at the thigh, which leaves the left hand nothing to reach.
+			const float CarryW = FMath::IsFinite(Melee.CarryWeight()) ? Melee.CarryWeight() : 0.f;
+			const FVector Carried = Pose.GetComponentSpaceTransform(Chest).GetLocation() + R * 15.f - U * 27.f + F * 9.f;
+			Base = FMath::Lerp(Base, Carried, CarryW);
 			// Charging, the hand is pinned at the right hip instead of swinging with the run clip.
 			const FVector Tucked = Pose.GetComponentSpaceTransform(Chest).GetLocation() + R * 24.f - U * 26.f + F * 10.f;
 			Base = FMath::Lerp(Base, Tucked, Level);

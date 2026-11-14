@@ -8,6 +8,9 @@
 #include "Engine/Engine.h"
 #include "Engine/StaticMeshActor.h"
 #include "EngineUtils.h"
+#include "NavigationSystem.h"
+#include "Engine/TargetPoint.h"
+#include <algorithm>
 #include "Materials/MaterialInstanceDynamic.h"
 #include "UnrealClient.h"
 #include "GameFramework/CharacterMovementComponent.h"
@@ -97,9 +100,9 @@ static const FPreviewCam GPreviewCams[] = {
 	{TEXT("Shot_FlagGreen"), TEXT("flag_green"), FVector::ZeroVector, FRotator::ZeroRotator, 45.f},
 	{TEXT("Shot_FlagMeetinghouse"), TEXT("flag_meetinghouse"), FVector::ZeroVector, FRotator::ZeroRotator, 45.f},
 	// Close-up of the cover wall nearest Loc (placed at runtime from the wall's collision box).
-	{TEXT("Shot_WallE"), TEXT("wall_east"), FVector(6100.f, -1500.f, 0.f), FRotator::ZeroRotator, 55.f},
+	{TEXT("Shot_WallE"), TEXT("wall_east"), FVector(13547.f, 10769.f, 0.f), FRotator::ZeroRotator, 55.f},
 	// Behind Patriot wall W1, looking over it at flag B on the Green.
-	{TEXT("Shot_WallPatriot"), TEXT("wall_patriot"), FVector(-4735.f, -253.f, 0.f), FRotator::ZeroRotator, 60.f},
+	{TEXT("Shot_WallPatriot"), TEXT("wall_patriot"), FVector(-4555.f, -5053.f, 0.f), FRotator::ZeroRotator, 60.f},
 	// -PA250Preview=smoke: scripted volleys west of the Green, then fresh smoke and the drifting bank.
 	{TEXT("Shot_SmokeFresh"), TEXT("smoke_fresh"), FVector::ZeroVector, FRotator::ZeroRotator, 60.f},
 	{TEXT("Shot_SmokeBank"), TEXT("smoke_bank"), FVector::ZeroVector, FRotator::ZeroRotator, 60.f},
@@ -332,7 +335,15 @@ int32 APA250BattleGameMode::SpawnCreekBridge(UWorld* World, const FVector& Groun
 		return 0;
 	}
 	const FPA250CreekBridge Span = PlanCreekBridge(GroundPoint);
-	auto Place = [&](const FVector& Center, const FVector& SizeCm, const FLinearColor& Color, bool bBlock, const TCHAR* Tag) -> bool {
+	// Battlefield kit (Scripts/import_battlefield_kit.py): the North Bridge model, river water and
+	// its wet margin. When they are present the six gameplay boxes below keep their size, tags and
+	// collision but are not drawn; the kit pieces are drawn instead and never collide.
+	UStaticMesh* BridgeMesh = LoadObject<UStaticMesh>(nullptr, TEXT("/Game/PA250/Battlefield/Meshes/SM_NorthBridge.SM_NorthBridge"));
+	UMaterialInterface* WaterMat = LoadObject<UMaterialInterface>(nullptr, TEXT("/Game/PA250/Battlefield/Materials/M_Water.M_Water"));
+	UMaterialInterface* BankMat = LoadObject<UMaterialInterface>(nullptr, TEXT("/Game/PA250/Battlefield/Materials/M_CreekBank.M_CreekBank"));
+	const bool bKitRiver = WaterMat && BankMat;
+	auto Place = [&](const FVector& Center, const FVector& SizeCm, const FLinearColor& Color, bool bBlock, const TCHAR* Tag,
+		bool bDraw = true, UMaterialInterface* Override = nullptr) -> bool {
 		FActorSpawnParameters Params;
 		Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 		AStaticMeshActor* A = World->SpawnActor<AStaticMeshActor>(Center, FRotator::ZeroRotator, Params);
@@ -350,11 +361,24 @@ int32 APA250BattleGameMode::SpawnCreekBridge(UWorld* World, const FVector& Groun
 		{
 			Mesh->SetCollisionProfileName(TEXT("BlockAll"));
 		}
-		if (Base)
+		if (Override)
+		{
+			Mesh->SetMaterial(0, Override);
+		}
+		else if (Base)
 		{
 			UMaterialInstanceDynamic* Mid = UMaterialInstanceDynamic::Create(Base, Mesh);
 			Mid->SetVectorParameterValue(TEXT("Color"), Color);
 			Mesh->SetMaterial(0, Mid);
+		}
+		if (!bDraw)
+		{
+			Mesh->SetVisibility(false);
+			Mesh->SetCastShadow(false);
+		}
+		if (Override)
+		{
+			Mesh->SetCastShadow(false);  // flat ground dressing
 		}
 		return true;
 	};
@@ -368,20 +392,72 @@ int32 APA250BattleGameMode::SpawnCreekBridge(UWorld* World, const FVector& Groun
 	const FLinearColor Rail(0.28f, 0.18f, 0.09f);
 	int32 N = 0;
 	// Water showing under the planks, and two banks that close the creek on either side of the span.
-	N += Place(Span.CreekCenter, FVector(Creek.X, Deck.Y, 30.f), Water, false, TEXT("PA250Creek")) ? 1 : 0;
-	N += Place(Span.CreekCenter + FVector(0.f, BankOff, 10.f), FVector(Creek.X, BankLen, 90.f), Water, true, TEXT("PA250Creek")) ? 1 : 0;
-	N += Place(Span.CreekCenter + FVector(0.f, -BankOff, 10.f), FVector(Creek.X, BankLen, 90.f), Water, true, TEXT("PA250Creek")) ? 1 : 0;
-	N += Place(Span.DeckCenter, Deck, Plank, true, TEXT("PA250Bridge")) ? 1 : 0;
+	N += Place(Span.CreekCenter, FVector(Creek.X, Deck.Y, 30.f), Water, false, TEXT("PA250Creek"), !bKitRiver) ? 1 : 0;
+	N += Place(Span.CreekCenter + FVector(0.f, BankOff, 10.f), FVector(Creek.X, BankLen, 90.f), Water, true, TEXT("PA250Creek"), !bKitRiver) ? 1 : 0;
+	N += Place(Span.CreekCenter + FVector(0.f, -BankOff, 10.f), FVector(Creek.X, BankLen, 90.f), Water, true, TEXT("PA250Creek"), !bKitRiver) ? 1 : 0;
+	N += Place(Span.DeckCenter, Deck, Plank, true, TEXT("PA250Bridge"), !BridgeMesh) ? 1 : 0;
 	const float RailZ = Span.DeckCenter.Z + Deck.Z * 0.5f + 30.f;
-	N += Place(FVector(Span.DeckCenter.X, Span.DeckCenter.Y + Deck.Y * 0.5f, RailZ), FVector(Deck.X, 14.f, 70.f), Rail, false, TEXT("PA250Bridge")) ? 1 : 0;
-	N += Place(FVector(Span.DeckCenter.X, Span.DeckCenter.Y - Deck.Y * 0.5f, RailZ), FVector(Deck.X, 14.f, 70.f), Rail, false, TEXT("PA250Bridge")) ? 1 : 0;
+	N += Place(FVector(Span.DeckCenter.X, Span.DeckCenter.Y + Deck.Y * 0.5f, RailZ), FVector(Deck.X, 14.f, 70.f), Rail, false, TEXT("PA250Bridge"), !BridgeMesh) ? 1 : 0;
+	N += Place(FVector(Span.DeckCenter.X, Span.DeckCenter.Y - Deck.Y * 0.5f, RailZ), FVector(Deck.X, 14.f, 70.f), Rail, false, TEXT("PA250Bridge"), !BridgeMesh) ? 1 : 0;
+	// Drawn pieces (not counted, never blocking). The ground point is the deck's centre at ground level.
+	const FVector Ground = Span.DeckCenter - FVector(0.f, 0.f, 14.f);
+	int32 Drawn = 0;
+	if (bKitRiver)
+	{
+		// The river lies bank-full in its meadow, as the Concord does in April: a wet margin, then water.
+		// Tops 1 cm (margin) and 2 cm (water) above the levelled Common: no lip to catch the low sun.
+		Drawn += Place(Ground + FVector(0.f, 0.f, -19.f), FVector(Creek.X + 110.f, Creek.Y + 110.f, 40.f), Water, false, TEXT("PA250CreekVisual"), true, BankMat) ? 1 : 0;
+		Drawn += Place(Ground + FVector(0.f, 0.f, -18.f), FVector(Creek.X, Creek.Y, 40.f), Water, false, TEXT("PA250CreekVisual"), true, WaterMat) ? 1 : 0;
+	}
+	if (BridgeMesh)
+	{
+		FActorSpawnParameters Params;
+		Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+		if (AStaticMeshActor* A = World->SpawnActor<AStaticMeshActor>(Ground, FRotator::ZeroRotator, Params))
+		{
+			A->Tags.Add(TEXT("PA250BridgeVisual"));
+			UStaticMeshComponent* Mesh = A->GetStaticMeshComponent();
+			Mesh->SetMobility(EComponentMobility::Movable);
+			Mesh->SetStaticMesh(BridgeMesh);
+			Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+			++Drawn;
+		}
+	}
+	UE_LOG(LogTemp, Display, TEXT("PA250 creek bridge: kit visuals %d (bridge=%d river=%d)"), Drawn, BridgeMesh ? 1 : 0, bKitRiver ? 1 : 0);
 	UE_LOG(LogTemp, Display, TEXT("PA250 creek bridge: %d pieces, deck %.0f cm across a %.0f cm creek"),
 		N, Deck.X, Creek.X);
 	return N;
 }
 
+int32 APA250BattleGameMode::SealLevelRiver(UWorld* World)
+{
+	int32 N = 0;
+	if (!World)
+	{
+		return N;
+	}
+	for (TActorIterator<AStaticMeshActor> It(World); It; ++It)
+	{
+		UStaticMeshComponent* Mesh = It->ActorHasTag(TEXT("PA250Creek")) ? It->GetStaticMeshComponent() : nullptr;
+		if (!Mesh)
+		{
+			continue;
+		}
+		Mesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+		Mesh->SetCollisionResponseToAllChannels(ECR_Ignore);
+		Mesh->SetCollisionResponseToChannel(ECC_Pawn, ECR_Block);
+		++N;
+	}
+	return N;
+}
+
 void APA250BattleGameMode::ApplyScenarioPreset()
 {
+	// Before any plank crossing is spawned (its banks carry the same tag and block everything).
+	if (const int32 Sealed = SealLevelRiver(GetWorld()))
+	{
+		UE_LOG(LogTemp, Display, TEXT("PA250 river: %d channel blocks stop men only"), Sealed);
+	}
 	TArray<FString> Tags;
 	Tags.Reserve(static_cast<int32>(Setup.terrain_tags.size()));
 	for (const std::string& Tag : Setup.terrain_tags)
@@ -415,7 +491,18 @@ void APA250BattleGameMode::ApplyScenarioPreset()
 	}
 	if (ScenarioFight.bContestSingleCrossing)
 	{
-		if (APA250ControlPoint* Green = FindGreenPost())
+		// L_Concord is built with its river and the full-length North Bridge (tagged
+		// PA250LevelCrossing by build_levels.py); only a level without one gets the plank crossing.
+		bool bLevelCrossing = false;
+		for (TActorIterator<AActor> It(GetWorld()); It && !bLevelCrossing; ++It)
+		{
+			bLevelCrossing = It->ActorHasTag(TEXT("PA250LevelCrossing"));
+		}
+		if (bLevelCrossing)
+		{
+			UE_LOG(LogTemp, Display, TEXT("PA250 crossing: the level's own river and bridge"));
+		}
+		else if (APA250ControlPoint* Green = FindGreenPost())
 		{
 			// The post actor sits above the ground. The creek and the planks are on the ground under it.
 			SpawnCreekBridge(GetWorld(), Green->GetActorLocation() + FVector(0.f, 0.f, -140.f));
@@ -534,6 +621,24 @@ void APA250BattleGameMode::EnsureInitialized()
 	if (Sub)
 	{
 		Setup = Sub->GetBattleSetup();
+	}
+	if (bDebugBattle && Setup.valid)
+	{
+		// A level opened directly fights the scenario it was built for (the debug campaign's first
+		// contact is at Concord, which used to put the bridge fight on whatever map was open).
+		// -PA250Scenario=<preset> overrides. Only this local copy of the setup changes.
+		FString Want = GetWorld()->GetMapName().Contains(TEXT("L_Concord")) ? TEXT("concord_bridge") : TEXT("lexington_common");
+		FParse::Value(FCommandLine::Get(), TEXT("PA250Scenario="), Want);
+		if (Want != UTF8_TO_TCHAR(Setup.scenario_preset.c_str()))
+		{
+			UE_LOG(LogTemp, Display, TEXT("PA250 debug battle: scenario %s on %s (the campaign's contact was %s)"),
+				*Want, *GetWorld()->GetMapName(), UTF8_TO_TCHAR(Setup.scenario_preset.c_str()));
+			Setup.scenario_preset = TCHAR_TO_UTF8(*Want);
+			Setup.terrain_tags.erase(std::remove_if(Setup.terrain_tags.begin(), Setup.terrain_tags.end(),
+				[](const std::string& T) { return T == "bridge_crossing" || T == "return_march"; }), Setup.terrain_tags.end());
+			if (Want == TEXT("concord_bridge")) Setup.terrain_tags.push_back("bridge_crossing");
+			if (Want == TEXT("battle_road")) Setup.terrain_tags.push_back("return_march");
+		}
 	}
 	if (!Setup.valid)
 	{
@@ -1037,7 +1142,8 @@ void APA250BattleGameMode::CapturePreviewShot(const FString& Tag, const FString&
 
 	const FString PreviewDir = FPaths::ConvertRelativePathToFull(FPaths::Combine(FPaths::ProjectDir(), TEXT("../../docs/preview")));
 	IFileManager::Get().MakeDirectory(*PreviewDir, true);
-	const FString FinalName = FString::Printf(TEXT("lexington_%s_%s.png"), *PreviewLabel, *OutStem);
+	const FString MapStem = GetWorld()->GetMapName().Contains(TEXT("L_Concord")) ? TEXT("concord") : TEXT("lexington");
+	const FString FinalName = FString::Printf(TEXT("%s_%s_%s.png"), *MapStem, *PreviewLabel, *OutStem);
 	const FString SavedPath = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("PA250"), FinalName);
 	IFileManager::Get().MakeDirectory(*FPaths::GetPath(SavedPath), true);
 
@@ -1202,35 +1308,80 @@ AActor* APA250BattleGameMode::PickStart(FName Faction) const
 	return nullptr;
 }
 
-FTransform APA250BattleGameMode::PickSpawnTransform(FName Faction, APA250ControlPoint* PreferredPost) const
+bool APA250BattleGameMode::PostIsSafeSpawn(const APA250ControlPoint* Post, FName Faction) const
 {
-	if (PreferredPost && PreferredPost->GetHolder() == Faction)
+	if (!Post || Post->GetHolder() != Faction)
 	{
-		FVector Loc = PreferredPost->GetActorLocation();
-		Loc += FVector(FMath::FRandRange(-PreferredPost->Radius * 0.35f, PreferredPost->Radius * 0.35f),
-			FMath::FRandRange(-PreferredPost->Radius * 0.35f, PreferredPost->Radius * 0.35f), 40.f);
-		Loc = ClearSpawnLocation(GetWorld(), Loc);
-		return FTransform(FRotator::ZeroRotator, Loc);
+		return false;
 	}
-	// Prefer any owned post.
-	TArray<APA250ControlPoint*> Owned;
-	for (const TWeakObjectPtr<APA250ControlPoint>& WP : Posts)
+	// Nobody comes on in the middle of the crossing being fought for.
+	if (ScenarioFight.bContestSingleCrossing && Post->PostId == ScenarioFight.CrossingPostId)
 	{
-		if (APA250ControlPoint* P = WP.Get())
+		return false;
+	}
+	// Nor under the enemy's muskets: no living enemy within SafeSpawnEnemyCm of the post.
+	for (TActorIterator<ARFCharacter> It(GetWorld()); It; ++It)
+	{
+		if (!It->IsDead() && It->FactionId != Faction && !It->FactionId.IsNone()
+			&& FVector::Dist2D(It->GetActorLocation(), Post->GetActorLocation()) < SafeSpawnEnemyCm)
 		{
-			if (P->GetHolder() == Faction) Owned.Add(P);
+			return false;
 		}
 	}
-	if (Owned.Num() > 0)
+	return true;
+}
+
+FTransform APA250BattleGameMode::PickSpawnTransform(FName Faction, APA250ControlPoint* PreferredPost) const
+{
+	auto AtPost = [this](const APA250ControlPoint* Post) {
+		FVector Loc = Post->GetActorLocation();
+		Loc += FVector(FMath::FRandRange(-Post->Radius * 0.35f, Post->Radius * 0.35f),
+			FMath::FRandRange(-Post->Radius * 0.35f, Post->Radius * 0.35f), 0.f);
+		// On ground a man can stand on: the navmesh under the point, else the post itself.
+		if (UNavigationSystemV1* Nav = FNavigationSystem::GetCurrent<UNavigationSystemV1>(GetWorld()))
+		{
+			FNavLocation OnNav;
+			if (Nav->ProjectPointToNavigation(Loc, OnNav, FVector(250.f, 250.f, 400.f)))
+			{
+				Loc = OnNav.Location + FVector(0.f, 0.f, 100.f);
+			}
+			else
+			{
+				Loc = Post->GetActorLocation();
+			}
+		}
+		return FTransform(FRotator::ZeroRotator, ClearSpawnLocation(GetWorld(), Loc + FVector(0.f, 0.f, 40.f)));
+	};
+	if (PostIsSafeSpawn(PreferredPost, Faction))
 	{
-		return PickSpawnTransform(Faction, Owned[FMath::RandRange(0, Owned.Num() - 1)]);
+		return AtPost(PreferredPost);
 	}
+	TArray<APA250ControlPoint*> Safe;
+	for (const TWeakObjectPtr<APA250ControlPoint>& WP : Posts)
+	{
+		if (APA250ControlPoint* P = WP.Get(); P && PostIsSafeSpawn(P, Faction))
+		{
+			Safe.Add(P);
+		}
+	}
+	if (Safe.Num() > 0)
+	{
+		return AtPost(Safe[FMath::RandRange(0, Safe.Num() - 1)]);
+	}
+	// No post is ours and quiet: the side's own start ground at the edge of the field.
 	if (AActor* Start = PickStart(Faction))
 	{
 		FTransform T = Start->GetActorTransform();
 		T.AddToTranslation(FVector(FMath::FRandRange(-400.f, 400.f), FMath::FRandRange(-400.f, 400.f), 0.f));
 		T.SetLocation(ClearSpawnLocation(GetWorld(), T.GetLocation()));
 		return T;
+	}
+	for (const TWeakObjectPtr<APA250ControlPoint>& WP : Posts)
+	{
+		if (APA250ControlPoint* P = WP.Get(); P && P->GetHolder() == Faction)
+		{
+			return AtPost(P);
+		}
 	}
 	return FTransform::Identity;
 }
@@ -1479,28 +1630,9 @@ void APA250BattleGameMode::ConfigureSoldier(ARFCharacter* Soldier, FName Faction
 	Soldier->SetTeam(Faction, UnitClass);
 	// The class's kit: health, pace, his firelock and how hard he hits. Bots and the player alike.
 	const FPA250UnitClassKit& Kit = PA250UnitClasses::KitFor(Faction, UnitClass);
-	FVector Anchor = FVector(-500.f, -1000.f, 120.f);
-	if (Posts.Num() > 0 && Posts[0].IsValid())
-	{
-		Anchor = Posts[0]->GetActorLocation();
-	}
-	{
-		FVector FromGreen = Soldier->GetActorLocation() - Anchor;
-		FromGreen.Z = 0.f;
-		// Far spawns are pulled in to 55 m from the Green, so the two sides start ~110 m apart:
-		// room to form ranks and march into the 40-80 m musket band (28 m put lines face to face).
-		// Dragoons stay back at their side's start: a mounted reserve that rides up before getting down.
-		if (!Soldier->IsPlayerControlled() && FromGreen.Size() > 7000.f && UnitClass != TEXT("dragoon"))
-		{
-			Soldier->SetActorLocation(Anchor + FromGreen.GetSafeNormal() * 5500.f + FVector(0.f, 0.f, 40.f), false, nullptr, ETeleportType::TeleportPhysics);
-		}
-		if (Soldier->GetActorUpVector().Z < 0.5f)
-		{
-			FVector Face = Anchor - Soldier->GetActorLocation();
-			Face.Z = 0.f;
-			Soldier->SetActorRotation(Face.IsNearlyZero() ? FRotator(0.f, 180.f, 0.f) : Face.Rotation());
-		}
-	}
+	// (Until 2026-11-13 a bot spawned more than 70 m from the first post was moved to 55 m from it.
+	// The levels now place every start and post at the distance meant, and on L_Concord that rule
+	// dropped the militia beside the bridge and into the river, 10 m from the regulars.)
 	if (Soldier->HealthComponent)
 	{
 		Soldier->HealthComponent->MaxHealth = Kit.MaxHealth;
@@ -1944,11 +2076,16 @@ AActor* APA250BattleGameMode::ChooseRespawnPoint(AController* Controller)
 	if (F)
 	{
 		const FTransform T = PickSpawnTransform(*F, nullptr);
-		// RFGameMode expects an actor; fall back to a base start near the transform.
-		if (AActor* S = PickStart(*F))
+		// RFGameMode expects an actor. Its own marker, not a level start: moving a PlayerStart here
+		// (as this did) walked the side's start ground onto whatever post was last spawned at.
+		if (!RespawnAnchor.IsValid())
 		{
-			S->SetActorLocation(T.GetLocation());
-			return S;
+			RespawnAnchor = GetWorld()->SpawnActor<ATargetPoint>(T.GetLocation(), T.Rotator());
+		}
+		if (AActor* Anchor = RespawnAnchor.Get())
+		{
+			Anchor->SetActorTransform(T);
+			return Anchor;
 		}
 	}
 	return Super::ChooseRespawnPoint(Controller);
@@ -2070,20 +2207,69 @@ void APA250BattleGameMode::EndPlay(const EEndPlayReason::Type EndPlayReason)
 
 bool APA250BattleGameMode::SideIsOut(int32 Pool, int32 InitialUnits, bool bEverFielded, int32 Alive, bool bHumanAliveOnSide)
 {
-	if (bHumanAliveOnSide || Pool > 0) return false;
-	if (InitialUnits > 0) return true;
-	return bEverFielded && Alive <= 0;
+	// Every man standing is a ticket (user decision 2026-11-13): a side is beaten only when its
+	// reserve is spent AND nobody of it is left on the field. InitialUnits no longer decides.
+	(void)InitialUnits;
+	if (bHumanAliveOnSide || Pool > 0 || Alive > 0) return false;
+	return bEverFielded;
+}
+
+bool APA250BattleGameMode::RemnantBreaks(int32 Pool, int32 Alive, bool bHumanAliveOnSide)
+{
+	return !bHumanAliveOnSide && Pool <= 0 && Alive > 0 && Alive <= RemnantMen;
+}
+
+bool APA250BattleGameMode::IsMarkedRemnant(FName Faction) const
+{
+	if (bBattleOver || PoolTotal(Faction) > 0) return false;
+	const int32 Alive = CountAlive(Faction);
+	return Alive > 0 && Alive <= RemnantMarkMen;
+}
+
+float APA250BattleGameMode::RemnantCountdown(FName Faction) const
+{
+	const float* T = RemnantTime.Find(Faction);
+	return (T && *T > 0.f) ? FMath::Max(0.f, RemnantRoutSeconds - *T) : -1.f;
+}
+
+void APA250BattleGameMode::TickRemnants(float DeltaSeconds)
+{
+	// The last handful of a side with no reserve does not fight to the last man in a hedge: it
+	// breaks. Without this a battle whose last enemies were out of sight (or stuck) ran to the clock.
+	bool bHumanAlive = false;
+	if (!bAutoplayBots)
+	{
+		const APlayerController* PC = GetWorld() ? GetWorld()->GetFirstPlayerController() : nullptr;
+		const ARFCharacter* Me = PC ? Cast<ARFCharacter>(PC->GetPawn()) : nullptr;
+		bHumanAlive = Me && !Me->IsDead() && Me->FactionId == PlayerFaction;
+	}
+	for (const FName F : {FName(TEXT("british")), FName(TEXT("continental"))})
+	{
+		float& T = RemnantTime.FindOrAdd(F);
+		if (!RemnantBreaks(PoolTotal(F), CountAlive(F), bHumanAlive && F == PlayerFaction))
+		{
+			T = 0.f;
+			continue;
+		}
+		if (T <= 0.f)
+		{
+			PushKillFeed(FString::Printf(TEXT("The last %s are breaking"), F == TEXT("british") ? TEXT("regulars") : TEXT("provincials")));
+			UE_LOG(LogTemp, Display, TEXT("PA250 remnant: %s has %d men and no reserve; breaks in %.0f s"), *F.ToString(), CountAlive(F), RemnantRoutSeconds);
+		}
+		T += DeltaSeconds;
+		if (T >= RemnantRoutSeconds)
+		{
+			EndBattle(F == TEXT("british") ? FName(TEXT("continental")) : FName(TEXT("british")), TEXT("routed"));
+			return;
+		}
+	}
 }
 
 void APA250BattleGameMode::CheckTicketExhaustion()
 {
-	// Keep early fights from ending on bleed alone (default MinSecondsBeforeExhaustion ≈ 2 min).
-	const float Elapsed = GetWorld() ? (GetWorld()->GetTimeSeconds() - StartTime) : 0.f;
-	if (!TicketsMayExhaust(Elapsed, MinSecondsBeforeExhaustion))
-	{
-		return;
-	}
-	// Conquest: a side at 0 tickets loses at once, even with soldiers still standing.
+	// A side loses when its reserve is spent and its last man is down (SideIsOut). Bleed alone can
+	// no longer end a fight, so the old two-minute guard is gone: it only made a player whose side
+	// had been wiped early watch the field until the clock allowed the result.
 	// A side that started with no reinforcement tickets only loses after it has fielded at
 	// least once and been wiped — never on the first Tick before spawn (stores gating used
 	// to leave Continental at 0 tickets and kick Concord back to the map immediately).
@@ -2257,7 +2443,7 @@ void APA250BattleGameMode::Tick(float DeltaSeconds)
 			const float AvgFps = FpsSampleFrames / FMath::Max(FpsSampleAccum, KINDA_SMALL_NUMBER);
 			const FString Dir = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("PA250"));
 			IFileManager::Get().MakeDirectory(*Dir, true);
-			const FString Path = FPaths::Combine(Dir, TEXT("lexington_fps.json"));
+			const FString Path = FPaths::Combine(Dir, GetWorld()->GetMapName().Contains(TEXT("L_Concord")) ? TEXT("concord_fps.json") : TEXT("lexington_fps.json"));
 			FIntPoint ViewSize(0, 0);
 			if (GEngine && GEngine->GameViewport && GEngine->GameViewport->Viewport)
 			{
@@ -2323,6 +2509,10 @@ void APA250BattleGameMode::Tick(float DeltaSeconds)
 		}
 	}
 	CheckTicketExhaustion();
+	if (!bBattleOver)
+	{
+		TickRemnants(DeltaSeconds);
+	}
 	if (SpawnScreen && SpawnScreen->IsInViewport() && !bOpeningClassPick && !CanSpawn(PlayerFaction))
 	{
 		CloseSpawnScreenToSpectate(SpawnScreen->GetOwningPlayer());
@@ -2333,8 +2523,9 @@ void APA250BattleGameMode::Tick(float DeltaSeconds)
 	}
 	if (TimeRemaining() <= 0.f)
 	{
-		const int32 TB = PoolTotal(TEXT("british"));
-		const int32 TC = PoolTotal(TEXT("continental"));
+		// Every man standing counts, as it does for exhaustion: reserve plus the men on the field.
+		const int32 TB = MenRemaining(TEXT("british"));
+		const int32 TC = MenRemaining(TEXT("continental"));
 		FName Winner;
 		if (ScenarioFight.bRewardForcePreservation)
 		{

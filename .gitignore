@@ -425,3 +425,16 @@ compile_commands.json
 !protocol/test_vectors/**
 !unreal/PA250Sim/data/
 !unreal/PA250Sim/data/**
+
+# Generated stills and rebuildable art (regenerate instead of committing).
+# Battle-level preview captures written by scripts/capture_preview.sh (<level>_<label>_*.png).
+# Stills committed before this rule stay tracked.
+docs/preview/lexington_*.png
+docs/preview/concord_*.png
+# Battlefield kit: Blender output of tools/art/battlefield_kit.py and textures processed from raw/
+# (~670 MB). raw/ holds the paid OpenAI images and stays in git so processing reruns offline.
+unreal/PlayAmerica250/SourceArt/battlefield/*.blend
+unreal/PlayAmerica250/SourceArt/battlefield/*.glb
+unreal/PlayAmerica250/SourceArt/battlefield/ue5/
+unreal/PlayAmerica250/SourceArt/battlefield/previews/
+unreal/PlayAmerica250/SourceArt/battlefield/textures/

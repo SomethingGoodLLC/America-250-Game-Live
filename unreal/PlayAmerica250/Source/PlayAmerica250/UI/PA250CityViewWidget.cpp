@@ -408,8 +408,8 @@ TSharedRef<SWidget> UPA250CityViewWidget::RebuildWidget()
 		SOverlay::Slot().HAlign(HAlign_Left).VAlign(VAlign_Bottom).Padding(FMargin(10.f, 0.f, 0.f, KBottomStripPx + 10.f))
 			[SAssignNew(PanelWidget, SBox).WidthOverride(KPanelWidth).Visibility_Lambda([Weak]() {
 				UPA250Subsystem* Sub = Weak.IsValid() ? UPA250Subsystem::Get(Weak.Get()) : nullptr;
-				// Staff letters and notices open on the left; the panel steps aside for them.
-				return Sub && Sub->HasStaffEvent() ? EVisibility::Collapsed : EVisibility::Visible;
+				// An open staff letter sits on the left; the panel steps aside for it.
+				return Sub && Sub->IsStaffPanelOpen() ? EVisibility::Collapsed : EVisibility::Visible;
 			})
 			 [SNew(SBorder).BorderImage(&St->Panel).Padding(FMargin(2.f))
 			  [SNew(SVerticalBox) +

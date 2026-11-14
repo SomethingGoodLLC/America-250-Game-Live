@@ -19,7 +19,8 @@ class UPA250MeleeTuning;
 class UPA250FactionVisuals;
 class UPA250CombatProfiles;
 
-/** Rules read from BattleSetup.scenario_preset and terrain_tags on the shared Lexington map. */
+/** Rules read from BattleSetup.scenario_preset and terrain_tags. The Common and Battle Road fights
+ *  are on L_Lexington; the bridge fight is on L_Concord (UPA250Subsystem::BattleLevelForPreset). */
 struct FPA250ScenarioFight
 {
 	bool bContestSingleCrossing = false;
@@ -118,6 +119,22 @@ public:
 	/** Pure: has a side lost on tickets? Never while the human player is alive on it; otherwise at 0
 	 *  tickets (a side that started with none only once it has fielded men and been wiped). */
 	static bool SideIsOut(int32 Pool, int32 InitialUnits, bool bEverFielded, int32 Alive, bool bHumanAliveOnSide);
+	/** GAMEPLAY SETTINGS (user report 2026-11-14: both sides at 0 on the bar, the last enemies could
+	 *  not be found and the fight only ended on the clock). A side with no reserve and this few men
+	 *  left is a remnant: it breaks and quits the field after RemnantRoutSeconds; from
+	 *  RemnantMarkMen down its men are marked on the enemy player's HUD so they can be found. */
+	static constexpr int32 RemnantMen = 3;
+	static constexpr int32 RemnantMarkMen = 5;
+	static constexpr float RemnantRoutSeconds = 45.f;
+	/** Pure: is this side a remnant about to break? Never the human player's side while he is alive
+	 *  on it (user decision 2026-11-10: the battle is not lost under a man who is still fighting). */
+	static bool RemnantBreaks(int32 Pool, int32 Alive, bool bHumanAliveOnSide);
+	/** Every man a side still has: its reserve plus the men standing on the field. The HUD's number. */
+	int32 MenRemaining(FName Faction) const { return PoolTotal(Faction) + CountAlive(Faction); }
+	/** No reserve and RemnantMarkMen or fewer standing: the HUD marks these men for the other side. */
+	bool IsMarkedRemnant(FName Faction) const;
+	/** Seconds until this side's remnant quits the field, or -1 when it is not breaking. */
+	float RemnantCountdown(FName Faction) const;
 	/** No reserves left: the player steps into the nearest of his side's men still standing (no ticket
 	 *  is spent, the bot's controller is retired). False when nobody is left to take over. */
 	bool TakeOverSoldier(APlayerController* PC);
@@ -165,6 +182,9 @@ public:
 	static FPA250CreekBridge PlanCreekBridge(const FVector& GroundPoint);
 	/** Spawns the creek, the banks, and the deck. Returns how many pieces were placed. */
 	static int32 SpawnCreekBridge(UWorld* World, const FVector& GroundPoint);
+	/** A level built with its own river (L_Concord) closes the channel with unseen blocks tagged
+	 *  PA250Creek. Narrow them to men only: shot, sight lines and cameras pass. Returns the count. */
+	static int32 SealLevelRiver(UWorld* World);
 	const TArray<FString>& GetKillFeed() const { return KillFeed; }
 	/** Last killer label for the local player's death (spawn screen "Killed by"). */
 	FString GetLastKillerLabel() const { return LastKillerLabel; }
@@ -230,6 +250,7 @@ private:
 	bool CanSpawn(FName Faction) const;
 	void SpendDeathTicket(FName Faction, FName UnitClass);
 	void BleedTickets(float DeltaSeconds);
+	void TickRemnants(float DeltaSeconds);
 	int32 PoolTotal(FName Faction) const;
 	int32 CountAlive(FName Faction, FName UnitClass) const;
 	int32 CountAlive(FName Faction) const;
@@ -239,6 +260,12 @@ private:
 	bool bOpeningClassPick = false;
 	AActor* PickStart(FName Faction) const;
 	FTransform PickSpawnTransform(FName Faction, APA250ControlPoint* PreferredPost) const;
+	/** Ours, not the crossing being contested, and no living enemy within SafeSpawnEnemyCm. */
+	bool PostIsSafeSpawn(const APA250ControlPoint* Post, FName Faction) const;
+	/** GAMEPLAY SETTING: reinforcements do not come on at a post with an enemy this close. */
+	float SafeSpawnEnemyCm = 6000.f;
+	/** Where RFGameMode respawns a controller (ChooseRespawnPoint); never a level PlayerStart. */
+	TWeakObjectPtr<AActor> RespawnAnchor;
 	void ShowSpawnScreen(APlayerController* PC);
 	void CloseSpawnScreenToSpectate(APlayerController* PC);
 	void BeginDeathCamThenSpawn(APlayerController* PC);
@@ -272,6 +299,8 @@ private:
 	TMap<FName, TMap<FName, int32>> InitialPool;
 	/** True once a side has had at least one living soldier this battle (for zero-ticket wipe rules). */
 	TMap<FName, bool> EverFielded;
+	/** Seconds each side has been a breaking remnant (RemnantBreaks) without a break. */
+	TMap<FName, float> RemnantTime;
 	/** Remaining tickets (death + bleed) and per-class deaths. HUD shows Ledger.Pool. */
 	FPA250TicketLedger Ledger;
 	TMap<FName, TArray<TWeakObjectPtr<AActor>>> Starts;

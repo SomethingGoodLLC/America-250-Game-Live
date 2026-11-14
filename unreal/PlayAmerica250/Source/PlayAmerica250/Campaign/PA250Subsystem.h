@@ -164,6 +164,24 @@ public:
 	FString GetShipmentsJson() const;
 	UFUNCTION(BlueprintPure, Category = "PA250")
 	bool HasStaffEvent() const;
+	/** The letter panel is on screen: a letter that needs an answer now, or the desk the player opened. */
+	bool IsStaffPanelOpen() const;
+	/** A letter is waiting on the desk with the panel closed (the clock keeps running). */
+	bool HasDeskLetter() const;
+	void OpenDesk();
+	void CloseDesk();
+	FString GetDeskChipText() const;
+	bool IsPendingLetterTimely() const;
+	/** Hours left before the clerk files the shown letter unanswered; -1 = no limit. */
+	int32 GetPendingLetterHoursLeft() const;
+	/** Catalog choices of the shown source letter (empty for other kinds). */
+	int32 GetPendingLetterChoiceCount() const;
+	FString GetPendingLetterChoiceId(int32 Index) const;
+	FString GetPendingLetterChoiceLabel(int32 Index) const;
+	FString GetPendingLetterChoiceSummary(int32 Index) const;
+	/** Display only: the latest desk news (delivery, refusal, new letter) for the HUD message line. */
+	int32 GetDispatchSerial() const { return DispatchSerial; }
+	const FString& GetLastDispatch() const { return LastDispatch; }
 	/** True when the shown letter still needs a choice; false for a delivered/refused notice. */
 	bool IsPendingLetterAwaitingChoice() const;
 	FString GetPendingLetterId() const;
@@ -198,10 +216,17 @@ public:
 	void BumpHudEpoch() { ++HudEpoch; }
 	int32 GetHudEpoch() const { return HudEpoch; }
 
+	/** Display only: a battle result was applied and its report has not been shown on the map yet. */
+	bool HasUnseenBattleReport() const { return bUnseenBattleReport; }
+	void AcknowledgeBattleReport() { bUnseenBattleReport = false; }
+
 	FString AutoplayStage;
 	bool WriteTrace(const FString& Extra = FString()) const;
 
 	static FName LevelNameForFlow(EPA250Flow Flow);
+	/** The battle level for a BattleSetup.scenario_preset: Concord's bridge has its own level
+	 *  (L_Concord) when that map is in the project; every other fight is on L_Lexington. */
+	static FName BattleLevelForPreset(const FString& ScenarioPreset);
 	void TravelToFlowLevel(UObject* WorldContext) const;
 
 	static constexpr int32 MaxHoursPerFrame = 32;
@@ -209,6 +234,8 @@ public:
 private:
 	void MaybeAutosave(const pa250::CampaignState& Before, const pa250::CampaignState& After);
 	void RouteInterrupt(const pa250::TickOutput& Out);
+	void NoteDispatches(const pa250::CampaignState& Before, const pa250::CampaignState& After);
+	void AfterLetterAnswered();
 
 	pa250::CampaignController Controller;
 	bool bCampaignActive = false;
@@ -217,4 +244,10 @@ private:
 	float HourAccumulator = 0.f;
 	TArray<FString> AutosavePaths;
 	int32 HudEpoch = 0;
+	bool bUnseenBattleReport = false;
+	/** The clock was stopped by a letter, not by the player: answering it starts the clock again. */
+	bool bPausedByLetter = false;
+	bool bDeskOpen = false;
+	int32 DispatchSerial = 0;
+	FString LastDispatch;
 };

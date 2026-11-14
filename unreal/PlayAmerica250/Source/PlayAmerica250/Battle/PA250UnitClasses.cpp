@@ -35,7 +35,7 @@ const TArray<FPA250UnitClassKit>& BritishKits()
 		Kit(TEXT("line_infantry"), TEXT("Regular"), TEXT("Brown Bess and bayonet"),
 			TEXT("The battalion man. Steady in the volley and in the charge."), 100.f, 1.f, 1.f, 1.f, 1.f, 1.f, EPA250Bayonet::All),
 		Look(Kit(TEXT("grenadier"), TEXT("Grenadier"), TEXT("Brown Bess and bayonet"),
-			TEXT("Shock troops: the biggest men of the regiment. Hard to kill, deadliest with the bayonet."), 120.f, 0.95f, 1.f, 1.f, 1.f, 1.3f, EPA250Bayonet::All),
+			TEXT("Shock troops: the biggest men of the regiment. Deadliest with the bayonet; a ball stops them like any man."), 100.f, 0.95f, 1.f, 1.f, 1.f, 1.3f, EPA250Bayonet::All),
 			1.07f, EPA250Hat::Bearskin),
 		Look(Kit(TEXT("light_infantry"), TEXT("Light Infantry"), TEXT("Short musket and bayonet"),
 			TEXT("Skirmishers in loose order. Fast and a better shot; lighter in a bayonet fight."), 90.f, 1.15f, 0.88f, 1.f, 1.f, 0.9f, EPA250Bayonet::All),

@@ -160,8 +160,13 @@ CampaignState choose_logistics(const CampaignState& state, const std::string& le
                                const std::string& choice);
 // Clarify / counterorder / escalate a detached commander's request.
 CampaignState resolve_commander_request(const CampaignState& state, const std::string& action);
-// Tick correspondence deliveries and dated chapter/project gates; may add EventPopup.
+// Tick correspondence deliveries and dated chapter/project gates. Only a letter that needs an
+// answer right now (letter_is_timely) adds EventPopup; everything else waits on the desk.
 void tick_logistics(CampaignState& s, std::vector<Interrupt>& interrupts);
+// True for the one kind of letter that stops the clock: the detached commander asking for orders.
+bool letter_is_timely(const CorrespondenceItem& letter);
+// Hour at which an unanswered desk letter is filed as set aside; 0 = it never lapses.
+int64_t letter_lapse_hour(const CorrespondenceItem& letter);
 
 // Opening-war correspondence catalog (immutable). Load once from data JSON text.
 void load_correspondence_catalog(const std::string& json_text);

@@ -423,7 +423,7 @@ void AMusketWeapon::StartReload()
 
 EActiveReloadHit AMusketWeapon::CommitReload()
 {
-	if (!Sequencer.IsReloading() || Sequencer.IsJammed())
+	if (!Sequencer.IsReloading() || Sequencer.IsJammed() || bReloadPaused)
 	{
 		return EActiveReloadHit::None;
 	}
@@ -476,7 +476,7 @@ void AMusketWeapon::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
 	BotCommitCooldown = FMath::Max(0.f, BotCommitCooldown - DeltaSeconds);
-	if (State != EMusketState::Loaded)
+	if (State != EMusketState::Loaded && !bReloadPaused)
 	{
 		CurrentReloadSeconds += DeltaSeconds;
 		Sequencer.Tick(DeltaSeconds / FMath::Clamp(ReloadTimeScale, 0.25f, 4.f));
@@ -517,6 +517,10 @@ void AMusketWeapon::UpdateVisuals(float DeltaSeconds)
 		FRotator Aim = Pawn->GetBaseAimRotation();
 		Aim.Pitch = FMath::Clamp(FRotator::NormalizeAxis(Aim.Pitch), -MaxBarrelPitch, MaxBarrelPitch);
 		Aim.Roll = 0.f;
+		// The mouse turns the camera, not the man: a musket that followed the view all the way round pointed
+		// back through his own body. It stays within reach of the hands that hold it.
+		const float BodyYaw = Pawn->GetActorRotation().Yaw;
+		Aim.Yaw = BodyYaw + FMath::Clamp(FMath::FindDeltaAngleDegrees(BodyYaw, Aim.Yaw), -MaxCarryYawLeft, MaxCarryYawRight);
 		if (!RootComponent->IsUsingAbsoluteRotation()) RootComponent->SetUsingAbsoluteRotation(true);
 		FQuat Rot = Aim.Quaternion() * FRotator(MeleePitchOffset, MeleeYawOffset, 0.f).Quaternion();
 		if (BodyPoseAlpha > 0.f) Rot = FQuat::Slerp(Rot, BodyPoseRotation, FMath::Clamp(BodyPoseAlpha, 0.f, 1.f)).GetNormalized();
@@ -599,11 +603,12 @@ void AMusketWeapon::PoseSupportHand()
 	T.SpotFromGripCS = BodyToWorld.InverseTransformVector(SpotWorld - GripWorld);
 	// Reloading, the musket is parked on the body, not carried by the right hand: give the spot outright.
 	T.SpotCS = BodyToWorld.InverseTransformPosition(SpotWorld);
-	T.bSpotAbsolute = BodyPoseAlpha > 0.5f;
+	T.bSpotAbsolute = BodyPoseAlpha > 0.f; // from the first moment: the right hand is already leaving for the cartridge box
 	T.GunUpCS = BodyToWorld.InverseTransformVectorNoScale(GetActorUpVector());
 	T.GunForwardCS = BodyToWorld.InverseTransformVectorNoScale(GetActorForwardVector());
-	T.PoleFromShoulderCS = BodyToWorld.InverseTransformVectorNoScale(-Soldier->GetActorRightVector()) * 40.f
-		+ BodyToWorld.InverseTransformVectorNoScale(FVector(0.f, 0.f, -30.f));
+	// Elbow out to his left, low and a little back, so the upper arm hangs beside the body instead of across it.
+	T.PoleFromShoulderCS = BodyToWorld.InverseTransformVectorNoScale(-Soldier->GetActorRightVector() * 60.f - Soldier->GetActorForwardVector() * 20.f)
+		+ BodyToWorld.InverseTransformVectorNoScale(FVector(0.f, 0.f, -20.f));
 
 	// Which bone axis faced up in the bind pose is the back of the hand. Keep that toward the barrel.
 	const FTransform RefHand = FAnimationRuntime::GetComponentSpaceTransformRefPose(Ref, HandRef);

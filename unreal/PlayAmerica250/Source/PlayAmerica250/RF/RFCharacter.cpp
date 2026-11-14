@@ -714,6 +714,7 @@ void ARFCharacter::Tick(float DeltaTime)
 		FaceControlYawTimer = FMath::Max(0.f, FaceControlYawTimer - DeltaTime);
 	}
 	TickMovementLock(DeltaTime);
+	if (Musket) Musket->SetReloadPaused(IsReloadBlockedByMovement());
 	TickFootsteps(DeltaTime);
 	TickViewFeedback(DeltaTime);
 	SensitivityToastTimer = FMath::Max(0.f, SensitivityToastTimer - DeltaTime);
@@ -1159,6 +1160,11 @@ void ARFCharacter::TickMovementLock(float DeltaTime)
 			GetCharacterMovement()->SetMovementMode(MOVE_Walking);
 		}
 	}
+}
+
+bool ARFCharacter::IsReloadBlockedByMovement() const
+{
+	return !bIsDead && ReloadBlockedByMovement(IsPlayerControlled(), IsMounted(), GetVelocity().Size2D(), WalkSpeed);
 }
 
 void ARFCharacter::OnReloadStarted()

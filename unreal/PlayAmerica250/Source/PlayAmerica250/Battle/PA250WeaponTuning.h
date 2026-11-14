@@ -60,16 +60,17 @@ struct PLAYAMERICA250_API FPA250WeaponTuningValues
 	float TorsoDamageNear = 100.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Damage")
-	float FalloffStartMeters = 40.f;
+	float FalloffStartMeters = 60.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Damage")
-	float TorsoDamageFar = 60.f;
+	float TorsoDamageFar = 80.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Damage")
 	float FalloffEndMeters = 100.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Damage")
-	float HeadMultiplier = 1.5f;
+	/** A ball in the head kills any man at any range (2.5 x the far torso damage clears 120 health). */
+	float HeadMultiplier = 2.5f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Damage")
 	float MaxRangeMeters = 200.f;

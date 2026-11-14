@@ -72,6 +72,14 @@ struct FPA250MeleePose
 	float Shoulder = 0.f;
 	/** 0..1 guard: musket carried high across the body, weight back, knees soft. */
 	float Guard = 0.f;
+	/** 0..1 armed and on foot: the right hand holds the musket in front of the right hip, muzzle up and to the
+	 *  left, so the left hand reaches it without folding across the chest (the clips are unarmed). */
+	float Carry = 0.f;
+	/** How much of the carry is left once every other hold has taken its share. */
+	float CarryWeight() const
+	{
+		return FMath::Clamp(Carry, 0.f, 1.f) * (1.f - FMath::Clamp(Coil + Lunge + Butt + Level + Guard + Raise + Chop + Reload + Shoulder, 0.f, 1.f));
+	}
 	/** Cm the rear foot trails behind the body while a lunge step carries it forward. */
 	float RearFootLagCm = 0.f;
 	/** Hit reaction: the way the blow drives the body (component space), length 0..1. */
@@ -79,7 +87,7 @@ struct FPA250MeleePose
 
 	bool IsActive() const
 	{
-		return Coil > 1.e-3f || Lunge > 1.e-3f || Butt > 1.e-3f || Level > 1.e-3f || Guard > 1.e-3f || Reload > 1.e-3f || Shoulder > 1.e-3f || Raise > 1.e-3f || Chop > 1.e-3f || RearFootLagCm > 0.1f || !FlinchCS.IsNearlyZero(1.e-3);
+		return Coil > 1.e-3f || Lunge > 1.e-3f || Butt > 1.e-3f || Level > 1.e-3f || Guard > 1.e-3f || Carry > 1.e-3f || Reload > 1.e-3f || Shoulder > 1.e-3f || Raise > 1.e-3f || Chop > 1.e-3f || RearFootLagCm > 0.1f || !FlinchCS.IsNearlyZero(1.e-3);
 	}
 };
 

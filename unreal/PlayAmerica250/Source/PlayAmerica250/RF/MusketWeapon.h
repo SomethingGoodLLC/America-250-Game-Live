@@ -48,6 +48,11 @@ public:
 
 	void SetReloadHeld(bool bHeld) { bReloadHeld = bHeld; }
 
+	/** Set by the owner every frame (the player at a run): the drill stands still, a press does nothing, and it
+	 *  carries on from the same point when the pause lifts. */
+	void SetReloadPaused(bool bPaused) { bReloadPaused = bPaused; }
+	bool IsReloadPaused() const { return bReloadPaused && State != EMusketState::Loaded; }
+
 	void TickBotReload(float Skill01, FRandomStream& Rng);
 
 	/** AI only (bots call it every frame): presses reload when the training plan says so, through the
@@ -114,6 +119,10 @@ public:
 	static float ReloadAnimAlpha(EActiveReloadPhase Phase, float PhaseProgress);
 	/** Barrel pitch limit (deg), up or down. Kept near the view limit so a high aim still raises the musket. */
 	static constexpr float MaxBarrelPitch = 85.f;
+	/** How far the barrel turns off the body's facing (deg) to follow the aim. Less to his right: the left
+	 *  hand has to reach across the body to hold it there. */
+	static constexpr float MaxCarryYawLeft = 60.f;
+	static constexpr float MaxCarryYawRight = 25.f;
 	USceneComponent* GetMuzzleLocation() const { return MuzzleLocation; }
 	/** Visual only: show or hide the pack's socket bayonet on the muzzle (created on first use). */
 	void SetBayonetFixed(bool bFixed);
@@ -189,6 +198,7 @@ protected:
 
 	FActiveReloadSequencer Sequencer;
 	bool bReloadHeld = false;
+	bool bReloadPaused = false;
 	float BotCommitCooldown = 0.f;
 	FPA250AIReloadPlanner AIPlanner;
 	EActiveReloadPhase LastSoundPhase = EActiveReloadPhase::Idle;

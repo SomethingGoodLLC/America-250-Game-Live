@@ -201,6 +201,11 @@ private:
 	 *  the last drill phase / progress seen (held through a fumble or a jam). */
 	float ReloadWeight = 0.f;
 	float RamBlend = 0.f;
+	/** Visual only: the drill pose is shown below this ground speed (cm/s); faster, the musket stays at the carry. */
+	static constexpr float ReloadDrillMaxSpeed = 60.f;
+	/** Visual only: how far the carried musket points up and to the left of the aim (degrees). */
+	static constexpr float CarryPitchDegrees = 22.f;
+	static constexpr float CarryYawDegrees = -20.f;
 	uint8 ReloadPhase = 0;
 	float ReloadProgress = 0.f;
 	void TickReloadPose(float DeltaTime);

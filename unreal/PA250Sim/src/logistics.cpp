@@ -139,10 +139,19 @@ CorrespondenceItem* find_awaiting(CampaignState& s) {
     return nullptr;
 }
 
+// Puts a letter on top of the desk. Only a timely letter interrupts the clock.
 void push_event(CampaignState& s, std::vector<Interrupt>* interrupts, const std::string& letter_id) {
     s.pending_event_id = letter_id;
-    if (interrupts) interrupts->push_back(Interrupt::EventPopup);
+    const CorrespondenceItem* letter = find_letter(s, letter_id);
+    if (interrupts && letter && letter_is_timely(*letter)) interrupts->push_back(Interrupt::EventPopup);
 }
+
+// GAMEPLAY TUNING: days a desk letter waits for an answer, and the gap between supply letters.
+constexpr int64_t kLetterReplyHours = 72;
+constexpr int64_t kKnoxReplyHours = 24 * 7;
+constexpr int64_t kAftermathCooldownHours = 24 * 7;
+
+bool has_prefix(const std::string& s, const char* prefix) { return s.rfind(prefix, 0) == 0; }
 
 uint64_t mix_seed(const CampaignState& s, uint64_t salt) {
     return detail::mix64(s.seed ^ detail::mix64(static_cast<uint64_t>(s.now.hour_index)) ^ salt);
@@ -243,7 +252,19 @@ void deliver_committed(CampaignState& s, CorrespondenceItem& letter) {
 void seed_aftermath_letter(CampaignState& s, std::vector<Interrupt>* interrupts) {
     if (!s.progress.aftermath_pending) return;
     if (find_awaiting(s)) return;
+    // One supply letter per stretch of fighting: a second clash within the week does not
+    // bring the same question back to the desk.
+    for (const auto& c : s.staff.queue)
+        if (has_prefix(c.id, "aftermath_") && s.now.hour_index - c.created_hour < kAftermathCooldownHours) {
+            s.progress.aftermath_pending = false;
+            return;
+        }
     reset_clerk_day(s);
+    std::string field = "Concord";
+    {
+        auto pit = s.provinces.find(s.progress.last_battle_report.province_id);
+        if (pit != s.provinces.end() && !pit->second.name.empty()) field = pit->second.name;
+    }
     CorrespondenceItem letter;
     letter.id = next_letter_id(s, "aftermath");
     letter.created_hour = s.now.hour_index;
@@ -254,7 +275,7 @@ void seed_aftermath_letter(CampaignState& s, std::vector<Interrupt>* interrupts)
     letter.fictionalized = true;
     letter.powder = 12;
     letter.arms = 6;
-    letter.subject = "Powder and arms after the Concord clash";
+    letter.subject = "Powder and arms after the " + field + " clash";
     letter.body =
         "[FICTIONALIZED] Clerk Hale presents three paths: purchase from a merchant, petition the "
         "Committee of Safety, or requisition from local stocks. Recorded history of 19 April is "
@@ -269,6 +290,7 @@ void seed_aftermath_letter(CampaignState& s, std::vector<Interrupt>* interrupts)
 void seed_concord_followup(CampaignState& s) {
     if (s.progress.concord_followup_seeded) return;
     if (!s.progress.lexington_fought) return;
+    if (s.pending_battle.active) return;  // columns are ordered once the field is clear
     s.progress.concord_followup_seeded = true;
     s.ai_objective = "concord";
     // Point British column toward Concord if still in the field.
@@ -305,7 +327,7 @@ void maybe_commander_friction(CampaignState& s, std::vector<Interrupt>* interrup
     if (s.progress.battles_fought < 1) return;
     DetachedCommander& cmd = s.progress.commander;
     if (cmd.pending_clarification) return;
-    if (find_awaiting(s)) return;
+    // His question is timely, so it does not queue behind a letter waiting on the desk.
     // After first battle, cautious commander asks to preserve force rather than contest Concord.
     if (s.progress.lexington_fought && s.progress.battles_fought == 1 &&
         cmd.last_request.empty()) {
@@ -344,8 +366,8 @@ void maybe_chapter_gates(CampaignState& s, std::vector<Interrupt>* interrupts) {
         letter.created_hour = s.now.hour_index;
         letter.recipient = "congress";
         letter.kind = "commander_report";
-        letter.status = "needs_approval";
-        letter.awaiting_choice = true;
+        letter.status = "approved";  // a briefing: filed for reading, nothing to answer
+        letter.awaiting_choice = false;
         letter.fictionalized = true;
         letter.subject = "Chapter: Continental Army established";
         letter.body =
@@ -354,7 +376,6 @@ void maybe_chapter_gates(CampaignState& s, std::vector<Interrupt>* interrupts) {
             "coordination. Washington is appointed 15 June and takes command 3 July — headquarters "
             "correspondence becomes available after that dated transition.";
         s.staff.queue.push_back(letter);
-        push_event(s, interrupts, letter.id);
         detail::add_log(s, "chapter: continental army");
     }
     if (s.progress.chapter_continental && !s.progress.chapter_washington &&
@@ -430,8 +451,7 @@ void resolve_due_letters(CampaignState& s, std::vector<Interrupt>* interrupts) {
                 }
                 letter.status = "delivered";
                 letter.awaiting_choice = false;
-                push_event(s, interrupts, letter.id);
-                continue;
+                continue;  // a notice: the HUD reports it, the clock keeps running
             }
             if (letter.status == "delayed") {
                 // Delayed shipments convert to pending delivery a few hours later once.
@@ -440,7 +460,24 @@ void resolve_due_letters(CampaignState& s, std::vector<Interrupt>* interrupts) {
                 continue;
             }
             deliver_committed(s, letter);
-            push_event(s, interrupts, letter.id);
+        }
+    }
+}
+
+// A desk letter left unanswered past its window is set aside by the clerk, with whatever
+// that costs (Knox goes unsupported, the supply question goes unasked).
+void lapse_unanswered_letters(CampaignState& s) {
+    std::vector<std::string> due;
+    for (const auto& c : s.staff.queue) {
+        if (!c.awaiting_choice || c.status != "needs_approval") continue;
+        const int64_t lapse = letter_lapse_hour(c);
+        if (lapse > 0 && s.now.hour_index >= lapse) due.push_back(c.id);
+    }
+    for (const auto& id : due) {
+        s = choose_logistics(s, id, "dismiss");
+        if (CorrespondenceItem* letter = find_letter(s, id)) {
+            letter->reason = "Left unanswered; " + s.staff.clerk_name + " filed it. " + letter->reason;
+            detail::add_log(s, "letter lapsed unanswered: " + id);
         }
     }
 }
@@ -929,6 +966,15 @@ void tick_cartridge_jobs(CampaignState& s) {
     }
 }
 
+bool letter_is_timely(const CorrespondenceItem& letter) {
+    return letter.kind == "commander_report" && letter.subject.find("Detached") != std::string::npos;
+}
+
+int64_t letter_lapse_hour(const CorrespondenceItem& letter) {
+    if (!letter.awaiting_choice || letter.status != "needs_approval" || letter_is_timely(letter)) return 0;
+    return letter.created_hour + (letter.kind == "knox_support" ? kKnoxReplyHours : kLetterReplyHours);
+}
+
 std::string scenario_preset_for_province(const std::string& province_id) {
     if (province_id == "lexington") return "lexington_common";
     if (province_id == "concord") return "concord_bridge";
@@ -1245,8 +1291,11 @@ void tick_logistics(CampaignState& s, std::vector<Interrupt>& interrupts) {
     tick_recruitment_jobs(s);
     deliver_due_shipments(s, &interrupts);
     resolve_due_letters(s, &interrupts);
+    lapse_unanswered_letters(s);
     rest_armies_hourly(s);
     seed_aftermath_letter(s, &interrupts);
+    // The April columns march whether or not the supply letter has been answered.
+    if (!s.progress.aftermath_pending) seed_concord_followup(s);
     maybe_commander_friction(s, &interrupts);
     maybe_chapter_gates(s, &interrupts);
     seed_opening_war_correspondence(s, &interrupts);

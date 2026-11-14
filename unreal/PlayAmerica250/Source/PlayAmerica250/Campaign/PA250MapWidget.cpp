@@ -11,6 +11,8 @@
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
+#include "Widgets/Layout/SWrapBox.h"
+#include "Widgets/Layout/SScrollBox.h"
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/SOverlay.h"
 #include "Widgets/Text/STextBlock.h"
@@ -678,8 +680,14 @@ FText UPA250MapWidget::StaffPanelText() const
 	const FString Subject = S->GetPendingLetterSubject();
 	const FString Body = S->GetPendingLetterBody();
 	const FString Clerk = ToFStr(S->GetState().staff.clerk_name);
-	return FText::FromString(FString::Printf(
-		TEXT("%s — correspondence\n\n%s\n\n%s"), *Clerk, *Subject, *Body));
+	FString Text = FString::Printf(TEXT("%s — correspondence\n\n%s\n\n%s"), *Clerk, *Subject, *Body);
+	const int32 HoursLeft = S->IsPendingLetterAwaitingChoice() ? S->GetPendingLetterHoursLeft() : -1;
+	if (HoursLeft >= 0)
+	{
+		Text += FString::Printf(TEXT("\n\nNo need to stop the clock for this. Unanswered in %d h, %s files it as set aside."),
+								HoursLeft, *Clerk);
+	}
+	return FText::FromString(Text);
 }
 
 void UPA250MapWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
@@ -696,6 +704,13 @@ void UPA250MapWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 	{
 		SelectedArmyId.Reset();
 		NotifyMapSelectionChanged();
+	}
+	// Desk news (a delivery, a refusal, a new letter) goes to the message line; it never pauses.
+	if (S->GetDispatchSerial() != SeenDispatchSerial)
+	{
+		const bool bFirstLook = SeenDispatchSerial < 0;
+		SeenDispatchSerial = S->GetDispatchSerial();
+		if (!bFirstLook) SetStatusMessage(S->GetLastDispatch());
 	}
 	const int32 Epoch = S->GetHudEpoch();
 	if (Epoch == PaintedHudEpoch)
@@ -960,7 +975,7 @@ TSharedRef<SWidget> UPA250MapWidget::RebuildWidget()
 	});
 	TAttribute<EVisibility> StaffVis = TAttribute<EVisibility>::CreateLambda([this]() {
 		UPA250Subsystem* S2 = Sub();
-		return (S2 && S2->HasStaffEvent() && !S2->IsBattlePending()) ? EVisibility::Visible : EVisibility::Collapsed;
+		return (S2 && S2->IsStaffPanelOpen()) ? EVisibility::Visible : EVisibility::Collapsed;
 	});
 	TAttribute<EVisibility> AftermathChoicesVis = TAttribute<EVisibility>::CreateLambda([this]() {
 		UPA250Subsystem* S2 = Sub();
@@ -1016,26 +1031,71 @@ TSharedRef<SWidget> UPA250MapWidget::RebuildWidget()
 		return S2 && S2->HasStaffEvent() && !S2->IsBattlePending() && S2->IsPendingLetterAwaitingChoice() &&
 			   S2->GetPendingLetterKind() == Kind;
 	};
-	TAttribute<EVisibility> HistoricalNoticeVis = TAttribute<EVisibility>::CreateLambda([this, SourceKindAwaiting]() {
-		return SourceKindAwaiting(Sub(), TEXT("historical_notice")) ? EVisibility::Visible : EVisibility::Collapsed;
-	});
-	TAttribute<EVisibility> SourceL3Vis = TAttribute<EVisibility>::CreateLambda([this, SourceKindAwaiting]() {
+	// A source letter's choices come from the catalog: one button per choice, the effect as its
+	// tooltip, and "Set aside" for no commitment. Nothing here is hard-wired to a letter.
+	TSharedRef<SVerticalBox> SourceChoices = SNew(SVerticalBox).Visibility(TAttribute<EVisibility>::CreateLambda(
+		[this, SourceKindAwaiting]() {
+			return SourceKindAwaiting(Sub(), TEXT("source_decision")) ? EVisibility::Visible : EVisibility::Collapsed;
+		}));
+	for (int32 ChoiceIdx = 0; ChoiceIdx < 4; ++ChoiceIdx)
+	{
+		SourceChoices->AddSlot().AutoHeight().Padding(0, 0, 0, 5)
+			[SNew(SButton)
+				 .ButtonStyle(&Hud.Button)
+				 .IsFocusable(false)
+				 .HAlign(HAlign_Left)
+				 .ContentPadding(FMargin(11.f, 4.f))
+				 .Visibility_Lambda([this, ChoiceIdx]() {
+					 UPA250Subsystem* S2 = Sub();
+					 return (S2 && ChoiceIdx < S2->GetPendingLetterChoiceCount()) ? EVisibility::Visible : EVisibility::Collapsed;
+				 })
+				 .ToolTipText_Lambda([this, ChoiceIdx]() {
+					 UPA250Subsystem* S2 = Sub();
+					 return FText::FromString(S2 ? S2->GetPendingLetterChoiceSummary(ChoiceIdx) : FString());
+				 })
+				 .OnClicked_Lambda([this, ChoiceIdx]() {
+					 if (UPA250Subsystem* S2 = Sub())
+					 {
+						 const FString ChoiceId = S2->GetPendingLetterChoiceId(ChoiceIdx);
+						 if (!ChoiceId.IsEmpty()) PressLogistics(ChoiceId);
+					 }
+					 return FReply::Handled();
+				 })
+					 [SNew(SVerticalBox) +
+					  SVerticalBox::Slot().AutoHeight()
+						  [SNew(STextBlock)
+							   .Font(BodyFont)
+							   .ColorAndOpacity(FPA250HudStyle::Cream)
+							   .AutoWrapText(true)
+							   .Text_Lambda([this, ChoiceIdx]() {
+								   UPA250Subsystem* S2 = Sub();
+								   return FText::FromString(S2 ? S2->GetPendingLetterChoiceLabel(ChoiceIdx) : FString());
+							   })] +
+					  // What the choice costs and brings, on the button itself.
+					  SVerticalBox::Slot().AutoHeight()
+						  [SNew(STextBlock)
+							   .Font(FPA250HudStyle::Font(TEXT("Regular"), 10))
+							   .ColorAndOpacity(FPA250HudStyle::Brass)
+							   .AutoWrapText(true)
+							   .Text_Lambda([this, ChoiceIdx]() {
+								   UPA250Subsystem* S2 = Sub();
+								   FString Summary = S2 ? S2->GetPendingLetterChoiceSummary(ChoiceIdx) : FString();
+								   Summary.RemoveFromStart(TEXT("Gameplay tuning: "));
+								   return FText::FromString(Summary);
+							   })]]];
+	}
+	SourceChoices->AddSlot().AutoHeight().HAlign(HAlign_Left)
+		[MakeButton(TEXT("Set aside"), [this]() { PressLogistics(TEXT("dismiss")); })];
+	// "Later" puts a desk letter back without answering it; the clock never stopped for it.
+	TAttribute<EVisibility> LaterVis = TAttribute<EVisibility>::CreateLambda([this]() {
 		UPA250Subsystem* S2 = Sub();
-		return (SourceKindAwaiting(S2, TEXT("source_decision")) && S2->GetPendingLetterSourceId() == TEXT("L3"))
+		return (S2 && S2->IsStaffPanelOpen() && S2->IsPendingLetterAwaitingChoice() && !S2->IsPendingLetterTimely())
 				   ? EVisibility::Visible
 				   : EVisibility::Collapsed;
 	});
-	TAttribute<EVisibility> SourceL5Vis = TAttribute<EVisibility>::CreateLambda([this, SourceKindAwaiting]() {
+	TAttribute<EVisibility> DeskChipVis = TAttribute<EVisibility>::CreateLambda([this]() {
 		UPA250Subsystem* S2 = Sub();
-		return (SourceKindAwaiting(S2, TEXT("source_decision")) && S2->GetPendingLetterSourceId() == TEXT("L5"))
-				   ? EVisibility::Visible
-				   : EVisibility::Collapsed;
-	});
-	TAttribute<EVisibility> SourceL7Vis = TAttribute<EVisibility>::CreateLambda([this, SourceKindAwaiting]() {
-		UPA250Subsystem* S2 = Sub();
-		return (SourceKindAwaiting(S2, TEXT("source_decision")) && S2->GetPendingLetterSourceId() == TEXT("L7"))
-				   ? EVisibility::Visible
-				   : EVisibility::Collapsed;
+		return (S2 && S2->HasDeskLetter()) ? EVisibility::Visible : EVisibility::Collapsed;
 	});
 	TAttribute<EVisibility> ViewSourceVis = TAttribute<EVisibility>::CreateLambda([this]() {
 		UPA250Subsystem* S2 = Sub();
@@ -1044,9 +1104,9 @@ TSharedRef<SWidget> UPA250MapWidget::RebuildWidget()
 	});
 
 	TAttribute<EVisibility> ForcesVis = TAttribute<EVisibility>::CreateLambda([this]() {
-		// Staff correspondence and battles take the screen; the forces list returns after.
+		// An open letter and battles take the screen; the forces list returns after.
 		UPA250Subsystem* S2 = Sub();
-		if (S2 && (S2->IsBattlePending() || S2->HasStaffEvent())) return EVisibility::Collapsed;
+		if (S2 && (S2->IsBattlePending() || S2->IsStaffPanelOpen())) return EVisibility::Collapsed;
 		return EVisibility::Visible;
 	});
 	TAttribute<EVisibility> ArmyBannerVis = TAttribute<EVisibility>::CreateLambda([this]() {
@@ -1375,61 +1435,87 @@ TSharedRef<SWidget> UPA250MapWidget::RebuildWidget()
 			  .VAlign(VAlign_Center)
 			  .HAlign(HAlign_Left)
 			  .Padding(FMargin(36.f, 0.f, 0.f, 0.f))
-				  [SNew(SBox).WidthOverride(420.f)
+				  [SNew(SBox).WidthOverride(460.f)
+					   [SNew(SVerticalBox) +
+						SVerticalBox::Slot().AutoHeight()
+							[SNew(SButton)
+								 .ButtonStyle(&Hud.Button)
+								 .Visibility(DeskChipVis)
+								 .IsFocusable(false)
+								 .ContentPadding(FMargin(11.f, 5.f))
+								 .ToolTipText(FText::FromString(TEXT(
+									 "Open the letter and choose. The clock keeps running; an unanswered letter is filed by the clerk.")))
+								 .OnClicked_Lambda([this]() {
+									 if (UPA250Subsystem* S2 = Sub()) S2->OpenDesk();
+									 return FReply::Handled();
+								 })
+									 [SNew(STextBlock)
+										  .Font(BodyFont)
+										  .ColorAndOpacity(FPA250HudStyle::Cream)
+										  .AutoWrapText(true)
+										  .Text_Lambda([this]() {
+											  UPA250Subsystem* S2 = Sub();
+											  return FText::FromString(S2 ? S2->GetDeskChipText() : FString());
+										  })]] +
+						SVerticalBox::Slot().AutoHeight()
 					   [SNew(SBorder)
 							.Visibility(StaffVis)
 							.BorderImage(&Hud.Parchment)
 							.Padding(FMargin(18.f, 14.f))
 								[SNew(SVerticalBox) +
+								 // A long letter scrolls inside the panel so its choices always stay on screen.
 								 SVerticalBox::Slot().AutoHeight()
-									 [SNew(STextBlock)
-										  .Font(BodyFont)
-										  .ColorAndOpacity(FLinearColor(0.12f, 0.08f, 0.04f))
-										  .AutoWrapText(true)
-										  .Text_Lambda([this]() { return StaffPanelText(); })] +
+									 [SNew(SBox).MaxDesiredHeight(400.f)
+										  [SNew(SScrollBox) +
+										   SScrollBox::Slot()
+											   [SNew(STextBlock)
+													.Font(BodyFont)
+													.ColorAndOpacity(FLinearColor(0.12f, 0.08f, 0.04f))
+													.AutoWrapText(true)
+													.Text_Lambda([this]() { return StaffPanelText(); })]]] +
 								 SVerticalBox::Slot().AutoHeight().Padding(0, 10, 0, 0)
-									 [SNew(SHorizontalBox).Visibility(AftermathChoicesVis) +
-									  SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 6, 0)
+									 [SNew(SWrapBox).PreferredSize(420.f).InnerSlotPadding(FVector2D(6.f, 6.f)).Visibility(AftermathChoicesVis) +
+									  SWrapBox::Slot()
 										  [MakeButton(TEXT("Purchase"), [this]() { PressLogistics(TEXT("purchase")); },
 													  EVisibility::Visible,
 													  TAttribute<FText>::CreateLambda(
 														  [this]() { return AftermathTip(TEXT("purchase")); }))] +
-									  SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 6, 0)
+									  SWrapBox::Slot()
 										  [MakeButton(TEXT("Request aid"),
 													  [this]() { PressLogistics(TEXT("request_assistance")); },
 													  EVisibility::Visible,
 													  TAttribute<FText>::CreateLambda([this]() {
 														  return AftermathTip(TEXT("request_assistance"));
 													  }))] +
-									  SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 6, 0)
+									  SWrapBox::Slot()
 										  [MakeButton(TEXT("Requisition"),
 													  [this]() { PressLogistics(TEXT("requisition")); },
 													  EVisibility::Visible,
 													  TAttribute<FText>::CreateLambda(
 														  [this]() { return AftermathTip(TEXT("requisition")); }))] +
-									  SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 6, 0)
+									  SWrapBox::Slot()
 										  [MakeButton(TEXT("Invest capacity"),
 													  [this]() { PressLogistics(TEXT("capacity_investment")); },
 													  EVisibility::Visible,
 													  TAttribute<FText>::CreateLambda([this]() {
 														  return AftermathTip(TEXT("capacity_investment"));
 													  }))] +
-									  SHorizontalBox::Slot().AutoWidth()
+									  SWrapBox::Slot()
 										  [MakeButton(TEXT("Dismiss"), [this]() { PressLogistics(TEXT("dismiss")); },
 													  EVisibility::Visible,
 													  TAttribute<FText>::CreateLambda(
 														  [this]() { return AftermathTip(TEXT("dismiss")); }))]] +
 								 SVerticalBox::Slot().AutoHeight().Padding(0, 10, 0, 0)
-									 [SNew(SHorizontalBox).Visibility(CommanderChoicesVis) +
-									  SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 6, 0)
+									 [SNew(SWrapBox).PreferredSize(420.f).InnerSlotPadding(FVector2D(6.f, 6.f)).Visibility(CommanderChoicesVis) +
+									  SWrapBox::Slot()
 										  [MakeButton(TEXT("Clarify: preserve"),
 													  [this]() { PressCommander(TEXT("preserve_force")); })] +
-									  SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 6, 0)
+									  SWrapBox::Slot()
 										  [MakeButton(TEXT("Counterorder: contest"),
 													  [this]() { PressCommander(TEXT("contest_crossing")); })] +
-									  SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 6, 0)
+									  SWrapBox::Slot()
 										  [MakeButton(TEXT("Escalate"), [this]() { PressCommander(TEXT("escalate")); })] +
-									  SHorizontalBox::Slot().AutoWidth()
+									  SWrapBox::Slot()
 										  [MakeButton(TEXT("Dismiss"), [this]() { PressLogistics(TEXT("dismiss")); })]] +
 								 SVerticalBox::Slot().AutoHeight().Padding(0, 10, 0, 0)
 									 [SNew(SHorizontalBox).Visibility(KnoxChoicesVis) +
@@ -1442,43 +1528,7 @@ TSharedRef<SWidget> UPA250MapWidget::RebuildWidget()
 									 [SNew(SHorizontalBox).Visibility(ChapterChoicesVis) +
 									  SHorizontalBox::Slot().AutoWidth()
 										  [MakeButton(TEXT("Acknowledge"), [this]() { PressLogistics(TEXT("dismiss")); })]] +
-								 SVerticalBox::Slot().AutoHeight().Padding(0, 10, 0, 0)
-									 [SNew(SHorizontalBox).Visibility(SourceL3Vis) +
-									  SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 6, 0)
-										  [MakeButton(TEXT("Purchase provisions"),
-													  [this]() { PressLogistics(TEXT("purchase_provisions")); })] +
-									  SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 6, 0)
-										  [MakeButton(TEXT("Shared lodging"),
-													  [this]() { PressLogistics(TEXT("shared_lodging")); })] +
-									  SHorizontalBox::Slot().AutoWidth()
-										  [MakeButton(TEXT("Retain workers"),
-													  [this]() { PressLogistics(TEXT("retain_workers")); })]] +
-								 SVerticalBox::Slot().AutoHeight().Padding(0, 10, 0, 0)
-									 [SNew(SHorizontalBox).Visibility(SourceL5Vis) +
-									  SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 6, 0)
-										  [MakeButton(TEXT("Guarded removal"),
-													  [this]() { PressLogistics(TEXT("guarded_removal")); })] +
-									  SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 6, 0)
-										  [MakeButton(TEXT("Negotiate locally"),
-													  [this]() { PressLogistics(TEXT("negotiate_local")); })] +
-									  SHorizontalBox::Slot().AutoWidth()
-										  [MakeButton(TEXT("Evacuate / keep boats"),
-													  [this]() { PressLogistics(TEXT("evacuate_preserve_boats")); })]] +
-								 SVerticalBox::Slot().AutoHeight().Padding(0, 10, 0, 0)
-									 [SNew(SHorizontalBox).Visibility(SourceL7Vis) +
-									  SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 6, 0)
-										  [MakeButton(TEXT("Request transfer"),
-													  [this]() { PressLogistics(TEXT("request_transfer")); })] +
-									  SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 6, 0)
-										  [MakeButton(TEXT("Fund procurement"),
-													  [this]() { PressLogistics(TEXT("fund_procurement")); })] +
-									  SHorizontalBox::Slot().AutoWidth()
-										  [MakeButton(TEXT("Conserve ammunition"),
-													  [this]() { PressLogistics(TEXT("conserve_ammunition")); })]] +
-								 SVerticalBox::Slot().AutoHeight().Padding(0, 10, 0, 0)
-									 [SNew(SHorizontalBox).Visibility(HistoricalNoticeVis) +
-									  SHorizontalBox::Slot().AutoWidth()
-										  [MakeButton(TEXT("Acknowledge"), [this]() { PressLogistics(TEXT("dismiss")); })]] +
+								 SVerticalBox::Slot().AutoHeight().Padding(0, 10, 0, 0)[SourceChoices] +
 								 SVerticalBox::Slot().AutoHeight().Padding(0, 10, 0, 0)
 									 [SNew(SHorizontalBox).Visibility(ViewSourceVis) +
 									  SHorizontalBox::Slot().AutoWidth()
@@ -1491,7 +1541,13 @@ TSharedRef<SWidget> UPA250MapWidget::RebuildWidget()
 								 SVerticalBox::Slot().AutoHeight().Padding(0, 10, 0, 0)
 									 [SNew(SHorizontalBox).Visibility(NoticeVis) +
 									  SHorizontalBox::Slot().AutoWidth()
-										  [MakeButton(TEXT("Acknowledge"), [this]() { PressLogistics(TEXT("dismiss")); })]]]]]
+										  [MakeButton(TEXT("Acknowledge"), [this]() { PressLogistics(TEXT("dismiss")); })]] +
+								 SVerticalBox::Slot().AutoHeight().Padding(0, 10, 0, 0)
+									 [SNew(SHorizontalBox).Visibility(LaterVis) +
+									  SHorizontalBox::Slot().AutoWidth()
+										  [MakeButton(TEXT("Later"), [this]() {
+											  if (UPA250Subsystem* S2 = Sub()) S2->CloseDesk();
+										  })]]]]]]
 		+ SOverlay::Slot()
 			  .VAlign(VAlign_Top)
 			  .HAlign(HAlign_Left)
@@ -1510,6 +1566,29 @@ TSharedRef<SWidget> UPA250MapWidget::RebuildWidget()
 										  .Text_Lambda([this]() { return AboutText(); })] +
 								 SVerticalBox::Slot().AutoHeight().Padding(0, 10, 0, 0)
 									 [MakeButton(TEXT("Close"), [this]() { PressAboutToggle(); })]]]]
+		// After a battle the report opens by itself, over the map, until it is closed.
+		+ SOverlay::Slot()
+			  .VAlign(VAlign_Center)
+			  .HAlign(HAlign_Center)
+				  [SNew(SBox).WidthOverride(620.f)
+					   [SNew(SBorder)
+							.Visibility(TAttribute<EVisibility>::CreateLambda([this]() {
+								UPA250Subsystem* S2 = Sub();
+								return (S2 && S2->HasUnseenBattleReport() && !BattleReportText().IsEmpty()) ? EVisibility::Visible : EVisibility::Collapsed;
+							}))
+							.BorderImage(&Hud.Parchment)
+							.Padding(FMargin(22.f, 16.f))
+								[SNew(SVerticalBox) +
+								 SVerticalBox::Slot().AutoHeight()
+									 [SNew(STextBlock)
+										  .Font(BodyFont)
+										  .ColorAndOpacity(FLinearColor(0.12f, 0.08f, 0.04f))
+										  .AutoWrapText(true)
+										  .Text_Lambda([this]() { return BattleReportText(); })] +
+								 SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Right).Padding(0, 12, 0, 0)
+									 [MakeButton(TEXT("Continue"), [this]() {
+										 if (UPA250Subsystem* S2 = Sub()) S2->AcknowledgeBattleReport();
+									 })]]]]
 		+ SOverlay::Slot()
 			  .VAlign(VAlign_Bottom)
 			  .HAlign(HAlign_Right)
