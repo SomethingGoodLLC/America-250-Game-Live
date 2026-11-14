@@ -1,0 +1,26 @@
+{
+ "name": "result_force_preserved_posts_held",
+ "description": "Battle Road: the column that also held the posts takes the town",
+ "scenario": {
+  "province": "menotomy",
+  "attacker": "british_regulars",
+  "defender": "continental_militia"
+ },
+ "result": {
+  "province_id": "menotomy",
+  "winner": "british",
+  "end_reason": "force_preserved",
+  "objective_holder": "british",
+  "objectives_held": {
+   "green": "british"
+  }
+ },
+ "expect": {
+  "schema_valid": true,
+  "applied": true,
+  "owner_after": "british",
+  "siege_by": "",
+  "siege_hours": 0,
+  "loser_fate": "retreated"
+ }
+}

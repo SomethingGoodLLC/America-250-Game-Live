@@ -302,6 +302,17 @@ std::vector<std::string> CampaignController::approve_transfer_order(
     return {};
 }
 
+std::vector<std::string> CampaignController::send_stores_to_depot_order(const std::string& source_province) {
+    if (!started_ || flow_ != Flow::Campaign) return {detail::err("not_in_campaign")};
+    if (state_.pending_battle.active) return {detail::err("battle_pending")};
+    std::string error;
+    CampaignState next = send_stores_to_depot(state_, source_province, error);
+    if (!error.empty()) return {detail::err(error)};
+    state_ = next;
+    record("send_stores", source_province);
+    return {};
+}
+
 std::vector<std::string> CampaignController::develop_province_action(const std::string& province_id,
                                                                      const std::string& track) {
     return start_construction_action(province_id, track);
@@ -361,6 +372,37 @@ std::vector<std::string> CampaignController::take_loan_action() {
     return {};
 }
 
+std::vector<std::string> CampaignController::reenlist_action(const std::string& army_id,
+                                                             const std::string& unit_class) {
+    if (!started_ || flow_ != Flow::Campaign) return {detail::err("not_in_campaign")};
+    std::string error;
+    CampaignState next = reenlist_companies(state_, army_id, unit_class, error);
+    if (!error.empty()) return {detail::err(error)};
+    state_ = next;
+    record("reenlist", army_id + ":" + unit_class);
+    return {};
+}
+
+std::vector<std::string> CampaignController::send_for_siege_guns_action() {
+    if (!started_ || flow_ != Flow::Campaign) return {detail::err("not_in_campaign")};
+    std::string error;
+    CampaignState next = send_for_siege_guns(state_, error);
+    if (!error.empty()) return {detail::err(error)};
+    state_ = next;
+    record("siege_guns_sent_for", "");
+    return {};
+}
+
+std::vector<std::string> CampaignController::attach_siege_guns_action(const std::string& army_id) {
+    if (!started_ || flow_ != Flow::Campaign) return {detail::err("not_in_campaign")};
+    std::string error;
+    CampaignState next = attach_siege_guns(state_, army_id, error);
+    if (!error.empty()) return {detail::err(error)};
+    state_ = next;
+    record("siege_guns_hauled", army_id);
+    return {};
+}
+
 std::vector<std::string> CampaignController::repay_loan_action() {
     if (!started_ || flow_ != Flow::Campaign) return {detail::err("not_in_campaign")};
     std::string error;
@@ -395,6 +437,21 @@ std::vector<std::string> CampaignController::start_cartridge_craft(const std::st
     if (!error.empty()) return {detail::err(error)};
     state_ = next;
     record("cartridge_job", province_id);
+    return {};
+}
+
+std::string CampaignController::stamp_siege(const std::string& province_id, const std::string& siege_by, int hours) {
+    if (!started_) return "no_campaign";
+    auto it = state_.provinces.find(province_id);
+    if (it == state_.provinces.end()) return "unknown_province";
+    if (siege_by.empty() || hours <= 0) {
+        it->second.siege_by.clear();
+        it->second.siege_hours_remaining = 0;
+    } else {
+        it->second.siege_by = siege_by;
+        it->second.siege_hours_remaining = hours;
+    }
+    record("stamp_siege", province_id);
     return {};
 }
 

@@ -3,6 +3,7 @@
 #include "PA250CampaignGameMode.h"
 #include "PA250MapWidget.h"
 #include "PA250Subsystem.h"
+#include "UI/PA250CampaignArcPanels.h"
 #include "Camera/CameraActor.h"
 #include "Camera/CameraComponent.h"
 #include "Engine/Scene.h"
@@ -109,7 +110,7 @@ FString SideWordFor(const pa250::CampaignState& St, const pa250::Army& A)
 	{
 		return TEXT("Yours");
 	}
-	return A.faction == "british" ? FString(TEXT("British")) : ToFStr(A.faction);
+	return A.faction == "british" ? FString(TEXT("British")) : FString(TEXT("Patriot"));
 }
 
 /** Plate second line: your strength is yours to know; enemy strength stays unreported. */
@@ -437,6 +438,8 @@ void APA250ProvinceMapActor::Tick(float DeltaSeconds)
 	MoveArmyTokens(DeltaSeconds);
 	UpdateArmyLod();
 	RefreshBattleMarker();
+	RefreshMissionMarkers();
+	RefreshSiegeMarkers();
 	RefreshRoutes();
 }
 
@@ -1457,6 +1460,93 @@ void APA250ProvinceMapActor::UpdateArmyLod()
 	}
 }
 
+void APA250ProvinceMapActor::RefreshMissionMarkers()
+{
+	UPA250Subsystem* S = Sub();
+	if (!S || !S->GetController().has_campaign() || S->GetHudEpoch() == MissionMarkerHudEpoch)
+	{
+		return;
+	}
+	MissionMarkerHudEpoch = S->GetHudEpoch();
+	const TArray<FString> Targets = S->IsCampaignOver() ? TArray<FString>() : S->GetMissionTargetProvinces();
+	while (MissionMarkers.Num() < Targets.Num())
+	{
+		UTextRenderComponent* M = NewObject<UTextRenderComponent>(this);
+		M->SetupAttachment(MapMesh);
+		M->RegisterComponent();
+		M->SetAbsolute(true, true, true);
+		M->SetWorldRotation(APA250ProvinceMapActor::FlatMapTextRotation());
+		M->SetHorizontalAlignment(EHTA_Center);
+		M->SetWorldSize(30.f);
+		M->SetTextRenderColor(FColor(214, 168, 62)); // brass, as the tracker's heading
+		M->SetText(FText::FromString(TEXT("(!)")));
+		MissionMarkers.Add(M);
+	}
+	for (int32 i = 0; i < MissionMarkers.Num(); ++i)
+	{
+		UTextRenderComponent* M = MissionMarkers[i];
+		if (!M) continue;
+		const FVector2D* Token = i < Targets.Num() ? TokenUV.Find(Targets[i]) : nullptr;
+		if (!Token)
+		{
+			M->SetVisibility(false);
+			continue;
+		}
+		// Above the town mark, on the side away from the battle marker's place.
+		M->SetWorldLocation(UVToWorld(*Token + FVector2D(-0.012f, -0.020f), 10.f));
+		M->SetVisibility(true);
+	}
+}
+
+void APA250ProvinceMapActor::RefreshSiegeMarkers()
+{
+	UPA250Subsystem* S = Sub();
+	if (!S || !S->GetController().has_campaign() || S->GetHudEpoch() == SiegeMarkerHudEpoch)
+	{
+		return;
+	}
+	SiegeMarkerHudEpoch = S->GetHudEpoch();
+	TArray<TPair<FString, FString>> Besieged;
+	for (const auto& Kv : S->GetState().provinces)
+	{
+		if (Kv.second.siege_by.empty()) continue;
+		const FString When = PA250ArcPanels::TimeLeft(Kv.second.siege_hours_remaining);
+		Besieged.Emplace(ToFStr(Kv.first), FString::Printf(TEXT("S %s"), *When));
+	}
+	while (SiegeMarkers.Num() < Besieged.Num())
+	{
+		UTextRenderComponent* M = NewObject<UTextRenderComponent>(this);
+		M->SetupAttachment(MapMesh);
+		M->RegisterComponent();
+		M->SetAbsolute(true, true, true);
+		M->SetWorldRotation(APA250ProvinceMapActor::FlatMapTextRotation());
+		M->SetHorizontalAlignment(EHTA_Center);
+		M->SetWorldSize(22.f);
+		M->SetTextRenderColor(FColor(176, 48, 36));
+		SiegeMarkers.Add(M);
+	}
+	for (int32 i = 0; i < SiegeMarkers.Num(); ++i)
+	{
+		UTextRenderComponent* M = SiegeMarkers[i];
+		if (!M) continue;
+		const FVector2D* Token = i < Besieged.Num() ? TokenUV.Find(Besieged[i].Key) : nullptr;
+		if (!Token)
+		{
+			M->SetVisibility(false);
+			continue;
+		}
+		// Opposite the mission mark so a besieged mission town can show both.
+		M->SetText(FText::FromString(Besieged[i].Value));
+		M->SetWorldLocation(UVToWorld(*Token + FVector2D(0.018f, -0.020f), 10.f));
+		M->SetVisibility(true);
+	}
+	if (Besieged.Num() != SiegeMarkerLogged)
+	{
+		SiegeMarkerLogged = Besieged.Num();
+		UE_LOG(LogTemp, Display, TEXT("PA250 siege markers: %d"), Besieged.Num());
+	}
+}
+
 void APA250ProvinceMapActor::RefreshBattleMarker()
 {
 	UPA250Subsystem* S = Sub();
@@ -1772,6 +1862,23 @@ FString APA250ProvinceMapActor::DescribeHover(const FString& ArmyId, const FStri
 			}
 		}
 		Lines.Add(Here.Num() > 0 ? TEXT("Forces here: ") + FString::Join(Here, TEXT(", ")) : FString(TEXT("No forces here")));
+		if (!P->second.siege_by.empty())
+		{
+			const FString When = PA250ArcPanels::TimeLeft(P->second.siege_hours_remaining);
+			const FString Town = ToFStr(P->second.name);
+			if (P->second.owner == St.player_faction)
+			{
+				Lines.Add(FString::Printf(TEXT("%s is besieged: it falls in %s unless the besiegers leave or are beaten."), *Town, *When));
+			}
+			else if (P->second.siege_by == St.player_faction)
+			{
+				Lines.Add(FString::Printf(TEXT("You besiege %s: it falls in %s if your army stays."), *Town, *When));
+			}
+			else
+			{
+				Lines.Add(FString::Printf(TEXT("%s is besieged: it falls in %s."), *Town, *When));
+			}
+		}
 		if (St.pending_battle.active && St.pending_battle.province == Pid)
 		{
 			Lines.Add(TEXT("A battle is pending here"));

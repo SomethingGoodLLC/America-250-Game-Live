@@ -49,6 +49,9 @@ LINES: dict[str, tuple[str, str]] = {
     "reformed": ("Line re-formed!", "officer"),
     "charge": ("Huzzah!", "soldier"),
     "charge_b": ("At them, boys! Charge!", "soldier"),
+    # The leader's orders to his file (squad command, 2026-11-14).
+    "follow_me": ("Follow me!", "officer"),
+    "charge_bayonets": ("Charge bayonets!", "officer"),
 }
 
 # Shouting delivery: low stability for urgency, high style.

@@ -42,6 +42,11 @@ struct FPA250FormationOrder
 	bool bRout = false;
 	bool bCharge = false;                      // squad bayonet charge: run in and use the bayonet
 	bool bInCover = false;                     // Target is a covered firing position behind a wall
+	// A led squad (the leader's aim):
+	bool bFocusContact = false;                // fire at will on Contact (the leader's target), not the nearest enemy
+	bool bAimAtPoint = false;                  // presenting toward AimPoint (no man stands there)
+	FVector AimPoint = FVector::ZeroVector;
+	bool bHoldFire = false;                    // presented and waiting for the leader's shot
 };
 
 /** Pure: duck behind the wall unless moving, charging, routing, or loaded with a target in sight (rise to fire). */
@@ -143,8 +148,15 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Bot")
 	TObjectPtr<UPA250BotTuning> BotTuning;
 
+	/** The class's preferred fighting range (PA250UnitClasses kit), set by the battle game mode. */
+	float BandMinCm = 4000.f;
+	float BandMaxCm = 8000.f;
+
 	int32 SquadId = -1;
 	int32 FileIndex = 0;
+	/** Debug matchups (-PA250LedVolley): this man stands where he is and does nothing by himself; the
+	 *  battle drives him as a scripted leader. His reload still runs. */
+	bool bScriptedHold = false;
 	int32 ClaimedSlot = INDEX_NONE;
 	TWeakObjectPtr<APA250ControlPoint> ClaimedPost;
 
@@ -192,6 +204,17 @@ private:
 	float AimScale = 1.f;
 	int32 SeenReloads = 0;
 	bool TryBayonet(ARFCharacter* Me, ARFCharacter* Enemy, float Dist, const struct FPA250BotTuningValues& T);
+	/** A sapper with a work to raise or mend on ground his side holds goes to it and labours; false
+	 *  when there is none (or the enemy is on top of him) and he fights like any other man. */
+	bool TickSapper(ARFCharacter* Me, ARFCharacter* Enemy, float Dist, const struct FPA250BotTuningValues& T);
+	float LastSapperWork = -1.f;
+	/** A gunner goes to his place at one of his side's guns and stays there (the gun does the rest). */
+	bool TickGunner(ARFCharacter* Me, ARFCharacter* Enemy, float Dist, const struct FPA250BotTuningValues& T);
+	/** A surgeon goes to the nearest fallen man of his side he can still save and stays with him. */
+	bool TickSurgeon(ARFCharacter* Me, ARFCharacter* Enemy, float Dist, const struct FPA250BotTuningValues& T);
+	float LastSurgeonWork = -1.f;
+	/** Fallen colours close by are worth leaving the ranks for: his own to take up, the enemy's to carry off. */
+	bool TickFallenColours(ARFCharacter* Me, ARFCharacter* Enemy, float Dist, const struct FPA250BotTuningValues& T);
 	/** Dragoon riding and remounting; false when he should fight on foot like any skirmisher this think. */
 	bool TickDragoon(ARFCharacter* Me, ARFCharacter* Enemy, float Dist);
 	EPA250DragoonAct LastDragoonAct = EPA250DragoonAct::FightOnFoot;

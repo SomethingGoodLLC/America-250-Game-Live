@@ -119,12 +119,28 @@ def main() -> int:
             res["winner"] in ("british", "continental"),
             "battle winner set: " + res["winner"],
         )
-        ok = True
-        for faction, classes in res["losses"].items():
-            for cls, n in classes.items():
-                tickets = setup["sides"][faction]["tickets"].get(cls, 0)
-                ok &= 0 <= n <= tickets
-        check(ok, f"battle losses <= ticket pools: {res['losses']}")
+        # Casualties are counted in men (BattleResult.casualties): never more men of a
+        # class than the side fielded, and killed + wounded are the battle's deaths.
+        per_unit = int(setup.get("soldiers_per_unit", 4))
+        casualties = res.get("casualties", {})
+        ok = bool(casualties)
+        for faction, classes in casualties.items():
+            for cls, men in classes.items():
+                fielded = setup["sides"][faction]["tickets"].get(cls, 0) * per_unit
+                down = sum(men.get(k, 0) for k in ("killed", "wounded", "prisoners"))
+                ok &= 0 <= down <= fielded
+        check(ok, f"battle casualties in men <= the men fielded: {casualties}")
+        deaths = b["trace"]["deaths"]
+        for faction in ("british", "continental"):
+            fell = sum(
+                men.get("killed", 0) + men.get("wounded", 0)
+                for men in casualties.get(faction, {}).values()
+            )
+            check(
+                fell == deaths[faction],
+                f"{faction}: killed + wounded on the result ({fell}) "
+                f"are the battle's deaths ({deaths[faction]})",
+            )
         data = json.loads(Path(a.data).read_text())
         adj: dict[str, set[str]] = {p["id"]: set() for p in data["provinces"]}
         for edge in data["edges"]:

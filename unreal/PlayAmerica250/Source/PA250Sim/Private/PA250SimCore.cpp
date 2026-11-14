@@ -11,4 +11,5 @@
 #include "src/buildings.cpp"
 #include "src/serialize.cpp"
 #include "src/controller.cpp"
+#include "src/campaign.cpp"
 #pragma GCC visibility pop

@@ -62,6 +62,8 @@ public:
 
 	/** Select a plot by building id, or "+" for the build list (plot clicks; also -PA250CityProbe). */
 	void SelectPlot(const FString& Id);
+	/** Scrolls the detail pane (build list or building card) to its end: for the on-screen probe. */
+	void ScrollDetailToEnd();
 
 	/** True when a viewport-pixel position is on the panel. The rest of the screen stays map. */
 	bool IsViewportPointOverPanel(FVector2D ViewportPx) const;
@@ -106,6 +108,7 @@ private:
 	/** What the plots and detail pane were last built from; they are rebuilt only when it changes. */
 	FString LastLayoutSignature;
 
+	TSharedPtr<class SScrollBox> DetailScroll;
 	TSharedPtr<FPA250CityViewStyle> Style;
 	TSharedPtr<FPA250CitySnapshot> Snap;
 	TSharedPtr<SWidget> PanelWidget;

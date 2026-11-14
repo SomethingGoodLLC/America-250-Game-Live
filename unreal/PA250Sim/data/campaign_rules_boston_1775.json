@@ -1,0 +1,103 @@
+{
+ "note": "GAMEPLAY TUNING, not historical fact. The Boston 1775 campaign: its window, how it is won and lost, enlistments, occupation, the British commander's priorities and the sim-only battle resolver. Every value is a starting value. Schema: protocol/schemas/campaign_rules.yaml.",
+ "window": {
+  "note": "The scenario opens the evening before (18 April, 8 p.m.). If nobody has won by the end of the last hour the campaign is scored.",
+  "start": {
+   "y": 1775,
+   "m": 4,
+   "d": 19,
+   "h": 0
+  },
+  "end": {
+   "y": 1776,
+   "m": 3,
+   "d": 31,
+   "h": 23
+  }
+ },
+ "towns": {
+  "patriot_hq": "cambridge",
+  "british_base": "boston",
+  "heights": "dorchester"
+ },
+ "victory": {
+  "note": "Patriot win: Boston is Patriot-owned (the British evacuated, or the town was besieged and fell, or its governor defected). British win: the Patriot headquarters town British-owned hq_held_days running; or Support below support_floor for support_floor_days running; or no Patriot army left and none mustering. Vassalage is a British win. At the window's end: towns x score_per_town plus Support x score_support_weight for the Patriots, against British towns x score_per_town plus (100 - Support) x score_support_weight.",
+  "hq_held_days": 14,
+  "support_floor": 20,
+  "support_floor_days": 30,
+  "score_per_town": 10,
+  "score_support_weight": 1,
+  "score_tie_goes_to": "british"
+ },
+ "evacuation": {
+  "note": "With the guns on the fortified heights the British hold Boston this many more hours, then sail. The clock stops (and the heights mission reopens) if they retake the heights.",
+  "countdown_hours": 240
+ },
+ "enlistment": {
+  "note": "Enlistments run out with the year. From the warning date a company can be re-enlisted for gold_per_company; at the expiry hour every Continental company not re-enlisted goes home. A company is the catalog's recruit size for its class.",
+  "warning": {
+   "y": 1775,
+   "m": 12,
+   "d": 1,
+   "h": 0
+  },
+  "expiry": {
+   "y": 1776,
+   "m": 1,
+   "d": 1,
+   "h": 0
+  },
+  "gold_per_company": 15,
+  "exempt_classes": []
+ },
+ "siege_train": {
+  "note": "The noble train: once the mission is open the guns can be sent for directly. They reach the Patriot headquarters after haul_days. GAME INVENTION: the first army that hauls the train also takes field_guns light pieces and crew_units gun crews into its own ranks, once; the heavy train stays the mission's item.",
+  "gold_cost": 80,
+  "haul_days": 40,
+  "field_guns": 2,
+  "crew_units": 2
+ },
+ "occupation": {
+  "note": "An army standing alone in an enemy town at this hour takes it; a fortified town is besieged instead (battle_rules.json siege). Never under a ceasefire or a safe passage.",
+  "hour_of_day": 0
+ },
+ "british_ai": {
+  "note": "Each midnight every British field army without orders picks the town with the best score: value x 1000 / (march hours x (1 + defending units)), ties by town id. Value is the magazine's stock by the per_* weights, plus patriot_hq, heights, weak_town (no defender) and forage_farmland where they apply. A town the current British mission names gets mission_target on top, and the heights once fortified (or holding the siege guns) get heights_fortified: both are set far above the rest, because by distance alone the undefended headquarters three hours away would always outscore a defended magazine eleven hours off. The garrison never leaves the base; recruits join it and anything above garrison_max_units marches out as a new field army. A field army under retreat_morale or min_field_units goes home, where it regains rest_morale_per_day up to rest_morale_cap. recruit_targets: with gold to spare the AI raises the class furthest short of its share of the army (percent of its units, rounded up), the cheapest of those; with no class short, the cheapest company. Gun crews are not raised by share: the AI raises one only while a gun it holds has no crew. A column that marches out of the garrison takes detachment_gun_share_pct percent of the garrison's guns (rounded down) and the crews that serve them; the garrison opens with 4 guns and 4 crews (GAME INVENTION, counts invented).",
+  "garrison_units": 20,
+  "garrison_max_units": 32,
+  "detachment_gun_share_pct": 50,
+  "min_field_units": 6,
+  "retreat_morale": 30,
+  "rest_morale_per_day": 3,
+  "rest_morale_cap": 80,
+  "recruit_targets": {
+   "line_infantry": 55,
+   "grenadier": 12,
+   "light_infantry": 14,
+   "sapper": 4,
+   "ensign": 3,
+   "musician": 3,
+   "surgeon": 3
+  },
+  "value": {
+   "per_cartridge": 1,
+   "per_powder": 4,
+   "per_musket": 3,
+   "per_provision": 1,
+   "patriot_hq": 60,
+   "heights": 30,
+   "heights_fortified": 200000,
+   "weak_town": 20,
+   "forage_farmland": 15,
+   "mission_target": 100000
+  }
+ },
+ "auto_resolve": {
+  "note": "SIM ONLY (tests, the idle-run tool). The game fights its battles in Unreal. Power = men x (50 + morale) x (60 + 40 x rounds / max rounds) x (100 + fort_bonus_pct_per_level x fort level), with luck_pct either way from the battle seed. The loser loses loser_loss_pct of its units, the winner winner_loss_pct; a power ratio of broke_ratio_pct or more ends as army_broke.",
+  "fort_bonus_pct_per_level": 50,
+  "luck_pct": 15,
+  "loser_loss_pct": 30,
+  "winner_loss_pct": 10,
+  "broke_ratio_pct": 150
+ }
+}

@@ -16,12 +16,17 @@ import os
 import unreal
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "SourceAudio")
+# PA250_AUDIO_ONLY=follow_me,charge_bayonets imports only the WAVs with those names (new lines
+# are added without re-importing, and so re-saving, every sound already in the project).
+ONLY = {n.strip() for n in os.environ.get("PA250_AUDIO_ONLY", "").split(",") if n.strip()}
 
 
 def import_dir(src_dir, dest_path, prefix=""):
     tasks = []
     for name in sorted(os.listdir(src_dir)):
         if not name.lower().endswith(".wav"):
+            continue
+        if ONLY and os.path.splitext(name)[0] not in ONLY:
             continue
         t = unreal.AssetImportTask()
         t.filename = os.path.join(src_dir, name)
@@ -37,7 +42,7 @@ def import_dir(src_dir, dest_path, prefix=""):
 
 
 import_dir(os.path.join(ROOT, "sfx"), "/Game/PA250/Audio/SFX")
-ambience = unreal.load_asset("/Game/PA250/Audio/SFX/ambience_dawn")
+ambience = None if ONLY else unreal.load_asset("/Game/PA250/Audio/SFX/ambience_dawn")
 if ambience:
     ambience.set_editor_property("looping", True)
     unreal.EditorAssetLibrary.save_loaded_asset(ambience)
@@ -45,7 +50,7 @@ music = os.path.join(ROOT, "music")
 if os.path.isdir(music):
     import_dir(music, "/Game/PA250/Audio/Music")
     for name in sorted(os.listdir(music)):
-        if name.lower().endswith(".wav"):
+        if name.lower().endswith(".wav") and (not ONLY or os.path.splitext(name)[0] in ONLY):
             asset = unreal.load_asset("/Game/PA250/Audio/Music/" + os.path.splitext(name)[0])
             if asset:
                 asset.set_editor_property("looping", True)

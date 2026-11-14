@@ -1,0 +1,41 @@
+{
+ "name": "result_guns_loser_keeps_none",
+ "description": "a beaten side cannot drag off the guns it overran: they stay with the winner",
+ "scenario": {
+  "province": "lexington",
+  "attacker": "british_regulars",
+  "defender": "continental_militia",
+  "units": {
+   "british_regulars": {
+    "grenadier": 5,
+    "light_infantry": 6,
+    "line_infantry": 12,
+    "officer": 1,
+    "artilleryman": 2
+   }
+  },
+  "guns": {
+   "british_regulars": 2
+  }
+ },
+ "result": {
+  "province_id": "lexington",
+  "winner": "british",
+  "end_reason": "posts_swept",
+  "guns_taken": {
+   "continental": 2
+  }
+ },
+ "expect": {
+  "schema_valid": true,
+  "applied": true,
+  "owner_after": "british",
+  "siege_by": "",
+  "siege_hours": 0,
+  "army_guns": {
+   "british_regulars": 2,
+   "continental_militia": 0
+  },
+  "report_guns": {}
+ }
+}

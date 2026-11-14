@@ -226,11 +226,13 @@ void deliver_due_shipments(CampaignState& s, std::vector<Interrupt>* interrupts)
             st.provisions += add_v;
             st.lead += std::max(0, sh.lead);
             st.paper += std::max(0, sh.paper);
+            st.guns += std::max(0, sh.guns);
             sh.status = "delivered";
             ResourceChange ch;
-            ch.reason = "Shipment delivered " + sh.id + " to " + dest + ": powder+" + std::to_string(add_p) +
-                        " cart+" + std::to_string(add_c) + " muskets+" + std::to_string(add_m) + " prov+" +
-                        std::to_string(add_v);
+            ch.reason = "Stores arrive at " + (s.provinces.count(dest) ? s.provinces.at(dest).name : std::string("the depot")) +
+                        ": +" + std::to_string(add_p) + " powder, +" + std::to_string(add_c) + " cartridges, +" +
+                        std::to_string(add_m) + " muskets, +" + std::to_string(add_v) + " provisions" +
+                        (sh.guns > 0 ? ", +" + std::to_string(sh.guns) + (sh.guns == 1 ? " field gun" : " field guns") : std::string());
             ch.powder = add_p;
             ch.cartridges = add_c;
             ch.muskets = add_m;

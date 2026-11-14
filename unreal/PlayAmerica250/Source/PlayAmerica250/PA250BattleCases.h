@@ -26,4 +26,13 @@ void RunAudio(FLog& Log);     // every sound bank / voice line loads; shots, rel
 void RunBattleRoad(FLog& Log); // L_Lexington walls tagged as cover + muster points; cover-line picks; militia muster math
 void RunScenario(FLog& Log);  // Concord locks every post but the crossing; Battle Road wins by men preserved
 void RunTactics(FLog& Log);   // cover query vs a fence, line of sight, repositioning costs, role/training independence
+void RunCampaignRead(FLog& Log); // field strength from the sim, army_broke / posts_swept guards, cartridge boxes and the side's pool
+void RunCampaignArc(FLog& Log);  // the rules and mission files load; mission tracker and end screen text
+void RunClasses(FLog& Log);      // unit_classes.json covers every class (no fallback); bands, accuracy over range, the class verbs
+void RunSquad(FLog& Log);        // the player's file: who is in it, the six orders, the volley his shot fires, the HUD line, his aim
+void RunWorks(FLog& Log);        // the fire-over stance, field works by fortification level, where they stand, who mans them, the sapper
+void RunGunnery(FLog& Log);      // field guns: the data, which shot, the drill by crew, overrun and push, the asset's sockets, guns in the setup and the result
+void RunModes(FLog& Log);        // conquest, assault, landing: the order of posts, what is closed, the clock, the boats' course, the level, the card line
+void RunSupport(FLog& Log);      // ensign and the colours, musician relay and cadence, surgeon; field caps; the result carries them
+void RunEconomy(FLog& Log);      // Phase 4 as the game's own sim build reads it: ground rules, level costs, powder, the opening accounts
 }

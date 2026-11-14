@@ -24,6 +24,11 @@ struct BuildingDef {
     std::string campaign_effect;
     std::string battle_effect;
     std::string description;
+    // Terrain gate: the town needs one of these tags to build it new (empty = anywhere).
+    std::vector<std::string> requires_tags;
+    // Its monthly gold (depot trade) needs one of these tags (empty = anywhere).
+    std::vector<std::string> income_requires_tags;
+    int powder_per_month = 0;  // per level, into the town's magazine
 };
 
 struct RecruitDef {
@@ -43,9 +48,9 @@ struct RecruitDef {
 };
 
 struct EconomyTuning {
-    int levy_per_supply = 15;      // gold per point of a town's supply value (as before this pass)
+    int levy_per_supply = 4;       // gold per point of a town's supply value (15 before the Phase 4 retune)
     int pay_militia = 1;           // gold per man per month
-    int pay_regular = 2;           // every other class
+    int pay_regular = 3;           // every other class
     int depot_trade_gold = 8;      // per Depot level per month
     int workshop_muskets = 1;      // muskets per Workshop level per month, into that town's magazine
     int loan_step = 100;
@@ -53,7 +58,7 @@ struct EconomyTuning {
     int credit_per_town = 60;      // credit limit = this x towns held
     int unpaid_morale = 8;         // each army, each unpaid month
     int unpaid_support = 3;
-    int sea_subsidy_gold = 40;     // per month to a side that controls the harbour and holds its HQ town
+    int sea_subsidy_gold = 135;    // per month to a side that controls the harbour and holds its HQ town (pays the Boston garrison)
     int sea_provisions = 12;       // landed in that town's magazine each month
     int enemy_reserve_gold = 30;   // the other side keeps this back before raising a company
 };
@@ -64,6 +69,11 @@ struct BuildingsCatalog {
     std::map<std::string, RecruitDef> recruits;
     EconomyTuning economy;
     std::map<std::string, int> manpower;  // size key -> men a town can raise per month at Support 50
+    // Cost and upkeep of a track by the level being bought / held: x1, x2.5, x6.
+    std::vector<int> cost_multiplier_pct{100, 250, 600};
+    // Powder is imported through this building in a town with one of these tags.
+    std::string powder_building = "depot";
+    std::vector<std::string> powder_tags{"harbor"};
 };
 
 BuildingsCatalog g_catalog;
@@ -100,6 +110,17 @@ void ensure_default_catalog() {
     add({"militia_muster", "Militia Muster", "discrete", false, 40, 1, 2, 1, 0, 0, 0,
          "Lets the town raise militia companies", "Extra defender militia muster waves",
          "Drill ground for minutemen."});
+    {
+        BuildingDef mill{"powder_mill", "Powder Mill", "track", false, 50, 2, 3, 3, 0, 0, 0,
+                         "+2 powder/month per level into this town's magazine",
+                         "Powder is made up into cartridges when an army forms up here: more rounds a man",
+                         "A stamping mill on running water that makes gunpowder."};
+        mill.requires_tags = {"river", "falls"};
+        mill.powder_per_month = 2;
+        add(mill);
+    }
+    g_catalog.by_id["farm"].requires_tags = {"farmland"};
+    g_catalog.by_id["depot"].income_requires_tags = {"harbor", "crossroads"};
     ensure_default_recruits(g_catalog);
 }
 
@@ -158,6 +179,7 @@ int* track_level_ptr(Province& p, const std::string& id) {
     if (id == "workshop") return &p.workshop_level;
     if (id == "depot") return &p.depot_level;
     if (id == "fort") return &p.fort_level;
+    if (id == "powder_mill") return &p.powder_mill_level;
     return nullptr;
 }
 
@@ -166,7 +188,21 @@ const int* track_level_cptr(const Province& p, const std::string& id) {
     if (id == "workshop") return &p.workshop_level;
     if (id == "depot") return &p.depot_level;
     if (id == "fort") return &p.fort_level;
+    if (id == "powder_mill") return &p.powder_mill_level;
     return nullptr;
+}
+
+bool has_any_tag(const Province& p, const std::vector<std::string>& tags) {
+    if (tags.empty()) return true;
+    for (const auto& t : tags)
+        if (detail::contains(p.terrain, t)) return true;
+    return false;
+}
+
+std::string tag_words(const std::vector<std::string>& tags) {
+    std::string out;
+    for (size_t i = 0; i < tags.size(); ++i) out += (i ? (i + 1 == tags.size() ? " or " : ", ") : "") + tags[i];
+    return out;
 }
 
 std::string next_job_id(CampaignState& s) {
@@ -201,6 +237,9 @@ std::string construction_block(const CampaignState& s, const std::string& provin
     } else if (level > 0) {
         return "already_present";
     }
+    // The ground must suit a new building (catalog requires_tags). One already standing on the
+    // wrong ground is grandfathered: it may still be upgraded.
+    if (level == 0 && !has_any_tag(p, d->requires_tags)) return "wrong_ground";
     // Upgrades stay in their slot; only a new building needs a free one.
     if (level == 0 && province_slots_occupied(s, province_id) >= province_slot_count(province_id))
         return "no_free_slot";
@@ -219,6 +258,10 @@ std::string block_reason_text(const CampaignState& s, const std::string& provinc
     if (code == "already_building") return "Unavailable: already under construction.";
     if (code == "already_present") return "Unavailable: already built.";
     if (code == "max_level") return "Unavailable: already at maximum level.";
+    if (code == "wrong_ground") {
+        const BuildingDef* d = find_def(building_id);
+        return "Unavailable: needs " + (d ? tag_words(d->requires_tags) : std::string("other ground")) + " here.";
+    }
     if (code == "no_free_slot") {
         return "Unavailable: no free building slots (" +
                std::to_string(province_slots_occupied(s, province_id)) + "/" +
@@ -332,6 +375,7 @@ struct Budget {
     int income_total = 0;
     int expense_total = 0;  // positive number
     int muskets = 0;        // workshop output (resources, not gold)
+    int powder = 0;         // powder mill output
     int provisions = 0;     // farm harvest
     int interest = 0;
     int pay = 0;
@@ -360,11 +404,19 @@ Budget monthly_budget(const CampaignState& s, const std::string& faction) {
         if (p.owner != faction) continue;
         ++towns;
         b.levy += town_levy_gold(p);
-        b.trade += std::max(0, p.depot_level) * t.depot_trade_gold;
+        // Depot trade needs a harbour or a crossroads (catalog income_requires_tags).
+        if (const BuildingDef* depot = find_def("depot");
+            depot && (has_any_tag(p, depot->income_requires_tags) || building_grandfathered(p, "depot")))
+            b.trade += std::max(0, p.depot_level) * t.depot_trade_gold;
         b.muskets += std::max(0, p.workshop_level) * t.workshop_muskets;
         b.provisions += std::max(0, p.farm_level) * 3;  // clock.cpp's farm harvest
-        for (const auto& kv : g_catalog.by_id)
-            if (building_present(p, kv.first)) b.upkeep += std::max(0, kv.second.upkeep_gold);
+        for (const auto& kv : g_catalog.by_id) {
+            const int level = building_level(p, kv.first);
+            if (level <= 0) continue;
+            b.powder += level * std::max(0, kv.second.powder_per_month);
+            // Upkeep rises in step with the level's cost: x1, x2.5, x6.
+            b.upkeep += (std::max(0, kv.second.upkeep_gold) * level_cost_pct(is_track(kv.second) ? level - 1 : 0) + 50) / 100;
+        }
     }
     int militia = 0, regulars = 0;
     for (const auto& ak : s.armies) {
@@ -410,6 +462,12 @@ void load_buildings_catalog(const std::string& json_text) {
         const json j = json::parse(json_text);
         BuildingsCatalog cat;
         cat.demolish_refund_pct = j.value("demolish_refund_pct", 10);
+        if (j.contains("cost_multiplier_pct") && j.at("cost_multiplier_pct").is_array() && !j.at("cost_multiplier_pct").empty())
+            cat.cost_multiplier_pct = j.at("cost_multiplier_pct").get<std::vector<int>>();
+        if (j.contains("powder_purchase")) {
+            cat.powder_building = j.at("powder_purchase").value("building", cat.powder_building);
+            cat.powder_tags = j.at("powder_purchase").value("tags", cat.powder_tags);
+        }
         if (j.contains("buildings")) {
             for (const auto& b : j.at("buildings")) {
                 BuildingDef d;
@@ -428,6 +486,9 @@ void load_buildings_catalog(const std::string& json_text) {
                 d.campaign_effect = b.value("campaign_effect", "");
                 d.battle_effect = b.value("battle_effect", "");
                 d.description = b.value("description", "");
+                d.requires_tags = b.value("requires_tags", std::vector<std::string>{});
+                d.income_requires_tags = b.value("income_requires_tags", std::vector<std::string>{});
+                d.powder_per_month = std::max(0, b.value("powder_per_month", 0));
                 cat.by_id[d.id] = d;
             }
         }
@@ -552,14 +613,60 @@ int province_slots_occupied(const CampaignState& state, const std::string& provi
     return n;
 }
 
+int level_cost_pct(int level_index) {
+    ensure_default_catalog();
+    const auto& m = g_catalog.cost_multiplier_pct;
+    if (m.empty()) return 100;
+    const size_t i = static_cast<size_t>(std::max(0, level_index));
+    return std::max(1, m[std::min(i, m.size() - 1)]);
+}
+
+bool building_ground_ok(const Province& p, const std::string& building_id) {
+    const BuildingDef* d = find_def(building_id);
+    return d && has_any_tag(p, d->requires_tags);
+}
+
+bool building_grandfathered(const Province& p, const std::string& building_id) {
+    return building_present(p, building_id) && detail::contains(p.grandfathered, building_id);
+}
+
+int mark_grandfathered_buildings(CampaignState& s) {
+    ensure_default_catalog();
+    int marked = 0;
+    for (auto& pk : s.provinces) {
+        Province& p = pk.second;
+        for (const auto& kv : g_catalog.by_id) {  // ordered by building id
+            if (!building_present(p, kv.first) || detail::contains(p.grandfathered, kv.first)) continue;
+            const bool ground = has_any_tag(p, kv.second.requires_tags);
+            const bool income = has_any_tag(p, kv.second.income_requires_tags);
+            if (ground && income) continue;
+            p.grandfathered.push_back(kv.first);
+            std::sort(p.grandfathered.begin(), p.grandfathered.end());
+            ++marked;
+            detail::add_log(s, "grandfathered: " + kv.second.name + " at " + p.name + " stands without " +
+                                   tag_words(ground ? kv.second.income_requires_tags : kv.second.requires_tags) +
+                                   "; it keeps working");
+        }
+    }
+    return marked;
+}
+
+bool can_buy_powder(const CampaignState& state, const std::string& province_id) {
+    ensure_default_catalog();
+    auto pit = state.provinces.find(province_id);
+    if (pit == state.provinces.end() || pit->second.owner != state.player_faction) return false;
+    return building_present(pit->second, g_catalog.powder_building) && has_any_tag(pit->second, g_catalog.powder_tags);
+}
+
 int building_cost(const std::string& building_id, int current_level) {
     const BuildingDef* d = find_def(building_id);
     if (!d) return -1;
     if (is_track(*d)) {
-        // Align with logistics_tuning development costs when available.
+        // The four older tracks take their base from logistics_tuning (development_cost applies the
+        // level multiplier); a newer track takes it from the catalog.
         const int tuned = development_cost(building_id, current_level);
         if (tuned >= 0) return tuned;
-        return d->gold_cost + std::max(0, current_level) * 20;
+        return (d->gold_cost * level_cost_pct(current_level) + 50) / 100;
     }
     return d->gold_cost;
 }
@@ -707,6 +814,10 @@ CampaignState demolish_building(const CampaignState& state, const std::string& p
         return state;
     }
     s.player_gold += refund;
+    // A grandfathered building is gone with its walls: a new one on this ground answers to the rules.
+    pit->second.grandfathered.erase(
+        std::remove(pit->second.grandfathered.begin(), pit->second.grandfathered.end(), building_id),
+        pit->second.grandfathered.end());
     // Pulling a building down takes back the Support its completion gave. Without this,
     // demolish + rebuild of a Meeting House would mint Support for a few gold each cycle.
     const int support_before = s.local_support;
@@ -822,6 +933,10 @@ std::string city_view_json(const CampaignState& state, const std::string& provin
     j["name"] = p.name;
     j["owner"] = p.owner;
     j["yours"] = p.owner == state.player_faction;
+    j["besieged"] = !p.siege_by.empty();
+    j["siege_by"] = p.siege_by;
+    j["siege_hours_remaining"] = p.siege_hours_remaining;
+    j["siege_by_you"] = !p.siege_by.empty() && p.siege_by == state.player_faction;
     {
         auto sz = g_province_size.find(province_id);
         const std::string key = sz == g_province_size.end() ? "small_town" : sz->second;
@@ -861,6 +976,8 @@ std::string city_view_json(const CampaignState& state, const std::string& provin
                               {"upgrade_available",
                                construction_block(state, province_id, kv.first).empty()},
                               {"upgrade_preview", building_preview(state, province_id, kv.first)},
+                              {"grandfathered", building_grandfathered(p, kv.first)},
+                              {"upkeep", (std::max(0, kv.second.upkeep_gold) * level_cost_pct(is_track(kv.second) ? level - 1 : 0) + 50) / 100},
                               {"demolish_refund", demolish_refund(kv.first, level)}});
         }
         if (job) {
@@ -900,6 +1017,7 @@ std::string city_view_json(const CampaignState& state, const std::string& provin
                            {"campaign_effect", kv.second.campaign_effect},
                            {"battle_effect", kv.second.battle_effect},
                            {"description", kv.second.description},
+                           {"requires_tags", kv.second.requires_tags},
                            {"available", err.empty()},
                            {"reason", err.empty() ? std::string()
                                                     : block_reason_text(state, province_id, kv.first, err)}});
@@ -910,7 +1028,7 @@ std::string city_view_json(const CampaignState& state, const std::string& provin
         sources.push_back({{"id", "farm"},
                            {"label", "Farm L" + std::to_string(p.farm_level)},
                            {"provisions_per_month", p.farm_level * 3},
-                           {"income_gold", 15 * p.farm_level}});
+                           {"income_gold", g_catalog.economy.levy_per_supply * p.farm_level}});
     if (p.workshop_level > 0)
         sources.push_back({{"id", "workshop"},
                            {"label", "Workshop L" + std::to_string(p.workshop_level)},
@@ -930,6 +1048,21 @@ std::string city_view_json(const CampaignState& state, const std::string& provin
     }
     if (p.militia_muster)
         sources.push_back({{"id", "militia_muster"}, {"label", "Militia Muster"}, {"battle", "extra muster"}});
+    if (p.powder_mill_level > 0) {
+        const BuildingDef* mill = find_def("powder_mill");
+        sources.push_back({{"id", "powder_mill"},
+                           {"label", "Powder Mill L" + std::to_string(p.powder_mill_level)},
+                           {"powder_per_month", p.powder_mill_level * (mill ? mill->powder_per_month : 0)}});
+    }
+    j["can_buy_powder"] = can_buy_powder(state, province_id);
+    {
+        // The sentence the town panel shows on the greyed-out Buy powder button.
+        const BuildingDef* through = find_def(g_catalog.powder_building);
+        j["powder_purchase_needs"] = "Powder comes in by sea: needs a " +
+                                     (through ? through->name : g_catalog.powder_building) + " in a " +
+                                     tag_words(g_catalog.powder_tags) + " town.";
+    }
+    j["magazine_cartridges"] = magazine_cartridges(state, province_id);
     j["sources"] = sources;
     j["empty_slots"] = std::max(0, slots - occupied);
     j["terrain"] = p.terrain;
@@ -954,6 +1087,7 @@ std::string city_view_json(const CampaignState& state, const std::string& provin
             f["morale"] = a.morale;
             f["readiness"] = a.readiness;
             f["fatigue"] = a.fatigue;
+            f["rounds_per_man"] = carried_rounds(a);
             f["units"] = a.units;
         }
         forces.push_back(f);
@@ -1011,6 +1145,15 @@ int building_battle_morale(const Province& p) {
     ensure_default_catalog();
     if (!p.church) return 0;
     if (const BuildingDef* d = find_def("church")) return d->battle_morale;
+    return 0;
+}
+
+int company_size(const std::string& faction, const std::string& unit_class) {
+    ensure_default_catalog();
+    for (const auto& rk : g_catalog.recruits) {  // std::map: catalog id order
+        const RecruitDef& d = rk.second;
+        if (d.unit_class == unit_class && (d.faction.empty() || d.faction == faction) && d.men > 0) return d.men;
+    }
     return 0;
 }
 
@@ -1146,6 +1289,8 @@ void tick_recruitment_jobs(CampaignState& s) {
             a.units[job.unit_class] = job.men;
             a.morale = kRecruitMorale;
             a.readiness = 80;
+            // Men who sign on once the old enlistments are running out sign for the new year.
+            if (s.progress.enlistment_warned && !s.progress.enlistments_expired) a.reenlisted[job.unit_class] = job.men;
             s.armies[a.id] = a;
             ch.reason = name + " mustered, " + p.name + ": " + std::to_string(job.men) +
                         " men form the " + a.name;
@@ -1153,6 +1298,7 @@ void tick_recruitment_jobs(CampaignState& s) {
             Army& a = s.armies.at(army_id);
             const int before = std::max(0, detail::total_units(a));
             a.units[job.unit_class] += job.men;
+            if (s.progress.enlistment_warned && !s.progress.enlistments_expired) a.reenlisted[job.unit_class] += job.men;
             // New men dilute or lift the army's temper in proportion to their number.
             a.morale = detail::clamp_int(
                 (a.morale * before + kRecruitMorale * job.men) / std::max(1, before + job.men), 0, 100);
@@ -1320,6 +1466,27 @@ void settle_monthly_budget(CampaignState& s) {
         log_gold("Subsidy landed by sea: +" + std::to_string(b.subsidy) + " gold", b.subsidy);
         province_ledger(s, default_depot_province(s, s.player_faction)).provisions += t.sea_provisions;
     }
+    // Powder mills grind for whoever holds their town; only the player's are in the ledger.
+    for (const auto& pk : s.provinces) {
+        const Province& p = pk.second;
+        if (p.owner.empty()) continue;
+        int made = 0;
+        std::string names;
+        for (const auto& kv : g_catalog.by_id) {
+            const int level = building_level(p, kv.first);
+            if (level <= 0 || kv.second.powder_per_month <= 0) continue;
+            made += level * kv.second.powder_per_month;
+            names += (names.empty() ? "" : ", ") + kv.second.name + " L" + std::to_string(level);
+        }
+        if (made <= 0) continue;
+        province_ledger(s, pk.first).powder += made;
+        if (p.owner != s.player_faction) continue;
+        ResourceChange ch;
+        ch.reason = names + ", " + p.name + ": +" + std::to_string(made) + " powder";
+        ch.powder = made;
+        ch.province_id = pk.first;
+        detail::record_resource_change(s, ch);
+    }
     if (t.workshop_muskets > 0) {
         // Every workshop works for whoever holds its town; only the player's are in the ledger.
         for (const auto& pk : s.provinces) {
@@ -1415,13 +1582,54 @@ void settle_enemy_budget(CampaignState& s) {
     s.progress.enemy_arrears_months = 0;
     // Gold to spare buys men: the cheapest company this side may raise in a town it holds that has
     // the building, the arms and the rations for it. One a month, and never below the reserve.
+    // With the campaign rules loaded it buys by need (user decision 2026-11-14: the cheapest-company
+    // rule never raised a sapper, an ensign, a musician or a surgeon): the class furthest short of
+    // its share of the army (campaign_rules british_ai.recruit_targets), the cheapest of those, then
+    // catalog order. With no class short, or without the rules, the cheapest company as before.
+    std::map<std::string, int> have;
+    int total_units = 0;
+    for (const auto& ak : s.armies) {
+        if (ak.second.faction != faction) continue;
+        for (const auto& u : ak.second.units) {
+            have[u.first] += std::max(0, u.second);
+            total_units += std::max(0, u.second);
+        }
+    }
+    const std::map<std::string, int> no_targets;
+    const std::map<std::string, int>& targets = campaign_rules_loaded() ? campaign_rules().ai_recruit_targets : no_targets;
+    // Gun crews are raised for guns, not by share: as many units as its guns (with the army or laid
+    // up in a town it holds) still lack.
+    int guns_held = 0;
+    for (const auto& ak : s.armies)
+        if (ak.second.faction == faction) guns_held += std::max(0, ak.second.guns);
+    for (const auto& pk : s.provinces)
+        if (pk.second.owner == faction) guns_held += std::max(0, province_ledger(static_cast<const CampaignState&>(s), pk.first).guns);
+    const BattleRules& gun_rules = battle_rules();
+    auto short_of = [&](const std::string& unit_class) {
+        if (unit_class == gun_rules.guns_crew_class) {
+            if (!campaign_rules_loaded()) return 0;
+            return std::max(0, guns_held * gun_rules.guns_crew_units_per_gun - detail::map_get(have, unit_class));
+        }
+        auto it = targets.find(unit_class);
+        if (it == targets.end() || it->second <= 0) return 0;
+        const int want = (it->second * total_units + 99) / 100;  // its share, rounded up
+        return std::max(0, want - detail::map_get(have, unit_class));
+    };
     const RecruitDef* pick = nullptr;
     std::string where;
+    int pick_short = 0;
     for (const auto& rk : g_catalog.recruits) {
         const RecruitDef& d = rk.second;
         if (d.faction != faction || !d.requires_chapter.empty()) continue;
         if (chest - d.gold < t.enemy_reserve_gold) continue;
-        if (pick && d.gold >= pick->gold) continue;
+        int need = short_of(d.unit_class);
+        // A gun crew with no gun to serve is never raised, whatever it costs; a gun with no crew
+        // comes before any share (a gun nobody can serve is worth nothing on the field).
+        if (d.unit_class == gun_rules.guns_crew_class) {
+            if (need <= 0) continue;
+            need += 1000000;
+        }
+        if (pick && (need < pick_short || (need == pick_short && d.gold >= pick->gold))) continue;
         for (const auto& pk : s.provinces) {
             const Province& p = pk.second;
             if (p.owner != faction) continue;
@@ -1429,6 +1637,7 @@ void settle_enemy_budget(CampaignState& s) {
             const ProvinceStores& st = province_ledger(static_cast<const CampaignState&>(s), pk.first);
             if (st.muskets < d.muskets || st.provisions < d.provisions) continue;
             pick = &d;
+            pick_short = need;
             where = pk.first;
             break;
         }

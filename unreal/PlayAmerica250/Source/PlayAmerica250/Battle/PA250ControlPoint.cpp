@@ -1,4 +1,5 @@
 #include "PA250ControlPoint.h"
+#include "PA250UnitClasses.h"
 #include "Components/SphereComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/OverlapResult.h"
@@ -425,6 +426,7 @@ void APA250ControlPoint::Tick(float DeltaSeconds)
 void APA250ControlPoint::TickCapture(float DeltaSeconds)
 {
 	Presence.Reset();
+	TMap<FName, float> Weight; // a class may count for more than one man at a post (light infantry)
 	TArray<AActor*> Overlapping;
 	Zone->GetOverlappingActors(Overlapping, ARFCharacter::StaticClass());
 	for (AActor* A : Overlapping)
@@ -432,8 +434,12 @@ void APA250ControlPoint::TickCapture(float DeltaSeconds)
 		const ARFCharacter* C = Cast<ARFCharacter>(A);
 		if (C && !C->IsDead() && !C->FactionId.IsNone())
 		{
-			Presence.FindOrAdd(C->FactionId)++;
+			Weight.FindOrAdd(C->FactionId) += FMath::Max(0.1f, PA250UnitClasses::KitFor(C->FactionId, C->UnitClass).CaptureWeight);
 		}
+	}
+	for (const TPair<FName, float>& KV : Weight)
+	{
+		Presence.Add(KV.Key, FMath::Max(1, FMath::CeilToInt(KV.Value - KINDA_SMALL_NUMBER)));
 	}
 
 	const int32 Brit = GetPresence(TEXT("british"));

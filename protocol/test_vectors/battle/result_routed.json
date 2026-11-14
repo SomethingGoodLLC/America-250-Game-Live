@@ -1,0 +1,23 @@
+{
+ "name": "result_routed",
+ "description": "a remnant quits the field and the winner takes the town",
+ "scenario": {
+  "province": "lexington",
+  "attacker": "british_regulars",
+  "defender": "continental_militia"
+ },
+ "result": {
+  "province_id": "lexington",
+  "winner": "british",
+  "end_reason": "routed",
+  "objective_holder": "continental"
+ },
+ "expect": {
+  "schema_valid": true,
+  "applied": true,
+  "owner_after": "british",
+  "siege_by": "",
+  "siege_hours": 0,
+  "loser_fate": "retreated"
+ }
+}

@@ -1,0 +1,72 @@
+{
+ "name": "result_document",
+ "description": "a complete BattleResult document: every field the battle writes, and it reads back unchanged",
+ "round_trip": true,
+ "result": {
+  "province_id": "lexington",
+  "winner": "british",
+  "end_reason": "posts_swept",
+  "objective_holder": "british",
+  "objectives_held": {
+   "green": "british"
+  },
+  "casualties": {
+   "british": {
+    "line_infantry": {
+     "killed": 2,
+     "wounded": 3,
+     "prisoners": 0
+    }
+   },
+   "continental": {
+    "militia": {
+     "killed": 5,
+     "wounded": 7,
+     "prisoners": 8
+    }
+   }
+  },
+  "losses": {
+   "british": {
+    "line_infantry": 1
+   },
+   "continental": {
+    "militia": 3
+   }
+  },
+  "wounded": {
+   "continental": {
+    "militia": 1
+   }
+  },
+  "prisoners": {
+   "continental": {
+    "militia": 2
+   }
+  },
+  "colours_captured": {
+   "british": 1
+  },
+  "guns_taken": {
+   "british": 1
+  },
+  "cartridges_spent": {
+   "british": 30,
+   "continental": 20
+  },
+  "powder_spent": {
+   "continental": 1
+  },
+  "shots_fired": {
+   "british": 30,
+   "continental": 20
+  },
+  "morale_delta": {},
+  "personal_kills": 2,
+  "retreat_province": "lincoln",
+  "province_owner_after": ""
+ },
+ "expect": {
+  "schema_valid": true
+ }
+}

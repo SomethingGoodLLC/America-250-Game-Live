@@ -1,0 +1,23 @@
+{
+ "name": "result_time_limit",
+ "description": "a defender who wins on the clock keeps the town and the attacker falls back",
+ "scenario": {
+  "province": "lexington",
+  "attacker": "british_regulars",
+  "defender": "continental_militia"
+ },
+ "result": {
+  "province_id": "lexington",
+  "winner": "continental",
+  "end_reason": "time_limit",
+  "objective_holder": "continental"
+ },
+ "expect": {
+  "schema_valid": true,
+  "applied": true,
+  "owner_after": "continental",
+  "siege_by": "",
+  "siege_hours": 0,
+  "loser_fate": "retreated"
+ }
+}

@@ -5,6 +5,7 @@
 #include "Campaign/PA250MapWidget.h"
 #include "Campaign/PA250Subsystem.h"
 #include "pa250/sim.hpp"
+#include "UI/PA250CampaignArcPanels.h"
 #include "UI/PA250HudStyle.h"
 #include "Dom/JsonObject.h"
 #include "Engine/Engine.h"
@@ -42,6 +43,8 @@ struct FPA250CityBuilding
 	int32 Days = 1;
 	int32 Salvage = 0;      // gold from demolishing
 	int32 PaidGold = 0;     // returned in full when a job is cancelled
+	int32 Upkeep = 0;       // gold a month at the level it stands at
+	bool bGrandfathered = false; // stands on ground that would refuse a new one; keeps working
 	int32 DaysRemaining = 0;
 	float Progress = 0.f;
 	bool bConstructing = false;
@@ -76,6 +79,8 @@ struct FPA250CityForce
 	int32 Wounded = 0;
 	int32 Morale = 0;
 	int32 Readiness = 0;
+	/** Rounds in each man's cartridge box (the sim's carried_rounds). */
+	int32 Rounds = 0;
 };
 
 // A company the town can raise.
@@ -101,6 +106,8 @@ struct FPA250CitySnapshot
 	bool bOk = false;
 	bool bYours = false;
 	bool bBattlePending = false;
+	bool bBesieged = false;
+	FString SiegeLine;
 	FString Name;
 	FString SizeLabel;
 	FString Owner;
@@ -118,6 +125,10 @@ struct FPA250CitySnapshot
 	int32 Bayonets = 0;
 	int32 Lead = 0;
 	int32 Paper = 0;
+	/** Cartridges plus powder made up at form-up: what an army fighting from this town can shoot. */
+	int32 MagazineCartridges = 0;
+	bool bCanBuyPowder = false;
+	FString PowderNeeds; // the sim's sentence for why powder cannot be bought here
 	bool bBattleHere = false;
 	bool bEnemyInterest = false;
 	bool bSuppliedBySea = false;
@@ -257,6 +268,8 @@ void UPA250CityViewWidget::EnsureStyle()
 		if (!BuildingIcons.Contains(Id)) BuildingIcons.Add(Id, TSoftObjectPtr<UTexture2D>(FSoftObjectPath(Path)));
 	};
 	// Fort and Meeting House have no artwork yet: they show an initial on a plain plot.
+	// PLACEHOLDER, for human review: the Powder Mill has no artwork of its own and borrows the Workshop's.
+	DefaultIcon(TEXT("powder_mill"), TEXT("/Game/PA250/UI/CityView/T_Icon_Workshop.T_Icon_Workshop"));
 	DefaultIcon(TEXT("farm"), TEXT("/Game/PA250/UI/CityView/T_Icon_Farm.T_Icon_Farm"));
 	DefaultIcon(TEXT("workshop"), TEXT("/Game/PA250/UI/CityView/T_Icon_Workshop.T_Icon_Workshop"));
 	DefaultIcon(TEXT("depot"), TEXT("/Game/PA250/UI/CityView/T_Icon_Depot.T_Icon_Depot"));
@@ -370,12 +383,19 @@ TSharedRef<SWidget> UPA250CityViewWidget::RebuildWidget()
 
 	TSharedRef<SWidget> Body =
 		SNew(SVerticalBox) +
+		SVerticalBox::Slot().AutoHeight().Padding(0.f, 0.f, 0.f, 8.f)
+			[SNew(STextBlock)
+				 .Visibility_Lambda([S]() { return S->bBesieged ? EVisibility::Visible : EVisibility::Collapsed; })
+				 .Font(Font(TEXT("Bold"), 12))
+				 .ColorAndOpacity(KRed)
+				 .WrapTextAt(KContentWidth)
+				 .Text_Lambda([S]() { return FText::FromString(S->SiegeLine); })] +
 		// Stat tiles: only for a town the player holds.
 		SVerticalBox::Slot().AutoHeight().Padding(0.f, 0.f, 0.f, 8.f)
 			[SNew(SHorizontalBox).Visibility_Lambda([S]() { return S->bYours ? EVisibility::Visible : EVisibility::Collapsed; }) +
 			 SHorizontalBox::Slot().FillWidth(1.f).Padding(0.f, 0.f, 6.f, 0.f)
 				 [Stat(TEXT("DEVELOPMENT"), [S]() { return FString::FromInt(S->Development); },
-					   TEXT("1 + the levels of Farm, Workshop, Depot and Fort."))] +
+					   TEXT("1 + the levels of Farm, Workshop, Depot, Fort and Powder Mill."))] +
 			 SHorizontalBox::Slot().FillWidth(1.f).Padding(0.f, 0.f, 6.f, 0.f)
 				 [Stat(TEXT("SUPPLY"), [S]() { return FString::FromInt(S->Supply); },
 					   TEXT("Monthly supply and treasury income from this town. Farms raise it."))] +
@@ -505,7 +525,33 @@ void UPA250CityViewWidget::Refresh()
 		New.bOk = true;
 		New.bYours = Root->GetBoolField(TEXT("yours"));
 		New.bBattlePending = Root->GetBoolField(TEXT("battle_pending"));
+		New.bBesieged = false;
+		Root->TryGetBoolField(TEXT("besieged"), New.bBesieged);
 		New.Name = Root->GetStringField(TEXT("name"));
+		if (New.bBesieged)
+		{
+			FString SiegeBy;
+			Root->TryGetStringField(TEXT("siege_by"), SiegeBy);
+			bool bSiegeByYou = false;
+			Root->TryGetBoolField(TEXT("siege_by_you"), bSiegeByYou);
+			int32 Hours = 0;
+			Root->TryGetNumberField(TEXT("siege_hours_remaining"), Hours);
+			const FString When = PA250ArcPanels::TimeLeft(Hours);
+			if (New.bYours)
+			{
+				New.SiegeLine = FString::Printf(
+					TEXT("%s is besieged: it falls in %s unless the besiegers leave or are beaten."), *New.Name, *When);
+			}
+			else if (bSiegeByYou)
+			{
+				New.SiegeLine = FString::Printf(TEXT("You besiege %s: it falls in %s if your army stays."), *New.Name, *When);
+			}
+			else
+			{
+				const FString Who = SiegeBy == TEXT("british") ? TEXT("the British") : SiegeBy;
+				New.SiegeLine = FString::Printf(TEXT("%s is besieged by %s: it falls in %s."), *New.Name, *Who, *When);
+			}
+		}
 		New.SizeLabel = Root->GetStringField(TEXT("size_label"));
 		New.Owner = Root->GetStringField(TEXT("owner"));
 		New.Slots = Root->GetIntegerField(TEXT("slot_count"));
@@ -525,6 +571,9 @@ void UPA250CityViewWidget::Refresh()
 			New.Lead = (*Stores)->GetIntegerField(TEXT("lead"));
 			New.Paper = (*Stores)->GetIntegerField(TEXT("paper"));
 		}
+		Root->TryGetNumberField(TEXT("magazine_cartridges"), New.MagazineCartridges);
+		Root->TryGetBoolField(TEXT("can_buy_powder"), New.bCanBuyPowder);
+		Root->TryGetStringField(TEXT("powder_purchase_needs"), New.PowderNeeds);
 		New.bBattleHere = Root->GetBoolField(TEXT("battle_here"));
 		New.bEnemyInterest = Root->GetBoolField(TEXT("enemy_interest"));
 		New.bSuppliedBySea = Root->GetBoolField(TEXT("supplied_by_sea"));
@@ -556,6 +605,7 @@ void UPA250CityViewWidget::Refresh()
 				F.Wounded = Obj->GetIntegerField(TEXT("wounded"));
 				F.Morale = Obj->GetIntegerField(TEXT("morale"));
 				F.Readiness = Obj->GetIntegerField(TEXT("readiness"));
+				Obj->TryGetNumberField(TEXT("rounds_per_man"), F.Rounds);
 				if (const TSharedPtr<FJsonObject>* Units = nullptr; Obj->TryGetObjectField(TEXT("units"), Units))
 				{
 					for (const auto& Kv : (*Units)->Values)
@@ -617,6 +667,8 @@ void UPA250CityViewWidget::Refresh()
 			B.Cost = Obj->GetIntegerField(TEXT("upgrade_cost"));
 			B.Days = Obj->GetIntegerField(TEXT("upgrade_days"));
 			B.Salvage = Obj->GetIntegerField(TEXT("demolish_refund"));
+			Obj->TryGetNumberField(TEXT("upkeep"), B.Upkeep);
+			Obj->TryGetBoolField(TEXT("grandfathered"), B.bGrandfathered);
 			if (B.bCanUpgrade && !B.bAvailable) B.Reason = Obj->GetStringField(TEXT("upgrade_preview"));
 			New.Plots.Add(MoveTemp(B));
 		}
@@ -657,7 +709,7 @@ void UPA250CityViewWidget::Refresh()
 						   Snap->Lead, Snap->Paper, Hud.IsValid() ? *Hud->GetSelectedArmyId() : TEXT(""));
 	for (const FPA250CityForce& F : Snap->Forces)
 	{
-		Sig += FString::Printf(TEXT("%s:%d:%d:%d:%d;"), *F.ArmyId, F.Fit, F.Morale, F.Readiness, F.bMarching ? 1 : 0);
+		Sig += FString::Printf(TEXT("%s:%d:%d:%d:%d:%d;"), *F.ArmyId, F.Fit, F.Morale, F.Readiness, F.Rounds, F.bMarching ? 1 : 0);
 	}
 	if (Sig != LastLayoutSignature)
 	{
@@ -816,7 +868,8 @@ TSharedRef<SWidget> UPA250CityViewWidget::BuildForceList()
 				[SNew(STextBlock).Font(Font(TEXT("Regular"), 10)).ColorAndOpacity(KCream).WrapTextAt(KContentWidth - 130.f).Text(FText::FromString(Line))];
 			Text->AddSlot().AutoHeight()
 				[SNew(STextBlock).Font(Font(TEXT("Regular"), 10)).ColorAndOpacity(KCreamDim).Text(FText::FromString(FString::Printf(
-					 TEXT("Morale %d  ·  readiness %d  ·  %s"), F.Morale, F.Readiness, F.bMarching ? TEXT("on the march") : TEXT("holding"))))];
+					 TEXT("Morale %d  ·  readiness %d  ·  %d rounds a man  ·  %s"), F.Morale, F.Readiness, F.Rounds,
+					 F.bMarching ? TEXT("on the march") : TEXT("holding"))))];
 		}
 		else
 		{
@@ -847,7 +900,12 @@ TSharedRef<SWidget> UPA250CityViewWidget::BuildBuildingsTab()
 		SVerticalBox::Slot().AutoHeight()[BuildPlots()] +
 		SVerticalBox::Slot().AutoHeight().Padding(0.f, 10.f, 0.f, 0.f)
 			[SNew(SBorder).BorderImage(&St->Card).Padding(FMargin(10.f, 8.f))
-			 [SNew(SBox).MaxDesiredHeight(236.f)[SNew(SScrollBox) + SScrollBox::Slot()[BuildDetail()]]]];
+			 [SNew(SBox).MaxDesiredHeight(236.f)[SAssignNew(DetailScroll, SScrollBox) + SScrollBox::Slot()[BuildDetail()]]]];
+}
+
+void UPA250CityViewWidget::ScrollDetailToEnd()
+{
+	if (DetailScroll.IsValid()) DetailScroll->ScrollToEnd();
 }
 
 TSharedRef<SWidget> UPA250CityViewWidget::BuildForcesTab()
@@ -984,13 +1042,36 @@ TSharedRef<SWidget> UPA250CityViewWidget::BuildMagazineTab()
 			 SHorizontalBox::Slot().FillWidth(1.f).Padding(0.f, 0.f, 5.f, 0.f)[Store(TEXT("LEAD"), S->Lead)] +
 			 SHorizontalBox::Slot().FillWidth(1.f).Padding(0.f, 0.f, 5.f, 0.f)[Store(TEXT("PAPER"), S->Paper)] +
 			 SHorizontalBox::Slot().FillWidth(1.f)] +
+		SVerticalBox::Slot().AutoHeight().Padding(0.f, 5.f, 0.f, 0.f)
+			[BodyLine(S->Powder > 0
+						  ? FString::Printf(TEXT("An army that forms up here shoots from %d cartridges: the %d made up, and %d powder made up as it musters."),
+											S->MagazineCartridges, S->Cartridges, S->Powder)
+						  : FString::Printf(TEXT("An army that forms up here shoots from %d cartridges. Powder in the magazine would be made up into more."),
+											S->MagazineCartridges),
+					  KCreamDim, TEXT("Regular"), 10)] +
 		SVerticalBox::Slot().AutoHeight().Padding(0.f, 10.f, 0.f, 0.f)[SectionTitle(St, TEXT("BUY FOR THIS TOWN"), TEXT("arrives after transit"))] +
 		SVerticalBox::Slot().AutoHeight()
 			[SNew(SHorizontalBox) +
 			 SHorizontalBox::Slot().FillWidth(1.f).Padding(0.f, 0.f, 5.f, 0.f)
+				 [ActionButton(St,
+							   FString::Printf(TEXT("%d powder\n%d gold"), UPA250MapWidget::BuyPowderQty,
+											   pa250::purchase_cost(UPA250MapWidget::BuyPowderQty, 0, 0, 0, 0, 0, 0)),
+							   false, S->bCanBuyPowder,
+							   S->bCanBuyPowder ? FString(TEXT("Powder landed through this town's Depot. It is made up into cartridges when an army forms up here."))
+												: S->PowderNeeds,
+							   [Weak]() {
+								   if (Weak.IsValid() && Weak->Hud.IsValid())
+								   {
+									   Weak->Hud->PressBuyPowder();
+									   Weak->Refresh();
+								   }
+							   })] +
+			 SHorizontalBox::Slot().FillWidth(1.f)
 				 [HudAction(*FString::Printf(TEXT("%d cartridges\n%d gold"), UPA250MapWidget::BuyCartridgesQty,
 											 pa250::purchase_cost(0, UPA250MapWidget::BuyCartridgesQty, 0, 0, 0, 0, 0)),
-							TEXT("Ready-made cartridges for whoever fights from this town."), &UPA250MapWidget::PressBuyCartridges)] +
+							TEXT("Ready-made cartridges for whoever fights from this town."), &UPA250MapWidget::PressBuyCartridges)]] +
+		SVerticalBox::Slot().AutoHeight().Padding(0.f, 5.f, 0.f, 0.f)
+			[SNew(SHorizontalBox) +
 			 SHorizontalBox::Slot().FillWidth(1.f).Padding(0.f, 0.f, 5.f, 0.f)
 				 [HudAction(*FString::Printf(TEXT("%d muskets\n%d gold"), UPA250MapWidget::BuyMusketsQty,
 											 pa250::purchase_cost(0, 0, UPA250MapWidget::BuyMusketsQty, 0, 0, 0, 0)),
@@ -1152,7 +1233,16 @@ TSharedRef<SWidget> UPA250CityViewWidget::BuildDetail()
 	Box->AddSlot().AutoHeight()[Line(Title, KGold, TEXT("Bold"), 14)];
 	if (!B->Description.IsEmpty()) Box->AddSlot().AutoHeight().Padding(0.f, 2.f, 0.f, 4.f)[Line(B->Description, KCreamDim, TEXT("Italic"))];
 	if (!B->CampaignEffect.IsEmpty()) Box->AddSlot().AutoHeight()[Line(TEXT("Campaign: ") + B->CampaignEffect, KCream)];
-	if (!B->BattleEffect.IsEmpty()) Box->AddSlot().AutoHeight()[Line(TEXT("Battle: ") + B->BattleEffect, KCream)];
+	if (!B->BattleEffect.IsEmpty()) Box->AddSlot().AutoHeight()[Line(TEXT("Next battle here: ") + B->BattleEffect, KCream)];
+	if (!B->bConstructing && B->Upkeep > 0)
+	{
+		Box->AddSlot().AutoHeight()[Line(FString::Printf(TEXT("Upkeep: %d gold a month at this level."), B->Upkeep), KCreamDim)];
+	}
+	if (B->bGrandfathered)
+	{
+		Box->AddSlot().AutoHeight()
+			[Line(TEXT("This ground would not take a new one. It stood here before, so it keeps working and can still be upgraded."), KCreamDim, TEXT("Italic"))];
+	}
 
 	if (B->bConstructing)
 	{
@@ -1247,7 +1337,7 @@ TSharedRef<SWidget> UPA250CityViewWidget::BuildBuildList()
 		{
 			Text->AddSlot().AutoHeight()
 				[SNew(STextBlock).Font(Font(TEXT("Regular"), 10)).ColorAndOpacity(TextColor).WrapTextAt(KListTextWidth)
-					 .Text(FText::FromString(TEXT("Battle: ") + B.BattleEffect))];
+					 .Text(FText::FromString(TEXT("Next battle here: ") + B.BattleEffect))];
 		}
 		if (!B.bAvailable && !B.Reason.IsEmpty())
 		{

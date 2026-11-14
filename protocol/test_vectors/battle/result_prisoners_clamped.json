@@ -1,0 +1,36 @@
+{
+ "name": "result_prisoners_clamped",
+ "description": "prisoners leave the loser's ranks and are never more than the men it has left",
+ "scenario": {
+  "province": "lexington",
+  "attacker": "british_regulars",
+  "defender": "continental_militia"
+ },
+ "result": {
+  "province_id": "lexington",
+  "winner": "british",
+  "end_reason": "army_broke",
+  "losses": {
+   "continental": {
+    "militia": 2
+   }
+  },
+  "prisoners": {
+   "continental": {
+    "militia": 99
+   }
+  }
+ },
+ "expect": {
+  "schema_valid": true,
+  "applied": true,
+  "owner_after": "british",
+  "siege_by": "",
+  "siege_hours": 0,
+  "loser_fate": "retreated",
+  "loser_units": 5,
+  "prisoners_held": {
+   "british": 18
+  }
+ }
+}

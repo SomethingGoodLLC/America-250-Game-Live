@@ -94,8 +94,39 @@ Treaty treaty_from_json(const json& j) {
     t.province_id = j.value("province_id", "");
     return t;
 }
+// Men down by class (Army.men_down) and by faction and class (casualties).
+json men_down_to_json(const std::map<std::string, MenDown>& m) {
+    json j = json::object();
+    for (const auto& kv : m)
+        j[kv.first] = {{"killed", kv.second.killed}, {"wounded", kv.second.wounded}, {"prisoners", kv.second.prisoners}};
+    return j;
+}
+std::map<std::string, MenDown> men_down_from_json(const json& j) {
+    std::map<std::string, MenDown> m;
+    if (!j.is_object()) return m;
+    for (auto it = j.begin(); it != j.end(); ++it) {
+        MenDown d;
+        d.killed = it.value().value("killed", 0);
+        d.wounded = it.value().value("wounded", 0);
+        d.prisoners = it.value().value("prisoners", 0);
+        m[it.key()] = d;
+    }
+    return m;
+}
+json casualties_to_json(const std::map<std::string, std::map<std::string, MenDown>>& c) {
+    json j = json::object();
+    for (const auto& fk : c) j[fk.first] = men_down_to_json(fk.second);
+    return j;
+}
+std::map<std::string, std::map<std::string, MenDown>> casualties_from_json(const json& j) {
+    std::map<std::string, std::map<std::string, MenDown>> c;
+    if (!j.is_object()) return c;
+    for (auto it = j.begin(); it != j.end(); ++it) c[it.key()] = men_down_from_json(it.value());
+    return c;
+}
+
 json army_to_json(const Army& a) {
-    return {{"id", a.id},
+    json j = {{"id", a.id},
             {"name", a.name},
             {"faction", a.faction},
             {"province", a.province},
@@ -107,7 +138,16 @@ json army_to_json(const Army& a) {
             {"readiness", a.readiness},
             {"fatigue", a.fatigue},
             {"path", a.path},
-            {"hours_into_edge", a.hours_into_edge}};
+            {"hours_into_edge", a.hours_into_edge},
+            {"role", a.role},
+            {"reenlisted", a.reenlisted},
+            {"rounds_per_man", a.rounds_per_man}};
+    // Written only when a man is down: an army that has not lost one saves as it always did.
+    bool any = false;
+    for (const auto& kv : a.men_down) any = any || kv.second.total() > 0;
+    if (any) j["men_down"] = men_down_to_json(a.men_down);
+    if (a.guns > 0) j["guns"] = a.guns;
+    return j;
 }
 Army army_from_json(const json& j) {
     Army a;
@@ -123,7 +163,12 @@ Army army_from_json(const json& j) {
     a.readiness = j.value("readiness", 100);
     a.fatigue = j.value("fatigue", 0);
     a.path = j.value("path", std::vector<std::string>{});
+    a.role = j.value("role", "");
+    a.reenlisted = j.value("reenlisted", std::map<std::string, int>{});
     a.hours_into_edge = j.value("hours_into_edge", 0);
+    a.rounds_per_man = j.value("rounds_per_man", -1);
+    if (j.contains("men_down")) a.men_down = men_down_from_json(j.at("men_down"));
+    a.guns = j.value("guns", 0);
     return a;
 }
 json stores_to_json(const FactionStores& st) {
@@ -137,13 +182,15 @@ FactionStores stores_from_json(const json& j) {
     return st;
 }
 json province_stores_to_json(const ProvinceStores& st) {
-    return {{"powder", st.powder},
-            {"cartridges", st.cartridges},
-            {"muskets", st.muskets},
-            {"bayonets", st.bayonets},
-            {"provisions", st.provisions},
-            {"lead", st.lead},
-            {"paper", st.paper}};
+    json j = {{"powder", st.powder},
+              {"cartridges", st.cartridges},
+              {"muskets", st.muskets},
+              {"bayonets", st.bayonets},
+              {"provisions", st.provisions},
+              {"lead", st.lead},
+              {"paper", st.paper}};
+    if (st.guns > 0) j["guns"] = st.guns;  // written only where there are guns
+    return j;
 }
 ProvinceStores province_stores_from_json(const json& j) {
     ProvinceStores st;
@@ -154,6 +201,7 @@ ProvinceStores province_stores_from_json(const json& j) {
     st.provisions = j.value("provisions", 0);
     st.lead = j.value("lead", 0);
     st.paper = j.value("paper", 0);
+    st.guns = j.value("guns", 0);
     return st;
 }
 json letter_to_json(const CorrespondenceItem& c) {
@@ -247,7 +295,7 @@ DonorReserve donor_from_json(const json& j) {
     return d;
 }
 json shipment_to_json(const Shipment& sh) {
-    return {{"id", sh.id},
+    json j = {{"id", sh.id},
             {"donor_reserve_id", sh.donor_reserve_id},
             {"source_province", sh.source_province},
             {"dest_province", sh.dest_province},
@@ -263,6 +311,8 @@ json shipment_to_json(const Shipment& sh) {
             {"commit_hour", sh.commit_hour},
             {"deliver_on_hour", sh.deliver_on_hour},
             {"status", sh.status}};
+    if (sh.guns > 0) j["guns"] = sh.guns;
+    return j;
 }
 Shipment shipment_from_json(const json& j) {
     Shipment sh;
@@ -280,6 +330,7 @@ Shipment shipment_from_json(const json& j) {
     sh.provisions = j.value("provisions", 0);
     sh.lead = j.value("lead", 0);
     sh.paper = j.value("paper", 0);
+    sh.guns = j.value("guns", 0);
     sh.commit_hour = j.value("commit_hour", int64_t{0});
     sh.deliver_on_hour = j.value("deliver_on_hour", int64_t{0});
     sh.status = j.value("status", "");
@@ -388,7 +439,7 @@ ResourceChange resource_change_from_json(const json& j) {
     return c;
 }
 json battle_report_to_json(const BattleReport& r) {
-    return {{"province_id", r.province_id},
+    json j = {{"province_id", r.province_id},
             {"winner", r.winner},
             {"province_owner_before", r.province_owner_before},
             {"province_owner_after", r.province_owner_after},
@@ -411,7 +462,20 @@ json battle_report_to_json(const BattleReport& r) {
             {"loser_fate", r.loser_fate},
             {"scavenged_cartridges", r.scavenged_cartridges},
             {"scavenged_powder", r.scavenged_powder},
-            {"scavenged_muskets", r.scavenged_muskets}};
+            {"scavenged_muskets", r.scavenged_muskets},
+            {"end_reason", r.end_reason},
+            {"prisoners", r.prisoners},
+            {"siege_hours", r.siege_hours},
+            {"map_changes", r.map_changes},
+            {"rounds_before", r.rounds_before},
+            {"rounds_after", r.rounds_after},
+            {"rounds_dropped", r.rounds_dropped},
+            {"rounds_picked_up", r.rounds_picked_up}};
+    // Written only when the battle reported men (a save from before has none).
+    if (!r.casualties.empty()) j["casualties"] = casualties_to_json(r.casualties);
+    if (!r.colours_captured.empty()) j["colours_captured"] = r.colours_captured;
+    if (!r.guns_taken.empty()) j["guns_taken"] = r.guns_taken;
+    return j;
 }
 BattleReport battle_report_from_json(const json& j) {
     BattleReport r;
@@ -439,6 +503,17 @@ BattleReport battle_report_from_json(const json& j) {
     r.scavenged_cartridges = j.value("scavenged_cartridges", 0);
     r.scavenged_powder = j.value("scavenged_powder", 0);
     r.scavenged_muskets = j.value("scavenged_muskets", 0);
+    r.end_reason = j.value("end_reason", "");
+    r.prisoners = j.value("prisoners", std::map<std::string, std::map<std::string, int>>{});
+    r.siege_hours = j.value("siege_hours", 0);
+    r.map_changes = j.value("map_changes", std::vector<std::string>{});
+    r.rounds_before = j.value("rounds_before", std::map<std::string, int>{});
+    r.rounds_after = j.value("rounds_after", std::map<std::string, int>{});
+    r.rounds_dropped = j.value("rounds_dropped", std::map<std::string, int>{});
+    r.rounds_picked_up = j.value("rounds_picked_up", std::map<std::string, int>{});
+    if (j.contains("casualties")) r.casualties = casualties_from_json(j.at("casualties"));
+    r.colours_captured = j.value("colours_captured", std::map<std::string, int>{});
+    r.guns_taken = j.value("guns_taken", std::map<std::string, int>{});
     return r;
 }
 json staff_to_json(const StaffState& st) {
@@ -469,7 +544,13 @@ json progress_to_json(const CampaignProgress& p) {
     for (const auto& job : p.construction_jobs) builds.push_back(construction_job_to_json(job));
     json musters = json::array();
     for (const auto& job : p.recruit_jobs) musters.push_back(recruit_job_to_json(job));
-    return {{"battles_fought", p.battles_fought},
+    json missions = json::object();
+    for (const auto& mk : p.missions)
+        missions[mk.first] = {{"status", mk.second.status},
+                              {"activated_hour", mk.second.activated_hour},
+                              {"deadline_hour", mk.second.deadline_hour},
+                              {"resolved_hour", mk.second.resolved_hour}};
+    json j = {{"battles_fought", p.battles_fought},
             {"lexington_fought", p.lexington_fought},
             {"aftermath_pending", p.aftermath_pending},
             {"concord_followup_seeded", p.concord_followup_seeded},
@@ -497,7 +578,23 @@ json progress_to_json(const CampaignProgress& p) {
               {"ready_hour", p.knox.ready_hour},
               {"pieces", p.knox.pieces},
               {"transport_committed", p.knox.transport_committed},
-              {"fictionalized_authorization", p.knox.fictionalized_authorization}}},
+              {"fictionalized_authorization", p.knox.fictionalized_authorization},
+              {"province", p.knox.province},
+              {"army_id", p.knox.army_id}}},
+            {"missions", missions},
+            {"outcome",
+             {{"decided", p.outcome.decided},
+              {"winner", p.outcome.winner},
+              {"reason", p.outcome.reason},
+              {"hour_index", p.outcome.hour_index},
+              {"summary", p.outcome.summary}}},
+            {"hq_lost_hours", p.hq_lost_hours},
+            {"support_low_hours", p.support_low_hours},
+            {"evacuation_hours_remaining", p.evacuation_hours_remaining},
+            {"evacuated", p.evacuated},
+            {"enlistment_warned", p.enlistment_warned},
+            {"enlistments_expired", p.enlistments_expired},
+            {"battles_won", p.battles_won},
             {"commander",
              {{"id", p.commander.id},
               {"name", p.commander.name},
@@ -506,6 +603,9 @@ json progress_to_json(const CampaignProgress& p) {
               {"risk", p.commander.risk},
               {"pending_clarification", p.commander.pending_clarification},
               {"last_request", p.commander.last_request}}}};
+    // Written only once the train's light pieces have been issued (a save from before has no such key).
+    if (p.knox.field_guns_issued) j["knox"]["field_guns_issued"] = true;
+    return j;
 }
 CampaignProgress progress_from_json(const json& j) {
     CampaignProgress p;
@@ -547,7 +647,34 @@ CampaignProgress progress_from_json(const json& j) {
         p.knox.pieces = k.value("pieces", 0);
         p.knox.transport_committed = k.value("transport_committed", 0);
         p.knox.fictionalized_authorization = k.value("fictionalized_authorization", false);
+        p.knox.province = k.value("province", "");
+        p.knox.army_id = k.value("army_id", "");
+        p.knox.field_guns_issued = k.value("field_guns_issued", false);
     }
+    if (j.contains("missions"))
+        for (auto it = j.at("missions").begin(); it != j.at("missions").end(); ++it) {
+            MissionState m;
+            m.status = it.value().value("status", "locked");
+            m.activated_hour = it.value().value("activated_hour", int64_t{0});
+            m.deadline_hour = it.value().value("deadline_hour", int64_t{0});
+            m.resolved_hour = it.value().value("resolved_hour", int64_t{0});
+            p.missions[it.key()] = m;
+        }
+    if (j.contains("outcome")) {
+        const json& o = j.at("outcome");
+        p.outcome.decided = o.value("decided", false);
+        p.outcome.winner = o.value("winner", "");
+        p.outcome.reason = o.value("reason", "");
+        p.outcome.hour_index = o.value("hour_index", int64_t{0});
+        p.outcome.summary = o.value("summary", std::vector<std::string>{});
+    }
+    p.hq_lost_hours = j.value("hq_lost_hours", 0);
+    p.support_low_hours = j.value("support_low_hours", 0);
+    p.evacuation_hours_remaining = j.value("evacuation_hours_remaining", 0);
+    p.evacuated = j.value("evacuated", false);
+    p.enlistment_warned = j.value("enlistment_warned", false);
+    p.enlistments_expired = j.value("enlistments_expired", false);
+    p.battles_won = j.value("battles_won", std::map<std::string, int>{});
     if (j.contains("commander")) {
         const json& c = j.at("commander");
         p.commander.id = c.value("id", "parker");
@@ -606,9 +733,13 @@ json province_to_json(const Province& p) {
             {"workshop_level", p.workshop_level},
             {"depot_level", p.depot_level},
             {"fort_level", p.fort_level},
+            {"powder_mill_level", p.powder_mill_level},
+            {"grandfathered", p.grandfathered},
             {"church", p.church},
             {"militia_muster", p.militia_muster},
-            {"manpower_used", p.manpower_used}};
+            {"manpower_used", p.manpower_used},
+            {"siege_by", p.siege_by},
+            {"siege_hours_remaining", p.siege_hours_remaining}};
 }
 Province province_from_json(const json& j) {
     Province p;
@@ -626,9 +757,14 @@ Province province_from_json(const json& j) {
     p.workshop_level = j.value("workshop_level", 0);
     p.depot_level = j.value("depot_level", 0);
     p.fort_level = j.value("fort_level", 0);
+    p.powder_mill_level = j.value("powder_mill_level", 0);
+    p.grandfathered = j.value("grandfathered", std::vector<std::string>{});
+    std::sort(p.grandfathered.begin(), p.grandfathered.end());
     p.church = j.value("church", false);
     p.militia_muster = j.value("militia_muster", false);
     p.manpower_used = j.value("manpower_used", 0);
+    p.siege_by = j.value("siege_by", "");
+    p.siege_hours_remaining = j.value("siege_hours_remaining", 0);
     return p;
 }
 Edge edge_from_json(const json& j) {
@@ -756,6 +892,8 @@ CampaignState state_from_json(const json& j, bool is_save) {
         if (!s.provinces.count(kv.second.province)) throw std::runtime_error("army in unknown province: " + kv.first);
     auto gerr = validate_scenario_graph(s);
     if (!gerr.empty() && !s.edges.empty()) throw std::runtime_error("scenario graph invalid: " + gerr.front());
+    // Buildings standing before the ground rules keep working (see mark_grandfathered_buildings).
+    if (!is_save || !j.contains("ground_rules")) mark_grandfathered_buildings(s);
     return s;
 }
 
@@ -786,6 +924,7 @@ CampaignState load_scenario(const std::string& text) {
 std::string serialize(const CampaignState& s) {
     json j;
     j["schema_version"] = kSchemaVersion;
+    j["ground_rules"] = 1;  // written under the building ground rules: nothing more to grandfather on load
     j["scenario"] = s.scenario;
     j["now"] = {{"hour_index", s.now.hour_index}};
     j["seed"] = s.seed;
@@ -1086,6 +1225,7 @@ std::string setup_to_json(const BattleSetup& b) {
     j["province_name"] = b.province_name;
     j["objective"] = b.objective;
     j["scenario_preset"] = b.scenario_preset;
+    j["mode"] = b.mode;
     j["seed"] = b.seed;
     j["attacker_faction"] = b.attacker_faction;
     j["defender_faction"] = b.defender_faction;
@@ -1102,8 +1242,12 @@ std::string setup_to_json(const BattleSetup& b) {
     j["militia_muster"] = b.militia_muster;
     j["initial_post_holders"] = b.initial_post_holders;
     j["modifier_notes"] = b.modifier_notes;
+    j["soldiers_per_unit"] = b.soldiers_per_unit;
     j["sides"] = json::object();
-    for (const auto& kv : b.sides)
+    for (const auto& kv : b.sides) {
+        json factors = json::array();
+        for (const auto& f : kv.second.factors)
+            factors.push_back({{"label", f.label}, {"value", f.value}, {"source", f.source}});
         j["sides"][kv.first] = {{"faction", kv.second.faction},
                                 {"army_id", kv.second.army_id},
                                 {"tickets", kv.second.tickets},
@@ -1111,7 +1255,14 @@ std::string setup_to_json(const BattleSetup& b) {
                                 {"readiness", kv.second.readiness},
                                 {"cartridge_budget", kv.second.cartridge_budget},
                                 {"reinforcement_scale", kv.second.reinforcement_scale},
-                                {"retreat_province", kv.second.retreat_province}};
+                                {"retreat_province", kv.second.retreat_province},
+                                {"field_strength", kv.second.field_strength},
+                                {"rounds_per_man", kv.second.rounds_per_man},
+                                {"fortification_level", kv.second.fortification_level},
+                                {"magazine_province", kv.second.magazine_province},
+                                {"guns", kv.second.guns},
+                                {"factors", factors}};
+    }
     return j.dump();
 }
 
@@ -1124,6 +1275,7 @@ BattleSetup setup_from_json(const std::string& text) {
         b.province_name = j.at("province_name").get<std::string>();
         b.objective = j.at("objective").get<std::string>();
         b.scenario_preset = j.value("scenario_preset", scenario_preset_for_province(b.province_id));
+        b.mode = j.value("mode", std::string("conquest"));
         b.seed = j.at("seed").get<uint64_t>();
         b.attacker_faction = j.at("attacker_faction").get<std::string>();
         b.defender_faction = j.at("defender_faction").get<std::string>();
@@ -1140,6 +1292,7 @@ BattleSetup setup_from_json(const std::string& text) {
         b.militia_muster = j.value("militia_muster", false);
         b.initial_post_holders = j.value("initial_post_holders", std::map<std::string, std::string>{});
         b.modifier_notes = j.value("modifier_notes", std::vector<std::string>{});
+        b.soldiers_per_unit = j.value("soldiers_per_unit", battle_rules().soldiers_per_unit);
         for (auto it = j.at("sides").begin(); it != j.at("sides").end(); ++it) {
             SideSetup s;
             s.faction = it.value().at("faction").get<std::string>();
@@ -1150,6 +1303,14 @@ BattleSetup setup_from_json(const std::string& text) {
             s.cartridge_budget = it.value().value("cartridge_budget", b.province_cartridges);
             s.reinforcement_scale = it.value().value("reinforcement_scale", 1.f);
             s.retreat_province = it.value().at("retreat_province").get<std::string>();
+            s.field_strength = it.value().value("field_strength", 0);
+            s.rounds_per_man = it.value().value("rounds_per_man", 0);
+            s.guns = it.value().value("guns", 0);
+            s.fortification_level = it.value().value("fortification_level", 0);
+            s.magazine_province = it.value().value("magazine_province", "");
+            if (it.value().contains("factors"))
+                for (const auto& f : it.value().at("factors"))
+                    s.factors.push_back({f.value("label", ""), f.value("value", 0), f.value("source", "")});
             b.sides[it.key()] = s;
         }
         return b;
@@ -1163,6 +1324,7 @@ std::string result_to_json(const BattleResult& r) {
            {"winner", r.winner},
            {"objective_holder", r.objective_holder},
            {"objectives_held", r.objectives_held},
+           {"casualties", casualties_to_json(r.casualties)},
            {"losses", r.losses},
            {"wounded", r.wounded},
            {"cartridges_spent", r.cartridges_spent},
@@ -1171,7 +1333,11 @@ std::string result_to_json(const BattleResult& r) {
            {"shots_fired", r.shots_fired},
            {"personal_kills", r.personal_kills},
            {"province_owner_after", r.province_owner_after},
-           {"retreat_province", r.retreat_province}};
+           {"retreat_province", r.retreat_province},
+           {"end_reason", r.end_reason},
+           {"prisoners", r.prisoners},
+           {"colours_captured", r.colours_captured},
+           {"guns_taken", r.guns_taken}};
     return j.dump();
 }
 
@@ -1194,6 +1360,23 @@ BattleResult result_from_json(const std::string& text) {
         r.personal_kills = j.value("personal_kills", 0);
         r.province_owner_after = j.value("province_owner_after", "");
         r.retreat_province = j.value("retreat_province", "");
+        // Results written before the contract carried no reason: they were all fights to the end.
+        r.end_reason = j.value("end_reason", "tickets_exhausted");
+        if (!known_end_reason(r.end_reason))
+            throw std::runtime_error("result parse error: unknown end_reason " + r.end_reason);
+        r.prisoners = j.value("prisoners", std::map<std::string, std::map<std::string, int>>{});
+        if (j.contains("casualties")) r.casualties = casualties_from_json(j.at("casualties"));
+        r.colours_captured = j.value("colours_captured", std::map<std::string, int>{});
+        for (const auto& ck : r.colours_captured)
+            if (ck.second < 0) throw std::runtime_error("result parse error: negative colours for " + ck.first);
+        r.guns_taken = j.value("guns_taken", std::map<std::string, int>{});
+        for (const auto& ck : r.guns_taken)
+            if (ck.second < 0) throw std::runtime_error("result parse error: negative guns for " + ck.first);
+        // Casualties are whole men: a negative count is outside the contract.
+        for (const auto& fk : r.casualties)
+            for (const auto& ck : fk.second)
+                if (ck.second.killed < 0 || ck.second.wounded < 0 || ck.second.prisoners < 0)
+                    throw std::runtime_error("result parse error: negative casualties for " + ck.first);
         return r;
     } catch (const json::exception& e) {
         throw std::runtime_error(std::string("result parse error: ") + e.what());

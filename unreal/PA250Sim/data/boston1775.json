@@ -4,6 +4,7 @@
  "seed": 1775,
  "player_faction": "continental",
  "ai_objective": "concord",
+ "player_gold": 120,
  "start_ymdh": {
   "y": 1775,
   "m": 4,
@@ -17,9 +18,7 @@
    "name": "Concord",
    "owner": "continental",
    "map_index": 1,
-   "terrain": [
-    "woods"
-   ],
+   "terrain": ["woods", "river", "farmland", "crossroads"],
    "polygon": [
     [
      0,
@@ -53,9 +52,7 @@
    "name": "Lincoln",
    "owner": "continental",
    "map_index": 2,
-   "terrain": [
-    "woods"
-   ],
+   "terrain": ["woods"],
    "polygon": [
     [
      240,
@@ -85,9 +82,7 @@
    "name": "Lexington",
    "owner": "continental",
    "map_index": 3,
-   "terrain": [
-    "farmland"
-   ],
+   "terrain": ["farmland", "crossroads"],
    "polygon": [
     [
      400,
@@ -121,9 +116,7 @@
    "name": "Menotomy",
    "owner": "continental",
    "map_index": 4,
-   "terrain": [
-    "farmland"
-   ],
+   "terrain": ["farmland", "crossroads"],
    "polygon": [
     [
      420,
@@ -157,9 +150,7 @@
    "name": "Cambridge",
    "owner": "continental",
    "map_index": 5,
-   "terrain": [
-    "town"
-   ],
+   "terrain": ["town", "river", "crossroads"],
    "polygon": [
     [
      250,
@@ -197,9 +188,7 @@
    "name": "Charlestown",
    "owner": "continental",
    "map_index": 6,
-   "terrain": [
-    "hills"
-   ],
+   "terrain": ["hills", "harbor"],
    "polygon": [
     [
      600,
@@ -233,9 +222,7 @@
    "name": "Medford",
    "owner": "continental",
    "map_index": 7,
-   "terrain": [
-    "farmland"
-   ],
+   "terrain": ["farmland", "river"],
    "polygon": [
     [
      520,
@@ -269,9 +256,7 @@
    "name": "Watertown",
    "owner": "continental",
    "map_index": 8,
-   "terrain": [
-    "farmland"
-   ],
+   "terrain": ["farmland", "river", "falls"],
    "polygon": [
     [
      180,
@@ -305,9 +290,7 @@
    "name": "Brookline",
    "owner": "continental",
    "map_index": 9,
-   "terrain": [
-    "farmland"
-   ],
+   "terrain": ["farmland"],
    "polygon": [
     [
      320,
@@ -341,9 +324,7 @@
    "name": "Roxbury",
    "owner": "continental",
    "map_index": 10,
-   "terrain": [
-    "town"
-   ],
+   "terrain": ["town", "crossroads"],
    "polygon": [
     [
      470,
@@ -377,9 +358,7 @@
    "name": "Boston",
    "owner": "british",
    "map_index": 11,
-   "terrain": [
-    "town"
-   ],
+   "terrain": ["town", "harbor"],
    "polygon": [
     [
      700,
@@ -414,16 +393,14 @@
     755,
     550
    ],
-   "workshop_level": 1, "depot_level": 1, "fort_level": 1, "supply_value": 1
+   "workshop_level": 1, "depot_level": 1, "fort_level": 2, "supply_value": 1
   },
   {
    "id": "dorchester",
    "name": "Dorchester",
    "owner": "continental",
    "map_index": 12,
-   "terrain": [
-    "hills"
-   ],
+   "terrain": ["hills", "harbor"],
    "polygon": [
     [
      650,
@@ -453,9 +430,7 @@
    "name": "Chelsea",
    "owner": "continental",
    "map_index": 13,
-   "terrain": [
-    "marsh"
-   ],
+   "terrain": ["marsh", "harbor"],
    "polygon": [
     [
      760,
@@ -603,6 +578,14 @@
    "note": "Winnisimmet ferry (FACT)"
   },
   {
+   "id": "boston-dorchester",
+   "a": "boston",
+   "b": "dorchester",
+   "type": "boat",
+   "march_hours": 2,
+   "note": "Boats from the Long Wharf and Castle William to Dorchester Neck: Howe's planned landing of 5 March 1776, stopped by a storm (FACT that it was planned; the crossing time is invented). Added 2026-11-14 (user decision) so a British attack on the heights is a landing."
+  },
+  {
    "id": "chelsea-medford",
    "a": "chelsea",
    "b": "medford",
@@ -612,6 +595,22 @@
   }
  ],
  "armies": [
+  {
+   "id": "british_garrison",
+   "name": "Boston Garrison",
+   "faction": "british",
+   "province": "boston",
+   "role": "garrison",
+   "units": {
+    "artilleryman": 4,
+    "grenadier": 4,
+    "light_infantry": 3,
+    "line_infantry": 12,
+    "officer": 1
+   },
+   "guns": 4,
+   "morale": 80
+  },
   {
    "id": "british_regulars",
    "name": "British Regulars",
@@ -649,7 +648,7 @@
    "powder": 40, "cartridges": 80, "muskets": 30, "bayonets": 24, "provisions": 40, "lead": 20, "paper": 20
   },
   "concord": {
-   "powder": 4, "cartridges": 40, "muskets": 6, "bayonets": 4, "provisions": 10, "lead": 8, "paper": 8
+   "powder": 4, "cartridges": 40, "muskets": 6, "bayonets": 4, "provisions": 10, "lead": 8, "paper": 8, "guns": 2
   },
   "lexington": {
    "powder": 2, "cartridges": 10, "muskets": 2, "bayonets": 1, "provisions": 5, "lead": 2, "paper": 2
@@ -665,9 +664,9 @@
   "brookline": { "powder": 0, "cartridges": 0, "muskets": 0, "bayonets": 0, "provisions": 0, "lead": 0, "paper": 0 },
   "roxbury": { "powder": 0, "cartridges": 0, "muskets": 0, "bayonets": 0, "provisions": 0, "lead": 0, "paper": 0 },
   "dorchester": { "powder": 0, "cartridges": 0, "muskets": 0, "bayonets": 0, "provisions": 0, "lead": 0, "paper": 0 },
-  "chelsea": { "powder": 0, "cartridges": 0, "muskets": 0, "bayonets": 0, "provisions": 0, "lead": 0, "paper": 0 }
+  "chelsea": { "powder": 0, "cartridges": 0, "muskets": 0, "bayonets": 0, "provisions": 20, "lead": 0, "paper": 0 }
  },
- "stores_note": "Gameplay tuning seed — not a historical inventory. Legacy faction stores omitted; province_stores is authoritative.",
+ "stores_note": "Gameplay tuning seed — not a historical inventory. Legacy faction stores omitted; province_stores is authoritative. Field guns: cannon were hidden at Concord in April 1775, but the count of 2 is invented, as are the Boston garrison's 4 guns and 4 crews (user decision 2026-11-14).",
  "local_support": 55,
  "relations": {
   "british": -20

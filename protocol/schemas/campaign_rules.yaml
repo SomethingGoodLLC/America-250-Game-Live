@@ -1,0 +1,130 @@
+# Campaign rules (Play America 250): the window, how the campaign is won and lost, enlistments,
+# occupation, the British AI's weights and the sim-only battle resolver.
+# File: unreal/PA250Sim/data/campaign_rules_boston_1775.json, read by PA250Sim `load_campaign_rules`.
+# Every number is GAMEPLAY TUNING, not historical fact.
+$schema: "http://json-schema.org/draft-07/schema#"
+$id: "campaign_rules.v1"
+title: CampaignRules
+type: object
+additionalProperties: false
+required: [window, towns, victory, evacuation, enlistment, siege_train, occupation, british_ai, auto_resolve]
+properties:
+  note: {type: string}
+  window:
+    type: object
+    additionalProperties: false
+    required: [start, end]
+    properties:
+      note: {type: string}
+      start: {$ref: "#/definitions/ymdh"}
+      end: {$ref: "#/definitions/ymdh", description: "The campaign is scored at the end of this hour if nobody has won."}
+  towns:
+    type: object
+    additionalProperties: false
+    required: [patriot_hq, british_base, heights]
+    properties:
+      patriot_hq: {type: string}
+      british_base: {type: string}
+      heights: {type: string}
+  victory:
+    type: object
+    additionalProperties: false
+    required: [hq_held_days, support_floor, support_floor_days, score_per_town, score_support_weight, score_tie_goes_to]
+    properties:
+      note: {type: string}
+      hq_held_days: {type: integer, minimum: 1, description: "British win: the Patriot headquarters town British-owned this many days running."}
+      support_floor: {type: integer, minimum: 0, maximum: 100}
+      support_floor_days: {type: integer, minimum: 1, description: "British win: Patriot Support below the floor this many days running."}
+      score_per_town: {type: integer, minimum: 0}
+      score_support_weight: {type: integer, minimum: 0}
+      score_tie_goes_to: {enum: [british, continental]}
+  evacuation:
+    type: object
+    additionalProperties: false
+    required: [countdown_hours]
+    properties:
+      note: {type: string}
+      countdown_hours: {type: integer, minimum: 1}
+  enlistment:
+    type: object
+    additionalProperties: false
+    required: [warning, expiry, gold_per_company, exempt_classes]
+    properties:
+      note: {type: string}
+      warning: {$ref: "#/definitions/ymdh"}
+      expiry: {$ref: "#/definitions/ymdh"}
+      gold_per_company: {type: integer, minimum: 0}
+      exempt_classes: {type: array, items: {type: string}}
+  siege_train:
+    type: object
+    additionalProperties: false
+    required: [gold_cost, haul_days]
+    properties:
+      note: {type: string}
+      gold_cost: {type: integer, minimum: 0}
+      haul_days: {type: integer, minimum: 1}
+      field_guns: {type: integer, minimum: 0, description: "Light pieces the first army to haul the train takes into its ranks, once."}
+      crew_units: {type: integer, minimum: 0, description: "Gun-crew units that come with them."}
+  occupation:
+    type: object
+    additionalProperties: false
+    required: [hour_of_day]
+    properties:
+      note: {type: string}
+      hour_of_day: {type: integer, minimum: 0, maximum: 23}
+  british_ai:
+    type: object
+    additionalProperties: false
+    required: [garrison_units, garrison_max_units, min_field_units, retreat_morale, rest_morale_per_day, rest_morale_cap, value]
+    properties:
+      note: {type: string}
+      garrison_units: {type: integer, minimum: 0}
+      garrison_max_units: {type: integer, minimum: 0}
+      detachment_gun_share_pct: {type: integer, minimum: 0, maximum: 100, description: "Share of the garrison's field guns (and their crews) a column takes when it marches out."}
+      min_field_units: {type: integer, minimum: 1}
+      retreat_morale: {type: integer, minimum: 0, maximum: 100}
+      rest_morale_per_day: {type: integer, minimum: 0}
+      rest_morale_cap: {type: integer, minimum: 0, maximum: 100}
+      recruit_targets:
+        type: object
+        additionalProperties: {type: integer, minimum: 0, maximum: 100}
+        description: >-
+          Unit class -> the share of its units (percent) the AI wants of that class. With gold to
+          spare it raises the class furthest short of its share (the cheapest of those). Absent or
+          empty: the cheapest company it can raise.
+      value:
+        type: object
+        additionalProperties: false
+        required: [per_cartridge, per_powder, per_musket, per_provision, patriot_hq, heights, heights_fortified, weak_town, forage_farmland, mission_target]
+        properties:
+          per_cartridge: {type: integer, minimum: 0}
+          per_powder: {type: integer, minimum: 0}
+          per_musket: {type: integer, minimum: 0}
+          per_provision: {type: integer, minimum: 0}
+          patriot_hq: {type: integer, minimum: 0}
+          heights: {type: integer, minimum: 0}
+          heights_fortified: {type: integer, minimum: 0}
+          weak_town: {type: integer, minimum: 0}
+          forage_farmland: {type: integer, minimum: 0}
+          mission_target: {type: integer, minimum: 0}
+  auto_resolve:
+    type: object
+    additionalProperties: false
+    required: [fort_bonus_pct_per_level, luck_pct, loser_loss_pct, winner_loss_pct, broke_ratio_pct]
+    properties:
+      note: {type: string}
+      fort_bonus_pct_per_level: {type: integer, minimum: 0}
+      luck_pct: {type: integer, minimum: 0, maximum: 50}
+      loser_loss_pct: {type: integer, minimum: 0, maximum: 100}
+      winner_loss_pct: {type: integer, minimum: 0, maximum: 100}
+      broke_ratio_pct: {type: integer, minimum: 100}
+definitions:
+  ymdh:
+    type: object
+    additionalProperties: false
+    required: [y, m, d]
+    properties:
+      y: {type: integer}
+      m: {type: integer, minimum: 1, maximum: 12}
+      d: {type: integer, minimum: 1, maximum: 31}
+      h: {type: integer, minimum: 0, maximum: 23}

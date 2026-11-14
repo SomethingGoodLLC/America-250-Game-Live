@@ -1,0 +1,43 @@
+{
+ "name": "result_colours_lost",
+ "description": "the enemy takes the player's colours: Support falls",
+ "scenario": {
+  "province": "lexington",
+  "attacker": "british_regulars",
+  "defender": "continental_militia",
+  "units": {
+   "british_regulars": {
+    "grenadier": 5,
+    "light_infantry": 6,
+    "line_infantry": 12,
+    "officer": 1,
+    "ensign": 1
+   },
+   "continental_militia": {
+    "line_infantry": 4,
+    "militia": 17,
+    "officer": 1,
+    "ensign": 1
+   }
+  }
+ },
+ "result": {
+  "province_id": "lexington",
+  "winner": "british",
+  "end_reason": "posts_swept",
+  "colours_captured": {
+   "british": 1
+  }
+ },
+ "expect": {
+  "schema_valid": true,
+  "applied": true,
+  "owner_after": "british",
+  "siege_by": "",
+  "siege_hours": 0,
+  "report_colours": {
+   "british": 1
+  },
+  "local_support_delta": -3
+ }
+}

@@ -325,7 +325,7 @@ void APA250CampaignPlayerController::OnLeftReleased()
 	{
 		return;
 	}
-	// A town click also shows its panel (unless it was a march order); see HandleTownClicked.
+	// Left click inspects the town. A march is the right button.
 	if (UPA250MapWidget* W = CampaignWidget(this))
 	{
 		W->HandleTownClicked(Pid);
@@ -336,10 +336,41 @@ void APA250CampaignPlayerController::OnLeftReleased()
 
 void APA250CampaignPlayerController::OnRightClick()
 {
-	if (APA250ProvinceMapActor* Map = FindMap())
+	float MX = 0.f;
+	float MY = 0.f;
+	GetMousePosition(MX, MY);
+	if (OverHud(this, FVector2D(MX, MY)))
 	{
-		Map->HandleRightClick();
+		return;
 	}
+	APA250ProvinceMapActor* Map = FindMap();
+	if (!Map)
+	{
+		return;
+	}
+	UPA250MapWidget* W = CampaignWidget(this);
+	FHitResult Hit;
+	if (!GetHitResultUnderCursor(ECC_Visibility, true, Hit) || !Hit.bBlockingHit)
+	{
+		if (W) W->ClearSelection();
+		else Map->HandleRightClick();
+		return;
+	}
+	const FString ArmyId = Map->ArmyAtWorld(Hit.ImpactPoint);
+	const FString ArmyProv = Map->ProvinceForArmy(ArmyId);
+	const FString Pid = !ArmyProv.IsEmpty() ? ArmyProv : Map->ProvinceAtWorld(Hit.ImpactPoint);
+	if (Pid.IsEmpty())
+	{
+		if (W) W->ClearSelection();
+		else Map->HandleRightClick();
+		return;
+	}
+	if (W)
+	{
+		W->HandleTownOrdered(Pid);
+		return;
+	}
+	Map->HandleRightClick();
 }
 
 void APA250CampaignPlayerController::OnMiddlePressed()

@@ -1,0 +1,51 @@
+{
+ "name": "result_men_remainder_carries",
+ "description": "the remainder carries: three men down from an earlier battle and one more now make one unit lost, with nothing left over",
+ "scenario": {
+  "province": "lexington",
+  "attacker": "british_regulars",
+  "defender": "continental_militia",
+  "men_down": {
+   "continental_militia": {
+    "militia": {
+     "killed": 3
+    }
+   }
+  }
+ },
+ "result": {
+  "province_id": "lexington",
+  "winner": "british",
+  "end_reason": "time_limit",
+  "casualties": {
+   "continental": {
+    "militia": {
+     "killed": 1
+    }
+   }
+  }
+ },
+ "expect": {
+  "schema_valid": true,
+  "applied": true,
+  "owner_after": "british",
+  "siege_by": "",
+  "siege_hours": 0,
+  "loser_fate": "retreated",
+  "loser_units": 21,
+  "units": {
+   "continental_militia": {
+    "militia": 16
+   }
+  },
+  "men_down": {
+   "continental_militia": {
+    "militia": {
+     "killed": 0,
+     "wounded": 0,
+     "prisoners": 0
+    }
+   }
+  }
+ }
+}

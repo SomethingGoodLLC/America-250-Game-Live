@@ -31,11 +31,94 @@ PathPlan plan_path(const CampaignState& s, const std::string& army_id, const std
 std::vector<std::string> validate_order(const CampaignState& state, const Order& order);
 
 // ---- Battle ------------------------------------------------------------
+// Battle rules (GAMEPLAY TUNING, data/battle_rules.json). Optional; defaults apply if unloaded.
+void load_battle_rules(const std::string& json_text);
+bool battle_rules_loaded();
+const BattleRules& battle_rules();
+bool known_end_reason(const std::string& reason);
+// Pure: split the bot budget between two sides in proportion to their fit soldiers, each share
+// clamped to the per-side limits. 96 v 88 gives 21 v 19; 2:1 gives 27 v 13.
+FieldSplit split_field_strength(int men_a, int men_b);
+// Pure: rounds in each man's box when `cartridges` are shared among `men` (clamped to the rules).
+int rounds_per_man_for(int cartridges, int men);
+// Pure: of this many men shot or bayoneted down, how many are killed and how many wounded
+// (battle_rules.json casualties.wounded_pct_of_fallen, rounded half up). Prisoners are not among
+// them: they surrendered. Men a surgeon saved are counted wounded before this is asked.
+MenDown split_fallen(int fallen);
+// Pure: rounds in each man's box in this army (a full box when the army has never drawn on it).
+int carried_rounds(const Army& army);
+// Hourly: an army standing in a town its side holds fills its boxes up to a full box from that
+// town's magazine (cartridges first, then powder made up). Nowhere else do boxes fill.
+void refill_cartridge_boxes(CampaignState& s);
+// Hourly: a siege lifts when no besieging army stands in the town; at expiry the town changes hands.
+void tick_sieges(CampaignState& s);
 std::string choose_retreat(const CampaignState& state, const std::string& province,
                            const std::string& loser_faction);
 std::string scenario_preset_for_province(const std::string& province_id);
 BattleSetup build_battle_setup(const CampaignState& state, const std::string& province);
 CampaignState apply_battle_result(const CampaignState& state, const BattleResult& result);
+
+// ---- Campaign arc: win and loss, missions, enlistments, the scored AI ----
+// Rules (data/campaign_rules_boston_1775.json) and missions (data/missions_boston_1775.json).
+// The arc runs only while the rules are loaded; missions only while a mission file is loaded.
+void load_campaign_rules(const std::string& json_text);
+void unload_campaign_rules();
+bool campaign_rules_loaded();
+const CampaignRules& campaign_rules();
+// Returns "code: detail" errors (unknown predicate or effect, dangling prerequisite); empty = loaded.
+std::vector<std::string> load_missions(const std::string& json_text);
+void unload_missions();
+bool missions_loaded();
+const std::vector<MissionDef>& mission_defs();
+// Pure: is the predicate true for a mission of `mission_faction`?
+bool mission_predicate(const CampaignState& state, const std::string& mission_faction,
+                       const MissionPredicate& predicate);
+// Plain words for the tracker: where the predicate stands now.
+std::string mission_progress_text(const CampaignState& state, const std::string& mission_faction,
+                                  const MissionPredicate& predicate);
+// Hourly, from advance_hour: guns in transit, occupation, enlistments, missions (effects are
+// enqueued as MissionEffect commands for the next hour), the evacuation clock, win and loss.
+void tick_campaign(CampaignState& s, std::vector<Interrupt>& interrupts);
+// Pure: the command a completed or failed mission enqueues. outcome = "complete" | "failed".
+CampaignState apply_mission_effect(const CampaignState& state, const std::string& mission_id,
+                                   const std::string& outcome);
+// Pure: has the campaign been won or lost at this hour? decided=false while it has not.
+CampaignOutcome evaluate_outcome(const CampaignState& state);
+// Pure: the window score as the end-of-campaign formula would count it now, plus hours until
+// window_end. The HUD shows this while the campaign is still running; evaluate_outcome applies it
+// only when the window has closed.
+struct WindowScore {
+    int patriot_towns = 0;
+    int british_towns = 0;
+    int patriot_points = 0;
+    int british_points = 0;
+    int64_t hours_remaining = 0;
+};
+WindowScore window_score_snapshot(const CampaignState& state);
+// Read-only snapshots for the HUD: the mission tracker and the end screen.
+std::string missions_json(const CampaignState& state);
+std::string outcome_json(const CampaignState& state);
+// Enlistments. From the warning date until they expire a company may be re-enlisted for gold.
+// error: unknown_army / not_your_army / unknown_class / exempt_class / not_yet / too_late /
+// nothing_to_reenlist / insufficient_gold / battle_pending.
+int reenlist_cost(const CampaignState& state, const std::string& army_id, const std::string& unit_class);
+CampaignState reenlist_companies(const CampaignState& state, const std::string& army_id,
+                                 const std::string& unit_class, std::string& error);
+int company_size(const std::string& faction, const std::string& unit_class);  // catalog recruit size
+// The noble train. error: not_available / already_underway / already_delivered / insufficient_gold.
+CampaignState send_for_siege_guns(const CampaignState& state, std::string& error);
+// Hitch the delivered guns to an army standing where they lie (empty army_id: leave them here).
+// error: no_guns / unknown_army / not_your_army / not_here.
+CampaignState attach_siege_guns(const CampaignState& state, const std::string& army_id, std::string& error);
+// The AI's daily orders when the rules are loaded (called from the midnight hook in advance_hour).
+void campaign_daily_ai(CampaignState& s);
+// Pure: the town an AI field army would march on now, or "" (scored list, ties by town id).
+std::string choose_ai_target(const CampaignState& state, const std::string& army_id);
+// SIM ONLY (tests and tools): settle the pending battle without Unreal, seeded from the setup.
+BattleResult auto_resolve_battle(const CampaignState& state, const BattleSetup& setup);
+// SIM ONLY: a player who never acts. Advances up to max_hours, settling every battle with
+// auto_resolve_battle, and stops when the campaign is decided. Deterministic for a given state.
+CampaignState run_idle_campaign(const CampaignState& state, int max_hours);
 
 // ---- Logistics / correspondence / staff (pure) -------------------------
 // Ensure default stores/staff exist (called from load_scenario path).
@@ -64,11 +147,49 @@ CampaignState approve_purchase(const CampaignState& state, const std::string& de
 CampaignState approve_transfer(const CampaignState& state, const std::string& source_province,
                                const std::string& dest_province, int powder, int cartridges, int muskets,
                                int bayonets, int provisions, int lead, int paper, std::string& error);
+// The transfer itself, field guns included (approve_transfer is this with no guns).
+CampaignState transfer_stores(const CampaignState& state, const std::string& source_province,
+                              const std::string& dest_province, int powder, int cartridges, int muskets, int bayonets,
+                              int provisions, int lead, int paper, int guns, std::string& error);
+// Guns an army fields: those it has, as far as it has crews to serve them (battle_rules guns).
+int served_guns(const Army& army);
+// The kind of fight (pure; battle_rules.json "modes"): "landing" when the attacker arrived by a
+// landing edge type into a town with the landing tag, else "assault" when the defender's
+// fortification level reaches the assault level, else "conquest". A preset fight is always conquest.
+std::string choose_battle_mode(const std::string& scenario_preset, const std::string& arrival_edge_type,
+                               const std::vector<std::string>& terrain_tags, int defender_fortification_level);
+// Clock rule, each hour after the cartridge boxes: an army with gun crews standing in a town its
+// side holds draws field guns from that town's magazine, as many as its spare crews can serve.
+void draw_guns(CampaignState& s);
+// Pure: ship a town's whole war stores (not its provisions) to the side's headquarters depot.
+// Errors: unknown_province, already_at_depot, not_your_province, empty_order.
+CampaignState send_stores_to_depot(const CampaignState& state, const std::string& source_province,
+                                   std::string& error);
 // Gold a purchase order would cost (the price approve_purchase charges). Never mutates state.
 int purchase_cost(int powder, int cartridges, int muskets, int bayonets, int provisions, int lead,
                   int paper);
 // Province development (EU4-style tracks + City View discrete buildings).
-int province_development(const Province& p);  // 1 + farm+workshop+depot+fort
+int province_development(const Province& p);  // 1 + farm+workshop+depot+fort+powder mill
+// Level costs and upkeep scale by level (catalog cost_multiplier_pct: 100, 250, 600 by default).
+int level_cost_pct(int level_index);
+// Cartridges one unit of magazine powder makes up into when an army forms up (the craft ratio).
+int cartridges_per_powder();
+// What a town's magazine is worth to an army forming up there, in cartridges: the cartridges it
+// holds plus its powder made up. Pure; no workshop bonus.
+int magazine_cartridges(const CampaignState& state, const std::string& province_id);
+// Terrain gates (catalog requires_tags). True when the town has one of the tags, or the building
+// asks for none. A building already standing on the wrong ground is "grandfathered": it keeps
+// working and may be upgraded; only new construction is refused.
+bool building_ground_ok(const Province& p, const std::string& building_id);
+bool building_grandfathered(const Province& p, const std::string& building_id);
+// A scenario, or a save written before the ground rules, may hold a building on ground that no longer
+// suits it (or a Depot with no harbour or crossroads to trade through). Each such building is marked
+// in Province.grandfathered and logged once; it keeps working, earning and upgrading. load_scenario
+// and deserialize call this; a save written under the rules ("ground_rules" key) is left alone.
+// Returns how many buildings were newly marked.
+int mark_grandfathered_buildings(CampaignState& s);
+// Powder is bought through a Depot in a harbour town (catalog powder_purchase).
+bool can_buy_powder(const CampaignState& state, const std::string& province_id);
 int effective_supply_value(const Province& p);  // supply_value + farm_level
 int development_cost(const std::string& track, int current_level);  // gold, -1 = unknown track
 int development_max_level();

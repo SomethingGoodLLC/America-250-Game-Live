@@ -42,6 +42,10 @@
 #include "PA250SpawnScreen.h"
 #include "PA250UnitClasses.h"
 #include "PA250VolleyCoordinator.h"
+#include "PA250FieldWork.h"
+#include "PA250Support.h"
+#include "PA250FieldGun.h"
+#include "PA250BattleModes.h"
 #include "PA250WeaponTuning.h"
 #include "PA250Smoke.h"
 #include "RFCharacter.h"
@@ -129,6 +133,8 @@ void APA250BattleGameMode::NotifyShot(ARFCharacter* Shooter, const FVector& Dir,
 	if (Volleys)
 	{
 		Volleys->NotifyShot(Shooter, Dir, bHit);
+		// The player's own shot fires every man of his file who is presented.
+		if (Shooter && Shooter->IsPlayerControlled()) Volleys->LeaderFired(Shooter);
 	}
 }
 
@@ -236,7 +242,7 @@ void APA250BattleGameMode::GatherPosts()
 	});
 }
 
-FPA250ScenarioFight APA250BattleGameMode::ResolveScenario(const FString& Preset, const TArray<FString>& TerrainTags)
+FPA250ScenarioFight APA250BattleGameMode::ResolveScenario(const FString& Preset, const TArray<FString>& TerrainTags, const FString& Mode)
 {
 	FPA250ScenarioFight Fight;
 	const bool bBridge = Preset == TEXT("concord_bridge") || TerrainTags.Contains(TEXT("bridge_crossing"));
@@ -244,6 +250,9 @@ FPA250ScenarioFight APA250BattleGameMode::ResolveScenario(const FString& Preset,
 	// The preset wins when a stray tag disagrees. A crossing fight is not also a preservation fight.
 	Fight.bContestSingleCrossing = bBridge && Preset != TEXT("battle_road");
 	Fight.bRewardForcePreservation = bRoad && !Fight.bContestSingleCrossing;
+	// The scripted fights keep their own rules whatever mode a stray setup names.
+	const bool bScripted = Fight.bContestSingleCrossing || Fight.bRewardForcePreservation;
+	Fight.Mode = (!bScripted && (Mode == TEXT("assault") || Mode == TEXT("landing"))) ? FName(*Mode) : FName(TEXT("conquest"));
 	return Fight;
 }
 
@@ -289,6 +298,64 @@ void APA250BattleGameMode::ConfigurePostForScenario(APA250ControlPoint* P, const
 			P->DebugSetHolder(NAME_None);
 		}
 	}
+}
+
+void APA250BattleGameMode::ConcordBanks(FName TownHolder, FName& East, FName& West)
+{
+	// The level bakes the village bank (east of the river) under the british tag. That bank starts
+	// beside the bridge and already holds the far bridgehead, so a side that begins there takes
+	// the crossing. Whoever owns the town stands there; the other side comes on from the west.
+	East = (TownHolder == TEXT("british") || TownHolder == TEXT("continental")) ? TownHolder : FName(TEXT("british"));
+	West = East == TEXT("british") ? FName(TEXT("continental")) : FName(TEXT("british"));
+}
+
+void APA250BattleGameMode::AssignConcordGround()
+{
+	if (FString(UTF8_TO_TCHAR(Setup.scenario_preset.c_str())) != TEXT("concord_bridge"))
+	{
+		return;
+	}
+	FName Holder = ToName(Setup.defender_faction);
+	for (const auto& KV : Setup.sides)
+	{
+		if (!Setup.province_id.empty() && KV.second.magazine_province == Setup.province_id)
+		{
+			Holder = ToName(KV.first);
+			break;
+		}
+	}
+	FName East, West;
+	ConcordBanks(Holder, East, West);
+	if (East != TEXT("british"))
+	{
+		// The east-bank markers are tagged british and the west-bank markers continental.
+		auto SwapSide = [](TMap<FName, TArray<TWeakObjectPtr<AActor>>>& Map) {
+			TArray<TWeakObjectPtr<AActor>> EastMarks = Map.FindRef(TEXT("british"));
+			TArray<TWeakObjectPtr<AActor>> WestMarks = Map.FindRef(TEXT("continental"));
+			Map.Add(TEXT("continental"), EastMarks);
+			Map.Add(TEXT("british"), WestMarks);
+		};
+		SwapSide(Starts);
+		SwapSide(MusterPoints);
+	}
+	for (const TWeakObjectPtr<APA250ControlPoint>& WP : Posts)
+	{
+		APA250ControlPoint* P = WP.Get();
+		if (!P)
+		{
+			continue;
+		}
+		if (P->PostId == TEXT("buckman"))
+		{
+			P->DebugSetHolder(East);
+		}
+		else if (P->PostId == TEXT("meetinghouse"))
+		{
+			P->DebugSetHolder(West);
+		}
+	}
+	UE_LOG(LogTemp, Display, TEXT("PA250 concord ground: %s holds the town and takes the east bank; %s starts on the west"),
+		*East.ToString(), *West.ToString());
 }
 
 FName APA250BattleGameMode::PreservationWinner(int32 RemainingA, int32 InitialA, int32 RemainingB, int32 InitialB,
@@ -465,10 +532,34 @@ void APA250BattleGameMode::ApplyScenarioPreset()
 		Tags.Add(UTF8_TO_TCHAR(Tag.c_str()));
 	}
 	const FString Preset = UTF8_TO_TCHAR(Setup.scenario_preset.c_str());
-	ScenarioFight = ResolveScenario(Preset, Tags);
+	ScenarioFight = ResolveScenario(Preset, Tags, UTF8_TO_TCHAR(Setup.mode.c_str()));
 	for (const TWeakObjectPtr<APA250ControlPoint>& WP : Posts)
 	{
 		ConfigurePostForScenario(WP.Get(), ScenarioFight);
+	}
+	// Assault and landing: the ground is the defender's, every post of it, and the posts are taken
+	// in the order the attacker comes to them.
+	ModeOrder.Reset();
+	ModeCarried = 0;
+	bLanded = false;
+	ModeClockAdded = 0.f;
+	if (PA250Modes::IsOrdered(ScenarioFight.Mode))
+	{
+		const FName Defender = ToName(Setup.defender_faction);
+		const FName Attacker = ToName(Setup.attacker_faction);
+		TArray<FVector> Where;
+		for (const TWeakObjectPtr<APA250ControlPoint>& WP : Posts)
+		{
+			Where.Add(WP.IsValid() ? WP->GetActorLocation() : FVector::ZeroVector);
+			if (!WP.IsValid()) continue;
+			WP->MarkHoldersAssigned();
+			WP->DebugSetHolder(Defender);
+		}
+		ModeOrder = PA250Modes::AttackOrder(Where, GetRearPoint(Attacker, FVector::ZeroVector));
+		TickBattleMode();
+		FString OrderText;
+		for (const int32 I : ModeOrder) OrderText += (OrderText.IsEmpty() ? TEXT("") : TEXT(" > ")) + (Posts[I].IsValid() ? Posts[I]->PostId.ToString() : FString(TEXT("?")));
+		UE_LOG(LogTemp, Display, TEXT("PA250 mode: %s; %s attack, the posts in order: %s"), *ScenarioFight.Mode.ToString(), *Attacker.ToString(), *OrderText);
 	}
 	// Fort / sim-authored holders override scenario defaults (defender starts holding a post).
 	for (const auto& Kv : Setup.initial_post_holders)
@@ -485,10 +576,9 @@ void APA250BattleGameMode::ApplyScenarioPreset()
 				   *Holder.ToString());
 		}
 	}
-	if (Setup.fort_level > 0)
-	{
-		SpawnFortCoverNearHeldPosts();
-	}
+	// Works for every battle: with no fortification they are only places a sapper can build on.
+	SpawnFieldWorks();
+	SpawnFieldGuns();
 	if (ScenarioFight.bContestSingleCrossing)
 	{
 		// L_Concord is built with its river and the full-length North Bridge (tagged
@@ -508,6 +598,7 @@ void APA250BattleGameMode::ApplyScenarioPreset()
 			SpawnCreekBridge(GetWorld(), Green->GetActorLocation() + FVector(0.f, 0.f, -140.f));
 		}
 	}
+	AssignConcordGround();
 	// DebugSetHolder marks flips; clear so scenario setup is not scored as capture flips.
 	for (const TWeakObjectPtr<APA250ControlPoint>& WP : Posts)
 	{
@@ -535,66 +626,503 @@ float APA250BattleGameMode::GetCampaignConfidencePressure(FName Faction) const
 	return FMath::Clamp((1.f - Morale01) * 0.2f + (1.f - Ready01) * 0.1f, 0.f, 0.35f);
 }
 
-void APA250BattleGameMode::SpawnFortCoverNearHeldPosts()
+void APA250BattleGameMode::SpawnFieldWorks()
 {
 	UWorld* World = GetWorld();
-	if (!World || Setup.fort_level <= 0) return;
-	UStaticMesh* Cube = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube"));
-	if (!Cube)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("PA250 fort cover: /Engine/BasicShapes/Cube.Cube failed to load; no cover spawned"));
-		return;
-	}
-	int32 Spawned = 0;
+	if (!World) return;
+	const FName Defender = ToName(Setup.defender_faction);
+	const FName Attacker = OtherFaction(Defender);
+	const auto DefSide = Setup.sides.find(Setup.defender_faction);
+	const int32 Level = DefSide != Setup.sides.end() ? DefSide->second.fortification_level : 0;
+
+	// The defender's post: the one the setup gives him (the fort's), else one he holds nearest his
+	// own start, else the post nearest his start.
+	APA250ControlPoint* Post = nullptr;
 	for (const auto& Kv : Setup.initial_post_holders)
 	{
-		const FName PostId = UTF8_TO_TCHAR(Kv.first.c_str());
-		APA250ControlPoint* Post = nullptr;
+		if (Kv.second != Setup.defender_faction) continue;
 		for (const TWeakObjectPtr<APA250ControlPoint>& WP : Posts)
 		{
-			if (WP.IsValid() && WP->PostId == PostId)
-			{
-				Post = WP.Get();
-				break;
-			}
+			if (WP.IsValid() && WP->PostId == FName(UTF8_TO_TCHAR(Kv.first.c_str()))) Post = WP.Get();
 		}
-		if (!Post) continue;
-		FVector Ground = Post->GetActorLocation();
+	}
+	const FVector DefRear = GetRearPoint(Defender, FVector::ZeroVector);
+	float BestD = TNumericLimits<float>::Max();
+	for (const TWeakObjectPtr<APA250ControlPoint>& WP : Posts)
+	{
+		if (Post || !WP.IsValid()) continue;
+		const float D = FVector::Dist2D(WP->GetActorLocation(), DefRear) + (WP->GetHolder() == Defender ? 0.f : 100000.f);
+		if (D < BestD)
+		{
+			BestD = D;
+		}
+	}
+	for (const TWeakObjectPtr<APA250ControlPoint>& WP : Posts)
+	{
+		if (Post || !WP.IsValid()) continue;
+		const float D = FVector::Dist2D(WP->GetActorLocation(), DefRear) + (WP->GetHolder() == Defender ? 0.f : 100000.f);
+		if (D <= BestD) Post = WP.Get();
+	}
+	if (!Post) return;
+	const FVector PostLoc = Post->GetActorLocation();
+	FVector TowardEnemy = (GetRearPoint(Attacker, PostLoc + FVector(10000.f, 0.f, 0.f)) - PostLoc).GetSafeNormal2D();
+	if (TowardEnemy.IsNearlyZero()) TowardEnemy = FVector::ForwardVector;
+
+	// Places: marked in the level, else made up on an arc in front of the post.
+	TArray<FVector> Places, Fronts;
+	TArray<FVector> RedoubtPlaces, RedoubtFronts;
+	for (TActorIterator<AActor> It(World); It; ++It)
+	{
+		if (!It->ActorHasTag(TEXT("PA250WorksSlot"))) continue;
+		(It->ActorHasTag(TEXT("redoubt")) ? RedoubtPlaces : Places).Add(It->GetActorLocation());
+		(It->ActorHasTag(TEXT("redoubt")) ? RedoubtFronts : Fronts).Add(It->GetActorForwardVector().GetSafeNormal2D());
+	}
+	const bool bMarked = Places.Num() > 0;
+	if (!bMarked)
+	{
+		PA250Works::RingSlots(PostLoc, TowardEnemy, Rules.works_slot_ring_cm, FMath::Max(0, Rules.works_breastwork_slots),
+			Rules.works_breastwork_length_cm + 160.f, Places, Fronts);
+		UE_LOG(LogTemp, Warning, TEXT("PA250 works: %s has no PA250WorksSlot markers; %d places made up about post %s"), *World->GetMapName(), Places.Num(), *Post->PostId.ToString());
+	}
+	else
+	{
+		// Nearest the defender's post first, so the works that stand at the start are the ones about it.
+		TArray<int32> Order;
+		for (int32 i = 0; i < Places.Num(); ++i) Order.Add(i);
+		Order.Sort([&](int32 A, int32 B) {
+			const float DA = FVector::DistSquared2D(Places[A], PostLoc), DB = FVector::DistSquared2D(Places[B], PostLoc);
+			return DA != DB ? DA < DB : A < B;
+		});
+		TArray<FVector> P2, F2;
+		for (int32 i : Order)
+		{
+			P2.Add(Places[i]);
+			F2.Add(Fronts[i]);
+		}
+		Places = P2;
+		Fronts = F2;
+	}
+	if (RedoubtPlaces.Num() == 0)
+	{
+		RedoubtPlaces.Add(PostLoc);
+		RedoubtFronts.Add(TowardEnemy);
+	}
+	auto OnGround = [World, Post](FVector At) {
 		FHitResult Hit;
-		FCollisionQueryParams TraceParams(SCENE_QUERY_STAT(PA250FortCover), false, Post);
-		const FVector TraceStart = Ground + FVector(0.f, 0.f, 400.f);
-		const FVector TraceEnd = Ground - FVector(0.f, 0.f, 1200.f);
-		if (World->LineTraceSingleByChannel(Hit, TraceStart, TraceEnd, ECC_WorldStatic, TraceParams) && Hit.bBlockingHit)
+		FCollisionQueryParams TraceParams(SCENE_QUERY_STAT(PA250Works), false, Post);
+		if (World->LineTraceSingleByChannel(Hit, At + FVector(0.f, 0.f, 600.f), At - FVector(0.f, 0.f, 1500.f), ECC_WorldStatic, TraceParams) && Hit.bBlockingHit)
 		{
-			Ground = Hit.ImpactPoint;
+			At.Z = Hit.ImpactPoint.Z;
 		}
-		else
+		return At;
+	};
+	auto Raise = [&](EPA250WorkKind Kind, const FVector& At, const FVector& Front, float BuiltShare) {
+		FActorSpawnParameters Params;
+		Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+		APA250FieldWork* W = World->SpawnActor<APA250FieldWork>(OnGround(At), FRotator(0.f, Front.Rotation().Yaw, 0.f), Params);
+		if (!W) return;
+		W->Configure(Kind, Defender, BuiltShare);
+		Works.Add(W);
+	};
+	auto ForLevel = [Level](const std::vector<int>& ByLevel) {
+		TArray<int32> A;
+		for (const int N : ByLevel) A.Add(N);
+		return PA250Works::CountForLevel(A, Level);
+	};
+	const int32 Standing = ForLevel(Rules.works_breastworks_by_level);
+	const int32 Redoubts = FMath::Min(ForLevel(Rules.works_redoubts_by_level), RedoubtPlaces.Num());
+	int32 Built = 0;
+	for (int32 i = 0; i < Places.Num(); ++i)
+	{
+		const bool bStands = i < Standing;
+		Raise(EPA250WorkKind::Breastwork, Places[i], Fronts[i], bStands ? 1.f : 0.f);
+		Built += bStands ? 1 : 0;
+	}
+	for (int32 i = 0; i < Redoubts; ++i)
+	{
+		Raise(EPA250WorkKind::Redoubt, RedoubtPlaces[i], RedoubtFronts[i], 1.f);
+	}
+	UE_LOG(LogTemp, Display, TEXT("PA250 works: fortification L%d of %s: %d breastworks and %d redoubt standing about post %s, %d places a sapper can build on (%s)"),
+		Level, *Defender.ToString(), Built, Redoubts, *Post->PostId.ToString(), Places.Num() - Built,
+		bMarked ? TEXT("marked places") : TEXT("made-up places"));
+}
+
+APA250FieldWork* APA250BattleGameMode::NearestWorkNeedingLabour(const FVector& From, float ReachCm) const
+{
+	APA250FieldWork* Best = nullptr;
+	float BestD = ReachCm;
+	for (APA250FieldWork* W : Works)
+	{
+		if (!W || !W->NeedsWork()) continue;
+		const float D = FVector::Dist2D(W->GetWorkPoint(), From);
+		if (D <= BestD)
 		{
-			Ground.Z -= 120.f;
-			UE_LOG(LogTemp, Warning, TEXT("PA250 fort cover: no ground under post %s; using a fixed drop"),
-				*Post->PostId.ToString());
+			BestD = D;
+			Best = W;
 		}
-		// 100 cm engine cube, scale Z 1.2 → 120 cm tall. Center sits half that above the ground.
-		const float HalfHeight = 60.f;
-		const FVector Offsets[] = {FVector(220.f, 0.f, HalfHeight), FVector(-220.f, 0.f, HalfHeight),
-								   FVector(0.f, 220.f, HalfHeight)};
-		for (const FVector& Off : Offsets)
+	}
+	return Best;
+}
+
+void APA250BattleGameMode::SpawnFieldGuns()
+{
+	UWorld* World = GetWorld();
+	if (!World) return;
+	for (const auto& Kv : Setup.sides)
+	{
+		const FName F = ToName(Kv.first);
+		const int32 Count = FMath::Max(0, Kv.second.guns);
+		if (Count <= 0) continue;
+		const FName Enemy = OtherFaction(F);
+		// Places: the level's PA250GunSlot markers for this side (tagged with the faction as well),
+		// else drawn up in line a little in front of the side's own start, fronting the enemy.
+		TArray<FTransform> Slots;
+		for (TActorIterator<AActor> It(World); It; ++It)
 		{
+			if (It->ActorHasTag(TEXT("PA250GunSlot")) && It->ActorHasTag(F)) Slots.Add(It->GetActorTransform());
+		}
+		const bool bMarked = Slots.Num() >= Count;
+		if (!bMarked)
+		{
+			Slots.Reset();
+			const FVector Start = GetRearPoint(F, FVector::ZeroVector);
+			const FVector Across = GetRearPoint(Enemy, Start + FVector(10000.f, 0.f, 0.f)) - Start;
+			FVector Front = Across.GetSafeNormal2D();
+			if (Front.IsNearlyZero()) Front = FVector::ForwardVector;
+			const FVector Right(-Front.Y, Front.X, 0.f);
+			// Debug battles: -PA250GunsForward=<metres> stands the made-up battery that far out toward
+			// the enemy (an exposed battery, for the matchup where it is overrun).
+			float ForwardCm = 900.f;
+			if (float Metres = 0.f; bDebugBattle && FParse::Value(FCommandLine::Get(), TEXT("PA250GunsForward="), Metres) && Metres > 0.f) ForwardCm = Metres * 100.f;
+			for (int32 i = 0; i < Count; ++i)
+			{
+				const FVector At = Start + Front * ForwardCm + Right * ((i - 0.5f * (Count - 1)) * 700.f);
+				Slots.Add(FTransform(Front.Rotation(), At));
+			}
+			UE_LOG(LogTemp, Warning, TEXT("PA250 guns: %s has no PA250GunSlot markers for %s; %d places made up %.0f m out from that side's start (the two starts are %.0f m apart)"),
+				*World->GetMapName(), *F.ToString(), Count, ForwardCm / 100.f, Across.Size2D() / 100.f);
+		}
+		for (int32 i = 0; i < Count; ++i)
+		{
+			FVector At = Slots[i].GetLocation();
+			FHitResult Hit;
+			FCollisionQueryParams TraceParams(SCENE_QUERY_STAT(PA250Guns), false);
+			if (World->LineTraceSingleByChannel(Hit, At + FVector(0.f, 0.f, 600.f), At - FVector(0.f, 0.f, 1500.f), ECC_WorldStatic, TraceParams)) At.Z = Hit.ImpactPoint.Z;
 			FActorSpawnParameters Params;
 			Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-			AStaticMeshActor* Wall =
-				World->SpawnActor<AStaticMeshActor>(Ground + Off, FRotator::ZeroRotator, Params);
-			if (!Wall) continue;
-			Wall->GetStaticMeshComponent()->SetStaticMesh(Cube);
-			Wall->SetActorScale3D(FVector(3.5f, 0.4f, 1.2f));
-			Wall->GetStaticMeshComponent()->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-			Wall->GetStaticMeshComponent()->SetCollisionProfileName(TEXT("BlockAll"));
-			Wall->Tags.Add(TEXT("PA250Cover"));
+			APA250FieldGun* Gun = World->SpawnActor<APA250FieldGun>(At, FRotator(0.f, Slots[i].Rotator().Yaw, 0.f), Params);
+			if (!Gun) continue;
+			Gun->Place(F);
+			Guns.Add(Gun);
+		}
+		UE_LOG(LogTemp, Display, TEXT("PA250 guns: %s brings %d field %s (%s)"), *F.ToString(), Count, Count == 1 ? TEXT("gun") : TEXT("guns"),
+			bMarked ? TEXT("marked places") : TEXT("made-up places"));
+	}
+}
+
+APA250FieldGun* APA250BattleGameMode::GunFor(ARFCharacter* Gunner, int32& OutPost) const
+{
+	OutPost = INDEX_NONE;
+	if (!Gunner || Gunner->IsDead()) return nullptr;
+	// The place he already has.
+	for (APA250FieldGun* Gun : Guns)
+	{
+		if (!Gun || Gun->GetFaction() != Gunner->FactionId) continue;
+		if (const int32 Post = Gun->PostOf(Gunner); Post != INDEX_NONE)
+		{
+			OutPost = Post;
+			return Gun;
+		}
+	}
+	// Else the nearest gun of his side with a place free, which he takes.
+	APA250FieldGun* Best = nullptr;
+	float BestD = TNumericLimits<float>::Max();
+	for (APA250FieldGun* Gun : Guns)
+	{
+		if (!Gun || Gun->GetFaction() != Gunner->FactionId || !Gun->HasFreePost()) continue;
+		const float D = FVector::DistSquared2D(Gun->GetActorLocation(), Gunner->GetActorLocation());
+		if (D < BestD)
+		{
+			BestD = D;
+			Best = Gun;
+		}
+	}
+	if (Best) OutPost = Best->ClaimPost(Gunner);
+	return OutPost != INDEX_NONE ? Best : nullptr;
+}
+
+int32 APA250BattleGameMode::SpawnGunCrews(FName Faction, int32 MostMen)
+{
+	const FName CrewClass(UTF8_TO_TCHAR(Rules.guns_crew_class.c_str()));
+	int32 Spawned = 0;
+	for (APA250FieldGun* Gun : Guns)
+	{
+		if (!Gun || Gun->GetFaction() != Faction) continue;
+		for (int32 i = 0; i < Rules.cannon_crew_men && Spawned < MostMen; ++i)
+		{
+			if (ClassMenInReserve(Faction, CrewClass) <= 0) break;
+			const FVector At = Gun->GetCrewPost(i);
+			ARFCharacter* Man = SpawnBotAt(Faction, CrewClass, FTransform(Gun->GetActorRotation(), At));
+			if (!Man) break;
+			Gun->ClaimPost(Man);
 			++Spawned;
 		}
 	}
-	UE_LOG(LogTemp, Display, TEXT("PA250 fort cover: spawned %d cover walls (fort_level=%d)"), Spawned,
-		   Setup.fort_level);
+	if (Spawned > 0) UE_LOG(LogTemp, Display, TEXT("PA250 guns: %d %s gunners come on at their guns"), Spawned, *Faction.ToString());
+	return Spawned;
+}
+
+APA250FieldGun* APA250BattleGameMode::GunAt(const ARFCharacter* Soldier) const
+{
+	if (!Soldier) return nullptr;
+	for (APA250FieldGun* Gun : Guns)
+	{
+		if (Gun && Gun->GetFaction() == Soldier->FactionId
+			&& FVector::Dist2D(Gun->GetActorLocation(), Soldier->GetActorLocation()) <= Rules.cannon_crew_radius_cm) return Gun;
+	}
+	return nullptr;
+}
+
+bool APA250BattleGameMode::PlayerFiresGun(ARFCharacter* Soldier)
+{
+	APA250FieldGun* Gun = GunAt(Soldier);
+	if (!Gun || Gun->GetPlayerGunner() != Soldier) return false;
+	if (Gun->IsFollowingPlayer())
+	{
+		ShowNotice(TEXT("The gun is being run up: press 3 to stand it before you fire"), 3.f);
+		return true;
+	}
+	if (!Gun->IsLoaded())
+	{
+		ShowNotice(TEXT("The gun is not loaded"), 2.f);
+		return true;
+	}
+	if (!Gun->PlayerFire(LeaderAim)) ShowNotice(TEXT("The gun cannot fire: too few men at it, or the mark is out of range"), 3.f);
+	return true;
+}
+
+bool APA250BattleGameMode::PlayerWorksGun(ARFCharacter* Soldier, EActiveReloadHit& OutHit)
+{
+	OutHit = EActiveReloadHit::None;
+	APA250FieldGun* Gun = GunAt(Soldier);
+	if (!Gun || Gun->GetPlayerGunner() != Soldier) return false;
+	OutHit = Gun->PlayerCommit();
+	return true;
+}
+
+int32 APA250BattleGameMode::GetGunsTakenBy(FName Faction) const
+{
+	int32 N = 0;
+	for (const APA250FieldGun* Gun : Guns) N += (Gun && Gun->IsTaken() && Gun->GetFaction() == Faction) ? 1 : 0;
+	return N;
+}
+
+void APA250BattleGameMode::NotifyGunTaken(APA250FieldGun* Gun, FName From)
+{
+	if (!Gun) return;
+	++GunCaptures;
+	const bool bOurs = Gun->GetFaction() == PlayerFaction;
+	PushKillFeed(bOurs ? TEXT("We have taken a gun!") : TEXT("THE ENEMY HAS TAKEN A GUN"));
+	// A side that sees its guns go feels it.
+	if (Volleys) Volleys->PressSide(From, Rules.cannon_pressure, Rules.cannon_pressure_seconds, TEXT("GunLost"));
+}
+
+void APA250BattleGameMode::NotifyGunFired(APA250FieldGun* Gun, bool bCanister)
+{
+	if (!Gun) return;
+	GunShots.FindOrAdd(Gun->GetFaction())++;
+	if (bCanister) CanisterShots.FindOrAdd(Gun->GetFaction())++;
+}
+
+void APA250BattleGameMode::NotifyRoundShot(ARFCharacter* Man, bool bStruck)
+{
+	(bStruck ? RoundShotStruck : RoundShotKnockedDown)++;
+}
+
+void APA250BattleGameMode::NotifyWorkBattered(APA250FieldWork* Work, bool bBroken, FName ByFaction)
+{
+	if (!Work || !bBroken) return;
+	WorksBroken.FindOrAdd(ByFaction)++;
+	NotifyWorksChanged();
+	PushKillFeed(ByFaction == PlayerFaction ? TEXT("Our gun has battered down a breastwork") : TEXT("Their gun has battered down one of our works"));
+	UE_LOG(LogTemp, Display, TEXT("PA250 works: a %s breastwork is battered below cover by %s round shot (%d so far)"), *Work->GetFaction().ToString(), *ByFaction.ToString(),
+		WorksBroken.FindRef(ByFaction));
+}
+
+void APA250BattleGameMode::MaybeRaiseColours(ARFCharacter* Soldier)
+{
+	if (!Soldier || Soldier->IsDead() || !GetWorld()) return;
+	const FName F = Soldier->FactionId;
+	if (!PA250UnitClasses::KitFor(F, Soldier->UnitClass).bCarriesColours) return;
+	APA250Colours* Have = Colours.FindRef(F);
+	if (Have && Have->GetState() != EPA250ColoursState::Taken)
+	{
+		// Colours already up (or lying on the field for him to recover): no second stand.
+		return;
+	}
+	// A side has as many colours as its army brought ensign units, less those it has lost.
+	const int32 Brought = InitialPool.FindRef(F).FindRef(Soldier->UnitClass);
+	if (ColoursLost.FindRef(F) >= Brought) return;
+	FActorSpawnParameters Params;
+	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	APA250Colours* Flag = GetWorld()->SpawnActor<APA250Colours>(Soldier->GetActorLocation(), Soldier->GetActorRotation(), Params);
+	if (!Flag) return;
+	Flag->Raise(F, Soldier);
+	Colours.Add(F, Flag);
+	UE_LOG(LogTemp, Display, TEXT("PA250 colours: the %s colours take the field with %s"), *F.ToString(), *Soldier->GetName());
+}
+
+APA250Colours* APA250BattleGameMode::FallenColoursNear(const FVector& From, float SeekCm) const
+{
+	APA250Colours* Best = nullptr;
+	float BestD = SeekCm;
+	for (const auto& Kv : Colours)
+	{
+		APA250Colours* Flag = Kv.Value;
+		if (!Flag || Flag->GetState() != EPA250ColoursState::Fallen) continue;
+		const float D = FVector::Dist2D(Flag->GetActorLocation(), From);
+		if (D <= BestD)
+		{
+			BestD = D;
+			Best = Flag;
+		}
+	}
+	return Best;
+}
+
+int32 APA250BattleGameMode::NearestSavable(FName Faction, const FVector& From, float SeekCm) const
+{
+	const float Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.f;
+	const float Window = PA250UnitClasses::Verbs().SurgeonWindowSeconds;
+	int32 Best = INDEX_NONE;
+	float BestD = SeekCm;
+	for (int32 i = 0; i < FallenMen.Num(); ++i)
+	{
+		const FFallenMan& M = FallenMen[i];
+		if (M.bSaved || M.Faction != Faction || !PA250Support::CanStillBeSaved(M.FellAt, Now, Window)) continue;
+		const float D = FVector::Dist2D(M.Where, From);
+		if (D <= BestD)
+		{
+			BestD = D;
+			Best = i;
+		}
+	}
+	return Best;
+}
+
+void APA250BattleGameMode::TreatFallen(int32 Index, float Seconds, const ARFCharacter* Surgeon)
+{
+	if (!FallenMen.IsValidIndex(Index) || !Surgeon || Seconds <= 0.f) return;
+	FFallenMan& M = FallenMen[Index];
+	const FPA250ClassVerbs& Verbs = PA250UnitClasses::Verbs();
+	if (M.bSaved || !PA250Support::CanStillBeSaved(M.FellAt, GetWorld()->GetTimeSeconds(), Verbs.SurgeonWindowSeconds)) return;
+	M.Treated += Seconds;
+	if (M.Treated < Verbs.SurgeonTreatSeconds) return;
+	M.bSaved = true;
+	SavedBySurgeon.FindOrAdd(M.Faction).FindOrAdd(M.UnitClass)++;
+	if (M.Faction == PlayerFaction) PushKillFeed(TEXT("The surgeon has reached a fallen man: he will live"));
+	UE_LOG(LogTemp, Display, TEXT("PA250 surgeon: a %s %s is carried off wounded, not left for dead (%d saved by that side)"), *M.Faction.ToString(), *M.UnitClass.ToString(),
+		GetSavedBySurgeon(M.Faction));
+}
+
+int32 APA250BattleGameMode::GetSavedBySurgeon(FName Faction) const
+{
+	int32 N = 0;
+	if (const TMap<FName, int32>* Side = SavedBySurgeon.Find(Faction))
+	{
+		for (const auto& CK : *Side) N += CK.Value;
+	}
+	return N;
+}
+
+void APA250BattleGameMode::TickSupport(float DeltaSeconds)
+{
+	SupportTimer += DeltaSeconds;
+	if (SupportTimer < 0.25f) return;
+	const float Step = SupportTimer;
+	SupportTimer = 0.f;
+	const FPA250ClassVerbs& Verbs = PA250UnitClasses::Verbs();
+	const float Reach = Verbs.ColoursPickupM * 100.f;
+	for (auto& Kv : Colours)
+	{
+		const FName F = Kv.Key;
+		APA250Colours* Flag = Kv.Value;
+		if (!Flag) continue;
+		if (Volleys) Volleys->SetColours(F, Flag->GetState() == EPA250ColoursState::Carried, Flag->GetActorLocation());
+		if (Flag->GetState() != EPA250ColoursState::Fallen) continue;
+		// On the ground: a friend who reaches them first takes them up; an enemy who stands over
+		// them for the capture time carries them off.
+		ARFCharacter* Friend = nullptr;
+		ARFCharacter* Foe = nullptr;
+		for (TActorIterator<ARFCharacter> It(GetWorld()); It; ++It)
+		{
+			if (It->IsDead() || It->IsMounted() || It->FactionId.IsNone()) continue;
+			if (FVector::Dist2D(It->GetActorLocation(), Flag->GetActorLocation()) > Reach) continue;
+			(It->FactionId == F ? Friend : Foe) = *It;
+		}
+		if (Friend && !Foe)
+		{
+			Flag->TakeUp(Friend);
+			PushKillFeed(F == PlayerFaction ? TEXT("Our colours are up again") : TEXT("Their colours are up again"));
+			UE_LOG(LogTemp, Display, TEXT("PA250 colours: the %s colours are taken up again by %s"), *F.ToString(), *Friend->GetName());
+			continue;
+		}
+		Flag->EnemyOverSeconds = (Foe && !Friend) ? Flag->EnemyOverSeconds + Step : 0.f;
+		if (Foe && Flag->EnemyOverSeconds >= Verbs.ColoursCaptureSeconds)
+		{
+			Flag->CarryOff();
+			ColoursLost.FindOrAdd(F)++;
+			ColoursTaken.FindOrAdd(Foe->FactionId)++;
+			if (Volleys)
+			{
+				Volleys->SetColours(F, false, FVector::ZeroVector);
+				Volleys->PressSide(F, Verbs.ColoursFallPressure, Verbs.ColoursFallSeconds, TEXT("ColoursLost"));
+			}
+			PushKillFeed(F == PlayerFaction ? TEXT("THE ENEMY HAS OUR COLOURS") : TEXT("We have taken their colours!"));
+			UE_LOG(LogTemp, Display, TEXT("PA250 colours: the %s colours are carried off by the %s; morale check on the side that lost them"), *F.ToString(), *Foe->FactionId.ToString());
+		}
+	}
+}
+
+bool APA250BattleGameMode::SideHoldsGroundAt(FName Faction, const FVector& Where) const
+{
+	const APA250ControlPoint* Nearest = nullptr;
+	float BestD = TNumericLimits<float>::Max();
+	for (const TWeakObjectPtr<APA250ControlPoint>& WP : Posts)
+	{
+		if (!WP.IsValid()) continue;
+		const float D = FVector::DistSquared2D(WP->GetActorLocation(), Where);
+		if (D < BestD)
+		{
+			BestD = D;
+			Nearest = WP.Get();
+		}
+	}
+	return Nearest && Nearest->GetHolder() == Faction;
+}
+
+void APA250BattleGameMode::LabourOnWork(APA250FieldWork* Work, float Seconds, const ARFCharacter* Sapper)
+{
+	if (!Work || !Sapper || Seconds <= 0.f) return;
+	const FPA250ClassVerbs& Verbs = PA250UnitClasses::Verbs();
+	// A breastwork is the measure; a redoubt is as many breastworks' labour as it is stronger.
+	const float Strength = Work->GetKind() == EPA250WorkKind::Redoubt
+		? FMath::Max(1.f, Rules.works_redoubt_health / FMath::Max(1.f, Rules.works_breastwork_health)) : 1.f;
+	const bool bCoverBefore = Work->GivesCover();
+	Work->AddWork(Seconds / (FMath::Max(1.f, Verbs.SapperBuildSeconds) * Strength), Sapper->FactionId);
+	if (!bCoverBefore && Work->GivesCover())
+	{
+		WorksRaised.FindOrAdd(Sapper->FactionId)++;
+		NotifyWorksChanged();
+		PushKillFeed(Sapper->FactionId == PlayerFaction ? TEXT("Our sappers have raised a breastwork") : TEXT("Their pioneers have raised a breastwork"));
+		UE_LOG(LogTemp, Display, TEXT("PA250 works: a %s sapper raised a %s to cover (%d by that side so far)"), *Sapper->FactionId.ToString(),
+			Work->GetKind() == EPA250WorkKind::Redoubt ? TEXT("redoubt") : TEXT("breastwork"), WorksRaised.FindRef(Sapper->FactionId));
+	}
+}
+
+void APA250BattleGameMode::NotifyWorksChanged()
+{
+	if (Volleys) Volleys->RefreshCoverAnchors();
 }
 
 void APA250BattleGameMode::EnsureInitialized()
@@ -680,8 +1208,15 @@ void APA250BattleGameMode::EnsureInitialized()
 	UE_LOG(LogTemp, Display, TEXT("PA250 bleed: interval %.1fs, exhaustion gate %.0fs%s"), BleedIntervalSeconds,
 		MinSecondsBeforeExhaustion, Tuning ? TEXT(" (DA_MusketTuning)") : TEXT(" (C++ defaults, DA missing)"));
 
+	Rules = pa250::battle_rules();
+	// One source for soldiers per unit: the sim's battle_rules.json, carried by the setup.
+	if (Setup.valid && Setup.soldiers_per_unit > 0) SoldiersPerUnit = Setup.soldiers_per_unit;
 	int32 Cli = 0;
-	if (FParse::Value(FCommandLine::Get(), TEXT("PA250Bots="), Cli) && Cli >= 0) BotsPerSide = Cli;
+	if (FParse::Value(FCommandLine::Get(), TEXT("PA250Bots="), Cli) && Cli >= 0)
+	{
+		BotsPerSide = Cli;
+		bBotsOverride = true; // a fixed count a side, whatever the campaign says
+	}
 	float F = 0.f;
 	if (FParse::Value(FCommandLine::Get(), TEXT("PA250BattleTime="), F) && F > 0.f) TimeLimitSeconds = F;
 	if (FParse::Value(FCommandLine::Get(), TEXT("PA250SoldiersPerUnit="), Cli) && Cli >= 1) SoldiersPerUnit = Cli;
@@ -708,6 +1243,97 @@ void APA250BattleGameMode::EnsureInitialized()
 			UE_LOG(LogTemp, Display, TEXT("PA250 battle: debug extra units %s %s +%s"), *Parts[0], *Parts[1], *Parts[2]);
 		}
 	}
+	if (bDebugBattle && Setup.valid)
+	{
+		// Debug battles only: -PA250Morale=continental:15,british:80 sets a side's campaign morale and
+		// -PA250Rounds=6 the cartridges in every box. Only this local copy of the setup changes.
+		if (FString Arg; FParse::Value(FCommandLine::Get(), TEXT("PA250Morale="), Arg, /*bShouldStopOnSeparator=*/false))
+		{
+			TArray<FString> Items;
+			Arg.ParseIntoArray(Items, TEXT(","));
+			for (const FString& Item : Items)
+			{
+				FString Side, Value;
+				const auto SideIt = Item.Split(TEXT(":"), &Side, &Value) ? Setup.sides.find(TCHAR_TO_UTF8(*Side)) : Setup.sides.end();
+				if (SideIt == Setup.sides.end()) continue;
+				SideIt->second.morale = FMath::Clamp(FCString::Atoi(*Value), 0, 100);
+				UE_LOG(LogTemp, Display, TEXT("PA250 battle: debug morale %s = %d"), *Side, SideIt->second.morale);
+			}
+		}
+		// -PA250Mode=assault|landing|conquest: the kind of fight, whatever the campaign would choose.
+		// -PA250Attacker=british|continental: which side attacks (the other defends).
+		if (FString Arg; FParse::Value(FCommandLine::Get(), TEXT("PA250Attacker="), Arg) && Setup.sides.count(TCHAR_TO_UTF8(*Arg)))
+		{
+			Setup.attacker_faction = TCHAR_TO_UTF8(*Arg);
+			Setup.defender_faction = Arg == TEXT("british") ? "continental" : "british";
+			UE_LOG(LogTemp, Display, TEXT("PA250 battle: debug attacker %s"), *Arg);
+		}
+		if (FString Arg; FParse::Value(FCommandLine::Get(), TEXT("PA250Mode="), Arg) && (Arg == TEXT("assault") || Arg == TEXT("landing") || Arg == TEXT("conquest")))
+		{
+			Setup.mode = TCHAR_TO_UTF8(*Arg);
+			UE_LOG(LogTemp, Display, TEXT("PA250 battle: debug mode %s"), *Arg);
+		}
+		// -PA250Guns=british:1,continental:2: field guns for this fight, whatever the armies hold.
+		if (FString Arg; FParse::Value(FCommandLine::Get(), TEXT("PA250Guns="), Arg, /*bShouldStopOnSeparator=*/false))
+		{
+			TArray<FString> Items;
+			Arg.ParseIntoArray(Items, TEXT(","));
+			for (const FString& Item : Items)
+			{
+				FString Side, Value;
+				const auto SideIt = Item.Split(TEXT(":"), &Side, &Value) ? Setup.sides.find(TCHAR_TO_UTF8(*Side)) : Setup.sides.end();
+				if (SideIt == Setup.sides.end()) continue;
+				SideIt->second.guns = FMath::Clamp(FCString::Atoi(*Value), 0, 8);
+				UE_LOG(LogTemp, Display, TEXT("PA250 battle: debug %s brings %d guns"), *Side, SideIt->second.guns);
+			}
+		}
+		// -PA250Fort=N: the defender fights behind fortification level N (0 = in the open), whatever
+		// the town has. Only this local copy of the setup changes.
+		if (int32 Fort = 0; FParse::Value(FCommandLine::Get(), TEXT("PA250Fort="), Fort) && Fort >= 0)
+		{
+			Setup.fort_level = FMath::Clamp(Fort, 0, 3);
+			const auto Def = Setup.sides.find(Setup.defender_faction);
+			if (Def != Setup.sides.end()) Def->second.fortification_level = Setup.fort_level;
+			if (Fort > 0) Setup.initial_post_holders[Setup.objective] = Setup.defender_faction;
+			else Setup.initial_post_holders.erase(Setup.objective);
+			UE_LOG(LogTemp, Display, TEXT("PA250 battle: debug fortification level %d for %s"), Setup.fort_level, UTF8_TO_TCHAR(Setup.defender_faction.c_str()));
+		}
+		if (int32 Rounds = 0; FParse::Value(FCommandLine::Get(), TEXT("PA250Rounds="), Rounds) && Rounds >= 0)
+		{
+			for (auto& KV : Setup.sides) KV.second.rounds_per_man = Rounds;
+		}
+		// Class matchups: -PA250OnlyClass=continental:rifleman,british:line_infantry fields one class a side.
+		if (FString Arg; FParse::Value(FCommandLine::Get(), TEXT("PA250OnlyClass="), Arg, /*bShouldStopOnSeparator=*/false))
+		{
+			TArray<FString> Items;
+			Arg.ParseIntoArray(Items, TEXT(","));
+			for (const FString& Item : Items)
+			{
+				FString Side, Class;
+				const auto SideIt = Item.Split(TEXT(":"), &Side, &Class) ? Setup.sides.find(TCHAR_TO_UTF8(*Side)) : Setup.sides.end();
+				if (SideIt == Setup.sides.end() || Class.IsEmpty()) continue;
+				int32 Units = 0;
+				for (const auto& T : SideIt->second.tickets) Units += FMath::Max(0, T.second);
+				SideIt->second.tickets.clear();
+				SideIt->second.tickets[TCHAR_TO_UTF8(*Class)] = FMath::Max(6, Units);
+				UE_LOG(LogTemp, Display, TEXT("PA250 battle: debug %s fields only %s"), *Side, *Class);
+			}
+		}
+		// Extra units change the odds, so the field is shared out again by the sim's own rule.
+		if (FParse::Param(FCommandLine::Get(), TEXT("PA250FieldFromTickets")) || FCString::Strifind(FCommandLine::Get(), TEXT("PA250ExtraUnits=")))
+		{
+			auto Men = [this](const char* Side) {
+				int32 Units = 0;
+				const auto It = Setup.sides.find(Side);
+				if (It != Setup.sides.end()) for (const auto& T : It->second.tickets) Units += FMath::Max(0, T.second);
+				return Units * SoldiersPerUnit;
+			};
+			const pa250::FieldSplit Split = pa250::split_field_strength(Men("british"), Men("continental"));
+			if (Setup.sides.count("british")) Setup.sides.at("british").field_strength = Split.a;
+			if (Setup.sides.count("continental")) Setup.sides.at("continental").field_strength = Split.b;
+			UE_LOG(LogTemp, Display, TEXT("PA250 battle: debug field strength british %d, continental %d"), Split.a, Split.b);
+		}
+	}
 	for (const auto& KV : Setup.sides)
 	{
 		const FName Faction = ToName(KV.first);
@@ -715,6 +1341,19 @@ void APA250BattleGameMode::EnsureInitialized()
 		{
 			InitialPool.FindOrAdd(Faction).Add(ToName(T.first), T.second);
 		}
+	}
+	// Ammunition: each side's magazine, in rounds, and never less than one opening box a man.
+	for (const auto& KV : Setup.sides)
+	{
+		if (KV.second.rounds_per_man <= 0) continue;
+		int32 Units = 0;
+		for (const auto& T : KV.second.tickets) Units += FMath::Max(0, T.second);
+		const int32 Men = FMath::Max(Units * SoldiersPerUnit, KV.second.field_strength);
+		const FName Faction = ToName(KV.first);
+		Ammo.Init(Faction, FPA250AmmoPool::OpeningPool(KV.second.cartridge_budget, Rules.rounds_per_cartridge, Men, KV.second.rounds_per_man));
+		UE_LOG(LogTemp, Display, TEXT("PA250 ammo %s: %d rounds a man, %d rounds on the field (%d cartridges from %s)"),
+			*Faction.ToString(), KV.second.rounds_per_man, Ammo.Remaining(Faction), KV.second.cartridge_budget,
+			KV.second.magazine_province.empty() ? TEXT("what the men carry") : UTF8_TO_TCHAR(KV.second.magazine_province.c_str()));
 	}
 	// Tickets = reinforcement pool in soldiers. Spent on death + bleed (M6), not spawn.
 	for (const auto& FK : InitialPool)
@@ -780,7 +1419,11 @@ void APA250BattleGameMode::BeginPlay()
 	}
 	StartTime = GetWorld()->GetTimeSeconds();
 	Banner = FString::Printf(TEXT("Battle of %s"), UTF8_TO_TCHAR(Setup.province_name.c_str()));
-	if (ScenarioFight.bContestSingleCrossing)
+	if (PA250Modes::IsOrdered(ScenarioFight.Mode))
+	{
+		Banner += FString::Printf(TEXT(" — %s"), PA250Modes::ModeWords(ScenarioFight.Mode));
+	}
+	else if (ScenarioFight.bContestSingleCrossing)
 	{
 		Banner += TEXT(" — hold the crossing");
 	}
@@ -795,7 +1438,29 @@ void APA250BattleGameMode::BeginPlay()
 	}
 	for (const auto& KV : InitialPool)
 	{
-		SpawnInitialForces(KV.Key, BotsPerSide);
+		UE_LOG(LogTemp, Display, TEXT("PA250 field: %s puts %d men on the field%s"), *KV.Key.ToString(), GetFieldStrength(KV.Key),
+			bBotsOverride ? TEXT(" (-PA250Bots)") : TEXT(""));
+		SpawnInitialForces(KV.Key, GetFieldStrength(KV.Key));
+	}
+	// Debug matchups: -PA250HoldAt=<metres> draws the two sides up that far apart on open ground and
+	// has them hold it; -PA250NoReserve fights with the men on the field only.
+	if (float HoldAt = 0.f; bDebugBattle && FParse::Value(FCommandLine::Get(), TEXT("PA250HoldAt="), HoldAt) && HoldAt > 0.f)
+	{
+		ArrangeMatchup(HoldAt);
+	}
+	// -PA250LedVolley=<side>: one man of that side leads a file as the player would (see TickLedVolleyProbe).
+	if (FString Side; bDebugBattle && FParse::Value(FCommandLine::Get(), TEXT("PA250LedVolley="), Side) && !Side.IsEmpty())
+	{
+		ProbeSide = FName(*Side);
+	}
+	if (bDebugBattle && FParse::Param(FCommandLine::Get(), TEXT("PA250NoReserve")))
+	{
+		for (TPair<FName, int32>& KV : Ledger.Pool) KV.Value = 0;
+	}
+	// A full box of the player's side is kept for the player (FPA250AmmoPool::Held), as one ticket is.
+	if (!bAutoplayBots && GetRoundsPerMan(PlayerFaction) > 0)
+	{
+		Ammo.Held.Add(PlayerFaction, FMath::Max(0, Rules.resupply_held_boxes) * GetRoundsPerMan(PlayerFaction));
 	}
 	// One ticket of the player's side is kept for the player: bot deaths and bleed cannot spend it and
 	// bots are not reinforced from it, so he can always rejoin once (see FPA250TicketLedger::Held).
@@ -826,6 +1491,7 @@ void APA250BattleGameMode::BeginPlay()
 	if (Volleys)
 	{
 		Volleys->Init(this);
+		Volleys->bHoldGround = bMatchupHold;
 	}
 	FTimerHandle H;
 	GetWorldTimerManager().SetTimer(H, FTimerDelegate::CreateLambda([this]() { if (!bBattleOver) Banner.Reset(); }), 4.f, false);
@@ -839,6 +1505,7 @@ void APA250BattleGameMode::BeginPlay()
 	MaybeStartFpsSample();
 	MaybeStartMeleeProbe();
 	MaybeStartClassPortraits();
+	MaybeStartGunStill();
 	// A moment after BeginPlay, so the player's pawn and its musket exist whatever the spawn order.
 	FTimerHandle ClassPick;
 	GetWorldTimerManager().SetTimer(ClassPick, FTimerDelegate::CreateWeakLambda(this, [this]() {
@@ -1319,11 +1986,14 @@ bool APA250BattleGameMode::PostIsSafeSpawn(const APA250ControlPoint* Post, FName
 	{
 		return false;
 	}
-	// Nor under the enemy's muskets: no living enemy within SafeSpawnEnemyCm of the post.
+	// Nor under the enemy's muskets: no living enemy within SafeSpawnEnemyCm of the post. Light
+	// infantry (forward_spawn) come on with the enemy much closer: that is their verb.
+	const float SafeCm = (!SpawnClassHint.IsNone() && PA250UnitClasses::KitFor(Faction, SpawnClassHint).bForwardSpawn)
+		? FMath::Min(SafeSpawnEnemyCm, PA250UnitClasses::Verbs().ForwardSpawnEnemyM * 100.f) : SafeSpawnEnemyCm;
 	for (TActorIterator<ARFCharacter> It(GetWorld()); It; ++It)
 	{
 		if (!It->IsDead() && It->FactionId != Faction && !It->FactionId.IsNone()
-			&& FVector::Dist2D(It->GetActorLocation(), Post->GetActorLocation()) < SafeSpawnEnemyCm)
+			&& FVector::Dist2D(It->GetActorLocation(), Post->GetActorLocation()) < SafeCm)
 		{
 			return false;
 		}
@@ -1393,8 +2063,13 @@ FName APA250BattleGameMode::ChooseClassFor(FName Faction, FName Preferred) const
 	{
 		return Preferred;
 	}
-	// The class asked for, while the army still has men of it.
-	if (ClassMenLeft(Faction, Preferred) > 0)
+	// Some classes take the field one or two at a time (the ensign with the colours, a musician, a
+	// surgeon: unit_classes.json max_on_field), whatever the army has of them in reserve.
+	auto Room = [this, Faction](FName Class) {
+		return PA250Support::ClassHasFieldRoom(CountAlive(Faction, Class), PA250UnitClasses::KitFor(Faction, Class).MaxOnField);
+	};
+	// The class asked for, while the army still has a man of it off the field.
+	if (ClassMenInReserve(Faction, Preferred) > 0 && Room(Preferred))
 	{
 		return Preferred;
 	}
@@ -1406,7 +2081,7 @@ FName APA250BattleGameMode::ChooseClassFor(FName Faction, FName Preferred) const
 	int32 BestLeft = 0;
 	for (const FName& N : Names)
 	{
-		const int32 Left = ClassMenLeft(Faction, N);
+		const int32 Left = Room(N) ? ClassMenInReserve(Faction, N) : 0;
 		if (Left > BestLeft)
 		{
 			BestLeft = Left;
@@ -1436,6 +2111,12 @@ int32 APA250BattleGameMode::ClassMenLeft(FName Faction, FName UnitClass) const
 	const int32 Start = (P ? FMath::Max(0, P->FindRef(UnitClass)) : 0) * FMath::Max(1, SoldiersPerUnit);
 	const TMap<FName, int32>* Dead = Ledger.Deaths.Find(Faction);
 	return FMath::Max(0, Start - (Dead ? Dead->FindRef(UnitClass) : 0));
+}
+
+int32 APA250BattleGameMode::ClassMenInReserve(FName Faction, FName UnitClass) const
+{
+	const TMap<FName, int32>* Gave = Prisoners.Find(Faction);
+	return FMath::Max(0, ClassMenLeft(Faction, UnitClass) - (Gave ? Gave->FindRef(UnitClass) : 0) - CountAlive(Faction, UnitClass));
 }
 
 TArray<APA250BattleGameMode::FClassChoice> APA250BattleGameMode::GetClassChoices(FName Faction) const
@@ -1502,7 +2183,7 @@ void APA250BattleGameMode::MaybeOpenClassPick(APlayerController* PC)
 	if (!bForce)
 	{
 		for (const TCHAR* Probe : {TEXT("PA250NoClassPick"), TEXT("PA250Preview="), TEXT("PA250BattleShots="), TEXT("PA250HurtProbe"),
-				 TEXT("PA250TakeoverProbe"), TEXT("PA250FpsSample"), TEXT("PA250MeleeProbe"), TEXT("PA250ClassPortraits")})
+				 TEXT("PA250TakeoverProbe"), TEXT("PA250FpsSample"), TEXT("PA250MeleeProbe"), TEXT("PA250ClassPortraits"), TEXT("PA250GunStill")})
 		{
 			if (Cmd.Contains(Probe)) return;
 		}
@@ -1553,12 +2234,15 @@ void APA250BattleGameMode::TickOfficers(float DeltaSeconds)
 		return;
 	}
 	OfficerTimer = 0.5f;
-	TArray<ARFCharacter*> Men, Officers;
+	TArray<ARFCharacter*> Men, Officers, Musicians;
+	const FPA250ClassVerbs& Verbs = PA250UnitClasses::Verbs();
+	int32 CadenceMen = 0;
 	for (TActorIterator<ARFCharacter> It(GetWorld()); It; ++It)
 	{
 		if (It->IsDead()) continue;
 		Men.Add(*It);
 		if (PA250UnitClasses::KitFor(It->FactionId, It->UnitClass).bOfficer) Officers.Add(*It);
+		if (PA250UnitClasses::KitFor(It->FactionId, It->UnitClass).bRelaysOrders) Musicians.Add(*It);
 	}
 	for (ARFCharacter* C : Men)
 	{
@@ -1580,19 +2264,33 @@ void APA250BattleGameMode::TickOfficers(float DeltaSeconds)
 			const FPA250UnitClassKit& Kit = PA250UnitClasses::KitFor(C->FactionId, C->UnitClass);
 			C->Musket->ClassSpreadScale = Kit.SpreadScale;
 			C->Musket->ClassRangeScale = Kit.RangeScale;
-			C->Musket->ReloadTimeScale = Kit.ReloadScale * (bNear ? PA250UnitClasses::OfficerReloadScale : 1.f);
+			C->Musket->ClassAccurateRangeCm = Kit.AccurateM * 100.f;
+			C->Musket->ClassSpreadGrowth = Kit.SpreadGrowth;
+			// The musician's verb: men who fire by volley load in cadence within earshot of him.
+			bool bCadence = false;
+			for (const ARFCharacter* M : Musicians)
+			{
+				bCadence |= M != C && M->FactionId == C->FactionId
+					&& FVector::DistSquared2D(M->GetActorLocation(), C->GetActorLocation()) <= FMath::Square(Verbs.MusicianCadenceM * 100.f);
+			}
+			const bool bVolleyRole = CombatProfilesAsset ? !CombatProfilesAsset->RoleFor(C->FactionId, C->UnitClass).bIndividualFire : true;
+			C->Musket->ReloadTimeScale = Kit.ReloadScale * (bNear ? PA250UnitClasses::OfficerReloadScale : 1.f)
+				* PA250Support::CadenceReloadScale(bVolleyRole, bCadence, Verbs.MusicianCadenceScale);
+			CadenceMen += (bVolleyRole && bCadence) ? 1 : 0;
 		}
 	}
+	CadenceManChecks += CadenceMen;
 }
 
 bool APA250BattleGameMode::CanSpawn(FName Faction) const
 {
-	return Ledger.Remaining(Faction) > 0;
+	return PoolTotal(Faction) > 0;
 }
 
 void APA250BattleGameMode::SpendDeathTicket(FName Faction, FName UnitClass)
 {
-	Ledger.SpendDeath(Faction, UnitClass);
+	// A class may cost less than a whole ticket (militia: half; unit_classes.json ticket_cost).
+	Ledger.SpendDeath(Faction, UnitClass, PA250UnitClasses::KitFor(Faction, UnitClass).TicketCost);
 }
 
 void APA250BattleGameMode::RegisterConsoleCommands()
@@ -1654,6 +2352,8 @@ void APA250BattleGameMode::ConfigureSoldier(ARFCharacter* Soldier, FName Faction
 		Soldier->Musket->ApplyWeaponTuning();
 		Soldier->Musket->ClassSpreadScale = Kit.SpreadScale;
 		Soldier->Musket->ClassRangeScale = Kit.RangeScale;
+		Soldier->Musket->ClassAccurateRangeCm = Kit.AccurateM * 100.f;
+		Soldier->Musket->ClassSpreadGrowth = Kit.SpreadGrowth;
 		Soldier->Musket->ReloadTimeScale = Kit.ReloadScale; // TickOfficers adds the officer bonus
 	}
 	Soldier->bNearOfficer = false;
@@ -1674,6 +2374,11 @@ void APA250BattleGameMode::ConfigureSoldier(ARFCharacter* Soldier, FName Faction
 			Bot->AimErrorDegrees = CombatProfilesAsset->TrainingFor(Faction, UnitClass).AimErrorDegrees * Bot->GetAimScale() * Kit.SpreadScale;
 		}
 		Bot->ConfigureCrowd(BotTuningAsset);
+		// The class's preferred range (unit_classes.json): he opens fire inside the far edge and
+		// closes to the near one; he has to see at least that far.
+		Bot->BandMinCm = FMath::Max(0.f, Kit.PreferMinM * 100.f);
+		Bot->BandMaxCm = FMath::Max(500.f, Kit.PreferMaxM * 100.f);
+		Bot->SightRange = FMath::Max(Bot->SightRange, Bot->BandMaxCm + 1000.f);
 	}
 	{
 		const ARFCharacter* Defaults = GetDefault<ARFCharacter>(Soldier->GetClass());
@@ -1685,6 +2390,7 @@ void APA250BattleGameMode::ConfigureSoldier(ARFCharacter* Soldier, FName Faction
 	{
 		Soldier->GetCharacterMovement()->MaxWalkSpeed = Soldier->WalkSpeed;
 	}
+	MaybeRaiseColours(Soldier);
 	// Dragoons (GAME INVENTION for 1775) take the field in the saddle; anyone else leaves his horse.
 	if (UnitClass == TEXT("dragoon"))
 	{
@@ -1699,16 +2405,19 @@ void APA250BattleGameMode::ConfigureSoldier(ARFCharacter* Soldier, FName Faction
 ARFCharacter* APA250BattleGameMode::SpawnBot(FName Faction, FName UnitClass, APA250ControlPoint* PreferredPost, uint32 ClothingSeed)
 {
 	const FName Charged = ChooseClassFor(Faction, UnitClass);
-	if (!Ledger.CanReinforce(Faction)) // the ticket held for the human is not for bots
+	if (!Ledger.CanReinforce(Faction) || MenInReserve(Faction) <= 0) // the ticket held for the human is not for bots; nor a man the army does not have
 	{
 		return nullptr;
 	}
-	return SpawnBotAt(Faction, Charged, PickSpawnTransform(Faction, PreferredPost), ClothingSeed);
+	SpawnClassHint = Charged;
+	const FTransform At = PickSpawnTransform(Faction, PreferredPost);
+	SpawnClassHint = NAME_None;
+	return SpawnBotAt(Faction, Charged, At, ClothingSeed);
 }
 
 ARFCharacter* APA250BattleGameMode::SpawnBotAt(FName Faction, FName Charged, const FTransform& T, uint32 ClothingSeed)
 {
-	if (!Ledger.CanReinforce(Faction))
+	if (!Ledger.CanReinforce(Faction) || MenInReserve(Faction) <= 0)
 	{
 		return nullptr;
 	}
@@ -1737,6 +2446,8 @@ ARFCharacter* APA250BattleGameMode::SpawnBotAt(FName Faction, FName Charged, con
 
 void APA250BattleGameMode::SpawnInitialForces(FName Faction, int32 Count)
 {
+	// Gun crews first, at their guns; they are part of the side's field strength.
+	Count -= SpawnGunCrews(Faction, Count);
 	// Militia muster (GAME INVENTION): only part of a side's militia is on the field at the start;
 	// the rest arrive in companies (TickMuster). Everyone else deploys as before. Tickets are not
 	// touched (they are spent on death), so BattleResult losses still never exceed the pools.
@@ -1889,7 +2600,9 @@ bool APA250BattleGameMode::RequestSpawn(AController* Controller, FName UnitClass
 		ShowNotice(TEXT("Last reserve - fall again and you fight on as one of the men still standing"), 6.f);
 	}
 
+	SpawnClassHint = Cls;
 	FTransform T = PickSpawnTransform(Faction, PostOrNull);
+	SpawnClassHint = NAME_None;
 	UClass* PawnClass = DefaultPawnClass;
 	APawn* NewPawn = GetWorld()->SpawnActor<APawn>(PawnClass, T.GetLocation(), T.Rotator());
 	if (!NewPawn)
@@ -1965,9 +2678,12 @@ bool APA250BattleGameMode::TakeOverSoldier(APlayerController* PC)
 		return false;
 	}
 	const APawn* Old = PC->GetPawn();
-	ARFCharacter* Best = nullptr;
+	// The next living man of his own file first; with none, the nearest man of his side.
+	const ARFCharacter* Fallen = Cast<ARFCharacter>(Old);
+	ARFCharacter* Best = (Volleys && Fallen) ? Volleys->PickSuccessor(Fallen) : nullptr;
+	const bool bFromFile = Best != nullptr;
 	float BestD = TNumericLimits<float>::Max();
-	for (TActorIterator<ARFCharacter> It(GetWorld()); It; ++It)
+	for (TActorIterator<ARFCharacter> It(GetWorld()); It && !bFromFile; ++It)
 	{
 		ARFCharacter* C = *It;
 		if (C->IsDead() || C->FactionId != PlayerFaction || C->IsMounted() || !Cast<APA250BotController>(C->GetController())) continue;
@@ -2006,9 +2722,206 @@ bool APA250BattleGameMode::TakeOverSoldier(APlayerController* PC)
 	FrameHumanCamera(PC, Best);
 	PC->SetControlRotation(FRotator(-10.f, Facing.Yaw, 0.f));
 	PC->SetViewTarget(Best);
+	if (bFromFile)
+	{
+		// His file is his still: the man he has become leads it.
+		Volleys->TransferLeadership(Fallen, Best);
+		int32 Men = 0, Loaded = 0, Presented = 0;
+		EPA250SquadOrder Order = EPA250SquadOrder::None;
+		Volleys->GetFileStatus(Best, Men, Loaded, Presented, Order);
+		ShowNotice(FString::Printf(TEXT("You are down - you fight on as the next man of your file (%d with you)"), Men), 6.f);
+		UE_LOG(LogTemp, Display, TEXT("PA250 file: the player takes the place of %s; %d men left in the file"), *Best->GetName(), Men);
+		return true;
+	}
 	const int32 Left = CountAlive(PlayerFaction);
 	ShowNotice(FString::Printf(TEXT("No reserves left - you take the place of a man still standing (%d left)"), Left), 6.f);
 	return true;
+}
+
+FString APA250BattleGameMode::FileLineText(int32 Men, int32 Loaded, int32 Presented, const TCHAR* OrderWords, bool bVolleyRole)
+{
+	if (Men <= 0) return TEXT("Your file: no men left");
+	FString S = FString::Printf(TEXT("Your file: %d %s, %d loaded  -  %s"), Men, Men == 1 ? TEXT("man") : TEXT("men"), Loaded, OrderWords);
+	if (Presented > 0) S += FString::Printf(TEXT("  -  %d PRESENTED: your shot fires them"), Presented);
+	else S += bVolleyRole ? TEXT("  -  hold aim to make ready") : TEXT("  -  hold aim: they fire at will on your man");
+	return S + TEXT("\n1 follow   2 line here   3 hold   4 cover   5 charge   6 fall back");
+}
+
+FVector APA250BattleGameMode::ResolveLeaderAim(const FVector& Eye, const FVector& HitPoint, const TArray<FVector>& Enemies, float RayCm)
+{
+	FVector Best = HitPoint;
+	float BestAlong = TNumericLimits<float>::Max();
+	const FVector Dir = (HitPoint - Eye).GetSafeNormal();
+	for (const FVector& E : Enemies)
+	{
+		if (FMath::PointDistToSegment(E, Eye, HitPoint) > RayCm) continue;
+		const float Along = FVector::DotProduct(E - Eye, Dir);
+		if (Along > 0.f && Along < BestAlong)
+		{
+			BestAlong = Along;
+			Best = E;
+		}
+	}
+	return Best;
+}
+
+FString APA250BattleGameMode::GetFileLine(const ARFCharacter* Soldier) const
+{
+	int32 Men = 0, Loaded = 0, Presented = 0;
+	EPA250SquadOrder Order = EPA250SquadOrder::None;
+	if (!Volleys || !Soldier || !Volleys->GetFileStatus(Soldier, Men, Loaded, Presented, Order)) return FString();
+	const bool bVolleyRole = CombatProfilesAsset ? !CombatProfilesAsset->RoleFor(Soldier->FactionId, Soldier->UnitClass).bIndividualFire : true;
+	return FileLineText(Men, Loaded, Presented, PA250Squad::OrderWords(Order), bVolleyRole);
+}
+
+void APA250BattleGameMode::GivePlayerOrder(ARFCharacter* Soldier, int32 OrderIndex)
+{
+	static const EPA250SquadOrder Keys[] = {EPA250SquadOrder::FollowMe, EPA250SquadOrder::FormLine, EPA250SquadOrder::Hold,
+		EPA250SquadOrder::TakeCover, EPA250SquadOrder::Charge, EPA250SquadOrder::FallBack};
+	if (bBattleOver || !Volleys || !Soldier || Soldier->IsDead() || OrderIndex < 1 || OrderIndex > 6) return;
+	const EPA250SquadOrder Order = Keys[OrderIndex - 1];
+	// At a gun he serves, "follow me" has its crew run it up after him and "hold" stands it again.
+	if (APA250FieldGun* Gun = GunAt(Soldier); Gun && Gun->GetPlayerGunner() == Soldier && (Order == EPA250SquadOrder::FollowMe || Order == EPA250SquadOrder::Hold))
+	{
+		Gun->SetFollowPlayer(Order == EPA250SquadOrder::FollowMe);
+		ShowNotice(Order == EPA250SquadOrder::FollowMe ? TEXT("Run her up! Walk ahead and the crew pushes the gun after you")
+			: TEXT("The gun stands"), 3.f);
+	}
+	const int32 Took = Volleys->GiveOrder(Soldier, Order, LeaderAim);
+	if (Took <= 0)
+	{
+		ShowNotice(TEXT("You have no men to order"), 2.5f);
+		return;
+	}
+	ShowNotice(Took > 1 ? FString::Printf(TEXT("%s!  (%d squads obey)"), PA250Squad::OrderWords(Order), Took)
+		: FString::Printf(TEXT("%s!"), PA250Squad::OrderWords(Order)), 2.5f);
+	UE_LOG(LogTemp, Display, TEXT("PA250 order: %s -> %d squad(s)"), PA250Squad::OrderWords(Order), Took);
+}
+
+void APA250BattleGameMode::TickPlayerFile(float DeltaSeconds)
+{
+	if (!Volleys || bAutoplayBots || bOpeningClassPick) return;
+	APlayerController* PC = GetWorld()->GetFirstPlayerController();
+	ARFCharacter* Me = PC ? Cast<ARFCharacter>(PC->GetPawn()) : nullptr;
+	if (!Me || Me->IsDead() || Me->FactionId != PlayerFaction || Me->IsMounted()) return;
+	const FPA250ClassVerbs& Verbs = PA250UnitClasses::Verbs();
+	FileTimer -= DeltaSeconds;
+	if (FileTimer <= 0.f)
+	{
+		FileTimer = FMath::Max(0.2f, Verbs.SquadEnsureSeconds);
+		Volleys->EnsureLeaderFile(Me);
+	}
+	// Where he is looking: the man on his line of sight, else the ground or wall it strikes.
+	FVector Eye;
+	FRotator Rot;
+	PC->GetPlayerViewPoint(Eye, Rot);
+	const FVector End = Eye + Rot.Vector() * 20000.f;
+	FHitResult Hit;
+	FCollisionQueryParams Q(SCENE_QUERY_STAT(PA250LeaderAim), false, Me);
+	if (Me->Musket) Q.AddIgnoredActor(Me->Musket);
+	const FVector Struck = GetWorld()->LineTraceSingleByChannel(Hit, Eye, End, ECC_Visibility, Q) ? Hit.ImpactPoint : End;
+	TArray<FVector> Enemies;
+	for (TActorIterator<ARFCharacter> It(GetWorld()); It; ++It)
+	{
+		if (!It->IsDead() && It->FactionId != PlayerFaction && !It->FactionId.IsNone()) Enemies.Add(It->GetActorLocation());
+	}
+	LeaderAim = ResolveLeaderAim(Eye, Struck, Enemies, Verbs.SquadAimRayM * 100.f);
+	Volleys->UpdateLeader(Me, Me->IsAiming(), LeaderAim);
+}
+
+void APA250BattleGameMode::TickLedVolleyProbe(float DeltaSeconds)
+{
+	if (ProbeSide.IsNone() || !Volleys) return;
+	const FPA250ClassVerbs& Verbs = PA250UnitClasses::Verbs();
+	const float Now = GetWorld()->GetTimeSeconds();
+	ARFCharacter* L = ProbeLeader.Get();
+	if (!L || L->IsDead())
+	{
+		// A new leader: a man of the side whose class volleys.
+		L = nullptr;
+		for (TActorIterator<ARFCharacter> It(GetWorld()); It && !L; ++It)
+		{
+			if (It->IsDead() || It->FactionId != ProbeSide || !Cast<APA250BotController>(It->GetController())) continue;
+			if (PA250UnitClasses::KitFor(It->FactionId, It->UnitClass).bVolleyShock) L = *It;
+		}
+		if (!L) return;
+		ProbeLeader = L;
+		ProbeHold = 0.f;
+		if (APA250BotController* Bot = Cast<APA250BotController>(L->GetController())) Bot->bScriptedHold = true;
+		const int32 Men = Volleys->EnsureLeaderFile(L);
+		Volleys->GiveOrder(L, EPA250SquadOrder::Hold, L->GetActorLocation() + L->GetActorForwardVector() * 1000.f);
+		UE_LOG(LogTemp, Display, TEXT("PA250 led volley probe: %s (%s) leads %d men"), *L->GetName(), *ProbeSide.ToString(), Men);
+	}
+	else
+	{
+		Volleys->EnsureLeaderFile(L);
+		// He repeats his order now and then, as a leader does (and so a musician who has come up can carry it on).
+		if (Now >= ProbeOrderAt)
+		{
+			ProbeOrderAt = Now + 20.f;
+			Volleys->GiveOrder(L, EPA250SquadOrder::Hold, L->GetActorLocation() + L->GetActorForwardVector() * 1000.f);
+		}
+	}
+	// Did the squad he fired on waver?
+	if (ProbeTargetSquad >= 0)
+	{
+		const EPA250Morale M = Volleys->GetSquadMorale(ProbeTargetSquad);
+		if (M != EPA250Morale::Steady)
+		{
+			++ProbeShook;
+			UE_LOG(LogTemp, Display, TEXT("PA250 led volley probe: squad %d fired on is %s (%d of %d volleys shook their target)"), ProbeTargetSquad, MoraleName(M), ProbeShook, ProbeVolleys);
+			ProbeTargetSquad = -1;
+		}
+		else if (Now > ProbeWatchUntil)
+		{
+			ProbeTargetSquad = -1;
+		}
+	}
+	// His aim: the nearest living enemy within a volley's reach.
+	ARFCharacter* Foe = nullptr;
+	float BestD = Verbs.VolleyReachM * 100.f;
+	for (TActorIterator<ARFCharacter> It(GetWorld()); It; ++It)
+	{
+		if (It->IsDead() || It->FactionId == ProbeSide || It->FactionId.IsNone()) continue;
+		const float D = FVector::Dist(It->GetActorLocation(), L->GetActorLocation());
+		if (D < BestD)
+		{
+			BestD = D;
+			Foe = *It;
+		}
+	}
+	if (!Foe)
+	{
+		Volleys->UpdateLeader(L, false, L->GetActorLocation());
+		ProbeHold = 0.f;
+		return;
+	}
+	L->SetActorRotation(FRotator(0.f, (Foe->GetActorLocation() - L->GetActorLocation()).Rotation().Yaw, 0.f));
+	Volleys->UpdateLeader(L, true, Foe->GetActorLocation());
+	int32 Men = 0, Loaded = 0, Presented = 0;
+	EPA250SquadOrder Order = EPA250SquadOrder::None;
+	Volleys->GetFileStatus(L, Men, Loaded, Presented, Order);
+	ProbeHold = Presented >= Verbs.VolleyMinShooters ? ProbeHold + DeltaSeconds : 0.f;
+	if (ProbeHold >= 0.5f && Now >= ProbeNextAt && ProbeTargetSquad < 0)
+	{
+		const int32 TargetSquad = Foe->SquadId;
+		const bool bSteady = Volleys->GetSquadMorale(TargetSquad) == EPA250Morale::Steady;
+		if (L->Musket && L->Musket->CanFire()) L->FireMusketAt(Foe->GetActorLocation() + FVector(0.f, 0.f, 20.f));
+		if (Volleys->LeaderFired(L))
+		{
+			++ProbeVolleys;
+			// Only a squad that stood steady can be seen to waver.
+			if (bSteady && TargetSquad >= 0)
+			{
+				ProbeTargetSquad = TargetSquad;
+				ProbeWatchUntil = Now + Verbs.VolleyShockSeconds + 2.f;
+			}
+			UE_LOG(LogTemp, Display, TEXT("PA250 led volley probe: volley %d, %d presented, target squad %d at %.0f m (%s)"), ProbeVolleys, Presented, TargetSquad, BestD / 100.f,
+				bSteady ? TEXT("steady") : TEXT("already wavering"));
+		}
+		ProbeHold = 0.f;
+		ProbeNextAt = Now + 8.f;
+	}
 }
 
 APawn* APA250BattleGameMode::SpawnDefaultPawnAtTransform_Implementation(AController* NewPlayer, const FTransform& SpawnTransform)
@@ -2111,9 +3024,18 @@ void APA250BattleGameMode::OnControllerRespawned(AController* Controller, APawn*
 	FrameHumanCamera(Cast<APlayerController>(Controller), C);
 }
 
+int32 APA250BattleGameMode::MenInReserve(FName Faction) const
+{
+	int32 Down = 0;
+	for (const auto& CK : Ledger.Deaths.FindRef(Faction)) Down += CK.Value;
+	for (const auto& CK : Prisoners.FindRef(Faction)) Down += CK.Value;
+	return FMath::Max(0, InitialSoldiers(Faction) - Down - CountAlive(Faction));
+}
+
 int32 APA250BattleGameMode::PoolTotal(FName Faction) const
 {
-	return Ledger.Remaining(Faction);
+	// Tickets, but never more than the men the army still has off the field.
+	return FMath::Min(Ledger.Remaining(Faction), MenInReserve(Faction));
 }
 
 int32 APA250BattleGameMode::InitialSoldiers(FName Faction) const
@@ -2152,9 +3074,60 @@ int32 APA250BattleGameMode::PostsOwned(FName Faction) const
 	int32 N = 0;
 	for (const TWeakObjectPtr<APA250ControlPoint>& WP : Posts)
 	{
-		if (WP.IsValid() && !WP->IsContestLocked() && WP->GetHolder() == Faction) ++N;
+		// A post closed by the assault or the landing is still somebody's.
+		if (WP.IsValid() && (!WP->IsContestLocked() || PA250Modes::IsOrdered(ScenarioFight.Mode)) && WP->GetHolder() == Faction) ++N;
 	}
 	return N;
+}
+
+APA250ControlPoint* APA250BattleGameMode::GetModeOpenPost() const
+{
+	if (!PA250Modes::IsOrdered(ScenarioFight.Mode) || ModeOrder.Num() != Posts.Num()) return nullptr;
+	const FName Attacker = ToName(Setup.attacker_faction);
+	if (PA250Modes::IsLanding(ScenarioFight.Mode))
+	{
+		return (!bLanded && Posts.IsValidIndex(ModeOrder[0])) ? Posts[ModeOrder[0]].Get() : nullptr;
+	}
+	TArray<FName> Holders;
+	for (const TWeakObjectPtr<APA250ControlPoint>& WP : Posts) Holders.Add(WP.IsValid() ? WP->GetHolder() : NAME_None);
+	const int32 Open = PA250Modes::OpenPost(ModeOrder, Holders, Attacker);
+	return Posts.IsValidIndex(Open) ? Posts[Open].Get() : nullptr;
+}
+
+void APA250BattleGameMode::TickBattleMode()
+{
+	if (!PA250Modes::IsOrdered(ScenarioFight.Mode) || ModeOrder.Num() != Posts.Num() || bBattleOver) return;
+	const FName Attacker = ToName(Setup.attacker_faction);
+	const FName Defender = ToName(Setup.defender_faction);
+	TArray<FName> Holders;
+	for (const TWeakObjectPtr<APA250ControlPoint>& WP : Posts) Holders.Add(WP.IsValid() ? WP->GetHolder() : NAME_None);
+	const bool bOurAttack = Attacker == PlayerFaction;
+	if (PA250Modes::IsLanding(ScenarioFight.Mode) && !bLanded && Holders.IsValidIndex(ModeOrder[0]) && Holders[ModeOrder[0]] == Attacker)
+	{
+		bLanded = true;
+		PushKillFeed(bOurAttack ? TEXT("The landing place is ours: push inland") : TEXT("THEY HOLD THE LANDING PLACE"));
+		UE_LOG(LogTemp, Display, TEXT("PA250 mode: landing made good at %.0f s; every post is open"), GetWorld()->GetTimeSeconds() - StartTime);
+	}
+	const int32 Carried = PA250Modes::PostsCarried(Holders, Attacker);
+	if (PA250Modes::IsAssault(ScenarioFight.Mode) && Carried > ModeCarried)
+	{
+		// Each post carried buys the attack more time.
+		const float Add = Rules.assault_seconds_per_post * (Carried - ModeCarried);
+		TimeLimitSeconds += Add;
+		ModeClockAdded += Add;
+		PushKillFeed(bOurAttack ? FString::Printf(TEXT("Post carried! (%d of %d)"), Carried, Posts.Num()) : FString::Printf(TEXT("THEY HAVE CARRIED A POST (%d of %d)"), Carried, Posts.Num()));
+		UE_LOG(LogTemp, Display, TEXT("PA250 mode: assault carries post %d of %d at %.0f s; clock +%.0f s"), Carried, Posts.Num(), GetWorld()->GetTimeSeconds() - StartTime, Add);
+	}
+	ModeCarried = Carried;
+	const TArray<bool> Locked = PA250Modes::LockedPosts(ScenarioFight.Mode, ModeOrder, Holders, Attacker, bLanded);
+	for (int32 i = 0; i < Posts.Num(); ++i)
+	{
+		if (Posts[i].IsValid()) Posts[i]->SetContestLocked(Locked.IsValidIndex(i) && Locked[i]);
+	}
+	if (PA250Modes::IsAssault(ScenarioFight.Mode) && Posts.Num() > 0 && Carried >= Posts.Num())
+	{
+		EndBattle(Attacker, TEXT("posts_swept"));
+	}
 }
 
 FName APA250BattleGameMode::PluralityHolder() const
@@ -2178,6 +3151,7 @@ int32 APA250BattleGameMode::CountPosts() const
 int32 APA250BattleGameMode::GetBleedPerInterval(FName Faction) const
 {
 	if (!UsesPostBleed(ScenarioFight)) return 0;
+	if (PA250Modes::IsLanding(ScenarioFight.Mode) && !bLanded) return 0;
 	const int32 Mine = PostsOwned(Faction);
 	const int32 Theirs = PostsOwned(Faction == TEXT("british") ? FName(TEXT("continental")) : FName(TEXT("british")));
 	return Mine < Theirs ? FPA250TicketLedger::BleedAmount(Mine, Theirs, CountPosts()) : 0;
@@ -2189,6 +3163,8 @@ void APA250BattleGameMode::BleedTickets(float DeltaSeconds)
 	{
 		return;
 	}
+	// A landing is not worn down for posts it has had no chance to reach.
+	if (PA250Modes::IsLanding(ScenarioFight.Mode) && !bLanded) return;
 	// Battlefront-style: the bleed grows with the post advantage, fastest when one side holds them all.
 	Ledger.Bleed(DeltaSeconds, BleedIntervalSeconds,
 		TEXT("british"), PostsOwned(TEXT("british")), TEXT("continental"), PostsOwned(TEXT("continental")), CountPosts());
@@ -2214,7 +3190,7 @@ bool APA250BattleGameMode::SideIsOut(int32 Pool, int32 InitialUnits, bool bEverF
 	return bEverFielded;
 }
 
-bool APA250BattleGameMode::RemnantBreaks(int32 Pool, int32 Alive, bool bHumanAliveOnSide)
+bool APA250BattleGameMode::RemnantBreaks(int32 Pool, int32 Alive, bool bHumanAliveOnSide, int32 RemnantMen)
 {
 	return !bHumanAliveOnSide && Pool <= 0 && Alive > 0 && Alive <= RemnantMen;
 }
@@ -2223,13 +3199,14 @@ bool APA250BattleGameMode::IsMarkedRemnant(FName Faction) const
 {
 	if (bBattleOver || PoolTotal(Faction) > 0) return false;
 	const int32 Alive = CountAlive(Faction);
-	return Alive > 0 && Alive <= RemnantMarkMen;
+	return Alive > 0 && Alive <= Rules.remnant_mark_men;
 }
 
 float APA250BattleGameMode::RemnantCountdown(FName Faction) const
 {
+	if (bBattleOver) return -1.f; // the bar must not go on counting under the victory banner
 	const float* T = RemnantTime.Find(Faction);
-	return (T && *T > 0.f) ? FMath::Max(0.f, RemnantRoutSeconds - *T) : -1.f;
+	return (T && *T > 0.f) ? FMath::Max(0.f, Rules.remnant_seconds - *T) : -1.f;
 }
 
 void APA250BattleGameMode::TickRemnants(float DeltaSeconds)
@@ -2246,7 +3223,7 @@ void APA250BattleGameMode::TickRemnants(float DeltaSeconds)
 	for (const FName F : {FName(TEXT("british")), FName(TEXT("continental"))})
 	{
 		float& T = RemnantTime.FindOrAdd(F);
-		if (!RemnantBreaks(PoolTotal(F), CountAlive(F), bHumanAlive && F == PlayerFaction))
+		if (!RemnantBreaks(PoolTotal(F), CountAlive(F), bHumanAlive && F == PlayerFaction, Rules.remnant_men))
 		{
 			T = 0.f;
 			continue;
@@ -2254,13 +3231,491 @@ void APA250BattleGameMode::TickRemnants(float DeltaSeconds)
 		if (T <= 0.f)
 		{
 			PushKillFeed(FString::Printf(TEXT("The last %s are breaking"), F == TEXT("british") ? TEXT("regulars") : TEXT("provincials")));
-			UE_LOG(LogTemp, Display, TEXT("PA250 remnant: %s has %d men and no reserve; breaks in %.0f s"), *F.ToString(), CountAlive(F), RemnantRoutSeconds);
+			UE_LOG(LogTemp, Display, TEXT("PA250 remnant: %s has %d men and no reserve; breaks in %.0f s"), *F.ToString(), CountAlive(F), Rules.remnant_seconds);
 		}
 		T += DeltaSeconds;
-		if (T >= RemnantRoutSeconds)
+		if (T >= Rules.remnant_seconds)
 		{
 			EndBattle(F == TEXT("british") ? FName(TEXT("continental")) : FName(TEXT("british")), TEXT("routed"));
 			return;
+		}
+	}
+}
+
+int32 APA250BattleGameMode::GetPrisonersTaken(FName Faction) const
+{
+	// Prisoners[f] are men OF f taken; "taken by Faction" are the other side's.
+	int32 N = 0;
+	if (const TMap<FName, int32>* Side = Prisoners.Find(OtherFaction(Faction)))
+	{
+		for (const TPair<FName, int32>& KV : *Side) N += KV.Value;
+	}
+	return N;
+}
+
+void APA250BattleGameMode::TakePrisoner(ARFCharacter* Prisoner, const ARFCharacter* Captor)
+{
+	// Destroy() waits until the end of the frame, so a second dragoon in the same pass would
+	// count this man again. The tag is the mark that he has already surrendered.
+	if (!Prisoner || Prisoner->IsDead() || Prisoner->Tags.Contains(TEXT("PA250Prisoner"))) return;
+	Prisoner->Tags.Add(TEXT("PA250Prisoner"));
+	const FName F = Prisoner->FactionId;
+	Prisoners.FindOrAdd(F).FindOrAdd(Prisoner->UnitClass)++;
+	// He leaves the field alive: a man gone from the side's strength, not a death, and nobody takes his place.
+	if (int32* Pool = Ledger.Pool.Find(F); Pool && *Pool > Ledger.HeldFor(F)) --(*Pool);
+	PushKillFeed(F == PlayerFaction
+		? FString::Printf(TEXT("One of ours surrenders to %s"), Captor ? PA250UnitClasses::KitFor(Captor->FactionId, Captor->UnitClass).Label : TEXT("the enemy"))
+		: FString::Printf(TEXT("A routing %s surrenders"), PA250UnitClasses::KitFor(F, Prisoner->UnitClass).Label));
+	if (AController* C = Prisoner->GetController())
+	{
+		ControllerFaction.Remove(C);
+		ControllerClass.Remove(C);
+		C->UnPossess();
+		C->Destroy();
+	}
+	Prisoner->Destroy();
+}
+
+void APA250BattleGameMode::TickClassVerbs()
+{
+	// Twice a second, with the officers' steadying (TickOfficers sets OfficerTimer to 0.5 just before).
+	if (!Volleys || !FMath::IsNearlyEqual(OfficerTimer, 0.5f)) return;
+	const FPA250ClassVerbs& Verbs = PA250UnitClasses::Verbs();
+	const float Now = GetWorld()->GetTimeSeconds();
+	TArray<ARFCharacter*> Men;
+	for (TActorIterator<ARFCharacter> It(GetWorld()); It; ++It)
+	{
+		if (!It->IsDead() && !It->FactionId.IsNone()) Men.Add(*It);
+	}
+	for (ARFCharacter* C : Men)
+	{
+		if (!IsValid(C) || C->IsDead() || C->Tags.Contains(TEXT("PA250Prisoner"))) continue;
+		const FPA250UnitClassKit& Kit = PA250UnitClasses::KitFor(C->FactionId, C->UnitClass);
+		// The officer's verb, for the bots: rally the nearest routing squad of his side.
+		if (Kit.bRallies && !C->IsPlayerControlled() && Now >= RallyReadyAt.FindRef(C)
+			&& Volleys->RallyNearestRouting(C->FactionId, C->GetActorLocation(), Verbs.RallyRadiusM * 100.f))
+		{
+			RallyReadyAt.Add(C, Now + Verbs.RallyCooldownSeconds);
+			if (C->FactionId == PlayerFaction) PushKillFeed(TEXT("An officer rallies the men"));
+		}
+		// The dragoon's verb: in the saddle, a routing enemy he overtakes surrenders.
+		if (Kit.bTakesPrisoners && C->IsMounted())
+		{
+			for (ARFCharacter* Foe : Men)
+			{
+				if (!IsValid(Foe) || Foe->IsDead() || Foe->FactionId == C->FactionId || Foe->IsPlayerControlled() || Foe->IsMounted()) continue;
+				if (FVector::DistSquared2D(Foe->GetActorLocation(), C->GetActorLocation()) > FMath::Square(Verbs.SurrenderRadiusM * 100.f)) continue;
+				if (Volleys->IsRouting(Foe)) TakePrisoner(Foe, C);
+			}
+		}
+	}
+}
+
+void APA250BattleGameMode::UseClassAbility(ARFCharacter* Soldier)
+{
+	if (!Soldier || Soldier->IsDead() || bBattleOver || !Volleys) return;
+	const FPA250UnitClassKit& Kit = PA250UnitClasses::KitFor(Soldier->FactionId, Soldier->UnitClass);
+	const FPA250ClassVerbs& Verbs = PA250UnitClasses::Verbs();
+	const float Now = GetWorld()->GetTimeSeconds();
+	if (APA250FieldGun* Gun = GunAt(Soldier))
+	{
+		// Anyone may serve a gun of his side (a gunner serves it at full drill): T takes his place at
+		// it or leaves it. At the gun his trigger fires it and his reload key works the drill.
+		if (Gun->GetPlayerGunner() == Soldier)
+		{
+			Gun->SetPlayerGunner(nullptr);
+			ShowNotice(TEXT("You leave the gun"), 2.f);
+		}
+		else
+		{
+			Gun->SetPlayerGunner(Soldier);
+			ShowNotice(TEXT("You serve the gun: it lays where you look, your trigger fires it, R works the drill"), 5.f);
+		}
+		return;
+	}
+	if (Kit.bBuildsWorks)
+	{
+		// The sapper's verb: a spell of labour on the work he stands at, feet planted.
+		APA250FieldWork* Work = NearestWorkNeedingLabour(Soldier->GetActorLocation(), Verbs.SapperReachM * 100.f);
+		if (!Work)
+		{
+			ShowNotice(TEXT("No work within reach needs you: stand at a marked place or a battered bank"), 3.f);
+			return;
+		}
+		if (!SideHoldsGroundAt(Soldier->FactionId, Work->GetActorLocation()))
+		{
+			ShowNotice(TEXT("You can only dig on ground your side holds"), 3.f);
+			return;
+		}
+		if (Now < PlayerAbilityReadyAt) return;
+		PlayerAbilityReadyAt = Now + Verbs.SapperBurstSeconds;
+		Soldier->LockMovement(Verbs.SapperBurstSeconds);
+		LabourOnWork(Work, Verbs.SapperBurstSeconds, Soldier);
+		ShowNotice(FString::Printf(TEXT("You dig: the work stands to %d %% of its height%s"), FMath::RoundToInt(Work->GetStandingShare() * 100.f),
+			Work->GivesCover() ? TEXT(" and stops a ball") : TEXT("")), Verbs.SapperBurstSeconds);
+		return;
+	}
+	const bool bOrders = Kit.bRallies || Kit.bVolleyShock || Kit.bChargeRouts;
+	if (!bOrders)
+	{
+		// A passive verb: say what it is.
+		ShowNotice(FString(Kit.Verb), 5.f);
+		return;
+	}
+	if (Now < PlayerAbilityReadyAt)
+	{
+		ShowNotice(FString::Printf(TEXT("Not yet: %.0f s"), PlayerAbilityReadyAt - Now), 2.f);
+		return;
+	}
+	const FVector Here = Soldier->GetActorLocation();
+	const float Reach = Verbs.OrderRadiusM * 100.f;
+	if (Kit.bRallies && Volleys->RallyNearestRouting(Soldier->FactionId, Here, Verbs.RallyRadiusM * 100.f))
+	{
+		PlayerAbilityReadyAt = Now + Verbs.RallyCooldownSeconds;
+		ShowNotice(TEXT("You rally the men: they stop and re-form"), 4.f);
+		return;
+	}
+	// An officer may order either; a regular calls his line's volley; a grenadier leads the charge.
+	const FString Order = Volleys->OrderNearestLine(Soldier->FactionId, Here, Reach, Kit.bRallies || Kit.bVolleyShock, Kit.bRallies || Kit.bChargeRouts);
+	if (Order == TEXT("volley"))
+	{
+		PlayerAbilityReadyAt = Now + 8.f;
+		ShowNotice(TEXT("\"Present... FIRE!\" - the line volleys on your word"), 3.f);
+	}
+	else if (Order == TEXT("charge"))
+	{
+		PlayerAbilityReadyAt = Now + 12.f;
+		ShowNotice(TEXT("\"Charge bayonets!\" - the line goes in"), 3.f);
+	}
+	else
+	{
+		ShowNotice(Kit.bRallies ? TEXT("No routing squad to rally and no line within 30 m with an enemy in front of it")
+			: TEXT("No line within 30 m that can obey: it needs an enemy in front of it"), 3.f);
+	}
+}
+
+FString APA250BattleGameMode::GetAbilityLine(const ARFCharacter* Soldier) const
+{
+	if (!Soldier) return FString();
+	const FPA250UnitClassKit& Kit = PA250UnitClasses::KitFor(Soldier->FactionId, Soldier->UnitClass);
+	if (FString(Kit.Verb).IsEmpty()) return FString();
+	const float Left = PlayerAbilityReadyAt - (GetWorld() ? GetWorld()->GetTimeSeconds() : 0.f);
+	if (const APA250FieldGun* Gun = GunAt(Soldier))
+	{
+		return Gun->GetPlayerGunner() == Soldier ? Gun->StatusLine() : FString(TEXT("T  Serve this gun"));
+	}
+	if (Kit.bServesGuns) return TEXT("Gunner: go to one of your side's guns and press T to serve it");
+	if (Kit.bBuildsWorks) return TEXT("T  Dig: stand at a marked place or a battered bank and raise the work");
+	if (Kit.bRallies) return Left > 0.f ? FString::Printf(TEXT("T  Rally / order: %.0f s"), Left) : FString(TEXT("T  Rally a routing squad, or order the nearest line to volley or charge"));
+	if (Kit.bVolleyShock) return Left > 0.f ? FString::Printf(TEXT("T  Call a volley: %.0f s"), Left) : FString(TEXT("T  Call your line's volley: 3 muskets together shake the squad they hit"));
+	if (Kit.bChargeRouts) return Left > 0.f ? FString::Printf(TEXT("T  Order the charge: %.0f s"), Left) : FString(TEXT("T  Order the charge: a squad it reaches checks or breaks"));
+	if (Kit.bSteadyInCover) return TEXT("Home ground: steady and truer behind walls and fences, quickly shaken in the open");
+	if (Kit.bOfficerHunter) return TEXT("Pick off an officer: his squad is shaken");
+	if (Kit.bForwardSpawn) return TEXT("Takes posts fastest; may come on at a post close to the enemy");
+	if (Kit.bTakesPrisoners) return Soldier->IsMounted() ? FString(TEXT("In the saddle: ride down routers and they surrender")) : FString(TEXT("Mount (H) to ride down routers"));
+	return FString(Kit.Verb);
+}
+
+void APA250BattleGameMode::ArrangeMatchup(float MetersApart)
+{
+	// Two lines facing each other, each man two metres from the next, the given distance apart, on
+	// ground where each line can see the other: the field is searched for an open, level axis
+	// (walls, houses and the rolling ground away from the Green block a 150 m line of sight).
+	// The squads then keep that ground (UPA250VolleyCoordinator::bHoldGround).
+	UWorld* World = GetWorld();
+	const float Half = MetersApart * 50.f;
+	auto Ground = [World](const FVector& At, FVector& Out) {
+		FHitResult Hit;
+		FCollisionQueryParams Params(SCENE_QUERY_STAT(PA250MatchupGround), false);
+		for (TActorIterator<ARFCharacter> It(World); It; ++It) Params.AddIgnoredActor(*It);
+		if (!World->LineTraceSingleByChannel(Hit, FVector(At.X, At.Y, 20000.f), FVector(At.X, At.Y, -20000.f), ECC_Visibility, Params)) return false;
+		Out = Hit.ImpactPoint;
+		return true;
+	};
+	auto Clear = [World](const FVector& From, const FVector& To) {
+		FHitResult Hit;
+		FCollisionQueryParams Params(SCENE_QUERY_STAT(PA250MatchupSight), false);
+		for (TActorIterator<ARFCharacter> It(World); It; ++It) Params.AddIgnoredActor(*It);
+		return !World->LineTraceSingleByChannel(Hit, From + FVector(0.f, 0.f, 150.f), To + FVector(0.f, 0.f, 100.f), ECC_Visibility, Params);
+	};
+	TArray<FVector> Centers;
+	for (const TWeakObjectPtr<APA250ControlPoint>& WP : Posts)
+	{
+		if (WP.IsValid()) Centers.Add(WP->GetActorLocation());
+	}
+	if (Centers.Num() == 0) Centers.Add(FVector::ZeroVector);
+	const int32 NumPosts = Centers.Num();
+	for (int32 i = 0; i < NumPosts; ++i)
+	{
+		for (const FVector& Off : {FVector(6000.f, 0.f, 0.f), FVector(-6000.f, 0.f, 0.f), FVector(0.f, 6000.f, 0.f), FVector(0.f, -6000.f, 0.f)}) Centers.Add(Centers[i] + Off);
+	}
+	FVector BestA = Centers[0] - FVector(Half, 0.f, 0.f), BestB = Centers[0] + FVector(Half, 0.f, 0.f);
+	float BestRise = TNumericLimits<float>::Max();
+	for (const FVector& Center : Centers)
+	{
+		for (int32 Deg = 0; Deg < 180; Deg += 15)
+		{
+			const FVector Dir(FMath::Cos(FMath::DegreesToRadians(float(Deg))), FMath::Sin(FMath::DegreesToRadians(float(Deg))), 0.f);
+			const FVector Side(-Dir.Y, Dir.X, 0.f);
+			FVector A, B;
+			if (!Ground(Center - Dir * Half, A) || !Ground(Center + Dir * Half, B)) continue;
+			// The whole width of both lines must see across, both ways.
+			bool bOpen = true;
+			for (float Lat : {-900.f, -450.f, 0.f, 450.f, 900.f})
+			{
+				FVector LA, LB;
+				bOpen = bOpen && Ground(A + Side * Lat, LA) && Ground(B + Side * Lat, LB) && Clear(LA, LB) && Clear(LB, LA)
+					&& FMath::Abs(LA.Z - A.Z) < 150.f && FMath::Abs(LB.Z - B.Z) < 150.f;
+			}
+			const float Rise = FMath::Abs(A.Z - B.Z);
+			if (bOpen && Rise < BestRise)
+			{
+				BestRise = Rise;
+				BestA = A;
+				BestB = B;
+			}
+		}
+	}
+	const bool bFound = BestRise < TNumericLimits<float>::Max();
+	const FVector Axis = (BestB - BestA).GetSafeNormal2D();
+	const FVector Side(-Axis.Y, Axis.X, 0.f);
+	TMap<FName, int32> Placed;
+	for (TActorIterator<ARFCharacter> It(World); It; ++It)
+	{
+		if (It->IsDead() || It->IsPlayerControlled()) continue;
+		// A gunner with a place at a gun goes with his gun (below), not into the line.
+		bool bAtGun = false;
+		for (const APA250FieldGun* Gun : Guns) bAtGun = bAtGun || (Gun && Gun->PostOf(*It) != INDEX_NONE);
+		if (bAtGun) continue;
+		const bool bBrit = It->FactionId == TEXT("british");
+		const int32 Index = Placed.FindOrAdd(It->FactionId)++;
+		const float Along = (Index % 2 == 0 ? 1.f : -1.f) * 200.f * ((Index + 1) / 2);
+		FVector Spot = (bBrit ? BestB : BestA) + Side * Along;
+		FVector OnGround;
+		if (Ground(Spot, OnGround)) Spot = OnGround;
+		const FRotator Face = (bBrit ? -Axis : Axis).Rotation();
+		It->TeleportTo(Spot + FVector(0.f, 0.f, 95.f), Face, false, true);
+		if (AController* C = It->GetController()) C->SetControlRotation(Face);
+	}
+	// Guns: on the right flank of their side's line, clear of it, fronting the other line.
+	TMap<FName, int32> GunsPlaced;
+	for (APA250FieldGun* Gun : Guns)
+	{
+		if (!Gun) continue;
+		const bool bBrit = Gun->GetFaction() == TEXT("british");
+		const int32 Index = GunsPlaced.FindOrAdd(Gun->GetFaction())++;
+		const float Flank = 200.f * (Placed.FindRef(Gun->GetFaction()) / 2 + 1) + 700.f * (Index + 1);
+		FVector Spot = (bBrit ? BestB : BestA) + Side * Flank;
+		FVector OnGround;
+		if (Ground(Spot, OnGround)) Spot = OnGround;
+		Gun->SetActorLocationAndRotation(Spot, FRotator(0.f, (bBrit ? -Axis : Axis).Rotation().Yaw, 0.f));
+		for (TActorIterator<ARFCharacter> It(World); It; ++It)
+		{
+			const int32 Post = Gun->PostOf(*It);
+			if (Post == INDEX_NONE || It->IsDead()) continue;
+			It->TeleportTo(Gun->GetCrewPost(Post) + FVector(0.f, 0.f, 10.f), Gun->GetActorRotation(), false, true);
+		}
+	}
+	// Works (with -PA250Fort): the standing banks go two metres in front of their side's line,
+	// opposite the other side's guns when it has any, so the men those guns fire at are behind them.
+	{
+		TMap<FName, int32> WorksPlaced;
+		int32 Moved = 0;
+		for (APA250FieldWork* Work : Works)
+		{
+			if (!Work || !Work->GivesCover()) continue;
+			const FName F = Work->GetFaction();
+			const bool bBrit = F == TEXT("british");
+			float Opposite = 0.f;
+			int32 EnemyGuns = 0;
+			for (const APA250FieldGun* Gun : Guns)
+			{
+				if (!Gun || Gun->GetFaction() == F) continue;
+				Opposite += FVector::DotProduct(Gun->GetActorLocation() - (bBrit ? BestA : BestB), Side);
+				++EnemyGuns;
+			}
+			if (EnemyGuns > 0) Opposite /= EnemyGuns;
+			const int32 Index = WorksPlaced.FindOrAdd(F)++;
+			const float Along = Opposite + (Index % 2 == 0 ? 1.f : -1.f) * (Rules.works_breastwork_length_cm + 30.f) * ((Index + 1) / 2);
+			const FVector Toward = bBrit ? -Axis : Axis;
+			FVector Spot = (bBrit ? BestB : BestA) + Side * Along + Toward * 200.f;
+			FVector OnGround;
+			if (Ground(Spot, OnGround)) Spot = OnGround;
+			Work->SetActorLocationAndRotation(Spot, FRotator(0.f, Toward.Rotation().Yaw, 0.f));
+			++Moved;
+		}
+		if (Moved > 0)
+		{
+			NotifyWorksChanged();
+			UE_LOG(LogTemp, Display, TEXT("PA250 matchup: %d standing works set in front of their side's line"), Moved);
+		}
+	}
+	bMatchupHold = true;
+	UE_LOG(LogTemp, Display, TEXT("PA250 matchup: british %d and continental %d drawn up %.0f m apart, holding their ground (%s, rise %.0f cm)"),
+		Placed.FindRef(TEXT("british")), Placed.FindRef(TEXT("continental")), MetersApart, bFound ? TEXT("open axis found") : TEXT("NO OPEN AXIS: lines of sight may be blocked"),
+		bFound ? BestRise : -1.f);
+}
+
+int32 APA250BattleGameMode::GetFieldStrength(FName Faction) const
+{
+	if (bBotsOverride) return BotsPerSide;
+	const auto It = Setup.sides.find(TCHAR_TO_UTF8(*Faction.ToString()));
+	return (It != Setup.sides.end() && It->second.field_strength > 0) ? It->second.field_strength : BotsPerSide;
+}
+
+int32 APA250BattleGameMode::GetRoundsPerMan(FName Faction) const
+{
+	const auto It = Setup.sides.find(TCHAR_TO_UTF8(*Faction.ToString()));
+	return It != Setup.sides.end() ? FMath::Max(0, It->second.rounds_per_man) : 0;
+}
+
+APA250ControlPoint* APA250BattleGameMode::NearestHeldPost(FName Faction, const FVector& From) const
+{
+	APA250ControlPoint* Best = nullptr;
+	float BestSq = TNumericLimits<float>::Max();
+	for (const TWeakObjectPtr<APA250ControlPoint>& WP : Posts)
+	{
+		APA250ControlPoint* P = WP.Get();
+		if (!P || P->GetHolder() != Faction) continue;
+		const float Sq = FVector::DistSquared2D(P->GetActorLocation(), From);
+		if (Sq < BestSq)
+		{
+			BestSq = Sq;
+			Best = P;
+		}
+	}
+	return Best;
+}
+
+float APA250BattleGameMode::PostsSweptCountdown(FName& OutFaction) const
+{
+	for (const TPair<FName, float>& KV : SweepTime)
+	{
+		if (KV.Value > 0.f)
+		{
+			OutFaction = KV.Key;
+			return FMath::Max(0.f, Rules.posts_swept_seconds - KV.Value);
+		}
+	}
+	return -1.f;
+}
+
+float APA250BattleGameMode::ArmyBrokeCountdown(FName Faction) const
+{
+	const float* T = BrokeTime.Find(Faction);
+	return (T && *T > 0.f) ? FMath::Max(0.f, Rules.army_broke_seconds - *T) : -1.f;
+}
+
+void APA250BattleGameMode::TickEndConditions(float DeltaSeconds)
+{
+	const float Elapsed = GetWorld()->GetTimeSeconds() - StartTime;
+	auto SideName = [](FName F) { return F == TEXT("british") ? TEXT("regulars") : TEXT("provincials"); };
+	// posts_swept: one side holds every post for the sweep time. The single-crossing fight (Concord)
+	// has one post to contest, so holding it is the fight itself, not a sweep.
+	if (!ScenarioFight.bContestSingleCrossing && !PA250Modes::IsAssault(ScenarioFight.Mode))
+	{
+		const int32 Total = CountPosts();
+		for (const FName F : {FName(TEXT("british")), FName(TEXT("continental"))})
+		{
+			if (PostsOwned(F) > 0) EverHeldAPost.FindOrAdd(F) = true;
+		}
+		for (const FName F : {FName(TEXT("british")), FName(TEXT("continental"))})
+		{
+			const int32 Owned = PostsOwned(F);
+			float& T = SweepTime.FindOrAdd(F);
+			if (!PA250EndRules::PostsAreSwept(Owned, Total, EverHeldAPost.FindRef(OtherFaction(F)), Elapsed, Rules))
+			{
+				T = 0.f;
+				continue;
+			}
+			if (T <= 0.f)
+			{
+				PushKillFeed(FString::Printf(TEXT("The %s hold every post"), SideName(F)));
+				UE_LOG(LogTemp, Display, TEXT("PA250 sweep: %s hold all %d posts; the field is theirs in %.0f s"), *F.ToString(), Total, Rules.posts_swept_seconds);
+			}
+			T += DeltaSeconds;
+			if (T >= Rules.posts_swept_seconds)
+			{
+				EndBattle(F, TEXT("posts_swept"));
+				return;
+			}
+		}
+	}
+	// army_broke: most of a side's squads are withdrawing or routing. Either side, the player's too
+	// (user decision 2026-11-14); guarded against the opening minutes and against a handful of squads.
+	if (!Volleys) return;
+	for (const FName F : {FName(TEXT("british")), FName(TEXT("continental"))})
+	{
+		int32 Squads = 0, Broken = 0;
+		Volleys->CountSquads(F, Squads, Broken);
+		int32& Peak = PeakSquads.FindOrAdd(F);
+		Peak = FMath::Max(Peak, Squads);
+		float& T = BrokeTime.FindOrAdd(F);
+		if (!PA250EndRules::ArmyIsBreaking(Squads, Broken, Peak, Elapsed, Rules))
+		{
+			// A squad that steadies for a moment does not wipe the slate: the clock runs back down at
+			// the rate it ran up. (Squad states last a few seconds each, so a clock that snapped to
+			// zero never reached 15 s even in an army with morale 5: low-morale autoplay, 2026-11-14.)
+			T = FMath::Max(0.f, T - DeltaSeconds);
+			continue;
+		}
+		if (T <= 0.f)
+		{
+			PushKillFeed(FString::Printf(TEXT("The %s are breaking!"), SideName(F)));
+			UE_LOG(LogTemp, Display, TEXT("PA250 broke: %s has %d of %d squads falling back; breaks in %.0f s"), *F.ToString(), Broken, Squads, Rules.army_broke_seconds);
+		}
+		T += DeltaSeconds;
+		float& Longest = BrokePeak.FindOrAdd(F);
+		Longest = FMath::Max(Longest, T);
+		if (T >= Rules.army_broke_seconds)
+		{
+			EndBattle(OtherFaction(F), TEXT("army_broke"));
+			return;
+		}
+	}
+}
+
+void APA250BattleGameMode::TickAmmo(float DeltaSeconds)
+{
+	// Twice a second is plenty: an opening box for each man as he takes the field, and a refill for a
+	// man standing inside a post his side holds, out of what the side has left.
+	AmmoTimer += DeltaSeconds;
+	if (AmmoTimer < 0.5f) return;
+	const float Step = AmmoTimer;
+	AmmoTimer = 0.f;
+	const APlayerController* PC = GetWorld()->GetFirstPlayerController();
+	for (TActorIterator<ARFCharacter> It(GetWorld()); It; ++It)
+	{
+		ARFCharacter* C = *It;
+		if (C->IsDead() || !C->Musket) continue;
+		const int32 Box = GetRoundsPerMan(C->FactionId);
+		if (Box <= 0) continue; // a setup without rounds: boxes are not counted in this fight
+		const bool bHuman = PC && C->GetController() == PC;
+		if (!AmmoIssued.Contains(C))
+		{
+			AmmoIssued.Add(C);
+			// The round in the barrel is one of them.
+			C->Musket->RoundsInBox = FMath::Max(0, Ammo.Draw(C->FactionId, Box, bHuman) - 1);
+			continue;
+		}
+		const bool bDry = C->Musket->IsDry();
+		const int32 Want = (Box - 1) - FMath::Max(0, C->Musket->RoundsInBox) + (bDry ? 1 : 0);
+		const APA250ControlPoint* Post = Want > 0 ? NearestHeldPost(C->FactionId, C->GetActorLocation()) : nullptr;
+		const bool bAtPost = Post && FVector::DistSquared2D(Post->GetActorLocation(), C->GetActorLocation()) <= FMath::Square(Post->Radius);
+		if (!bAtPost || Ammo.Available(C->FactionId, bHuman) <= 0)
+		{
+			ResupplyClock.Remove(C);
+			continue;
+		}
+		float& Clock = ResupplyClock.FindOrAdd(C);
+		Clock += Step;
+		if (Clock < Rules.resupply_seconds) continue;
+		Clock = 0.f;
+		const int32 Granted = Ammo.Refill(C->FactionId, Want, bHuman);
+		C->Musket->Resupply(Granted);
+		if (bHuman && Granted > 0)
+		{
+			ShowNotice(FString::Printf(TEXT("Cartridge box filled at the %s (+%d)"), *Post->PostId.ToString(), Granted), 2.5f);
 		}
 	}
 }
@@ -2321,6 +3776,9 @@ void APA250BattleGameMode::BeginDeathCamThenSpawn(APlayerController* PC)
 	GetWorldTimerManager().SetTimer(H, FTimerDelegate::CreateWeakLambda(this, [this, WeakPC]() {
 		APlayerController* C = WeakPC.Get();
 		if (!C || bBattleOver) return;
+		// While a man of his file stands he fights on as that man: no spawn screen. (His fall has
+		// cost its ticket like any other death; stepping into a living man costs no more.)
+		if (Volleys && Volleys->PickSuccessor(Cast<ARFCharacter>(C->GetPawn())) && TakeOverSoldier(C)) return;
 		if (!CanSpawn(PlayerFaction))
 		{
 			CloseSpawnScreenToSpectate(C);
@@ -2339,7 +3797,35 @@ void APA250BattleGameMode::OnCharacterDied(ARFCharacter* Victim, AController* Vi
 	// M6: tickets spent on death (and bleed), not spawn.
 	if (HasAuthority())
 	{
+		// A surgeon may still reach him (the surgeon's verb).
+		{
+			FFallenMan Down;
+			Down.Where = Victim->GetActorLocation();
+			Down.FellAt = GetWorld()->GetTimeSeconds();
+			Down.Faction = Victim->FactionId;
+			Down.UnitClass = Victim->UnitClass;
+			FallenMen.Add(Down);
+		}
+		// The ensign is down: the colours fall with him and his side feels it.
+		if (APA250Colours* Flag = Colours.FindRef(Victim->FactionId); Flag && Flag->GetBearer() == Victim)
+		{
+			const FPA250ClassVerbs& SV = PA250UnitClasses::Verbs();
+			Flag->Drop();
+			ColoursFell.FindOrAdd(Victim->FactionId)++;
+			if (Volleys) Volleys->PressSide(Victim->FactionId, SV.ColoursFallPressure, SV.ColoursFallSeconds, TEXT("ColoursFell"));
+			PushKillFeed(Victim->FactionId == PlayerFaction ? TEXT("Our colours are down!") : TEXT("Their colours are down!"));
+			UE_LOG(LogTemp, Display, TEXT("PA250 colours: the %s colours fall with their bearer; morale check on that side"), *Victim->FactionId.ToString());
+		}
 		SpendDeathTicket(Victim->FactionId, Victim->UnitClass);
+		// The rifleman's verb: an officer he picks off leaves that officer's squad shaken.
+		if (const ARFCharacter* Marksman = Killer ? Cast<ARFCharacter>(Killer->GetPawn()) : nullptr)
+		{
+			if (Marksman->FactionId != Victim->FactionId && PA250UnitClasses::KitFor(Victim->FactionId, Victim->UnitClass).bOfficer
+				&& PA250UnitClasses::KitFor(Marksman->FactionId, Marksman->UnitClass).bOfficerHunter && Volleys && Volleys->ShakeSquadOf(Victim))
+			{
+				PushKillFeed(Victim->FactionId == PlayerFaction ? TEXT("Our officer is down: his men waver") : TEXT("Their officer is down: his men waver"));
+			}
+		}
 		if (Killer)
 		{
 			if (const ARFCharacter* KillerChar = Cast<ARFCharacter>(Killer->GetPawn()))
@@ -2395,6 +3881,13 @@ void APA250BattleGameMode::OnCharacterDied(ARFCharacter* Victim, AController* Vi
 		return;
 	}
 	TWeakObjectPtr<AController> OldCtl = VictimController;
+	// His replacement may come on at the colours if he stood in the ensign's squad (the ensign's verb).
+	bool bOnColours = false;
+	if (const APA250Colours* Flag = Colours.FindRef(F))
+	{
+		const ARFCharacter* Bearer = Flag->GetBearer();
+		bOnColours = Bearer && !Bearer->IsDead() && Bearer != Victim && Bearer->SquadId >= 0 && Bearer->SquadId == Victim->SquadId;
+	}
 	const FName Cls = Victim->UnitClass;
 	const uint32 Clothes = Victim->GetClothingSeed();
 	float Delay = RespawnDelay;
@@ -2406,13 +3899,33 @@ void APA250BattleGameMode::OnCharacterDied(ARFCharacter* Victim, AController* Vi
 		}
 	}
 	FTimerHandle H;
-	GetWorldTimerManager().SetTimer(H, FTimerDelegate::CreateWeakLambda(this, [this, OldCtl, F, Cls, Clothes]() {
+	GetWorldTimerManager().SetTimer(H, FTimerDelegate::CreateWeakLambda(this, [this, OldCtl, F, Cls, Clothes, bOnColours]() {
 		if (bBattleOver) return;
 		if (AController* C = OldCtl.Get())
 		{
 			ControllerFaction.Remove(C);
 			ControllerClass.Remove(C);
 			C->Destroy();
+		}
+		// On the colours: beside the ensign, unless the enemy is on top of him.
+		const APA250Colours* Flag = bOnColours ? Colours.FindRef(F).Get() : nullptr;
+		const ARFCharacter* Bearer = Flag ? Flag->GetBearer() : nullptr;
+		bool bSafe = Bearer && !Bearer->IsDead();
+		for (TActorIterator<ARFCharacter> It(GetWorld()); It && bSafe; ++It)
+		{
+			if (!It->IsDead() && It->FactionId != F && !It->FactionId.IsNone()
+				&& FVector::DistSquared2D(It->GetActorLocation(), Bearer->GetActorLocation()) < FMath::Square(SafeSpawnEnemyCm * 0.5f)) bSafe = false;
+		}
+		if (bSafe)
+		{
+			const FVector At = ClearSpawnLocation(GetWorld(), Bearer->GetActorLocation() - Bearer->GetActorForwardVector() * 350.f
+				+ FVector(FMath::FRandRange(-200.f, 200.f), FMath::FRandRange(-200.f, 200.f), 0.f));
+			if (SpawnBotAt(F, ChooseClassFor(F, Cls), FTransform(Bearer->GetActorRotation(), At), Clothes))
+			{
+				++SpawnedOnColours;
+				CheckTicketExhaustion();
+				return;
+			}
 		}
 		SpawnBot(F, ChooseClassFor(F, Cls), nullptr, Clothes);
 		CheckTicketExhaustion();
@@ -2496,6 +4009,18 @@ void APA250BattleGameMode::Tick(float DeltaSeconds)
 		if (WP.IsValid() && WP->ConsumeFlipFlag())
 		{
 			++PostFlips;
+			if (FirstFlipAt < 0.f) FirstFlipAt = GetWorld()->GetTimeSeconds() - StartTime;
+		}
+	}
+	// How long each side kept half its opening men standing (battle trace: holding behind works).
+	for (const FName F : {FName(TEXT("british")), FName(TEXT("continental"))})
+	{
+		const int32 Alive = CountAlive(F);
+		int32& Opening = OpeningField.FindOrAdd(F);
+		Opening = FMath::Max(Opening, Alive);
+		if (Opening > 0 && !HalfStrengthAt.Contains(F) && Alive * 2 <= Opening && PoolTotal(F) <= 0)
+		{
+			HalfStrengthAt.Add(F, GetWorld()->GetTimeSeconds() - StartTime);
 		}
 	}
 	BleedTickets(DeltaSeconds);
@@ -2508,10 +4033,20 @@ void APA250BattleGameMode::Tick(float DeltaSeconds)
 			EverFielded.FindOrAdd(F) = true;
 		}
 	}
+	TickAmmo(DeltaSeconds);
+	TickClassVerbs();
+	TickSupport(DeltaSeconds);
+	TickPlayerFile(DeltaSeconds);
+	TickLedVolleyProbe(DeltaSeconds);
+	TickBattleMode();
 	CheckTicketExhaustion();
 	if (!bBattleOver)
 	{
 		TickRemnants(DeltaSeconds);
+	}
+	if (!bBattleOver)
+	{
+		TickEndConditions(DeltaSeconds);
 	}
 	if (SpawnScreen && SpawnScreen->IsInViewport() && !bOpeningClassPick && !CanSpawn(PlayerFaction))
 	{
@@ -2527,7 +4062,12 @@ void APA250BattleGameMode::Tick(float DeltaSeconds)
 		const int32 TB = MenRemaining(TEXT("british"));
 		const int32 TC = MenRemaining(TEXT("continental"));
 		FName Winner;
-		if (ScenarioFight.bRewardForcePreservation)
+		if (PA250Modes::IsAssault(ScenarioFight.Mode))
+		{
+			// The clock is the defender's: he has held.
+			EndBattle(PA250Modes::AssaultWinnerAtTimeLimit(ToName(Setup.defender_faction)), TEXT("time_limit"));
+		}
+		else if (ScenarioFight.bRewardForcePreservation)
 		{
 			Winner = PreservationWinner(TB, InitialSoldiers(TEXT("british")), TC, InitialSoldiers(TEXT("continental")),
 				TEXT("british"), TEXT("continental"), ToName(Setup.defender_faction));
@@ -2562,6 +4102,7 @@ void APA250BattleGameMode::EndBattle(FName Winner, const FString& Reason)
 	Result = pa250::BattleResult{};
 	Result.province_id = Setup.province_id;
 	Result.winner = ToStd(Winner);
+	Result.end_reason = TCHAR_TO_UTF8(*Reason);
 	const FName Plurality = PluralityHolder();
 	Result.objective_holder = Plurality.IsNone() ? std::string() : ToStd(Plurality);
 	for (const TWeakObjectPtr<APA250ControlPoint>& WP : Posts)
@@ -2569,28 +4110,34 @@ void APA250BattleGameMode::EndBattle(FName Winner, const FString& Reason)
 		if (!WP.IsValid() || WP->GetHolder().IsNone()) continue;
 		Result.objectives_held[ToStd(WP->PostId)] = ToStd(WP->GetHolder());
 	}
-	for (const auto& FK : Ledger.Deaths)
+	// Casualties in men, from the battle's own ledger (until 2026-11-14 they were rounded to units
+	// of SoldiersPerUnit and capped at the ticket pool, so nineteen men could fall for a reported
+	// loss of one unit). The sim turns men into units and keeps the men left over on the army.
+	Result.casualties = CasualtiesFromLedger(Ledger.Deaths, Prisoners, SavedBySurgeon);
+	for (const auto& Kv : ColoursTaken)
 	{
-		for (const auto& CK : FK.Value)
-		{
-			const int32 Lost = FPA250TicketLedger::LossesInUnits(CK.Value, SoldiersPerUnit,
-				InitialPool.FindRef(FK.Key).FindRef(CK.Key));
-			if (Lost > 0)
-			{
-				Result.losses[ToStd(FK.Key)][ToStd(CK.Key)] = Lost;
-			}
-			// Rough wounded estimate: half of kills as wounded (gameplay report, not historical).
-			const int32 Wounded = Lost / 2;
-			if (Wounded > 0)
-			{
-				Result.wounded[ToStd(FK.Key)][ToStd(CK.Key)] = Wounded;
-			}
-		}
+		if (Kv.Value > 0) Result.colours_captured[ToStd(Kv.Key)] = Kv.Value;
+	}
+	// Guns that have changed hands and are still held by their captor at the end.
+	for (const FName F : {FName(TEXT("british")), FName(TEXT("continental"))})
+	{
+		if (const int32 N = GetGunsTakenBy(F); N > 0) Result.guns_taken[ToStd(F)] = N;
 	}
 	Result.personal_kills = PersonalKills;
-	// Cartridges from live shots when available; else fielded×2. Clamp to budget / province stock.
-	const int32 ProvinceCart = Setup.province_cartridges;
-	int32 RemainingCart = ProvinceCart;
+	for (const auto& FK : Result.casualties)
+	{
+		int32 Killed = 0, Wounded = 0, Taken = 0;
+		for (const auto& CK : FK.second)
+		{
+			Killed += CK.second.killed;
+			Wounded += CK.second.wounded;
+			Taken += CK.second.prisoners;
+		}
+		UE_LOG(LogTemp, Display, TEXT("PA250 ledger: %s fell %d (%d killed, %d wounded), %d taken prisoner"), UTF8_TO_TCHAR(FK.first.c_str()),
+			Killed + Wounded, Killed, Wounded, Taken);
+	}
+	// Cartridges from live shots when available (rounds_per_cartridge rounds to a magazine cartridge,
+	// rounded up); else fielded×2. Never more than the side's own magazine held.
 	int32 TotalShots = 0;
 	for (const auto& Kv : ShotsFiredByFaction) TotalShots += Kv.Value;
 	for (const auto& Side : Setup.sides)
@@ -2601,14 +4148,12 @@ void APA250BattleGameMode::EndBattle(FName Winner, const FString& Reason)
 			for (const auto& T : Side.second.tickets) N += std::max(0, T.second);
 			return N;
 		}();
-		int32 Spend = TotalShots > 0 ? ShotsFiredByFaction.FindRef(SideName) : Fielded * 2;
+		int32 Spend = TotalShots > 0 ? FMath::DivideAndRoundUp(ShotsFiredByFaction.FindRef(SideName), FMath::Max(1, Rules.rounds_per_cartridge)) : Fielded * 2;
 		if (ShotsFiredByFaction.FindRef(SideName) > 0)
 		{
 			Result.shots_fired[Side.first] = ShotsFiredByFaction.FindRef(SideName);
 		}
-		if (Side.second.cartridge_budget > 0) Spend = FMath::Min(Spend, Side.second.cartridge_budget);
-		Spend = FMath::Clamp(Spend, 0, RemainingCart);
-		RemainingCart -= Spend;
+		Spend = FMath::Clamp(Spend, 0, FMath::Max(0, Side.second.cartridge_budget));
 		Result.cartridges_spent[Side.first] = Spend;
 	}
 	// Powder horn waste from misfires (flash in the pan).
@@ -2628,12 +4173,42 @@ void APA250BattleGameMode::EndBattle(FName Winner, const FString& Reason)
 	{
 		Result.retreat_province = It->second.retreat_province;
 	}
-	Banner = FString::Printf(TEXT("%s victory (%s)"), *Winner.ToString().ToUpper(), *Reason);
-	UE_LOG(LogTemp, Display, TEXT("PA250 battle over: %s flips=%d bleed=%d"), *Banner, PostFlips, Ledger.BleedTicks);
+	Banner = FString::Printf(TEXT("%s victory: %s"), *Winner.ToString().ToUpper(), PA250EndRules::EndReasonWords(Reason));
+	UE_LOG(LogTemp, Display, TEXT("PA250 battle over: %s [%s] flips=%d bleed=%d"), *Banner, *Reason, PostFlips, Ledger.BleedTicks);
 	WriteBattleFile(Reason);
 
 	FTimerHandle H;
 	GetWorldTimerManager().SetTimer(H, FTimerDelegate::CreateUObject(this, &APA250BattleGameMode::FinishAndReturn), FMath::Max(0.1f, EndDelaySeconds), false);
+}
+
+std::map<std::string, std::map<std::string, pa250::MenDown>> APA250BattleGameMode::CasualtiesFromLedger(
+	const TMap<FName, TMap<FName, int32>>& Deaths, const TMap<FName, TMap<FName, int32>>& Surrendered,
+	const TMap<FName, TMap<FName, int32>>& SavedBySurgeon)
+{
+	std::map<std::string, std::map<std::string, pa250::MenDown>> Out;
+	for (const auto& FK : Deaths)
+	{
+		for (const auto& CK : FK.Value)
+		{
+			if (CK.Value <= 0) continue;
+			// A man the surgeon reached in time is wounded whatever the ratio says; the ratio shares
+			// out the rest.
+			const TMap<FName, int32>* SavedSide = SavedBySurgeon.Find(FK.Key);
+			const int32 Saved = FMath::Clamp(SavedSide ? SavedSide->FindRef(CK.Key) : 0, 0, CK.Value);
+			const pa250::MenDown Split = pa250::split_fallen(CK.Value - Saved);
+			pa250::MenDown& M = Out[ToStd(FK.Key)][ToStd(CK.Key)];
+			M.killed += Split.killed;
+			M.wounded += Split.wounded + Saved;
+		}
+	}
+	for (const auto& FK : Surrendered)
+	{
+		for (const auto& CK : FK.Value)
+		{
+			if (CK.Value > 0) Out[ToStd(FK.Key)][ToStd(CK.Key)].prisoners += CK.Value;
+		}
+	}
+	return Out;
 }
 
 void APA250BattleGameMode::WriteBattleFile(const FString& Reason) const
@@ -2675,6 +4250,58 @@ void APA250BattleGameMode::WriteBattleFile(const FString& Reason) const
 	Json += ReloadByTrainingJson();
 	Json += FString::Printf(TEXT(",\"muster_arrivals\":{\"british\":%d,\"continental\":%d}"),
 		MusterArrivals.FindRef(TEXT("british")), MusterArrivals.FindRef(TEXT("continental")));
+	Json += FString::Printf(TEXT(",\"field_strength\":{\"british\":%d,\"continental\":%d},\"squads_peak\":{\"british\":%d,\"continental\":%d}"),
+		GetFieldStrength(TEXT("british")), GetFieldStrength(TEXT("continental")), PeakSquads.FindRef(TEXT("british")), PeakSquads.FindRef(TEXT("continental")));
+	Json += FString::Printf(TEXT(",\"broke_peak_seconds\":{\"british\":%.1f,\"continental\":%.1f}"), BrokePeak.FindRef(TEXT("british")), BrokePeak.FindRef(TEXT("continental")));
+	Json += FString::Printf(TEXT(",\"prisoners_taken\":{\"british\":%d,\"continental\":%d}"), GetPrisonersTaken(TEXT("british")), GetPrisonersTaken(TEXT("continental")));
+	{
+		int32 StandingWorks = 0;
+		for (const APA250FieldWork* W : Works) StandingWorks += (W && W->GivesCover()) ? 1 : 0;
+		Json += FString::Printf(TEXT(",\"works\":{\"places\":%d,\"standing\":%d,\"raised\":{\"british\":%d,\"continental\":%d}}"), Works.Num(), StandingWorks,
+			WorksRaised.FindRef(TEXT("british")), WorksRaised.FindRef(TEXT("continental")));
+	}
+	{
+		int32 Loaded = 0;
+		for (const APA250FieldGun* Gun : Guns) Loaded += (Gun && Gun->IsLoaded()) ? 1 : 0;
+		Json += FString::Printf(TEXT(",\"guns\":{\"on_field\":%d,\"loaded_at_end\":%d,\"shots\":{\"british\":%d,\"continental\":%d},\"canister\":{\"british\":%d,\"continental\":%d},\"men_struck\":%d,\"men_knocked_down\":%d,\"works_broken\":{\"british\":%d,\"continental\":%d},\"changed_hands\":%d,\"held_by_captor\":{\"british\":%d,\"continental\":%d}}"),
+			Guns.Num(), Loaded, GunShots.FindRef(TEXT("british")), GunShots.FindRef(TEXT("continental")), CanisterShots.FindRef(TEXT("british")), CanisterShots.FindRef(TEXT("continental")),
+			RoundShotStruck, RoundShotKnockedDown, WorksBroken.FindRef(TEXT("british")), WorksBroken.FindRef(TEXT("continental")), GunCaptures,
+			GetGunsTakenBy(TEXT("british")), GetGunsTakenBy(TEXT("continental")));
+	}
+	Json += FString::Printf(TEXT(",\"mode\":{\"name\":\"%s\",\"posts_carried\":%d,\"landed\":%s,\"clock_added_seconds\":%.0f}"),
+		*ScenarioFight.Mode.ToString(), ModeCarried, bLanded ? TEXT("true") : TEXT("false"), ModeClockAdded);
+	Json += FString::Printf(TEXT(",\"support\":{\"colours_fell\":{\"british\":%d,\"continental\":%d},\"colours_taken_by\":{\"british\":%d,\"continental\":%d},\"saved_by_surgeon\":{\"british\":%d,\"continental\":%d},\"spawned_on_colours\":%d,\"cadence_man_checks\":%d}"),
+		ColoursFell.FindRef(TEXT("british")), ColoursFell.FindRef(TEXT("continental")), ColoursTaken.FindRef(TEXT("british")), ColoursTaken.FindRef(TEXT("continental")),
+		GetSavedBySurgeon(TEXT("british")), GetSavedBySurgeon(TEXT("continental")), SpawnedOnColours, CadenceManChecks);
+	Json += FString::Printf(TEXT(",\"held\":{\"first_flip_seconds\":%.0f,\"half_strength_seconds\":{\"british\":%.0f,\"continental\":%.0f}}"), FirstFlipAt,
+		HalfStrengthAt.Contains(TEXT("british")) ? HalfStrengthAt.FindRef(TEXT("british")) : -1.f,
+		HalfStrengthAt.Contains(TEXT("continental")) ? HalfStrengthAt.FindRef(TEXT("continental")) : -1.f);
+	Json += FString::Printf(TEXT(",\"led_volley\":{\"side\":\"%s\",\"volleys\":%d,\"shook\":%d}"), ProbeSide.IsNone() ? TEXT("") : *ProbeSide.ToString(), ProbeVolleys, ProbeShook);
+	Json += FString::Printf(TEXT(",\"standing\":{\"british\":%d,\"continental\":%d},\"deaths\":{\"british\":%d,\"continental\":%d}"),
+		CountAlive(TEXT("british")), CountAlive(TEXT("continental")),
+		[this]() { int32 N = 0; for (const auto& CK : Ledger.Deaths.FindRef(TEXT("british"))) N += CK.Value; return N; }(),
+		[this]() { int32 N = 0; for (const auto& CK : Ledger.Deaths.FindRef(TEXT("continental"))) N += CK.Value; return N; }());
+	Json += TEXT(",\"verbs\":{");
+	if (Volleys)
+	{
+		bool bFirstVerb = true;
+		for (const TCHAR* Side : {TEXT("british"), TEXT("continental")})
+		{
+			for (const TCHAR* Verb : {TEXT("VolleyShock"), TEXT("ChargeRout"), TEXT("OfficerDown"), TEXT("Rallied"), TEXT("OrderedVolley"), TEXT("LedVolley"), TEXT("FileFormed"), TEXT("Order"), TEXT("OrderRelayed"),
+				 TEXT("ColoursFell"), TEXT("ColoursLost"), TEXT("CannonShock"), TEXT("GunLost")})
+			{
+				Json += FString::Printf(TEXT("%s\"%s.%s\":%d"), bFirstVerb ? TEXT("") : TEXT(","), Side, Verb, Volleys->CountOf(FString::Printf(TEXT("%s.%s"), Side, Verb)));
+				bFirstVerb = false;
+			}
+		}
+	}
+	Json += TEXT("}");
+	Json += FString::Printf(TEXT(",\"unit_classes_from_data\":%s,\"unit_class_fallback_uses\":%d"), PA250UnitClasses::LoadedFromData() ? TEXT("true") : TEXT("false"), PA250UnitClasses::FallbackUses());
+	auto AmmoJson = [this](const TCHAR* F) {
+		return FString::Printf(TEXT("{\"rounds_per_man\":%d,\"start\":%d,\"left\":%d,\"refills\":%d,\"refill_rounds\":%d}"),
+			GetRoundsPerMan(F), Ammo.Start.FindRef(F), Ammo.Remaining(F), Ammo.Refills.FindRef(F), Ammo.RefillRounds.FindRef(F));
+	};
+	Json += TEXT(",\"ammo\":{\"british\":") + AmmoJson(TEXT("british")) + TEXT(",\"continental\":") + AmmoJson(TEXT("continental")) + TEXT("}");
 	Json += TEXT(",\"morale\":");
 	Json += Volleys ? Volleys->MoraleTraceJson() : FString(TEXT("{}"));
 	Json += FString::Printf(TEXT(",\"tickets\":{\"british\":%d,\"continental\":%d},\"reload\":{\"perfect\":%d,\"sweet\":%d,\"miss\":%d,\"jam\":%d},\"volleys\":{\"count\":%d,\"avg_hits\":%.2f},\"lines\":{\"engagements\":%d,\"in_line\":%d}},\"setup\":"),
@@ -2703,23 +4330,57 @@ void APA250BattleGameMode::FinishAndReturn()
 		using namespace PA250Autoplay;
 		Check(Sub, Setup.valid, TEXT("battle setup came from the sim"));
 		Check(Sub, Result.winner == "british" || Result.winner == "continental", TEXT("winner is set"));
-		bool bLossesOk = true;
-		for (const auto& FK : Result.losses)
+		// The result is the ledger, to the man: killed + wounded are the deaths, prisoners the surrendered.
+		bool bLedgerOk = true;
+		int32 Fell = 0;
+		for (const FName F : {FName(TEXT("british")), FName(TEXT("continental"))})
 		{
-			const FName F = ToName(FK.first);
-			for (const auto& CK : FK.second)
+			int32 Dead = 0, Gave = 0, OnResult = 0, OnResultTaken = 0;
+			for (const auto& CK : Ledger.Deaths.FindRef(F)) Dead += CK.Value;
+			for (const auto& CK : Prisoners.FindRef(F)) Gave += CK.Value;
+			const auto Side = Result.casualties.find(ToStd(F));
+			if (Side != Result.casualties.end())
 			{
-				const int32* Init = InitialPool.FindRef(F).Find(ToName(CK.first));
-				bLossesOk &= Init && CK.second <= *Init && CK.second >= 0;
+				for (const auto& CK : Side->second)
+				{
+					OnResult += CK.second.killed + CK.second.wounded;
+					OnResultTaken += CK.second.prisoners;
+				}
 			}
+			bLedgerOk &= OnResult == Dead && OnResultTaken == Gave;
+			Fell += Dead + Gave;
 		}
-		Check(Sub, bLossesOk, TEXT("losses never exceed the ticket pools"));
+		Check(Sub, bLedgerOk, TEXT("the result's casualties are the battle's ledger, to the man"));
+		// And the campaign took them as reported (a debug battle that fields units the campaign army
+		// does not have is the one case where the sim has nobody to take them from).
+		const bool bDebugUnits = FCString::Strifind(FCommandLine::Get(), TEXT("PA250ExtraUnits=")) || FCString::Strifind(FCommandLine::Get(), TEXT("PA250OnlyClass="));
+		if (bApplied && !bDebugUnits)
+		{
+			int32 OnCard = 0;
+			for (const auto& FK : Sub->GetState().progress.last_battle_report.casualties)
+			{
+				for (const auto& CK : FK.second) OnCard += CK.second.total();
+			}
+			Check(Sub, OnCard == Fell, FString::Printf(TEXT("the after-battle card's men equal the battle's ledger (%d on the card, %d fell)"), OnCard, Fell));
+		}
+		Check(Sub, Sub->GetState().progress.last_battle_report.personal_kills <= FMath::Max(0, PersonalKills), TEXT("by your own hand never exceeds what the battle counted"));
 		const auto Prov = Before.provinces.find(Setup.province_id);
 		const bool bAdj = Prov != Before.provinces.end() &&
 			(Result.retreat_province.empty() || std::find(Prov->second.adjacent.begin(), Prov->second.adjacent.end(), Result.retreat_province) != Prov->second.adjacent.end());
 		Check(Sub, bAdj, TEXT("retreat province is adjacent to the battle province"));
 		Check(Sub, bApplied && Sub->GetFlow() == EPA250Flow::Campaign && !Sub->IsBattlePending(), TEXT("BattleResult applied; flow back to campaign"));
-		Check(Sub, Result.objective_holder.empty() || Sub->GetState().provinces.at(Setup.province_id).owner == (Result.winner == Result.objective_holder ? Result.winner : Before.provinces.at(Setup.province_id).owner), TEXT("province ownership follows the objective holder"));
+		{
+			// The winner takes the town whatever ended the fight; a fort turns that into a siege, and
+			// on Battle Road (force_preserved) the posts still decide. The sim's report says which.
+			const pa250::Province& Town = Sub->GetState().provinces.at(Setup.province_id);
+			const std::string& OwnerBefore = Before.provinces.at(Setup.province_id).owner;
+			const std::string& Why = Sub->GetState().progress.last_battle_report.ownership_reason;
+			const bool bOwnerOk = Why == "siege_begun" ? (Town.owner == OwnerBefore && Town.siege_by == Result.winner)
+				: Why == "unchanged" ? Town.owner == OwnerBefore
+				: Town.owner == Result.winner;
+			Check(Sub, bApplied && bOwnerOk, FString::Printf(TEXT("province ownership follows the result (%s, %s)"), UTF8_TO_TCHAR(Why.c_str()), *EndReason));
+			Check(Sub, Sub->GetState().progress.last_battle_report.end_reason == Result.end_reason, TEXT("the report carries the end reason"));
+		}
 		Check(Sub, PostFlips >= 0, TEXT("post flip counter recorded"));
 		Finish(Sub, TEXT("selftest_battle"));
 		return;

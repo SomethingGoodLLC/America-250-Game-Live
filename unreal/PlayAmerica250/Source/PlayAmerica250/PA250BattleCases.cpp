@@ -1,5 +1,7 @@
 #include "PA250BattleCases.h"
 #include "PA250UnitClasses.h"
+#include "UI/PA250BattleCards.h"
+#include "UI/PA250CampaignArcPanels.h"
 #include "Components/CapsuleComponent.h"
 #include "PA250BotController.h"
 #include "PA250BattleGameMode.h"
@@ -22,6 +24,12 @@
 #include "PA250BotSpacingTest.h"
 #include "PA250ControlPoint.h"
 #include "Campaign/PA250Subsystem.h"
+#include "Campaign/PA250MapWidget.h"
+#include "Battle/PA250FieldWork.h"
+#include "Battle/PA250Support.h"
+#include "Battle/PA250FieldGun.h"
+#include "Battle/PA250BattleModes.h"
+#include "Engine/StaticMeshSocket.h"
 #include "PA250FlagArt.h"
 #include "PA250BattleHUD.h"
 #include "PA250FactionVisuals.h"
@@ -663,10 +671,10 @@ void RunConquest(FLog& Log)
 		&& !APA250BattleGameMode::SideIsOut(0, 0, true, 2, false), TEXT("exhaustion: a side that started with no tickets is out only once fielded and wiped"));
 
 	// A remnant breaks: no reserve, a handful left, never the player's own side while he lives.
-	Log.Check(APA250BattleGameMode::RemnantBreaks(0, APA250BattleGameMode::RemnantMen, false) && APA250BattleGameMode::RemnantBreaks(0, 1, false)
-		&& !APA250BattleGameMode::RemnantBreaks(0, APA250BattleGameMode::RemnantMen + 1, false) && !APA250BattleGameMode::RemnantBreaks(0, 0, false),
+	Log.Check(APA250BattleGameMode::RemnantBreaks(0, 3, false, 3) && APA250BattleGameMode::RemnantBreaks(0, 1, false, 3)
+		&& !APA250BattleGameMode::RemnantBreaks(0, 4, false, 3) && !APA250BattleGameMode::RemnantBreaks(0, 0, false, 3),
 		TEXT("remnant: no reserve and a handful standing breaks; a larger body or nobody does not"));
-	Log.Check(!APA250BattleGameMode::RemnantBreaks(2, 1, false) && !APA250BattleGameMode::RemnantBreaks(0, 1, true),
+	Log.Check(!APA250BattleGameMode::RemnantBreaks(2, 1, false, 3) && !APA250BattleGameMode::RemnantBreaks(0, 1, true, 3),
 		TEXT("remnant: not while a reserve is left, never under a living player"));
 
 	// One ticket held for the human player.
@@ -689,9 +697,28 @@ void RunConquest(FLog& Log)
 		Log.Check(None.HeldFor(B) == 0 && !None.CanReinforce(B) && !None.DrawHeld(B), TEXT("reserve: nothing is held from an empty pool"));
 	}
 
-	Log.Check(FPA250TicketLedger::LossesInUnits(9, 4, 5) == 2, TEXT("conquest: 9 deaths / 4 per unit -> 2 units"));
-	Log.Check(FPA250TicketLedger::LossesInUnits(100, 4, 5) == 5, TEXT("conquest: losses capped at starting units"));
-	Log.Check(FPA250TicketLedger::LossesInUnits(1, 4, 5) == 0, TEXT("conquest: one death rounds to 0 units"));
+	// The result counts men, straight from the ledger (until 2026-11-14 deaths were rounded to units
+	// and capped at the ticket pool). Nine deaths are nine men: killed and wounded by the sim's ratio.
+	{
+		pa250::load_battle_rules(pa250::read_text_file(TCHAR_TO_UTF8(*UPA250Subsystem::BattleRulesPath())));
+		TMap<FName, TMap<FName, int32>> Deaths, Gave;
+		Deaths.FindOrAdd(TEXT("continental")).Add(TEXT("militia"), 9);
+		Deaths.FindOrAdd(TEXT("continental")).Add(TEXT("officer"), 1);
+		Deaths.FindOrAdd(TEXT("british")).Add(TEXT("line_infantry"), 100);
+		Gave.FindOrAdd(TEXT("continental")).Add(TEXT("militia"), 2);
+		Gave.FindOrAdd(TEXT("british")).Add(TEXT("grenadier"), 3);
+		const auto Cas = APA250BattleGameMode::CasualtiesFromLedger(Deaths, Gave);
+		const pa250::MenDown Mil = Cas.at("continental").at("militia");
+		Log.Check(Mil.killed + Mil.wounded == 9 && Mil.wounded == pa250::split_fallen(9).wounded && Mil.prisoners == 2,
+			FString::Printf(TEXT("conquest: 9 deaths and 2 surrendered are 9 men down and 2 prisoners (%d killed, %d wounded, %d prisoners)"), Mil.killed, Mil.wounded, Mil.prisoners));
+		Log.Check(Cas.at("continental").at("officer").total() == 1, TEXT("conquest: one death is one man, not rounded away"));
+		Log.Check(Cas.at("british").at("line_infantry").total() == 100 && Cas.at("british").at("grenadier").prisoners == 3 && Cas.at("british").at("grenadier").killed == 0,
+			TEXT("conquest: a hundred deaths are a hundred men; a class that only surrendered has no dead"));
+	}
+	// A side cannot reinforce with men its army does not have, whatever its tickets say.
+	Log.Check(APA250BattleGameMode::ReserveFor(50, 88, 60, 19) == 9 && APA250BattleGameMode::ReserveFor(5, 88, 10, 19) == 5
+		&& APA250BattleGameMode::ReserveFor(38, 88, 79, 9) == 0 && APA250BattleGameMode::ReserveFor(38, 88, 88, 0) == 0,
+		TEXT("conquest: the reserve is never more tickets than men nor more men than tickets (88 men, 79 down, 9 standing: none)"));
 	// 5.f above is the ledger's interval argument, not the shipped bleed. Exhaustion waits on elapsed time.
 	Log.Check(!APA250BattleGameMode::TicketsMayExhaust(119.f, 120.f) &&
 			  APA250BattleGameMode::TicketsMayExhaust(120.f, 120.f),
@@ -1546,14 +1573,14 @@ void RunAudio(FLog& Log)
 	{
 		for (const TCHAR* Key : {TEXT("make_ready"), TEXT("present"), TEXT("fire"), TEXT("forward"), TEXT("enemy_advancing"),
 			TEXT("steady"), TEXT("fall_back"), TEXT("enemy_falling_back"), TEXT("breaking"), TEXT("enemy_running"),
-			TEXT("rally"), TEXT("reformed"), TEXT("charge"), TEXT("charge_b")})
+			TEXT("rally"), TEXT("reformed"), TEXT("charge"), TEXT("charge_b"), TEXT("follow_me"), TEXT("charge_bayonets")})
 		{
 			const USoundWave* W = Cast<USoundWave>(FPA250BattleAudio::Voice(FName(Side), Key));
 			if (!W) { ++Missing; continue; }
 			Shortest = FMath::Min(Shortest, W->Duration);
 		}
 	}
-	Log.Check(Missing == 0 && Shortest >= 0.3f, FString::Printf(TEXT("audio: 28 shouted lines present (missing %d, shortest %.2f s)"), Missing, Shortest));
+	Log.Check(Missing == 0 && Shortest >= 0.3f, FString::Printf(TEXT("audio: 32 shouted lines present, the leader's orders among them (missing %d, shortest %.2f s)"), Missing, Shortest));
 
 	// Gameplay actions make sound (counted at the hook; no audio device needed headless).
 	FScopedTestWorld W;
@@ -1801,6 +1828,13 @@ void RunScenario(FLog& Log)
 	Log.Check(!Green->IsContestLocked() && Green->GetHolder().IsNone(), TEXT("scenario: North Bridge starts neutral and can be taken"));
 	Log.Check(!House->IsContestLocked() && House->GetHolder() == TEXT("continental"), TEXT("scenario: Muster ground starts Continental and is contestable"));
 	Log.Check(!Buck->IsContestLocked() && Buck->GetHolder() == TEXT("british"), TEXT("scenario: Far bridgehead starts British and is contestable"));
+	FName East, West;
+	APA250BattleGameMode::ConcordBanks(TEXT("continental"), East, West);
+	Log.Check(East == TEXT("continental") && West == TEXT("british"),
+		TEXT("concord: the town's owner takes the east bank, the attacker the west"));
+	APA250BattleGameMode::ConcordBanks(TEXT("british"), East, West);
+	Log.Check(East == TEXT("british") && West == TEXT("continental"),
+		TEXT("concord: a British-held Concord keeps the east bank"));
 	Log.Check(House->GetObjectiveTitle() == TEXT("Muster ground"), TEXT("scenario: meetinghouse labeled Muster ground"));
 	Log.Check(Buck->GetObjectiveTitle() == TEXT("Far bridgehead"), TEXT("scenario: buckman labeled Far bridgehead"));
 	const bool bHouseMoved = House->ApplyCapturePressure(TEXT("british"), 6, 0, 30.f);
@@ -1842,5 +1876,1099 @@ void RunScenario(FLog& Log)
 	APA250BattleGameMode::ConfigurePostForScenario(Buck, Road);
 	Log.Check(!Green->IsContestLocked() && Green->GetHolder() == TEXT("british") && House->GetHolder().IsNone() && Buck->GetHolder().IsNone(),
 		TEXT("scenario: Battle Road holds the road and leaves the flanks open"));
+}
+
+void RunCampaignRead(FLog& Log)
+{
+	// The battle's numbers come from the sim's rules file, the same one the campaign uses.
+	pa250::load_battle_rules(pa250::read_text_file(TCHAR_TO_UTF8(*UPA250Subsystem::BattleRulesPath())));
+	Log.Check(pa250::battle_rules_loaded(), TEXT("campaign read: battle_rules.json loads"));
+	const pa250::BattleRules R = pa250::battle_rules();
+	Log.Check(R.bot_budget == 40 && R.field_min == 10 && R.field_max == 30 && R.soldiers_per_unit == 4,
+		TEXT("campaign read: field budget 40, 10 to 30 a side, 4 soldiers a unit"));
+
+	// Field strength: the sim's split is what the battle spawns.
+	const pa250::FieldSplit Opening = pa250::split_field_strength(96, 88);
+	const pa250::FieldSplit TwoToOne = pa250::split_field_strength(80, 40);
+	Log.Check(Opening.a == 21 && Opening.b == 19, FString::Printf(TEXT("campaign read: 96 v 88 fields 21 v 19 (%d v %d)"), Opening.a, Opening.b));
+	Log.Check(TwoToOne.a == 27 && TwoToOne.b == 13, FString::Printf(TEXT("campaign read: 2:1 fields 27 v 13 (%d v %d)"), TwoToOne.a, TwoToOne.b));
+
+	// army_broke: 60 % of the side's squads withdrawing or routing.
+	Log.Check(PA250EndRules::BrokenSquadsNeeded(5, 0.6f) == 3 && PA250EndRules::BrokenSquadsNeeded(3, 0.6f) == 2
+		&& PA250EndRules::BrokenSquadsNeeded(4, 0.6f) == 3 && PA250EndRules::BrokenSquadsNeeded(0, 0.6f) == 0,
+		TEXT("campaign read: 60 % of 5 squads is 3, of 4 is 3, of 3 is 2"));
+	Log.Check(PA250EndRules::ArmyIsBreaking(5, 3, 5, 300.f, R), TEXT("campaign read: 3 of 5 squads falling back is a breaking army"));
+	Log.Check(!PA250EndRules::ArmyIsBreaking(5, 2, 5, 300.f, R), TEXT("campaign read: 2 of 5 is not"));
+	// A skirmisher's fall-back from the open or from a charge is his drill, not a break.
+	Log.Check(PA250SquadIsBroken(EPA250Morale::Routing, false) && PA250SquadIsBroken(EPA250Morale::Routing, true)
+		&& PA250SquadIsBroken(EPA250Morale::Withdrawing, false) && !PA250SquadIsBroken(EPA250Morale::Withdrawing, true)
+		&& !PA250SquadIsBroken(EPA250Morale::Shaken, false) && !PA250SquadIsBroken(EPA250Morale::Steady, false),
+		TEXT("campaign read: a rout always counts toward a breaking army, a forced withdrawal counts, a drilled fall-back does not"));
+	Log.Check(R.remnant_men >= 1 && R.remnant_mark_men >= R.remnant_men && R.remnant_seconds > 0.f, TEXT("campaign read: remnant numbers come from battle_rules.json"));
+	// Guard 1: never in the first 120 seconds.
+	Log.Check(!PA250EndRules::ArmyIsBreaking(5, 5, 5, R.army_broke_min_elapsed_seconds - 1.f, R)
+		&& PA250EndRules::ArmyIsBreaking(5, 5, 5, R.army_broke_min_elapsed_seconds, R),
+		TEXT("campaign read: an army cannot break in the first 120 seconds"));
+	// Guard 2: never a side that fielded fewer than 3 squads; one worn down from 3 still can.
+	Log.Check(!PA250EndRules::ArmyIsBreaking(2, 2, 2, 300.f, R), TEXT("campaign read: a side that only ever formed 2 squads cannot break"));
+	Log.Check(!PA250EndRules::ArmyIsBreaking(1, 1, 1, 300.f, R), TEXT("campaign read: one squad falling back is not an army breaking"));
+	Log.Check(PA250EndRules::ArmyIsBreaking(2, 2, 3, 300.f, R), TEXT("campaign read: a side worn down from 3 squads to 2 can still break"));
+	Log.Check(!PA250EndRules::ArmyIsBreaking(0, 0, 4, 300.f, R), TEXT("campaign read: no squads left is tickets' business, not a break"));
+
+	// posts_swept: every post, after the opening minute, and only posts the enemy has held.
+	Log.Check(PA250EndRules::PostsAreSwept(3, 3, true, 90.f, R), TEXT("campaign read: holding all 3 posts the enemy once held is a sweep"));
+	Log.Check(!PA250EndRules::PostsAreSwept(2, 3, true, 90.f, R), TEXT("campaign read: 2 of 3 is not"));
+	Log.Check(!PA250EndRules::PostsAreSwept(3, 3, false, 900.f, R), TEXT("campaign read: no sweep while the enemy has never held a post (a garrison cannot win by standing still)"));
+	Log.Check(!PA250EndRules::PostsAreSwept(3, 3, true, R.posts_swept_min_elapsed_seconds - 1.f, R), TEXT("campaign read: no sweep in the opening minute"));
+	Log.Check(!PA250EndRules::PostsAreSwept(0, 0, true, 900.f, R), TEXT("campaign read: a field without posts cannot be swept"));
+	Log.Check(FString(PA250EndRules::EndReasonWords(TEXT("army_broke"))) != FString(PA250EndRules::EndReasonWords(TEXT("posts_swept")))
+		&& FString(PA250EndRules::EndReasonWords(TEXT("nonsense"))) == TEXT("the fight ended"),
+		TEXT("campaign read: each end reason has its own plain words"));
+	for (const TCHAR* Reason : {TEXT("tickets_exhausted"), TEXT("time_limit"), TEXT("force_preserved"), TEXT("routed"), TEXT("army_broke"), TEXT("posts_swept")})
+	{
+		Log.Check(pa250::known_end_reason(TCHAR_TO_UTF8(Reason)), FString::Printf(TEXT("campaign read: the sim knows end reason %s"), Reason));
+	}
+
+	// The cards read the same setup and report (text only here; the window is checked by -PA250CardProbe).
+	{
+		pa250::CampaignState St = pa250::load_scenario(pa250::read_text_file(TCHAR_TO_UTF8(*UPA250Subsystem::ScenarioPath())));
+		St.armies.at("british_regulars").previous_province = "boston";
+		St.armies.at("british_regulars").province = "charlestown";
+		St.armies.at("continental_militia").province = "charlestown";
+		St.pending_battle = {true, "charlestown", "british_regulars", "continental_militia"};
+		const pa250::BattleSetup Setup = pa250::build_battle_setup(St, "charlestown");
+		const TArray<PA250BattleCards::FRow> Mine = PA250BattleCards::SideRows(Setup.sides.at("continental"));
+		auto Find = [](const TArray<PA250BattleCards::FRow>& Rows, const TCHAR* Label) -> const PA250BattleCards::FRow* {
+			for (const PA250BattleCards::FRow& Row : Rows) if (Row.Label == Label) return &Row;
+			return nullptr;
+		};
+		bool bAllSourced = Mine.Num() >= 6;
+		for (const PA250BattleCards::FRow& Row : Mine) bAllSourced &= !Row.Source.IsEmpty() && !Row.Value.IsEmpty();
+		Log.Check(bAllSourced, TEXT("cards: every pre-battle line has a value and a source"));
+		const PA250BattleCards::FRow* Field = Find(Mine, TEXT("On the field"));
+		const PA250BattleCards::FRow* Morale = Find(Mine, TEXT("Morale"));
+		const PA250BattleCards::FRow* Fort = Find(Mine, TEXT("Fortification"));
+		Log.Check(Find(Mine, TEXT("Men")) && Find(Mine, TEXT("Men"))->Value == TEXT("88") && Field && Field->Value == TEXT("19"),
+			TEXT("cards: 88 men, 19 on the field"));
+		Log.Check(Find(Mine, TEXT("Rounds a man")) != nullptr, TEXT("cards: rounds a man is on the card"));
+		Log.Check(Morale && Morale->Value == TEXT("73") && Fort && Fort->Value == TEXT("L1") && Fort->Source.Contains(TEXT("Fort L1, Charlestown")),
+			TEXT("cards: the fort shows as L1 with its name, and morale is the final 73 (70 + 3)"));
+		bool bFortChange = false;
+		for (const PA250BattleCards::FRow& Row : Mine) bFortChange |= Row.bChange && Row.Value == TEXT("+3") && Row.Source.Contains(TEXT("Fort L1"));
+		Log.Check(bFortChange, TEXT("cards: the fort's +3 morale is its own line"));
+		const TArray<PA250BattleCards::FRow> Enemy = PA250BattleCards::SideRows(Setup.sides.at("british"));
+		const PA250BattleCards::FRow* Theirs = Find(Enemy, TEXT("Rounds a man"));
+		// Carried rounds (2026-11-14): a column has its boxes and no magazine behind it in the fight.
+		Log.Check(Theirs && Theirs->Value == TEXT("12") && Theirs->Source.Contains(TEXT("what the men carry in their boxes")),
+			TEXT("cards: the column's rounds are the boxes its men carry"));
+
+		pa250::BattleResult R2;
+		R2.province_id = "charlestown";
+		R2.winner = "british";
+		R2.end_reason = "posts_swept";
+		R2.losses["continental"]["militia"] = 3;
+		R2.prisoners["continental"]["militia"] = 2;
+		const pa250::CampaignState After = pa250::apply_battle_result(St, R2);
+		const PA250BattleCards::FAfter Card = PA250BattleCards::AfterBattle(After.progress.last_battle_report, After);
+		Log.Check(Card.Title == TEXT("Battle of Charlestown") && Card.Verdict == TEXT("Defeat") && Card.Reason.Contains(TEXT("every post")),
+			FString::Printf(TEXT("cards: after-battle title, verdict and reason (%s / %s / %s)"), *Card.Title, *Card.Verdict, *Card.Reason));
+		// Three units killed and two taken, in men (4 a unit): the card counts men.
+		Log.Check(Card.LossHeading == TEXT("Losses (men)") && Card.Losses.Num() == 2 && Card.Losses[0].Contains(TEXT("12 killed")),
+			FString::Printf(TEXT("cards: losses for both sides, in men (%s)"), Card.Losses.Num() ? *Card.Losses[0] : TEXT("none")));
+		Log.Check(Card.Prisoners.Num() == 2 && Card.Prisoners[1].Contains(TEXT("8 men")), TEXT("cards: prisoners taken from the player, in men"));
+		{
+			// A battle's own count: 5 killed, 7 wounded, 3 prisoners of the militia; 2 and 1 of the regulars.
+			pa250::BattleResult Rm;
+			Rm.province_id = "charlestown";
+			Rm.winner = "british";
+			Rm.end_reason = "posts_swept";
+			Rm.casualties["continental"]["militia"] = {5, 7, 3};
+			Rm.casualties["british"]["line_infantry"] = {2, 1, 0};
+			Rm.personal_kills = 9;
+			const pa250::CampaignState Am = pa250::apply_battle_result(St, Rm);
+			const PA250BattleCards::FAfter Cm = PA250BattleCards::AfterBattle(Am.progress.last_battle_report, Am);
+			bool bUnitsNote = false, bHand = false;
+			for (const FString& N : Cm.Notes)
+			{
+				bUnitsNote |= N.Contains(TEXT("Units out of the ranks: yours 3, the enemy's 0"));
+				bHand |= N.Contains(TEXT("By your own hand: 3 men"));
+			}
+			Log.Check(Cm.Losses.Num() == 2 && Cm.Losses[0].Contains(TEXT("5 killed, 7 wounded (12 men down)")) && Cm.Losses[1].Contains(TEXT("2 killed, 1 wounded (3 men down)")),
+				FString::Printf(TEXT("cards: the card shows the men the battle counted (%s)"), Cm.Losses.Num() ? *Cm.Losses[0] : TEXT("none")));
+			Log.Check(Cm.Prisoners.Num() == 2 && Cm.Prisoners[1].Contains(TEXT("3 men")) && Cm.Prisoners[0].Contains(TEXT("0 men")), TEXT("cards: prisoners in men"));
+			Log.Check(bUnitsNote, TEXT("cards: 15 men down cost 3 units; the 3 men left over are carried"));
+			Log.Check(bHand, TEXT("cards: by your own hand never exceeds the enemy's killed and wounded (9 claimed, 3 fell)"));
+			Log.Check(Am.armies.at("continental_militia").men_down.at("militia").total() == 3, TEXT("cards: the men left over stay on the army"));
+		}
+		bool bSiege = false, bRetreat = false, bBoxes = false, bDropped = false;
+		for (const FString& L : Card.MapChanges)
+		{
+			bSiege |= L.Contains(TEXT("besieged")) && L.Contains(TEXT("72"));
+			bRetreat |= L.Contains(TEXT("falls back to"));
+			bBoxes |= L.Contains(TEXT("rounds a man left of"));
+			bDropped |= L.Contains(TEXT("dropped in the retreat"));
+		}
+		Log.Check(bSiege && bRetreat, TEXT("cards: the map changes name the siege and the retreat"));
+		Log.Check(bBoxes && bDropped, TEXT("cards: the map changes say what rounds each army has left and what the beaten one dropped"));
+		const pa250::BattleReport& Rep = After.progress.last_battle_report;
+		const auto Mil = After.armies.find("continental_militia");
+		Log.Check(Mil != After.armies.end() && Rep.rounds_after.count("continental") && Mil->second.rounds_per_man == Rep.rounds_after.at("continental")
+			&& Mil->second.rounds_per_man < Rep.rounds_before.at("continental"),
+			TEXT("cards: the beaten army's boxes are saved on the army, and hold less than at form-up"));
+		Log.Check(PA250BattleCards::EndReasonSentence("army_broke", true) != PA250BattleCards::EndReasonSentence("army_broke", false)
+			&& PA250BattleCards::EndReasonSentence("", true) == TEXT("The fight ended."), TEXT("cards: the reason is told from the player's side"));
+
+		// No raw ids on the cards: no lowercase faction id, no town id, nothing in snake_case.
+		auto HasRawId = [&St](const FString& Text) {
+			FString Tok;
+			auto Bad = [&St](const FString& T) {
+				if (T.IsEmpty() || !T.Equals(T.ToLower(), ESearchCase::CaseSensitive)) return false;
+				return T.Contains(TEXT("_")) || T == TEXT("british") || T == TEXT("continental") || St.provinces.count(TCHAR_TO_UTF8(*T)) > 0;
+			};
+			for (const TCHAR Ch : Text)
+			{
+				if (FChar::IsAlpha(Ch) || Ch == TEXT('_')) { Tok.AppendChar(Ch); continue; }
+				if (Bad(Tok)) return true;
+				Tok.Reset();
+			}
+			return Bad(Tok);
+		};
+		Log.Check(HasRawId(TEXT("Concord now british")) && HasRawId(TEXT("12 line_infantry")) && HasRawId(TEXT("ammo at concord"))
+			&& !HasRawId(TEXT("Concord now British: the Patriot militia fall back")), TEXT("cards: the raw-id check itself tells ids from words"));
+		FString Offender;
+		for (const auto& SideKv : Setup.sides)
+		{
+			for (const PA250BattleCards::FRow& Row : PA250BattleCards::SideRows(SideKv.second))
+			{
+				if (HasRawId(Row.Label) || HasRawId(Row.Source)) Offender = Row.Label + TEXT(" / ") + Row.Source;
+			}
+		}
+		for (const TArray<FString>* Lines : {&Card.Losses, &Card.Prisoners, &Card.MapChanges, &Card.Notes})
+		{
+			for (const FString& L : *Lines) if (HasRawId(L)) Offender = L;
+		}
+		if (HasRawId(Card.Title) || HasRawId(Card.Reason)) Offender = Card.Title + TEXT(" / ") + Card.Reason;
+		Log.Check(Offender.IsEmpty(), FString::Printf(TEXT("cards: no raw ids in the pre-battle or after-battle text (%s)"), *Offender));
+
+		// A side never has more men on the field than it fields, in any of the 13 towns, with the
+		// town's magazine as it opens or emptied (playtest 2026-11-14: 19 men over a 4-soldier pool).
+		FString Over;
+		for (const auto& Pk : St.provinces)
+		{
+			for (const bool bEmptied : {false, true})
+			{
+				pa250::CampaignState Sx = pa250::load_scenario(pa250::read_text_file(TCHAR_TO_UTF8(*UPA250Subsystem::ScenarioPath())));
+				Sx.armies.at("british_regulars").province = Pk.first;
+				Sx.armies.at("continental_militia").province = Pk.first;
+				Sx.pending_battle = {true, Pk.first, "british_regulars", "continental_militia"};
+				if (bEmptied)
+				{
+					pa250::ProvinceStores& M = Sx.province_stores[Pk.first];
+					M.muskets = M.cartridges = M.powder = 0;
+				}
+				const pa250::BattleSetup Bx = pa250::build_battle_setup(Sx, Pk.first);
+				for (const auto& SideKv : Bx.sides)
+				{
+					int32 Units = 0;
+					for (const auto& T : SideKv.second.tickets) Units += T.second;
+					if (SideKv.second.field_strength > Units * Bx.soldiers_per_unit)
+					{
+						Over = FString::Printf(TEXT("%s %s: %d on the field over a pool of %d"), UTF8_TO_TCHAR(Pk.first.c_str()), UTF8_TO_TCHAR(SideKv.first.c_str()),
+							SideKv.second.field_strength, Units * Bx.soldiers_per_unit);
+					}
+				}
+			}
+		}
+		Log.Check(Over.IsEmpty(), FString::Printf(TEXT("campaign read: no side fields more men than its pool (%s)"), *Over));
+
+		// Men stood down are named on the card, and the headline is the men who fight.
+		{
+			pa250::CampaignState Tired = St;
+			Tired.armies.at("continental_militia").fatigue = 70;
+			const pa250::BattleSetup Bt = pa250::build_battle_setup(Tired, "charlestown");
+			const TArray<PA250BattleCards::FRow> Rows = PA250BattleCards::SideRows(Bt.sides.at("continental"));
+			const PA250BattleCards::FRow* Men = Find(Rows, TEXT("Men"));
+			bool bStoodDown = false;
+			for (const PA250BattleCards::FRow& Row : Rows) bStoodDown |= Row.bChange && Row.Value == TEXT("-20") && Row.Source.Contains(TEXT("stand down"));
+			Log.Check(Men && Men->Value == TEXT("68") && bStoodDown, FString::Printf(TEXT("cards: a tired militia shows 68 men who fight and a -20 line for those stood down (%s)"), Men ? *Men->Value : TEXT("none")));
+		}
+
+		// The correspondence panel waits while a battle card is up.
+		Log.Check(UPA250MapWidget::StaffPanelVisible(true, false, false) && !UPA250MapWidget::StaffPanelVisible(true, true, false)
+			&& !UPA250MapWidget::StaffPanelVisible(true, false, true) && !UPA250MapWidget::StaffPanelVisible(false, false, false),
+			TEXT("cards: the correspondence panel is hidden while a pre-battle or unread after-battle card is showing"));
+		// "Send stores to depot" answers a refusal in words.
+		Log.Check(!HasRawId(UPA250MapWidget::SendStoresRefusal(TEXT("already_at_depot"))) && !HasRawId(UPA250MapWidget::SendStoresRefusal(TEXT("empty_order")))
+			&& !HasRawId(UPA250MapWidget::SendStoresRefusal(TEXT("something_else"))) && UPA250MapWidget::SendStoresRefusal(TEXT("empty_order")).Contains(TEXT("no arms or powder")),
+			TEXT("cards: a refused stores order is explained in words"));
+		// The order itself, as the button gives it: Concord's arms and powder leave, its provisions stay.
+		{
+			pa250::CampaignState Open = pa250::load_scenario(pa250::read_text_file(TCHAR_TO_UTF8(*UPA250Subsystem::ScenarioPath())));
+			const int Bread = pa250::province_ledger(Open, "concord").provisions;
+			std::string Err;
+			const pa250::CampaignState Sent = pa250::send_stores_to_depot(Open, "concord", Err);
+			const pa250::ProvinceStores& Left = pa250::province_ledger(Sent, "concord");
+			Log.Check(Err.empty() && Left.powder == 0 && Left.cartridges == 0 && Left.muskets == 0 && Left.provisions == Bread && Sent.shipments.size() == Open.shipments.size() + 1,
+				TEXT("campaign read: sending Concord's stores to the depot empties its arms and powder in one order (mission 1 can be done)"));
+		}
+	}
+
+	// The side's ammunition pool.
+	const FName B(TEXT("british")), C(TEXT("continental"));
+	Log.Check(FPA250AmmoPool::OpeningPool(40, 20, 88, 9) == 800 && FPA250AmmoPool::OpeningPool(0, 20, 96, 12) == 1152
+		&& FPA250AmmoPool::OpeningPool(1, 20, 88, 3) == 264,
+		TEXT("campaign read: the pool is the magazine in rounds, never less than a box a man"));
+	FPA250AmmoPool Pool;
+	Pool.Init(C, 100);
+	Pool.Init(B, 30);
+	Pool.Held.Add(C, 12); // one box kept for the human player
+	Log.Check(Pool.Draw(C, 12, false) == 12 && Pool.Remaining(C) == 88, TEXT("campaign read: a man draws his opening box from the pool"));
+	Log.Check(Pool.Available(C, false) == 76 && Pool.Available(C, true) == 88, TEXT("campaign read: bots cannot draw the box held for the player"));
+	Log.Check(Pool.Draw(C, 200, false) == 76 && Pool.Remaining(C) == 12, TEXT("campaign read: bots stop at the held box"));
+	Log.Check(Pool.Draw(C, 5, false) == 0, TEXT("campaign read: nothing more for a bot"));
+	Log.Check(Pool.Refill(C, 12, true) == 12 && Pool.Remaining(C) == 0 && Pool.Refills.FindRef(C) == 1 && Pool.RefillRounds.FindRef(C) == 12,
+		TEXT("campaign read: the player still fills his box, and the refill is counted"));
+	Log.Check(Pool.Refill(C, 12, true) == 0 && Pool.Refills.FindRef(C) == 1, TEXT("campaign read: an empty pool gives nothing and counts no refill"));
+	Log.Check(Pool.Spent(C) == 100 && Pool.Remaining(B) == 30 && Pool.Spent(B) == 0, TEXT("campaign read: each side has its own pool"));
+
+	// The cartridge box on the musket: the last cartridge loads, then the piece stands empty until resupplied.
+	FScopedTestWorld W;
+	AMusketWeapon* Musket = W.World ? W.World->SpawnActor<AMusketWeapon>() : nullptr;
+	Log.Check(Musket && Musket->RoundsInBox == -1 && !Musket->IsDry(), TEXT("campaign read: outside a battle the box is not counted"));
+	if (!Musket) return;
+	Musket->WeaponTuning = UPA250WeaponTuning::MakeRuntimeDefaults();
+	Musket->SetReloadPreset(EPA250ReloadPreset::Arcade);
+	auto WaitLoaded = [Musket]() {
+		for (int32 i = 0; i < 400 && !Musket->CanFire() && !Musket->IsDry(); ++i) Musket->TickActor(0.25f, LEVELTICK_All, Musket->PrimaryActorTick);
+	};
+	Musket->RoundsInBox = 1;
+	Log.Check(Musket->CanFire(), TEXT("campaign read: a soldier takes the field loaded"));
+	Musket->Misfire(); // the piece is discharged without a ball: the same path as a shot
+	Log.Check(Musket->RoundsInBox == 0 && Musket->IsReloading() && !Musket->IsDry(), TEXT("campaign read: firing takes the last cartridge and loads it"));
+	WaitLoaded();
+	Log.Check(Musket->CanFire(), TEXT("campaign read: the last cartridge is loaded"));
+	Musket->Misfire();
+	Log.Check(Musket->IsDry() && !Musket->CanFire() && !Musket->IsReloading() && !Musket->IsJammed(),
+		TEXT("campaign read: an empty box leaves the piece dry, not reloading"));
+	for (int32 i = 0; i < 80; ++i) Musket->TickActor(0.25f, LEVELTICK_All, Musket->PrimaryActorTick);
+	Log.Check(Musket->IsDry() && !Musket->CanFire(), TEXT("campaign read: a dry piece does not load itself in 20 s"));
+	Musket->Resupply(0);
+	Log.Check(Musket->IsDry(), TEXT("campaign read: an empty hand-out changes nothing"));
+	Musket->Resupply(5);
+	Log.Check(!Musket->IsDry() && Musket->IsReloading() && Musket->RoundsInBox == 4, TEXT("campaign read: a refill starts the load and leaves 4 in the box"));
+	WaitLoaded();
+	Log.Check(Musket->CanFire(), TEXT("campaign read: and the piece is loaded again"));
+	Musket->Destroy();
+}
+void RunCampaignArc(FLog& Log)
+{
+	// The game loads these two files (UPA250Subsystem::LoadSimDataFiles); without them there is no arc.
+	pa250::load_battle_rules(pa250::read_text_file(TCHAR_TO_UTF8(*UPA250Subsystem::BattleRulesPath())));
+	pa250::load_campaign_rules(pa250::read_text_file(TCHAR_TO_UTF8(*UPA250Subsystem::CampaignRulesPath())));
+	const std::vector<std::string> Errors = pa250::load_missions(pa250::read_text_file(TCHAR_TO_UTF8(*UPA250Subsystem::MissionsPath())));
+	Log.Check(pa250::campaign_rules_loaded(), TEXT("arc: campaign_rules_boston_1775.json loads"));
+	Log.Check(Errors.empty() && pa250::mission_defs().size() == 11, FString::Printf(TEXT("arc: missions_boston_1775.json loads (%d missions, %d errors)"),
+		static_cast<int32>(pa250::mission_defs().size()), static_cast<int32>(Errors.size())));
+
+	pa250::CampaignState St = pa250::load_scenario(pa250::read_text_file(TCHAR_TO_UTF8(*UPA250Subsystem::ScenarioPath())));
+	St.treaties.push_back({"ceasefire", 24 * 500, "", ""}); // a quiet map: only the rule under test moves
+	St = pa250::advance_hour(St).state;
+
+	// The tracker at the opening.
+	PA250ArcPanels::FTracker T = PA250ArcPanels::Tracker(St, FString());
+	Log.Check(T.bVisible && T.Heading == TEXT("MISSION 1 OF 6") && T.Title == TEXT("Save the stores"),
+		FString::Printf(TEXT("arc: the tracker opens on the first mission (%s / %s)"), *T.Heading, *T.Title));
+	Log.Check(!T.Goal.IsEmpty() && T.Progress.Contains(TEXT("Concord magazine still holds")) && T.Deadline.IsEmpty(),
+		FString::Printf(TEXT("arc: it shows the goal and where it stands (%s)"), *T.Progress));
+	Log.Check(!T.bCanSendForGuns && !T.bCanHaulGuns && !T.bCanReenlist, TEXT("arc: no guns and no enlistment buttons in April"));
+	{
+		UPA250Subsystem* Probe = nullptr; // target towns come from the same definitions the subsystem reads
+		(void)Probe;
+		const pa250::MissionDef& First = pa250::mission_defs().front();
+		Log.Check(First.target_provinces.size() == 1 && First.target_provinces[0] == "concord", TEXT("arc: the first mission marks Concord on the map"));
+	}
+
+	// Enlistments: the warning, and the button for a selected army.
+	{
+		pa250::CampaignState Dec = St;
+		Dec.now = pa250::GameTime{pa250::from_ymdh(pa250::campaign_rules().enlist_warning).hour_index - 1};
+		Dec = pa250::advance_hour(Dec).state;
+		const PA250ArcPanels::FTracker None = PA250ArcPanels::Tracker(Dec, FString());
+		bool bWarned = false;
+		for (const FString& N : None.Notices) bWarned |= N.Contains(TEXT("Enlistments run out")) && N.Contains(TEXT("75 gold"));
+		Log.Check(bWarned && !None.bCanReenlist, TEXT("arc: from 1 December the tracker warns that enlistments run out, with the price"));
+		const PA250ArcPanels::FTracker Mine = PA250ArcPanels::Tracker(Dec, TEXT("continental_militia"));
+		Log.Check(Mine.bCanReenlist && Mine.ReenlistCost == 75 && Mine.SelectedArmyName == TEXT("Massachusetts Militia"),
+			FString::Printf(TEXT("arc: a selected army can be re-enlisted (%d gold)"), Mine.ReenlistCost));
+		Log.Check(!PA250ArcPanels::Tracker(Dec, TEXT("british_regulars")).bCanReenlist, TEXT("arc: not the enemy's army"));
+	}
+	// The guns: sent for when the mission is open, hauled by an army standing where they lie.
+	{
+		pa250::CampaignState Guns = St;
+		Guns.progress.enlistments_expired = true;
+		Guns.progress.missions["p5_the_noble_train"].status = "active";
+		Log.Check(PA250ArcPanels::Tracker(Guns, FString()).bCanSendForGuns, TEXT("arc: the guns can be sent for while the noble train is the mission"));
+		Guns.progress.knox.status = "delivered";
+		Guns.progress.knox.province = "cambridge";
+		PA250ArcPanels::FTracker Far = PA250ArcPanels::Tracker(Guns, TEXT("continental_militia"));
+		Log.Check(!Far.bCanSendForGuns && !Far.bCanHaulGuns, TEXT("arc: an army elsewhere cannot haul the guns"));
+		Guns.armies.at("continental_militia").province = "cambridge";
+		Log.Check(PA250ArcPanels::Tracker(Guns, TEXT("continental_militia")).bCanHaulGuns, TEXT("arc: an army at Cambridge can"));
+		Guns.progress.knox.army_id = "continental_militia";
+		const PA250ArcPanels::FTracker Hauling = PA250ArcPanels::Tracker(Guns, TEXT("continental_militia"));
+		Log.Check(Hauling.bCanLeaveGuns && !Hauling.bCanHaulGuns, TEXT("arc: the army hauling them can leave them"));
+	}
+	// Headquarters lost and a siege are standing notices.
+	{
+		pa250::CampaignState Hq = St;
+		Hq.provinces.at("cambridge").owner = "british";
+		Hq.provinces.at("charlestown").siege_by = "british";
+		Hq.provinces.at("charlestown").siege_hours_remaining = 50;
+		Hq.armies.at("british_regulars").province = "charlestown"; // a siege lifts the hour its besiegers are gone
+		Hq = pa250::advance_hour(Hq).state;
+		bool bHq = false, bSiege = false;
+		for (const FString& N : PA250ArcPanels::Tracker(Hq, FString()).Notices)
+		{
+			bHq |= N.Contains(TEXT("Cambridge")) && N.Contains(TEXT("day 1 of 14"));
+			bSiege |= N.Contains(TEXT("Charlestown is besieged"));
+		}
+		Log.Check(bHq, TEXT("arc: the tracker counts the days the headquarters is lost"));
+		Log.Check(bSiege, TEXT("arc: a besieged town of yours is on the tracker"));
+	}
+	// The end screen.
+	Log.Check(!PA250ArcPanels::EndScreen(St).bDecided, TEXT("arc: no end screen while the campaign runs"));
+	{
+		pa250::CampaignState Won = St;
+		Won.provinces.at("boston").owner = "continental";
+		Won = pa250::advance_hour(Won).state;
+		const PA250ArcPanels::FEnd E = PA250ArcPanels::EndScreen(Won);
+		Log.Check(E.bDecided && E.bPlayerWon && E.Headline == TEXT("VICTORY") && E.Subline.Contains(TEXT("Patriots")) && E.Lines.Num() >= 4,
+			FString::Printf(TEXT("arc: Boston taken is a victory screen with a summary (%d lines)"), E.Lines.Num()));
+		pa250::CampaignState Lost = St;
+		Lost.player_vassal = true;
+		Lost = pa250::advance_hour(Lost).state;
+		const PA250ArcPanels::FEnd D = PA250ArcPanels::EndScreen(Lost);
+		Log.Check(D.bDecided && !D.bPlayerWon && D.Headline == TEXT("DEFEAT") && D.Lines.Num() >= 4 && D.Lines[0].Contains(TEXT("Crown")),
+			TEXT("arc: vassalage is a defeat screen that says why"));
+	}
+	Log.Check(PA250ArcPanels::TimeLeft(72) == TEXT("3 days") && PA250ArcPanels::TimeLeft(30) == TEXT("1 day") && PA250ArcPanels::TimeLeft(5) == TEXT("5 hours"),
+		TEXT("arc: time left reads in days, then hours"));
+	{
+		const pa250::WindowScore W = pa250::window_score_snapshot(St);
+		const FString Board = PA250ArcPanels::LiveScoreboard(St);
+		Log.Check(Board.Contains(TEXT("You ")) && Board.Contains(TEXT("Crown ")) && Board.Contains(TEXT(" left")) &&
+					  Board.Contains(FString::FromInt(W.patriot_towns)) && Board.Contains(FString::FromInt(W.patriot_points)),
+			FString::Printf(TEXT("arc: live scoreboard shows towns and points (%s)"), *Board));
+		pa250::CampaignState Done = St;
+		Done.progress.outcome.decided = true;
+		Log.Check(PA250ArcPanels::LiveScoreboard(Done).IsEmpty(), TEXT("arc: the scoreboard hides once the campaign is decided"));
+	}
+	pa250::unload_missions();
+	pa250::unload_campaign_rules();
+}
+void RunEconomy(FLog& Log)
+{
+	// The files the game loads (UPA250Subsystem::LoadSimDataFiles), read by the sim as Unreal compiles it.
+	pa250::load_logistics_tuning(pa250::read_text_file(TCHAR_TO_UTF8(*UPA250Subsystem::LogisticsTuningPath())));
+	pa250::load_buildings_catalog(pa250::read_text_file(TCHAR_TO_UTF8(*UPA250Subsystem::BuildingsCatalogPath())));
+	pa250::load_province_sizes(pa250::read_text_file(TCHAR_TO_UTF8(*UPA250Subsystem::ProvinceSizesPath())));
+	pa250::CampaignState St = pa250::load_scenario(pa250::read_text_file(TCHAR_TO_UTF8(*UPA250Subsystem::ScenarioPath())));
+	pa250::ensure_logistics_defaults(St);
+
+	Log.Check(St.player_gold == 120 && pa250::monthly_net_gold(St) == 21,
+		FString::Printf(TEXT("economy: the campaign opens with 120 gold and +21 a month (%d, %+d)"), St.player_gold, pa250::monthly_net_gold(St)));
+	Log.Check(pa250::enemy_monthly_net_gold(St) == 3,
+		FString::Printf(TEXT("economy: the British accounts stand where they did, +3 a month (%+d)"), pa250::enemy_monthly_net_gold(St)));
+	Log.Check(pa250::building_cost("workshop", 0) == 40 && pa250::building_cost("workshop", 1) == 100 && pa250::building_cost("workshop", 2) == 240,
+		FString::Printf(TEXT("economy: a Workshop costs 40, 100, 240 by level (%d, %d, %d)"), pa250::building_cost("workshop", 0),
+			pa250::building_cost("workshop", 1), pa250::building_cost("workshop", 2)));
+	Log.Check(pa250::building_cost("powder_mill", 0) == 50, TEXT("economy: the catalog holds the Powder Mill (50 gold)"));
+
+	// Ground rules, with the sentence the town panel prints.
+	St.player_gold = 500;
+	std::string Err;
+	pa250::start_construction(St, "lexington", "powder_mill", Err);
+	const FString Why = UTF8_TO_TCHAR(pa250::building_preview(St, "lexington", "powder_mill").c_str());
+	Log.Check(Err == "wrong_ground" && Why.Contains(TEXT("needs river or falls")),
+		FString::Printf(TEXT("economy: no Powder Mill at Lexington, and the panel says why (%s)"), *Why));
+	pa250::start_construction(St, "watertown", "powder_mill", Err);
+	Log.Check(Err.empty(), TEXT("economy: Watertown's falls take a Powder Mill"));
+	pa250::start_construction(St, "roxbury", "farm", Err);
+	Log.Check(Err == "wrong_ground", TEXT("economy: no Farm in Roxbury (no farmland)"));
+	int32 Marked = 0;
+	for (const auto& Pk : St.provinces) Marked += static_cast<int32>(Pk.second.grandfathered.size());
+	Log.Check(Marked == 0, FString::Printf(TEXT("economy: no starting building needs grandfathering (%d marked)"), Marked));
+
+	// Powder: bought only through a harbour Depot; made up into cartridges where an army forms up.
+	Log.Check(!pa250::can_buy_powder(St, "cambridge") && !pa250::can_buy_powder(St, "charlestown"),
+		TEXT("economy: no powder to buy at Cambridge (no harbour) or Charlestown (no Depot)"));
+	St.provinces.at("charlestown").depot_level = 1;
+	Log.Check(pa250::can_buy_powder(St, "charlestown"), TEXT("economy: a Depot at Charlestown opens the powder trade"));
+	const pa250::ProvinceStores& Concord = pa250::province_ledger(St, "concord");
+	Log.Check(pa250::cartridges_per_powder() == 10 && pa250::magazine_cartridges(St, "concord") == Concord.cartridges + Concord.powder * 10,
+		FString::Printf(TEXT("economy: Concord's %d powder is %d more cartridges at form-up (%d in all)"), Concord.powder, Concord.powder * 10,
+			pa250::magazine_cartridges(St, "concord")));
+}
+void RunSquad(FLog& Log)
+{
+	// The numbers come from unit_classes.json (verbs.squad).
+	Log.Check(PA250UnitClasses::LoadFromFile(PA250UnitClasses::DataPath()), TEXT("squad: unit_classes.json loads"));
+	const FPA250ClassVerbs& V = PA250UnitClasses::Verbs();
+	Log.Check(V.SquadFileMin == 6 && V.SquadFileMax == 8 && V.SquadFollowBehindM > 0.f && V.SquadLineAheadM > 0.f && V.SquadOrderSeconds > 0.f
+		&& V.SquadAimSnapM > 0.f && V.SquadAimRayM > 0.f, TEXT("squad: the file is 6 to 8 men and its distances come from the data file"));
+
+	// Who is in the file: the nearest men of his class, up to 8; made up to 6 with others when his class is short.
+	{
+		TArray<PA250Squad::FCandidate> Many;
+		for (int32 i = 0; i < 10; ++i) Many.Add({i, true, 1000.f - 50.f * i});
+		for (int32 i = 10; i < 14; ++i) Many.Add({i, false, 10.f});
+		const TArray<int32> A = PA250Squad::PickFile(Many, 6, 8);
+		Log.Check(A.Num() == 8 && A[0] == 9 && A[7] == 2 && !A.Contains(10), TEXT("squad: ten of his class on the field give a file of the 8 nearest, none of another class"));
+		TArray<PA250Squad::FCandidate> Few;
+		for (int32 i = 0; i < 3; ++i) Few.Add({i, true, 900.f});
+		for (int32 i = 3; i < 8; ++i) Few.Add({i, false, 100.f * i});
+		const TArray<int32> B = PA250Squad::PickFile(Few, 6, 8);
+		Log.Check(B.Num() == 6 && B[0] == 0 && B[2] == 2 && B[3] == 3 && B[5] == 5, TEXT("squad: three of his class are made up to 6 with the nearest other men"));
+		TArray<PA250Squad::FCandidate> Two;
+		Two.Add({0, false, 50.f});
+		Two.Add({1, false, 20.f});
+		Log.Check(PA250Squad::PickFile(Two, 6, 8).Num() == 2 && PA250Squad::PickFile({}, 6, 8).Num() == 0, TEXT("squad: a side with two men left gives a file of two; with none, no file"));
+	}
+
+	// The six orders: words for each, a shouted line for four, and where the line stands.
+	{
+		TSet<FString> Words;
+		for (const EPA250SquadOrder O : {EPA250SquadOrder::FollowMe, EPA250SquadOrder::FormLine, EPA250SquadOrder::Hold, EPA250SquadOrder::TakeCover,
+				 EPA250SquadOrder::Charge, EPA250SquadOrder::FallBack})
+		{
+			Words.Add(PA250Squad::OrderWords(O));
+		}
+		Log.Check(Words.Num() == 6 && !Words.Contains(PA250Squad::OrderWords(EPA250SquadOrder::None)), TEXT("squad: six orders, each with its own words"));
+		Log.Check(FString(PA250Squad::OrderVoiceKey(EPA250SquadOrder::FollowMe)) == TEXT("follow_me") && FString(PA250Squad::OrderVoiceKey(EPA250SquadOrder::Charge)) == TEXT("charge_bayonets")
+			&& FString(PA250Squad::OrderVoiceKey(EPA250SquadOrder::FallBack)) == TEXT("fall_back") && PA250Squad::OrderVoiceKey(EPA250SquadOrder::TakeCover) == nullptr,
+			TEXT("squad: follow me, charge bayonets and fall back are shouted"));
+		const FVector Leader(1000.f, 0.f, 90.f), Facing(1.f, 0.f, 0.f), Point(5000.f, 200.f, 90.f), Here(300.f, 300.f, 90.f);
+		Log.Check(PA250Squad::LedAnchor(EPA250SquadOrder::FollowMe, Leader, Facing, Point, Here, 300.f).Equals(FVector(700.f, 0.f, 90.f), 0.1f),
+			TEXT("squad: follow me forms the line 3 m behind the leader"));
+		Log.Check(PA250Squad::LedAnchor(EPA250SquadOrder::FormLine, Leader, Facing, Point, Here, 300.f).Equals(Point, 0.1f)
+			&& PA250Squad::LedAnchor(EPA250SquadOrder::Hold, Leader, Facing, Point, Here, 300.f).Equals(Point, 0.1f)
+			&& PA250Squad::LedAnchor(EPA250SquadOrder::TakeCover, Leader, Facing, Point, Here, 300.f).Equals(Point, 0.1f)
+			&& PA250Squad::LedAnchor(EPA250SquadOrder::FallBack, Leader, Facing, Point, Here, 300.f).Equals(Point, 0.1f),
+			TEXT("squad: form line, hold, take cover and fall back stand on the point given"));
+		Log.Check(PA250Squad::LedAnchor(EPA250SquadOrder::None, Leader, Facing, Point, Here, 300.f).Equals(Here, 0.1f)
+			&& PA250Squad::LedAnchor(EPA250SquadOrder::Charge, Leader, Facing, Point, Here, 300.f).Equals(Here, 0.1f),
+			TEXT("squad: without an order, and in a charge, the line is where it is"));
+	}
+
+	// The leader's volley: his aim makes ready and presents, and the line waits there for his shot.
+	{
+		bool bFire = false;
+		Log.Check(PA250Squad::LedVolleyNext(EVolleyCall::None, true, false, false, true, 0.f, bFire) == EVolleyCall::MakeReady && !bFire,
+			TEXT("squad: holding aim with loaded men calls make ready"));
+		Log.Check(PA250Squad::LedVolleyNext(EVolleyCall::None, true, false, false, false, 0.f, bFire) == EVolleyCall::None,
+			TEXT("squad: no make ready while nobody in the file is loaded"));
+		Log.Check(PA250Squad::LedVolleyNext(EVolleyCall::MakeReady, true, false, false, true, 0.4f, bFire) == EVolleyCall::MakeReady
+			&& PA250Squad::LedVolleyNext(EVolleyCall::MakeReady, true, false, false, true, 0.f, bFire) == EVolleyCall::Present,
+			TEXT("squad: make ready runs its time, then present"));
+		Log.Check(PA250Squad::LedVolleyNext(EVolleyCall::MakeReady, true, true, false, true, 0.4f, bFire) == EVolleyCall::MakeReady && !bFire,
+			TEXT("squad: his shot before the line is presented fires nobody"));
+		Log.Check(PA250Squad::LedVolleyNext(EVolleyCall::Present, true, false, false, true, 0.f, bFire) == EVolleyCall::Present && !bFire,
+			TEXT("squad: a presented line waits for his shot however long he holds his aim"));
+		Log.Check(PA250Squad::LedVolleyNext(EVolleyCall::Present, true, true, false, true, 0.f, bFire) == EVolleyCall::Fire && bFire,
+			TEXT("squad: his shot fires the presented line"));
+		Log.Check(PA250Squad::LedVolleyNext(EVolleyCall::Fire, false, false, true, false, 0.f, bFire) == EVolleyCall::Fire && !bFire
+			&& PA250Squad::LedVolleyNext(EVolleyCall::Fire, true, false, false, false, 0.f, bFire) == EVolleyCall::None,
+			TEXT("squad: the volley runs out its shots, then the line is at rest"));
+		Log.Check(PA250Squad::LedVolleyNext(EVolleyCall::Present, false, false, false, true, 0.f, bFire) == EVolleyCall::None && !bFire,
+			TEXT("squad: lowering his aim recovers arms without a shot"));
+	}
+
+	// Where he is aiming: the man on his line of sight, not the ground far behind him.
+	{
+		const FVector Eye(0.f, 0.f, 160.f), Ground(9000.f, 0.f, 0.f);
+		TArray<FVector> Foes = {FVector(6000.f, 120.f, 90.f), FVector(3000.f, 900.f, 90.f), FVector(7000.f, -50.f, 90.f)};
+		Log.Check(APA250BattleGameMode::ResolveLeaderAim(Eye, Ground, Foes, 200.f).Equals(Foes[0], 0.1f),
+			TEXT("squad: his aim is the nearest man within 2 m of his line of sight"));
+		Log.Check(APA250BattleGameMode::ResolveLeaderAim(Eye, Ground, {FVector(3000.f, 900.f, 90.f)}, 200.f).Equals(Ground, 0.1f)
+			&& APA250BattleGameMode::ResolveLeaderAim(Eye, Ground, {}, 200.f).Equals(Ground, 0.1f),
+			TEXT("squad: with nobody on his line of sight his aim is the point it strikes"));
+	}
+
+	// The HUD line: how many are loaded, the order, and that his shot fires the presented.
+	{
+		const FString Idle = APA250BattleGameMode::FileLineText(7, 5, 0, PA250Squad::OrderWords(EPA250SquadOrder::FollowMe), true);
+		const FString Ready = APA250BattleGameMode::FileLineText(7, 5, 5, PA250Squad::OrderWords(EPA250SquadOrder::Hold), true);
+		const FString Skirmish = APA250BattleGameMode::FileLineText(6, 6, 0, PA250Squad::OrderWords(EPA250SquadOrder::TakeCover), false);
+		Log.Check(Idle.Contains(TEXT("7 men, 5 loaded")) && Idle.Contains(TEXT("Follow me")) && Idle.Contains(TEXT("hold aim to make ready")) && Idle.Contains(TEXT("5 charge")),
+			FString::Printf(TEXT("squad: the HUD shows the men, the loaded, the order and the keys (%s)"), *Idle.Replace(TEXT("\n"), TEXT(" | "))));
+		Log.Check(Ready.Contains(TEXT("5 PRESENTED")) && Ready.Contains(TEXT("your shot fires them")), TEXT("squad: the HUD says when his shot will fire the line"));
+		Log.Check(Skirmish.Contains(TEXT("fire at will on your man")) && !Skirmish.Contains(TEXT("make ready")), TEXT("squad: militia, rifles and light infantry are told they fire at will on his target"));
+		Log.Check(APA250BattleGameMode::FileLineText(1, 0, 0, TEXT("Hold this ground"), true).Contains(TEXT("1 man,")) && APA250BattleGameMode::FileLineText(0, 0, 0, TEXT(""), true).Contains(TEXT("no men left")),
+			TEXT("squad: one man is a man; none is said plainly"));
+	}
+
+	// Which classes volley on his shot and which fire at will: the tactical role, as for the bots.
+	{
+		const UPA250CombatProfiles* Pr = UPA250CombatProfiles::MakeRuntimeDefaults();
+		Log.Check(!Pr->RoleFor(TEXT("british"), TEXT("line_infantry")).bIndividualFire && !Pr->RoleFor(TEXT("continental"), TEXT("line_infantry")).bIndividualFire,
+			TEXT("squad: line infantry present and fire by volley"));
+		Log.Check(Pr->RoleFor(TEXT("continental"), TEXT("militia")).bIndividualFire && Pr->RoleFor(TEXT("continental"), TEXT("rifleman")).bIndividualFire
+			&& Pr->RoleFor(TEXT("british"), TEXT("light_infantry")).bIndividualFire, TEXT("squad: militia, rifles and light infantry fire at will"));
+	}
+
+	// A man's order from his squad: nothing of the leader's unless a leader set it.
+	{
+		const FPA250FormationOrder O;
+		Log.Check(!O.bFocusContact && !O.bAimAtPoint && !O.bHoldFire, TEXT("squad: a bot's order carries no leader's aim by default"));
+	}
+}
+
+void RunWorks(FLog& Log)
+{
+	pa250::load_battle_rules(pa250::read_text_file(TCHAR_TO_UTF8(*UPA250Subsystem::BattleRulesPath())));
+	const pa250::BattleRules R = pa250::battle_rules();
+	Log.Check(pa250::battle_rules_loaded() && R.cover_snap_cm > 0.f && R.works_breastwork_length_cm > 0.f && R.works_breastwork_health > 0.f
+		&& R.works_redoubt_health > R.works_breastwork_health && R.works_breastwork_slots >= 4, TEXT("works: sizes, strengths and places come from battle_rules.json"));
+	// A breastwork is something a man fires over: above his chest, below his shoulder.
+	Log.Check(R.works_breastwork_height_cm > 90.f + PA250Cover::ChestOffsetCm && R.works_breastwork_height_cm < 90.f + PA250Cover::FiringOffsetCm
+		&& R.works_redoubt_height_cm < 90.f + PA250Cover::FiringOffsetCm,
+		FString::Printf(TEXT("works: a bank (%.0f cm) stops a ball at the chest (90) and leaves the shoulder (145) clear"), R.works_breastwork_height_cm));
+
+	// The fire-over stance: down while he loads, up while he presents.
+	Log.Check(PA250Cover::FireOverDown(true, true, false, false) && !PA250Cover::FireOverDown(true, true, true, false)
+		&& !PA250Cover::FireOverDown(true, false, false, false) && !PA250Cover::FireOverDown(false, true, false, false)
+		&& !PA250Cover::FireOverDown(true, true, false, true),
+		TEXT("works: behind cover a man kneels to load, rises to present, and does not kneel in the open or on the run"));
+	// Bots at a covered place: the same stance (down unless loaded with a target in sight).
+	Log.Check(PA250ShouldDuck(true, true, false, true, false, false) && !PA250ShouldDuck(true, true, true, true, false, false)
+		&& !PA250ShouldDuck(false, true, false, true, false, false) && !PA250ShouldDuck(true, true, false, true, false, true),
+		TEXT("works: a bot behind cover is down while loading and up to fire; never down in a charge"));
+
+	// What stands at the start, by fortification level: breastworks, and a redoubt for a Fort at its highest.
+	{
+		TArray<int32> Breast, Redoubt;
+		for (const int N : R.works_breastworks_by_level) Breast.Add(N);
+		for (const int N : R.works_redoubts_by_level) Redoubt.Add(N);
+		Log.Check(PA250Works::CountForLevel(Breast, 0) == 0 && PA250Works::CountForLevel(Redoubt, 0) == 0, TEXT("works: no fortification, no works standing"));
+		Log.Check(PA250Works::CountForLevel(Breast, 1) > 0 && PA250Works::CountForLevel(Redoubt, 1) == 0
+			&& PA250Works::CountForLevel(Breast, 2) >= PA250Works::CountForLevel(Breast, 1) && PA250Works::CountForLevel(Redoubt, 2) == 0,
+			TEXT("works: levels 1 and 2 give breastworks and no redoubt"));
+		Log.Check(PA250Works::CountForLevel(Redoubt, 3) == 1 && PA250Works::CountForLevel(Breast, 3) > 0 && PA250Works::CountForLevel(Redoubt, 7) == 1,
+			TEXT("works: the highest level gives a redoubt as well"));
+		Log.Check(PA250Works::CountForLevel(Breast, 2) <= R.works_breastwork_slots, TEXT("works: there is a place for every breastwork a level stands"));
+	}
+
+	// How far a work stands: what is built of it, less what is battered away; cover from 60 %.
+	Log.Check(FMath::IsNearlyEqual(PA250Works::StandingShare(1.f, 300.f, 300.f), 1.f) && FMath::IsNearlyEqual(PA250Works::StandingShare(0.5f, 150.f, 300.f), 0.25f)
+		&& PA250Works::StandingShare(0.f, 300.f, 300.f) == 0.f, TEXT("works: a work stands to what is built of it less what is battered away"));
+	Log.Check(PA250Works::GivesCover(1.f, 300.f, 300.f, R.works_cover_built_share) && !PA250Works::GivesCover(0.5f, 300.f, 300.f, R.works_cover_built_share)
+		&& !PA250Works::GivesCover(1.f, 150.f, 300.f, R.works_cover_built_share) && PA250Works::GivesCover(0.7f, 300.f, 300.f, R.works_cover_built_share),
+		TEXT("works: a bank is cover once it stands to 60 % of its height, and not when half battered down"));
+
+	// Places made up about a post when the level has none marked.
+	{
+		TArray<FVector> Places, Fronts;
+		const FVector Post(1000.f, 2000.f, 0.f), Enemy(1.f, 0.f, 0.f);
+		PA250Works::RingSlots(Post, Enemy, R.works_slot_ring_cm, 6, R.works_breastwork_length_cm + 160.f, Places, Fronts);
+		bool bRing = Places.Num() == 6 && Fronts.Num() == 6;
+		float MinGap = TNumericLimits<float>::Max();
+		for (int32 i = 0; i < Places.Num(); ++i)
+		{
+			bRing &= FMath::IsNearlyEqual(FVector::Dist2D(Places[i], Post), R.works_slot_ring_cm, 1.f);
+			bRing &= FVector::DotProduct(Fronts[i], Enemy) > 0.f; // every bank fronts the way the enemy comes
+			for (int32 j = i + 1; j < Places.Num(); ++j) MinGap = FMath::Min(MinGap, FVector::Dist2D(Places[i], Places[j]));
+		}
+		Log.Check(bRing && Places[0].Equals(Post + Enemy * R.works_slot_ring_cm, 1.f), TEXT("works: six made-up places stand on an arc toward the enemy, the first on his line of advance"));
+		Log.Check(MinGap > R.works_breastwork_length_cm, FString::Printf(TEXT("works: banks on the arc do not overlap (%.0f cm apart, %.0f long)"), MinGap, R.works_breastwork_length_cm));
+	}
+
+	// Whoever defends a post mans its works: the line among the work anchors, on the friendly side.
+	{
+		const FVector Post(0.f, 0.f, 0.f), EnemyRear(20000.f, 0.f, 0.f), OwnRear(-20000.f, 0.f, 0.f);
+		const TArray<FVector> WorksAt = {FVector(1400.f, 0.f, 0.f), FVector(1300.f, 520.f, 0.f), FVector(9000.f, 0.f, 0.f)};
+		FVector Pick, Second;
+		const bool bFirst = UPA250VolleyCoordinator::PickLine(WorksAt, Post, EnemyRear, OwnRear, R.works_man_radius_cm, R.works_breastwork_length_cm, {}, Pick);
+		const bool bNext = UPA250VolleyCoordinator::PickLine(WorksAt, Post, EnemyRear, OwnRear, R.works_man_radius_cm, R.works_breastwork_length_cm, {Pick}, Second);
+		Log.Check(bFirst && Pick.X < 1400.f && Pick.X > 1100.f && FMath::Abs(Pick.Y) < 1.f, TEXT("works: the first squad stands behind the bank on the enemy's line of advance"));
+		Log.Check(bNext && Second.Y > 400.f, TEXT("works: the next squad takes the next bank, not the same one"));
+		FVector None;
+		Log.Check(!UPA250VolleyCoordinator::PickLine({FVector(9000.f, 0.f, 0.f)}, Post, EnemyRear, OwnRear, R.works_man_radius_cm, R.works_breastwork_length_cm, {}, None),
+			TEXT("works: a work beyond the manning radius is not this post's"));
+	}
+
+	// The sapper: a class of both sides, with its verb values in the data file.
+	Log.Check(PA250UnitClasses::LoadFromFile(PA250UnitClasses::DataPath()), TEXT("works: unit_classes.json loads with the sapper in it"));
+	Log.Check(PA250UnitClasses::KitFor(TEXT("continental"), TEXT("sapper")).bBuildsWorks && PA250UnitClasses::KitFor(TEXT("british"), TEXT("sapper")).bBuildsWorks
+		&& !PA250UnitClasses::KitFor(TEXT("british"), TEXT("line_infantry")).bBuildsWorks, TEXT("works: sappers of both sides build works; nobody else does"));
+	Log.Check(!FString(PA250UnitClasses::KitFor(TEXT("continental"), TEXT("sapper")).Role).IsEmpty() && FString(PA250UnitClasses::KitFor(TEXT("british"), TEXT("sapper")).Label) == TEXT("Pioneer"),
+		TEXT("works: the sapper has a one-line role for the class picker (the British call him a pioneer)"));
+	const FPA250ClassVerbs& V = PA250UnitClasses::Verbs();
+	Log.Check(V.SapperBuildSeconds > 0.f && V.SapperReachM > 0.f && V.SapperSeekM > V.SapperReachM && V.SapperBurstSeconds > 0.f, TEXT("works: the sapper's labour is timed in the data file"));
+	Log.Check(PA250UnitClasses::RequiredClasses(TEXT("british")).Contains(FName(TEXT("sapper"))) && PA250UnitClasses::DisplayOrder().Contains(FName(TEXT("sapper"))),
+		TEXT("works: the class picker and the data check know the sapper"));
+}
+
+void RunSupport(FLog& Log)
+{
+	Log.Check(PA250UnitClasses::LoadFromFile(PA250UnitClasses::DataPath()), TEXT("support: unit_classes.json loads with the three roles in it"));
+	const FPA250ClassVerbs& V = PA250UnitClasses::Verbs();
+	for (const TCHAR* F : {TEXT("british"), TEXT("continental")})
+	{
+		const FPA250UnitClassKit& E = PA250UnitClasses::KitFor(F, TEXT("ensign"));
+		const FPA250UnitClassKit& M = PA250UnitClasses::KitFor(F, TEXT("musician"));
+		const FPA250UnitClassKit& S = PA250UnitClasses::KitFor(F, TEXT("surgeon"));
+		Log.Check(E.bCarriesColours && M.bRelaysOrders && S.bTendsWounded && !E.bRelaysOrders && !M.bTendsWounded && !S.bCarriesColours,
+			FString::Printf(TEXT("support: %s ensign, musician and surgeon each have their own verb"), F));
+		Log.Check(E.MaxOnField == 1 && M.MaxOnField == 1 && S.MaxOnField == 1, FString::Printf(TEXT("support: %s fields one of each at a time"), F));
+		Log.Check(!FString(E.Role).IsEmpty() && !FString(M.Role).IsEmpty() && !FString(S.Role).IsEmpty() && !FString(E.Label).IsEmpty(),
+			FString::Printf(TEXT("support: %s roles have a one-line role for the class picker"), F));
+		Log.Check(PA250UnitClasses::RequiredClasses(F).Contains(FName(TEXT("ensign"))) && PA250UnitClasses::RequiredClasses(F).Contains(FName(TEXT("surgeon")))
+			&& PA250UnitClasses::RequiredClasses(F).Contains(FName(TEXT("musician"))), FString::Printf(TEXT("support: the data check requires the %s roles"), F));
+	}
+	Log.Check(PA250UnitClasses::KitFor(TEXT("british"), TEXT("line_infantry")).MaxOnField == 0, TEXT("support: the line has no cap on the field"));
+	Log.Check(V.EnsignRadiusM > 0.f && V.EnsignRallyScale > 0.f && V.EnsignRallyScale < 1.f && V.ColoursFallPressure > 0.f && V.ColoursCaptureSeconds > 0.f
+		&& V.MusicianRelayM > 0.f && V.MusicianCadenceScale < 1.f && V.SurgeonWindowSeconds > V.SurgeonTreatSeconds, TEXT("support: every value comes from the data file"));
+
+	// One of each at a time, whatever the army has of them.
+	Log.Check(PA250Support::ClassHasFieldRoom(0, 1) && !PA250Support::ClassHasFieldRoom(1, 1) && PA250Support::ClassHasFieldRoom(40, 0),
+		TEXT("support: a capped class takes the field one at a time; an uncapped one as the army has men"));
+
+	// Ensign: squads near the flying colours rally sooner.
+	Log.Check(FMath::IsNearlyEqual(PA250Support::RallySecondsNearColours(12.f, true, V.EnsignRallyScale), 12.f * V.EnsignRallyScale)
+		&& FMath::IsNearlyEqual(PA250Support::RallySecondsNearColours(12.f, false, V.EnsignRallyScale), 12.f),
+		TEXT("support: near the colours a routing squad rallies in half the time; away from them, as ever"));
+	{
+		// The morale machine with the shorter calm: rallying begins sooner near the colours.
+		FPA250MoraleState Near, Far;
+		Near.Set(EPA250Morale::Routing);
+		Far.Set(EPA250Morale::Routing);
+		const float Usual = 12.f;
+		float NearAt = -1.f, FarAt = -1.f;
+		for (int32 i = 1; i <= 200; ++i)
+		{
+			const float T = i * 0.1f;
+			if (NearAt < 0.f && Near.Tick(0.1f, 0.f, 1.f, PA250Support::RallySecondsNearColours(Usual, true, V.EnsignRallyScale), 5.f, false, false) && Near.State == EPA250Morale::Rallying) NearAt = T;
+			if (FarAt < 0.f && Far.Tick(0.1f, 0.f, 1.f, Usual, 5.f, false, false) && Far.State == EPA250Morale::Rallying) FarAt = T;
+		}
+		Log.Check(NearAt > 0.f && FarAt > 0.f && NearAt < FarAt - 1.f, FString::Printf(TEXT("support: a rout near the colours rallies at %.1f s, away from them at %.1f s"), NearAt, FarAt));
+	}
+
+	// Musician: an order carries on through him; without him only an officer reaches other lines.
+	{
+		const FVector Giver(0.f, 0.f, 0.f), NearLine(2000.f, 0.f, 0.f), FarLine(6000.f, 0.f, 0.f), VeryFar(12000.f, 0.f, 0.f);
+		const float Own = V.OrderRadiusM * 100.f, Relay = V.MusicianRelayM * 100.f;
+		bool bRelayed = false;
+		Log.Check(PA250Support::OrderReaches(Giver, NearLine, true, Own, {}, Relay, &bRelayed) && !bRelayed, TEXT("support: an officer's word reaches a line 20 m off by itself"));
+		Log.Check(!PA250Support::OrderReaches(Giver, FarLine, true, Own, {}, Relay), TEXT("support: without a musician it does not reach a line 60 m off"));
+		Log.Check(PA250Support::OrderReaches(Giver, FarLine, true, Own, {FVector(2500.f, 0.f, 0.f)}, Relay, &bRelayed) && bRelayed, TEXT("support: through a musician 25 m from him it does"));
+		Log.Check(!PA250Support::OrderReaches(Giver, FarLine, true, Own, {FVector(5000.f, 0.f, 0.f)}, Relay), TEXT("support: a musician who cannot hear the order relays nothing"));
+		Log.Check(!PA250Support::OrderReaches(Giver, VeryFar, true, Own, {FVector(2500.f, 0.f, 0.f)}, Relay), TEXT("support: the relay has its own limit"));
+		Log.Check(!PA250Support::OrderReaches(Giver, NearLine, false, Own, {}, Relay) && PA250Support::OrderReaches(Giver, NearLine, false, Own, {FVector(1000.f, 0.f, 0.f)}, Relay),
+			TEXT("support: a leader who is no officer reaches another line only through a musician"));
+		Log.Check(FMath::IsNearlyEqual(PA250Support::CadenceReloadScale(true, true, V.MusicianCadenceScale), V.MusicianCadenceScale)
+			&& PA250Support::CadenceReloadScale(false, true, V.MusicianCadenceScale) == 1.f && PA250Support::CadenceReloadScale(true, false, V.MusicianCadenceScale) == 1.f,
+			TEXT("support: volley-role men load in cadence near a musician; skirmishers and men out of earshot do not"));
+	}
+
+	// Surgeon: a man he saves is wounded, outside the ratio; the window closes.
+	{
+		Log.Check(PA250Support::CanStillBeSaved(100.f, 100.f + V.SurgeonWindowSeconds, V.SurgeonWindowSeconds) && !PA250Support::CanStillBeSaved(100.f, 101.f + V.SurgeonWindowSeconds, V.SurgeonWindowSeconds),
+			TEXT("support: a fallen man can be saved until the window closes"));
+		pa250::load_battle_rules(pa250::read_text_file(TCHAR_TO_UTF8(*UPA250Subsystem::BattleRulesPath())));
+		TMap<FName, TMap<FName, int32>> Deaths, Gave, Saved;
+		Deaths.FindOrAdd(TEXT("continental")).Add(TEXT("militia"), 10);
+		const auto Plain = APA250BattleGameMode::CasualtiesFromLedger(Deaths, Gave);
+		Saved.FindOrAdd(TEXT("continental")).Add(TEXT("militia"), 4);
+		const auto With = APA250BattleGameMode::CasualtiesFromLedger(Deaths, Gave, Saved);
+		const pa250::MenDown A = Plain.at("continental").at("militia"), B = With.at("continental").at("militia");
+		Log.Check(A.total() == 10 && B.total() == 10 && B.killed < A.killed && B.wounded == pa250::split_fallen(6).wounded + 4,
+			FString::Printf(TEXT("support: of 10 fallen, 4 saved by the surgeon are wounded and the ratio shares the other 6 (%d killed without him, %d with)"), A.killed, B.killed));
+		Saved.FindOrAdd(TEXT("continental")).Add(TEXT("militia"), 99);
+		Log.Check(APA250BattleGameMode::CasualtiesFromLedger(Deaths, Gave, Saved).at("continental").at("militia").wounded == 10, TEXT("support: he cannot save more men than fell"));
+	}
+
+	// Colours taken go into the result and move Support (the sim applies them).
+	{
+		pa250::CampaignState St = pa250::load_scenario(pa250::read_text_file(TCHAR_TO_UTF8(*UPA250Subsystem::ScenarioPath())));
+		St.armies.at("british_regulars").province = "lexington";
+		St.armies.at("continental_militia").province = "lexington";
+		St.armies.at("british_regulars").units["ensign"] = 1;
+		St.pending_battle = {true, "lexington", "british_regulars", "continental_militia"};
+		pa250::BattleResult R;
+		R.province_id = "lexington";
+		R.winner = "continental";
+		R.end_reason = "army_broke";
+		R.colours_captured["continental"] = 1;
+		const pa250::CampaignState After = pa250::apply_battle_result(St, R);
+		const PA250BattleCards::FAfter Card = PA250BattleCards::AfterBattle(After.progress.last_battle_report, After);
+		bool bLine = false;
+		for (const FString& L : Card.MapChanges) bLine |= L.Contains(TEXT("took 1 colour"));
+		Log.Check(After.progress.last_battle_report.colours_captured.count("continental") == 1 && After.local_support == St.local_support + 5 + pa250::battle_rules().colours_support_per_capture && bLine,
+			TEXT("support: colours the player takes are on the report and the card, and raise Support (with the defender's +5)"));
+	}
+}
+
+void RunModes(FLog& Log)
+{
+	pa250::load_battle_rules(pa250::read_text_file(TCHAR_TO_UTF8(*UPA250Subsystem::BattleRulesPath())));
+	const pa250::BattleRules& R = pa250::battle_rules();
+	Log.Check(R.assault_seconds_per_post > 0.f && R.assault_garrison_share_pct > 0 && R.landing_boats >= 1 && R.landing_men_per_boat >= 1 && R.landing_boat_speed_cm > 0.f
+		&& R.landing_row_out_m > 0.f && R.mode_assault_min_fort == 1, TEXT("modes: the assault and landing values come from battle_rules.json"));
+	// The sim chooses; the battle only reads.
+	Log.Check(pa250::choose_battle_mode("lexington_common", "road", {"farmland"}, 0) == "conquest" && pa250::choose_battle_mode("lexington_common", "neck", {"harbor"}, 1) == "assault"
+		&& pa250::choose_battle_mode("lexington_common", "boat", {"harbor"}, 2) == "landing" && pa250::choose_battle_mode("concord_bridge", "boat", {"harbor"}, 2) == "conquest",
+		TEXT("modes: the sim's rule gives conquest, assault, landing, and conquest for the bridge fight"));
+	const FPA250ScenarioFight Open = APA250BattleGameMode::ResolveScenario(TEXT("lexington_common"), {}, TEXT("conquest"));
+	const FPA250ScenarioFight Assault = APA250BattleGameMode::ResolveScenario(TEXT("lexington_common"), {}, TEXT("assault"));
+	const FPA250ScenarioFight Landing = APA250BattleGameMode::ResolveScenario(TEXT("lexington_common"), {TEXT("harbor")}, TEXT("landing"));
+	const FPA250ScenarioFight Bridge = APA250BattleGameMode::ResolveScenario(TEXT("concord_bridge"), {TEXT("bridge_crossing")}, TEXT("assault"));
+	const FPA250ScenarioFight Junk = APA250BattleGameMode::ResolveScenario(TEXT("lexington_common"), {}, TEXT("something_else"));
+	Log.Check(Open.Mode == TEXT("conquest") && Assault.Mode == TEXT("assault") && Landing.Mode == TEXT("landing") && Bridge.Mode == TEXT("conquest") && Bridge.bContestSingleCrossing
+		&& Junk.Mode == TEXT("conquest"), TEXT("modes: the battle reads the setup's mode; the bridge fight and an unknown word stay conquest"));
+	Log.Check(APA250BattleGameMode::UsesPostBleed(Open) && !APA250BattleGameMode::UsesPostBleed(Assault) && APA250BattleGameMode::UsesPostBleed(Landing),
+		TEXT("modes: an assault is not worn down for posts; the open fight and a landing made good are"));
+
+	// Three posts in a row; the attacker starts west of them.
+	const TArray<FVector> Where = {FVector(6000.f, 0.f, 0.f), FVector(1000.f, 0.f, 0.f), FVector(3500.f, 200.f, 0.f)};
+	const TArray<int32> Order = PA250Modes::AttackOrder(Where, FVector(-4000.f, 0.f, 0.f));
+	Log.Check(Order.Num() == 3 && Order[0] == 1 && Order[1] == 2 && Order[2] == 0, TEXT("modes: posts are ordered from the attacker's start, nearest first"));
+	const FName A(TEXT("british")), D(TEXT("continental"));
+	{
+		TArray<FName> H = {D, D, D};
+		TArray<bool> L = PA250Modes::LockedPosts(TEXT("assault"), Order, H, A, false);
+		Log.Check(PA250Modes::OpenPost(Order, H, A) == 1 && !L[1] && L[0] && L[2], TEXT("modes: an assault opens with only the nearest post open to contest"));
+		H[1] = A;
+		L = PA250Modes::LockedPosts(TEXT("assault"), Order, H, A, false);
+		Log.Check(PA250Modes::OpenPost(Order, H, A) == 2 && L[1] && !L[2] && L[0] && PA250Modes::PostsCarried(H, A) == 1,
+			TEXT("modes: a post carried stays the attacker's and the next one opens"));
+		H[2] = A;
+		H[0] = A;
+		Log.Check(PA250Modes::OpenPost(Order, H, A) == INDEX_NONE && PA250Modes::PostsCarried(H, A) == 3, TEXT("modes: with the last post carried nothing is left to take"));
+		Log.Check(PA250Modes::AssaultWinnerAtTimeLimit(D) == D, TEXT("modes: when an assault's clock runs out the defender has held"));
+	}
+	{
+		TArray<FName> H = {D, D, D};
+		TArray<bool> L = PA250Modes::LockedPosts(TEXT("landing"), Order, H, A, false);
+		Log.Check(!L[1] && L[0] && L[2], TEXT("modes: before the landing is made good only the landing post can be taken"));
+		L = PA250Modes::LockedPosts(TEXT("landing"), Order, H, A, true);
+		Log.Check(!L[0] && !L[1] && !L[2], TEXT("modes: once the landing post has been held every post is open, and stays open"));
+		L = PA250Modes::LockedPosts(TEXT("conquest"), Order, H, A, false);
+		Log.Check(!L[0] && !L[1] && !L[2], TEXT("modes: the open fight closes nothing"));
+	}
+	// Boats: abreast, the same distance out, each rowing straight in.
+	{
+		const FVector Place(0.f, 0.f, 0.f), Sea(0.f, 1.f, 0.f);
+		FVector S0, B0, S1, B1, S2, B2;
+		PA250Modes::BoatCourse(0, 3, Place, Sea, 900.f, R.landing_row_out_m * 100.f, S0, B0);
+		PA250Modes::BoatCourse(1, 3, Place, Sea, 900.f, R.landing_row_out_m * 100.f, S1, B1);
+		PA250Modes::BoatCourse(2, 3, Place, Sea, 900.f, R.landing_row_out_m * 100.f, S2, B2);
+		Log.Check(B1.Equals(Place) && FMath::IsNearlyEqual(FVector::Dist(B0, B2), 1800.f) && FMath::IsNearlyEqual(FVector::Dist(S1, B1), R.landing_row_out_m * 100.f)
+			&& FMath::IsNearlyEqual((S0 - B0).GetSafeNormal() | Sea, 1.f), TEXT("modes: three boats land abreast 9 m apart, each rowed straight in from the same distance out"));
+	}
+	// The level: a landing is fought on the harbour level when it is built, else on the common.
+	{
+		const FName Harbor = UPA250Subsystem::BattleLevelFor(TEXT("lexington_common"), TEXT("landing"));
+		const bool bBuilt = FPackageName::DoesPackageExist(TEXT("/Game/PA250/Maps/L_Harbor"));
+		Log.Check(Harbor == (bBuilt ? FName(TEXT("/Game/PA250/Maps/L_Harbor")) : UPA250Subsystem::BattleLevelForPreset(TEXT("lexington_common"))),
+			FString::Printf(TEXT("modes: a landing plays on %s"), *Harbor.ToString()));
+		Log.Check(UPA250Subsystem::BattleLevelFor(TEXT("concord_bridge"), TEXT("landing")) == UPA250Subsystem::BattleLevelForPreset(TEXT("concord_bridge"))
+			&& UPA250Subsystem::BattleLevelFor(TEXT("lexington_common"), TEXT("assault")) == UPA250Subsystem::BattleLevelForPreset(TEXT("lexington_common")),
+			TEXT("modes: the bridge fight keeps its level; an assault is fought on the town's own ground"));
+	}
+	// The card says what kind of fight it is, in words.
+	{
+		pa250::CampaignState St = pa250::load_scenario(pa250::read_text_file(TCHAR_TO_UTF8(*UPA250Subsystem::ScenarioPath())));
+		St.armies.at("british_regulars").province = "dorchester";
+		St.armies.at("british_regulars").previous_province = "boston";
+		St.armies.at("continental_militia").province = "dorchester";
+		St.pending_battle = {true, "dorchester", "british_regulars", "continental_militia"};
+		const pa250::BattleSetup Land = pa250::build_battle_setup(St, "dorchester");
+		const FString Line = PA250BattleCards::ModeLine(Land);
+		Log.Check(Land.mode == "landing" && Line.Contains(TEXT("British attack")) && Line.Contains(TEXT("landing from the boats")) && !Line.Contains(TEXT("_")),
+			FString::Printf(TEXT("modes: a British attack on Dorchester from Boston is a landing, and the card says so (%s)"), *Line));
+		St.armies.at("british_regulars").province = "charlestown";
+		St.armies.at("british_regulars").previous_province = "medford";
+		St.armies.at("continental_militia").province = "charlestown";
+		St.pending_battle = {true, "charlestown", "british_regulars", "continental_militia"};
+		const pa250::BattleSetup Storm = pa250::build_battle_setup(St, "charlestown");
+		Log.Check(Storm.mode == "assault" && PA250BattleCards::ModeLine(Storm).Contains(TEXT("assault on the works")), TEXT("modes: Charlestown by the neck is an assault on its works"));
+	}
+}
+
+void RunGunnery(FLog& Log)
+{
+	Log.Check(PA250UnitClasses::LoadFromFile(PA250UnitClasses::DataPath()), TEXT("guns: unit_classes.json loads with the gunner in it"));
+	const std::string RulesText = pa250::read_text_file(TCHAR_TO_UTF8(*UPA250Subsystem::BattleRulesPath()));
+	Log.Check(RulesText.find("\"cannon\"") != std::string::npos && RulesText.find("\"guns\"") != std::string::npos, TEXT("guns: battle_rules.json has the guns and cannon blocks"));
+	pa250::load_battle_rules(RulesText);
+	const pa250::BattleRules& R = pa250::battle_rules();
+	Log.Check(R.guns_crew_class == "artilleryman" && R.guns_crew_units_per_gun == 1 && R.cannon_crew_men == 4 && R.cannon_min_crew == 2
+		&& FMath::IsNearlyEqual(R.cannon_length_cm, 333.f) && R.cannon_round_range_m > R.cannon_canister_range_m && R.cannon_works_damage > 0.f,
+		TEXT("guns: the values are the file's (crew of 4, 2 can still work it, the mesh's own 333 cm)"));
+	for (const TCHAR* F : {TEXT("british"), TEXT("continental")})
+	{
+		const FPA250UnitClassKit& G = PA250UnitClasses::KitFor(F, TEXT("artilleryman"));
+		Log.Check(G.bServesGuns && !G.bBuildsWorks && !G.bTendsWounded && !FString(G.Role).IsEmpty() && !FString(G.Label).IsEmpty()
+			&& PA250UnitClasses::RequiredClasses(F).Contains(FName(TEXT("artilleryman"))), FString::Printf(TEXT("guns: the %s gunner serves guns and the data check requires him"), F));
+		Log.Check(!PA250UnitClasses::KitFor(F, TEXT("line_infantry")).bServesGuns, FString::Printf(TEXT("guns: %s line infantry are not gunners"), F));
+	}
+
+	// Which shot: canister close, round shot beyond, nothing past its range.
+	{
+		EPA250Shot Shot = EPA250Shot::RoundShot;
+		const bool bClose = PA250Gunnery::ChooseShot(R.cannon_canister_range_m * 100.f - 100.f, R, Shot) && Shot == EPA250Shot::Canister;
+		const bool bFar = PA250Gunnery::ChooseShot(R.cannon_canister_range_m * 100.f + 100.f, R, Shot) && Shot == EPA250Shot::RoundShot;
+		const bool bEnd = PA250Gunnery::ChooseShot(R.cannon_round_range_m * 100.f, R, Shot) && !PA250Gunnery::ChooseShot(R.cannon_round_range_m * 100.f + 100.f, R, Shot);
+		Log.Check(bClose && bFar && bEnd, FString::Printf(TEXT("guns: canister inside %.0f m, round shot to %.0f m, no shot beyond"), R.cannon_canister_range_m, R.cannon_round_range_m));
+	}
+
+	// The drill: a full crew of gunners at full speed, a short crew slower, untrained men slower still, too few not at all.
+	{
+		const float Full = PA250Gunnery::DrillSpeed(4, 4, R), Half = PA250Gunnery::DrillSpeed(2, 2, R), Raw = PA250Gunnery::DrillSpeed(4, 0, R), Mixed = PA250Gunnery::DrillSpeed(4, 2, R);
+		Log.Check(FMath::IsNearlyEqual(Full, 1.f) && FMath::IsNearlyEqual(Half, 0.5f) && FMath::IsNearlyEqual(Raw, 1.f / R.cannon_untrained_scale) && Mixed > Raw && Mixed < Full
+			&& PA250Gunnery::DrillSpeed(1, 1, R) == 0.f && FMath::IsNearlyEqual(PA250Gunnery::DrillSpeed(9, 9, R), 1.f),
+			FString::Printf(TEXT("guns: drill speed 4 gunners %.2f, 2 gunners %.2f, 4 infantry %.2f, 2 and 2 %.2f, one man 0; more than a crew adds nothing"), Full, Half, Raw, Mixed));
+		// Timed on the sequencer the gun uses: left alone the drill completes in the three steps' time, and a half crew takes twice as long.
+		auto TimeIt = [&R](float Speed) {
+			FActiveReloadSequencer Drill;
+			Drill.Configure(PA250Gunnery::DrillPreset(R));
+			Drill.Reset();
+			Drill.BeginReload();
+			float T = 0.f;
+			while (!Drill.IsComplete() && T < 120.f)
+			{
+				Drill.Tick(0.05f * Speed);
+				T += 0.05f;
+			}
+			return T;
+		};
+		const float Whole = R.cannon_sponge_load_seconds + R.cannon_ram_seconds + R.cannon_prime_lay_seconds;
+		const float TFull = TimeIt(Full), THalf = TimeIt(Half);
+		Log.Check(FMath::Abs(TFull - Whole) < 1.f && FMath::Abs(THalf - 2.f * Whole) < 2.f,
+			FString::Printf(TEXT("guns: the drill takes %.1f s with a full crew (%.0f s in the file) and %.1f s with two men"), TFull, Whole, THalf));
+		Log.Check(FString(PA250Gunnery::DrillWords(EActiveReloadPhase::PrimePan)) == TEXT("Sponge and load") && FString(PA250Gunnery::DrillWords(EActiveReloadPhase::RamCharge)) == TEXT("Ram home")
+			&& FString(PA250Gunnery::DrillWords(EActiveReloadPhase::ShoulderAim)) == TEXT("Prime and lay"), TEXT("guns: the drill's steps have their own words on the HUD"));
+	}
+
+	// The piece is laid above its mark by what the shot falls on the way.
+	{
+		const float Speed = R.cannon_round_speed_m * 100.f;
+		const float At100 = PA250Gunnery::RoundShotDrop(10000.f, Speed), At300 = PA250Gunnery::RoundShotDrop(30000.f, Speed);
+		// Flown in steps as the ball flies: it lands within a hand of the mark.
+		FVector P(0.f, 0.f, 0.f);
+		FVector Vel = (FVector(30000.f, 0.f, At300)).GetSafeNormal() * Speed;
+		while (P.X < 30000.f)
+		{
+			Vel.Z -= 490.f * 0.01f;
+			P += Vel * 0.01f;
+		}
+		Log.Check(At100 > 50.f && At300 > At100 * 8.f && FMath::Abs(P.Z) < 40.f,
+			FString::Printf(TEXT("guns: round shot falls %.0f cm in 100 m and %.0f cm in 300 m; laid that much high it arrives %.0f cm from the mark"), At100, At300, P.Z));
+	}
+
+	// Overrun and push.
+	Log.Check(PA250Gunnery::IsOverrun(0, 1) && !PA250Gunnery::IsOverrun(1, 3) && !PA250Gunnery::IsOverrun(0, 0), TEXT("guns: a gun is overrun only with the enemy at it and none of its own side"));
+	Log.Check(PA250Gunnery::CanPush(2, false, R) && !PA250Gunnery::CanPush(1, false, R) && !PA250Gunnery::CanPush(4, true, R), TEXT("guns: two men can push a gun, one cannot, and not while it is loading"));
+
+	// The purchased asset: one mesh, with the sockets and collision the setup script gave it.
+	{
+		UStaticMesh* Asset = LoadObject<UStaticMesh>(nullptr, TEXT("/Game/ThirdParty/PTM_Cannon/Mesh.Mesh"));
+		Log.Check(Asset != nullptr, TEXT("guns: the purchased cannon mesh loads (/Game/ThirdParty/PTM_Cannon/Mesh)"));
+		if (Asset)
+		{
+			bool bSockets = Asset->FindSocket(TEXT("Muzzle")) && Asset->FindSocket(TEXT("Vent"));
+			for (int32 i = 1; i <= 4; ++i) bSockets = bSockets && Asset->FindSocket(*FString::Printf(TEXT("Crew_%d"), i));
+			Log.Check(bSockets, TEXT("guns: the mesh has Muzzle, Vent and four crew sockets (Scripts/setup_cannon_asset.py)"));
+			const UBodySetup* Body = Asset->GetBodySetup();
+			Log.Check(Body && (Body->CollisionTraceFlag == CTF_UseComplexAsSimple || Body->AggGeom.GetElementCount() > 0), TEXT("guns: the mesh has collision"));
+			const FBoxSphereBounds B = Asset->GetBounds();
+			const float Length = 2.f * FMath::Max(B.BoxExtent.X, B.BoxExtent.Y), Height = 2.f * B.BoxExtent.Z;
+			Log.Check(FMath::Abs(Length - R.cannon_length_cm) < 5.f && Height > 180.f * 0.5f && Height < 180.f * 0.85f,
+				FString::Printf(TEXT("guns: the piece is %.0f cm long and %.0f cm high: chest high to a 180 cm soldier, at its own scale"), Length, Height));
+			if (const UStaticMeshSocket* Muzzle = Asset->FindSocket(TEXT("Muzzle")))
+			{
+				Log.Check(Muzzle->RelativeLocation.X > B.Origin.X + B.BoxExtent.X * 0.7f && Muzzle->RelativeLocation.Z > B.Origin.Z,
+					TEXT("guns: the muzzle socket is at the +X end, above the axle"));
+			}
+		}
+	}
+
+	// The campaign's guns reach the battle and come back from it.
+	{
+		pa250::CampaignState St = pa250::load_scenario(pa250::read_text_file(TCHAR_TO_UTF8(*UPA250Subsystem::ScenarioPath())));
+		Log.Check(St.province_stores.count("concord") && St.province_stores.at("concord").guns == 2 && St.armies.at("british_garrison").guns == 4
+			&& pa250::served_guns(St.armies.at("british_garrison")) == 4 && St.armies.at("continental_militia").guns == 0 && St.armies.at("british_regulars").guns == 0,
+			TEXT("guns: the scenario opens with 2 guns laid up at Concord and 4 served guns in the Boston garrison; neither field army has any"));
+		St.armies.at("british_regulars").province = "lexington";
+		St.armies.at("continental_militia").province = "lexington";
+		St.armies.at("british_regulars").guns = 2;
+		St.armies.at("british_regulars").units["artilleryman"] = 1;
+		St.pending_battle = {true, "lexington", "british_regulars", "continental_militia"};
+		const pa250::BattleSetup Setup = pa250::build_battle_setup(St, "lexington");
+		bool bRow = false;
+		for (const auto& F : Setup.sides.at("british").factors) bRow |= F.label == "guns" && F.value == 1;
+		Log.Check(Setup.sides.at("british").guns == 1 && Setup.sides.at("continental").guns == 0 && bRow,
+			TEXT("guns: an army with 2 guns and one crew brings 1 to the field, and the setup says why"));
+		pa250::BattleResult Res;
+		Res.province_id = "lexington";
+		Res.winner = "continental";
+		Res.end_reason = "army_broke";
+		Res.guns_taken["continental"] = 1;
+		const pa250::CampaignState After = pa250::apply_battle_result(St, Res);
+		const PA250BattleCards::FAfter Done = PA250BattleCards::AfterBattle(After.progress.last_battle_report, After);
+		bool bLine = false;
+		for (const FString& L : Done.MapChanges) bLine |= L.Contains(TEXT("gun"));
+		Log.Check(After.armies.at("continental_militia").guns == 1 && After.armies.at("british_regulars").guns == 1 && After.progress.last_battle_report.guns_taken.count("continental") == 1 && bLine,
+			TEXT("guns: a gun the player overran is his after the battle, on the report and on the card"));
+	}
+}
+
+void RunClasses(FLog& Log)
+{
+	// The class numbers live in unit_classes.json (user decision 2026-11-14). The built-in table is
+	// only a fallback: this case fails if the file is missing or does not cover a class.
+	const FString Path = PA250UnitClasses::DataPath();
+	TArray<FString> Errors;
+	const bool bLoaded = PA250UnitClasses::LoadFromFile(Path, &Errors);
+	Log.Check(FPaths::FileExists(Path), FString::Printf(TEXT("classes data: %s exists"), *Path));
+	Log.Check(bLoaded && Errors.Num() == 0 && PA250UnitClasses::LoadedFromData(),
+		FString::Printf(TEXT("classes data: unit_classes.json loads with no problems (%s)"), Errors.Num() ? *Errors[0] : TEXT("none")));
+	PA250UnitClasses::ResetFallbackUses();
+	for (const TCHAR* F : {TEXT("british"), TEXT("continental")})
+	{
+		for (const FName& Class : PA250UnitClasses::RequiredClasses(F))
+		{
+			const int32 Before = PA250UnitClasses::FallbackUses();
+			const FPA250UnitClassKit& K = PA250UnitClasses::KitFor(F, Class);
+			Log.Check(PA250UnitClasses::FallbackUses() == Before && K.Id == Class,
+				FString::Printf(TEXT("classes data: %s %s is served from the file, not the fallback"), F, *Class.ToString()));
+			Log.Check(!FString(K.Role).IsEmpty() && !FString(K.Verb).IsEmpty() && !FString(K.Label).IsEmpty(),
+				FString::Printf(TEXT("classes data: %s %s has a label, a one-line role and a verb"), F, *Class.ToString()));
+			Log.Check(K.PreferMaxM >= K.PreferMinM && K.AccurateM > 0.f && K.TicketCost > 0.f && K.CaptureWeight > 0.f,
+				FString::Printf(TEXT("classes data: %s %s has a sane band and firelock (%.0f-%.0f m, accurate %.0f m)"), F, *Class.ToString(), K.PreferMinM, K.PreferMaxM, K.AccurateM));
+		}
+	}
+	Log.Check(PA250UnitClasses::FallbackUses() == 0, FString::Printf(TEXT("classes data: no class fell back to the built-in table (%d uses)"), PA250UnitClasses::FallbackUses()));
+
+	// The fallback is used, counted and loud when the file is missing...
+	{
+		PA250UnitClasses::FScopedExpectFallback Expected; // logged as Display here; an Error anywhere else
+		TArray<FString> Missing;
+		Log.Check(!PA250UnitClasses::LoadFromFile(Path + TEXT(".nowhere"), &Missing) && Missing.Num() > 0 && !PA250UnitClasses::LoadedFromData(),
+			TEXT("classes data: a missing file is refused"));
+		PA250UnitClasses::ResetFallbackUses();
+		const FPA250UnitClassKit& K = PA250UnitClasses::KitFor(TEXT("continental"), TEXT("rifleman"));
+		Log.Check(PA250UnitClasses::FallbackUses() == 1 && K.Id == TEXT("rifleman") && K.RangeScale >= 2.f && !K.bOfficerHunter,
+			TEXT("classes data: with no file the built-in kit is served and the use is counted (it has no verb)"));
+	}
+	// ...and when the file lacks a class either side can field.
+	{
+		PA250UnitClasses::FScopedExpectFallback Expected;
+		FString Text;
+		FFileHelper::LoadFileToString(Text, *Path);
+		const FString Broken = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("PA250"), TEXT("unit_classes_missing_rifleman.json"));
+		FFileHelper::SaveStringToFile(Text.Replace(TEXT("\"rifleman\":"), TEXT("\"rifleman_removed\":")), *Broken);
+		TArray<FString> Lacking;
+		const bool bOk = PA250UnitClasses::LoadFromFile(Broken, &Lacking);
+		bool bNamed = false;
+		for (const FString& E : Lacking) bNamed |= E.Contains(TEXT("continental has no kit for rifleman"));
+		Log.Check(!bOk && bNamed, TEXT("classes data: a file that lacks a class is refused, and says which"));
+		IFileManager::Get().Delete(*Broken);
+	}
+	Log.Check(PA250UnitClasses::LoadFromFile(Path) && PA250UnitClasses::LoadedFromData(), TEXT("classes data: the real file loads again"));
+	PA250UnitClasses::ResetFallbackUses();
+
+	// Engagement bands (metres).
+	auto Band = [](const TCHAR* F, const TCHAR* C, float Min, float Max) {
+		const FPA250UnitClassKit& K = PA250UnitClasses::KitFor(F, C);
+		return K.PreferMinM == Min && K.PreferMaxM == Max;
+	};
+	Log.Check(Band(TEXT("continental"), TEXT("rifleman"), 100.f, 200.f) && Band(TEXT("british"), TEXT("light_infantry"), 50.f, 90.f)
+		&& Band(TEXT("british"), TEXT("line_infantry"), 30.f, 60.f) && Band(TEXT("continental"), TEXT("line_infantry"), 30.f, 60.f)
+		&& Band(TEXT("continental"), TEXT("militia"), 40.f, 70.f) && Band(TEXT("british"), TEXT("grenadier"), 0.f, 25.f),
+		TEXT("classes: rifles 100-200 m, light infantry 50-90, regulars 30-60, militia 40-70, grenadiers close to under 25"));
+	// A single musket shot loses accuracy fast past 50 m; a rifle holds to 150 m.
+	const FPA250UnitClassKit& Musket = PA250UnitClasses::KitFor(TEXT("british"), TEXT("line_infantry"));
+	const FPA250UnitClassKit& Rifle = PA250UnitClasses::KitFor(TEXT("continental"), TEXT("rifleman"));
+	Log.Check(Musket.RangeSpreadScale(3000.f) == 1.f && Musket.RangeSpreadScale(5000.f) == 1.f && FMath::IsNearlyEqual(Musket.RangeSpreadScale(10000.f), 2.5f)
+		&& FMath::IsNearlyEqual(Musket.RangeSpreadScale(15000.f), 4.f),
+		FString::Printf(TEXT("classes: a musket's cone is x1 to 50 m, x2.5 at 100 m, x4 at 150 m (%.2f / %.2f)"), Musket.RangeSpreadScale(10000.f), Musket.RangeSpreadScale(15000.f)));
+	Log.Check(Rifle.RangeSpreadScale(15000.f) == 1.f && Rifle.RangeSpreadScale(20000.f) < 1.3f,
+		FString::Printf(TEXT("classes: a rifle's cone is still x1 at 150 m (x%.2f at 200 m)"), Rifle.RangeSpreadScale(20000.f)));
+	Log.Check(Rifle.SpreadScale * Rifle.RangeSpreadScale(15000.f) < 0.2f * Musket.SpreadScale * Musket.RangeSpreadScale(15000.f),
+		TEXT("classes: at 150 m the rifle's cone is under a fifth of the musket's"));
+	{
+		FScopedTestWorld W;
+		AMusketWeapon* Gun = W.World ? W.World->SpawnActor<AMusketWeapon>() : nullptr;
+		Log.Check(Gun && Gun->RangeSpreadScale(5000.f) == 1.f && FMath::IsNearlyEqual(Gun->RangeSpreadScale(10000.f), 2.5f),
+			TEXT("classes: the weapon's own default is the musket curve"));
+		if (Gun)
+		{
+			Gun->ClassAccurateRangeCm = Rifle.AccurateM * 100.f;
+			Gun->ClassSpreadGrowth = Rifle.SpreadGrowth;
+			Log.Check(FMath::IsNearlyEqual(Gun->RangeSpreadScale(20000.f), Rifle.RangeSpreadScale(20000.f)), TEXT("classes: the weapon and the kit agree on the rifle's curve"));
+			Gun->Destroy();
+		}
+	}
+	// One verb a class.
+	auto Flags = [](const FPA250UnitClassKit& K) {
+		return int32(K.bVolleyShock) + int32(K.bSteadyInCover) + int32(K.bOfficerHunter) + int32(K.bChargeRouts) + int32(K.bForwardSpawn) + int32(K.bRallies) + int32(K.bTakesPrisoners)
+			+ int32(K.bBuildsWorks) + int32(K.bCarriesColours) + int32(K.bRelaysOrders) + int32(K.bTendsWounded) + int32(K.bServesGuns);
+	};
+	bool bOneEach = true;
+	for (const TCHAR* F : {TEXT("british"), TEXT("continental")})
+		for (const FName& Class : PA250UnitClasses::RequiredClasses(F)) bOneEach &= Flags(PA250UnitClasses::KitFor(F, Class)) == 1;
+	Log.Check(bOneEach, TEXT("classes: every class has exactly one verb"));
+	Log.Check(Musket.bVolleyShock && PA250UnitClasses::KitFor(TEXT("continental"), TEXT("militia")).bSteadyInCover && Rifle.bOfficerHunter
+		&& PA250UnitClasses::KitFor(TEXT("british"), TEXT("grenadier")).bChargeRouts && PA250UnitClasses::KitFor(TEXT("british"), TEXT("light_infantry")).bForwardSpawn
+		&& PA250UnitClasses::KitFor(TEXT("british"), TEXT("officer")).bRallies && PA250UnitClasses::KitFor(TEXT("continental"), TEXT("dragoon")).bTakesPrisoners,
+		TEXT("classes: regular volley, militia cover, rifleman officer, grenadier charge, light infantry ground, officer rally, dragoon prisoners"));
+	const FPA250ClassVerbs& V = PA250UnitClasses::Verbs();
+	Log.Check(V.VolleyMinShooters == 3 && V.VolleyWindowSeconds == 1.f && V.RallyCooldownSeconds > 0.f && V.SurrenderRadiusM > 0.f,
+		TEXT("classes: a volley is three muskets within a second; the rally has a cooldown"));
+
+	// Grenadier: a charge that reaches a squad forces its check.
+	Log.Check(PA250ChargeRoutResult(EPA250Morale::Shaken) == EPA250Morale::Routing && PA250ChargeRoutResult(EPA250Morale::Withdrawing) == EPA250Morale::Routing
+		&& PA250ChargeRoutResult(EPA250Morale::Steady) == EPA250Morale::Shaken && PA250ChargeRoutResult(EPA250Morale::Routing) == EPA250Morale::Routing,
+		TEXT("classes: a grenadier charge routs a shaken squad and shakes a steady one"));
+	// Militia: half a ticket. Four dead militia take two tickets; four dead regulars take four. Every death is counted.
+	{
+		const FName C(TEXT("continental")), B(TEXT("british"));
+		FPA250TicketLedger L;
+		L.Pool.Add(C, 20);
+		L.Pool.Add(B, 20);
+		const float Half = PA250UnitClasses::KitFor(C, TEXT("militia")).TicketCost;
+		for (int32 i = 0; i < 4; ++i) L.SpendDeath(C, TEXT("militia"), Half);
+		for (int32 i = 0; i < 4; ++i) L.SpendDeath(B, TEXT("line_infantry"), PA250UnitClasses::KitFor(B, TEXT("line_infantry")).TicketCost);
+		Log.Check(Half == 0.5f && L.Remaining(C) == 18 && L.Remaining(B) == 16 && L.Deaths.FindRef(C).FindRef(TEXT("militia")) == 4,
+			FString::Printf(TEXT("classes: four militia lost cost two tickets, four regulars four (%d / %d left of 20)"), L.Remaining(C), L.Remaining(B)));
+		FPA250TicketLedger Odd;
+		Odd.Pool.Add(C, 5);
+		Odd.SpendDeath(C, TEXT("militia"), Half);
+		Log.Check(Odd.Remaining(C) == 5, TEXT("classes: the first militiaman lost takes no ticket yet"));
+		Odd.SpendDeath(C, TEXT("militia"), Half);
+		Log.Check(Odd.Remaining(C) == 4, TEXT("classes: the second does"));
+	}
+	// Officer: a rally stops a rout. Routing men flee and cannot fire; rallied, they stop, re-form and are steady again.
+	{
+		FPA250MoraleState St;
+		St.Set(EPA250Morale::Routing);
+		Log.Check(FPA250MoraleOrders::For(St.State).bFleeToRear && FPA250MoraleOrders::For(St.State).bNeedsRally, TEXT("classes: a routing squad runs for the rear"));
+		// Left alone under the same pressure it keeps running.
+		FPA250MoraleState Left = St;
+		for (int32 i = 0; i < 100; ++i) Left.Tick(0.1f, 0.5f, 1.f, 8.f, 3.5f, false, false);
+		Log.Check(Left.State == EPA250Morale::Routing, TEXT("classes: under pressure it does not rally by itself"));
+		St.Set(EPA250Morale::Rallying); // what UPA250VolleyCoordinator::RallyNearestRouting does
+		Log.Check(!FPA250MoraleOrders::For(St.State).bFleeToRear && FPA250MoraleOrders::For(St.State).MarchScale == 0.f, TEXT("classes: rallied, it stops where it is"));
+		for (int32 i = 0; i < 40; ++i) St.Tick(0.1f, 0.5f, 1.f, 8.f, 3.5f, false, false);
+		Log.Check(St.State == EPA250Morale::Steady, TEXT("classes: and after re-forming it is steady again: the rally stopped the rout"));
+		FPA250MoraleState Broken;
+		Broken.Set(EPA250Morale::Rallying);
+		Broken.Tick(0.1f, 2.f, 1.f, 8.f, 3.5f, false, false);
+		Log.Check(Broken.State == EPA250Morale::Routing, TEXT("classes: a rally under overwhelming pressure does not hold"));
+	}
+	// Light infantry: more weight at a post.
+	Log.Check(PA250UnitClasses::KitFor(TEXT("british"), TEXT("light_infantry")).CaptureWeight > 1.5f && Musket.CaptureWeight == 1.f,
+		TEXT("classes: a light infantryman counts for more than one man at a post"));
 }
 } // namespace PA250BattleCases

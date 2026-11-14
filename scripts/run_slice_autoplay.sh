@@ -12,6 +12,12 @@ SVC="$ROOT/services/negotiation"
 PORT="${PA250_PORT:-8791}"
 RUNS="${RUNS:-1}"
 TIMEOUT="${AUTOPLAY_TIMEOUT:-420}"
+# The slice's battle is cut short on the clock (game-seconds). Since battles count every man
+# (2026-11-14), two bot armies left to fight to the end can leave the Patriots with no army at all
+# (88 of 88 down in 164 s in one run), which ends the campaign and the legs after the battle with it.
+# The slice checks the flow, not the outcome of a fight to the death: AUTOPLAY_BATTLE_SECONDS=720
+# gives the full clock.
+BATTLE_SECONDS="${AUTOPLAY_BATTLE_SECONDS:-90}"
 LOGDIR="$ROOT/unreal/PlayAmerica250/Saved/logs"
 mkdir -p "$LOGDIR" "$SAVED"
 
@@ -47,6 +53,7 @@ for run in $(seq 1 "$RUNS"); do
   rm -f "$SAVED"/autoplay_trace.json "$SAVED"/battle_result.json "$SAVED"/campaign.json "$SAVED"/autoplay_result.json
   "$ENGINE/Engine/Binaries/Mac/UnrealEditor-Cmd" "$PROJECT" /Game/PA250/Maps/L_Campaign \
     -game -nullrhi -unattended -nosplash -nosound -PA250Autoplay "-PA250Service=127.0.0.1:$PORT" \
+    "-PA250BattleTime=$BATTLE_SECONDS" \
     -log -stdout -FullStdOutLogOutput >"$LOGDIR/autoplay_run$run.log" 2>&1 &
   GAME_PID=$!
   waited=0

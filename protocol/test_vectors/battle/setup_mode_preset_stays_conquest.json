@@ -1,0 +1,19 @@
+{
+ "name": "setup_mode_preset_stays_conquest",
+ "description": "the North Bridge fight stays the bridge fight even behind works",
+ "scenario": {
+  "province": "concord",
+  "attacker": "british_regulars",
+  "defender": "continental_militia",
+  "attacker_from": "lincoln",
+  "fort_level": 2
+ },
+ "expect": {
+  "fortification_level": {
+   "british": 0,
+   "continental": 2
+  },
+  "mode": "conquest",
+  "scenario_preset": "concord_bridge"
+ }
+}

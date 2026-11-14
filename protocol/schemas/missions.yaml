@@ -1,0 +1,164 @@
+# Campaign missions (Play America 250): a data-driven chain per faction.
+# File: unreal/PA250Sim/data/missions_boston_1775.json, read by PA250Sim `load_missions`.
+# The sim evaluates each active mission on the hourly tick against CampaignState and applies rewards
+# and failure effects as commands (CommandKind::MissionEffect) at the next hour.
+# Predicates and effects are CLOSED sets: a type or field not listed here is refused at load.
+# Every number is GAMEPLAY TUNING, not historical fact; titles and flavour are display-only.
+$schema: "http://json-schema.org/draft-07/schema#"
+$id: "missions.v1"
+title: MissionFile
+type: object
+additionalProperties: false
+required: [missions]
+properties:
+  note: {type: string}
+  missions:
+    type: array
+    minItems: 1
+    items: {$ref: "#/definitions/mission"}
+definitions:
+  faction:
+    enum: [british, continental]
+  ymdh:
+    type: object
+    additionalProperties: false
+    required: [y, m, d]
+    properties:
+      y: {type: integer}
+      m: {type: integer, minimum: 1, maximum: 12}
+      d: {type: integer, minimum: 1, maximum: 31}
+      h: {type: integer, minimum: 0, maximum: 23}
+  mission:
+    type: object
+    additionalProperties: false
+    required: [id, faction, title, flavor, complete]
+    properties:
+      id: {type: string, pattern: "^[a-z0-9_]+$"}
+      faction: {$ref: "#/definitions/faction", description: "Whose mission it is. Predicates are read from this side."}
+      title: {type: string, minLength: 1}
+      flavor: {type: string, description: "One line of period colour. Display only."}
+      goal: {type: string, description: "What to do, in plain words, for the tracker. Display only."}
+      prerequisite: {type: string, description: "Mission id that must be over (complete or failed) first. Empty: starts with the campaign."}
+      prerequisite_must_succeed: {type: boolean, description: "True: the prerequisite must be complete, not merely over."}
+      available_from: {$ref: "#/definitions/ymdh", description: "Not activated before this date."}
+      target_provinces:
+        type: array
+        items: {type: string}
+        description: "Towns the tracker highlights on the map and the British AI weighs. Display and AI only."
+      complete: {$ref: "#/definitions/predicate"}
+      fail: {$ref: "#/definitions/predicate"}
+      deadline_days: {type: integer, minimum: 1, description: "Fails this many days after activation."}
+      deadline: {$ref: "#/definitions/ymdh", description: "Fails at this date."}
+      reward: {$ref: "#/definitions/effects"}
+      failure: {$ref: "#/definitions/effects"}
+  predicate:
+    oneOf:
+      - type: object
+        additionalProperties: false
+        required: [type, province]
+        properties:
+          type: {const: magazine_emptied}
+          province: {type: string}
+        description: "The town's magazine holds no powder, cartridges or muskets."
+      - type: object
+        additionalProperties: false
+        required: [type, province]
+        properties:
+          type: {const: enemy_army_in}
+          province: {type: string}
+        description: "An army of the other side stands in the town."
+      - type: object
+        additionalProperties: false
+        required: [type, provinces]
+        properties:
+          type: {const: hold_all}
+          provinces: {type: array, minItems: 1, items: {type: string}}
+        description: "The mission's side owns every listed town at once."
+      - type: object
+        additionalProperties: false
+        required: [type, provinces]
+        properties:
+          type: {const: owner_any}
+          provinces: {type: array, minItems: 1, items: {type: string}}
+        description: "The mission's side owns at least one listed town."
+      - type: object
+        additionalProperties: false
+        required: [type, province]
+        properties:
+          type: {const: owner_is}
+          province: {type: string}
+          faction: {$ref: "#/definitions/faction", description: "Default: the mission's side."}
+      - type: object
+        additionalProperties: false
+        required: [type, province, amount]
+        properties:
+          type: {const: provisions_at_most}
+          province: {type: string}
+          amount: {type: integer, minimum: 0}
+      - type: object
+        additionalProperties: false
+        required: [type, province, amount]
+        properties:
+          type: {const: provisions_at_least}
+          province: {type: string}
+          amount: {type: integer, minimum: 0}
+      - type: object
+        additionalProperties: false
+        required: [type, province, rounds]
+        properties:
+          type: {const: rounds_per_man_at_least}
+          province: {type: string}
+          rounds: {type: integer, minimum: 1}
+        description: "An army of the mission's side stands in the town and would take the field there with this many rounds a man (BattleSetup.rounds_per_man)."
+      - type: object
+        additionalProperties: false
+        required: [type, project, status]
+        properties:
+          type: {const: project_status}
+          project: {enum: [knox]}
+          status: {enum: [offered, underway, delivered, declined]}
+      - type: object
+        additionalProperties: false
+        required: [type, project, province, min_fort_level]
+        properties:
+          type: {const: item_at_fortified}
+          project: {enum: [knox]}
+          province: {type: string}
+          min_fort_level: {type: integer, minimum: 1, maximum: 3}
+        description: "The delivered guns are in the town, the mission's side owns it and its fort is at least this level."
+      - type: object
+        additionalProperties: false
+        required: [type, date]
+        properties:
+          type: {const: date_reached}
+          date: {$ref: "#/definitions/ymdh"}
+      - type: object
+        additionalProperties: false
+        required: [type, of]
+        properties:
+          type: {const: all}
+          of: {type: array, minItems: 1, items: {$ref: "#/definitions/predicate"}}
+  effects:
+    type: object
+    additionalProperties: false
+    description: "Applied once, as a command. gold, army_morale and army_readiness go to the mission's side; local_support is the Patriots' Support whoever earns it."
+    properties:
+      gold: {type: integer}
+      local_support: {type: integer}
+      british_attitude: {type: integer}
+      army_morale: {type: integer}
+      army_readiness: {type: integer}
+      stores:
+        type: object
+        additionalProperties: false
+        required: [province]
+        properties:
+          province: {type: string}
+          powder: {type: integer}
+          cartridges: {type: integer}
+          muskets: {type: integer}
+          provisions: {type: integer}
+      start_evacuation:
+        type: boolean
+        description: "Starts the British evacuation countdown (campaign rules: evacuation.countdown_hours)."
+      summary: {type: string, description: "Shown to the player with the effect. Display only."}

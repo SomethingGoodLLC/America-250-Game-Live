@@ -164,6 +164,15 @@ void apply_one_command(CampaignState& s, const Command& c) {
             }
             break;
         }
+        case CommandKind::MissionEffect: {
+            try {
+                nlohmann::json j = nlohmann::json::parse(c.payload.result_json);
+                s = apply_mission_effect(s, j.at("mission_id").get<std::string>(), j.at("outcome").get<std::string>());
+            } catch (const std::exception& e) {
+                detail::add_log(s, std::string("mission effect command failed: ") + e.what());
+            }
+            break;
+        }
         case CommandKind::ApplyDiplomacy: {
             try {
                 // result_json is a DiplomacyResult object
@@ -186,11 +195,22 @@ void apply_one_command(CampaignState& s, const Command& c) {
 void emit_daily_ai(CampaignState& s) {
     YMDH y = to_ymdh(s.now);
     if (y.h != 0) return;
+    // With the campaign rules loaded the AI scores its targets (campaign.cpp). Without them it keeps
+    // the single scripted objective below.
+    if (campaign_rules_loaded()) {
+        campaign_daily_ai(s);
+        return;
+    }
     if (s.ai_objective.empty()) return;
     for (auto& kv : s.armies) {
         Army& a = kv.second;
         if (a.faction == s.player_faction) continue;
         if (!a.path.empty()) continue;  // already marching
+        // An army sitting down before a fort does not march away from its own siege.
+        {
+            auto here = s.provinces.find(a.province);
+            if (here != s.provinces.end() && here->second.siege_by == a.faction) continue;
+        }
         PathPlan plan = plan_path(s, a.id, s.ai_objective);
         if (!plan.ok || plan.edges.empty()) continue;
         CommandPayload p;
@@ -337,6 +357,12 @@ CampaignState enqueue_command(const CampaignState& in, CommandPayload p) {
 TickOutput advance_hour(const CampaignState& in) {
     TickOutput out;
     CampaignState s = in;
+    if (s.progress.outcome.decided) {
+        // The campaign is over: the clock no longer advances.
+        out.state = s;
+        out.interrupts.push_back(Interrupt::CampaignOver);
+        return out;
+    }
     if (s.pending_battle.active) {
         detail::add_log(s, "hour blocked: battle pending at " + s.pending_battle.province);
         out.state = s;
@@ -346,21 +372,31 @@ TickOutput advance_hour(const CampaignState& in) {
     // Advance clock first so this hour's index is "now" for due commands.
     s.now.hour_index += 1;
 
-    // Consume commands due this hour.
-    std::vector<Command> rest;
+    // Consume commands due this hour. They are taken out of the state first: a command may replace
+    // the whole state (a battle result, a treaty, a mission effect), so the queue must not be read
+    // from the state while one is being applied. (It was, until two mission effects fell due in the
+    // same hour: the second was then read from freed memory.) A command enqueued by another one
+    // lands in the state's own queue and is kept.
+    std::vector<Command> due, later;
     for (const Command& c : s.pending_commands) {
         if (c.apply_on_hour == s.now.hour_index)
-            apply_one_command(s, c);
+            due.push_back(c);
         else if (c.apply_on_hour > s.now.hour_index)
-            rest.push_back(c);
+            later.push_back(c);
         // past-due dropped (should not happen)
     }
-    s.pending_commands = std::move(rest);
+    s.pending_commands = std::move(later);
+    for (const Command& c : due) apply_one_command(s, c);
 
     emit_daily_ai(s);
     decay_grievance(s);
     monthly_supply(s);
     tick_logistics(s, out.interrupts);
+    // After the workshops have made up their cartridges, before anyone marches.
+    refill_cartridge_boxes(s);
+    draw_guns(s);
+    tick_sieges(s);
+    tick_campaign(s, out.interrupts);
 
     // Snapshot provinces before movement for opposite-edge contact.
     std::map<std::string, std::string> province_before;

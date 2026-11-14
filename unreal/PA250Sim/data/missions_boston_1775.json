@@ -1,0 +1,311 @@
+{
+ "note": "GAMEPLAY TUNING and GAME INVENTION: a mission chain for each side, after the siege of Boston. Titles and flavour are display-only. Schema: protocol/schemas/missions.yaml (closed predicate and effect sets).",
+ "missions": [
+  {
+   "id": "p1_save_the_stores",
+   "faction": "continental",
+   "title": "Save the stores",
+   "flavor": "Gage's column is on the road for the powder and arms laid up at Concord.",
+   "goal": "Empty Concord's magazine (powder, cartridges, muskets) before a British army reaches the town. The two field guns hidden there go with the stores.",
+   "target_provinces": [
+    "concord"
+   ],
+   "complete": {
+    "type": "magazine_emptied",
+    "province": "concord"
+   },
+   "fail": {
+    "type": "enemy_army_in",
+    "province": "concord"
+   },
+   "reward": {
+    "local_support": 5,
+    "army_morale": 3,
+    "summary": "The country sees the stores saved: +5 Support, +3 morale"
+   },
+   "failure": {
+    "local_support": -3,
+    "summary": "The regulars reached the stores: -3 Support"
+   }
+  },
+  {
+   "id": "p2_shut_them_in",
+   "faction": "continental",
+   "title": "Shut them in",
+   "flavor": "An army of the country holds the roads out of Boston.",
+   "goal": "Hold Roxbury, Cambridge and Charlestown together on 17 June 1775 or after.",
+   "prerequisite": "p1_save_the_stores",
+   "target_provinces": [
+    "roxbury",
+    "cambridge",
+    "charlestown"
+   ],
+   "complete": {
+    "type": "all",
+    "of": [
+     {
+      "type": "hold_all",
+      "provinces": [
+       "roxbury",
+       "cambridge",
+       "charlestown"
+      ]
+     },
+     {
+      "type": "date_reached",
+      "date": {
+       "y": 1775,
+       "m": 6,
+       "d": 17,
+       "h": 0
+      }
+     }
+    ]
+   },
+   "reward": {
+    "local_support": 5,
+    "gold": 30,
+    "summary": "Boston is shut in by land: +5 Support, +30 gold voted by the towns"
+   }
+  },
+  {
+   "id": "p3_deny_the_islands",
+   "faction": "continental",
+   "title": "Deny the islands",
+   "flavor": "The garrison lives on the hay and livestock of the harbour shore.",
+   "goal": "Carry off Chelsea's provisions before the British forage them.",
+   "prerequisite": "p2_shut_them_in",
+   "target_provinces": [
+    "chelsea"
+   ],
+   "complete": {
+    "type": "provisions_at_most",
+    "province": "chelsea",
+    "amount": 0
+   },
+   "fail": {
+    "type": "owner_is",
+    "province": "chelsea",
+    "faction": "british"
+   },
+   "reward": {
+    "local_support": 3,
+    "british_attitude": -5,
+    "summary": "The garrison goes hungry: +3 Support"
+   },
+   "failure": {
+    "local_support": -3,
+    "summary": "The regulars foraged the shore: -3 Support"
+   }
+  },
+  {
+   "id": "p4_powder_for_the_army",
+   "faction": "continental",
+   "title": "Powder for the army",
+   "flavor": "Not nine rounds a man in the whole camp.",
+   "goal": "Stand an army at Cambridge with 12 rounds a man in the town's magazine.",
+   "prerequisite": "p3_deny_the_islands",
+   "target_provinces": [
+    "cambridge"
+   ],
+   "complete": {
+    "type": "rounds_per_man_at_least",
+    "province": "cambridge",
+    "rounds": 12
+   },
+   "reward": {
+    "army_morale": 5,
+    "summary": "The army can stand a day's firing: +5 morale"
+   }
+  },
+  {
+   "id": "p5_the_noble_train",
+   "faction": "continental",
+   "title": "The noble train",
+   "flavor": "Heavy guns lie at Ticonderoga, three hundred miles of winter road away.",
+   "goal": "From December 1775, pay to send for the siege guns and wait for them at Cambridge.",
+   "prerequisite": "p4_powder_for_the_army",
+   "available_from": {
+    "y": 1775,
+    "m": 12,
+    "d": 1,
+    "h": 0
+   },
+   "target_provinces": [
+    "cambridge"
+   ],
+   "complete": {
+    "type": "project_status",
+    "project": "knox",
+    "status": "delivered"
+   },
+   "reward": {
+    "army_morale": 5,
+    "local_support": 3,
+    "summary": "The guns are in camp: +5 morale, +3 Support"
+   }
+  },
+  {
+   "id": "p6_the_heights",
+   "faction": "continental",
+   "title": "The heights",
+   "flavor": "Guns on Dorchester Heights command the town and the anchorage.",
+   "goal": "March the siege guns to Dorchester and fortify it. The British then sail unless they retake the heights.",
+   "prerequisite": "p5_the_noble_train",
+   "prerequisite_must_succeed": true,
+   "target_provinces": [
+    "dorchester"
+   ],
+   "complete": {
+    "type": "item_at_fortified",
+    "project": "knox",
+    "province": "dorchester",
+    "min_fort_level": 1
+   },
+   "reward": {
+    "start_evacuation": true,
+    "summary": "The fleet cannot lie under these guns: the British prepare to sail"
+   }
+  },
+  {
+   "id": "b1_seize_the_stores",
+   "faction": "british",
+   "title": "Seize the stores",
+   "flavor": "The rebels' magazine at Concord is to be taken or destroyed.",
+   "goal": "Take Concord while its magazine still holds stores.",
+   "target_provinces": [
+    "concord"
+   ],
+   "complete": {
+    "type": "owner_is",
+    "province": "concord"
+   },
+   "fail": {
+    "type": "magazine_emptied",
+    "province": "concord"
+   },
+   "reward": {
+    "army_morale": 3,
+    "local_support": -3,
+    "summary": "The magazine is taken"
+   }
+  },
+  {
+   "id": "b2_break_the_siege_line",
+   "faction": "british",
+   "title": "Break the siege line",
+   "flavor": "The town cannot be held with the country in arms at every road.",
+   "goal": "Take Roxbury, Cambridge or Charlestown.",
+   "prerequisite": "b1_seize_the_stores",
+   "target_provinces": [
+    "roxbury",
+    "cambridge",
+    "charlestown"
+   ],
+   "complete": {
+    "type": "owner_any",
+    "provinces": [
+     "roxbury",
+     "cambridge",
+     "charlestown"
+    ]
+   },
+   "reward": {
+    "army_morale": 3,
+    "local_support": -5,
+    "summary": "A road out of Boston is open"
+   }
+  },
+  {
+   "id": "b3_take_the_heights",
+   "faction": "british",
+   "title": "Take the heights",
+   "flavor": "Whoever holds Dorchester Heights holds the harbour.",
+   "goal": "Take Dorchester.",
+   "prerequisite": "b2_break_the_siege_line",
+   "target_provinces": [
+    "dorchester"
+   ],
+   "complete": {
+    "type": "owner_is",
+    "province": "dorchester"
+   },
+   "reward": {
+    "local_support": -3,
+    "summary": "The heights are occupied"
+   }
+  },
+  {
+   "id": "b4_forage_raids",
+   "faction": "british",
+   "title": "Forage raids",
+   "flavor": "Fresh provisions for the garrison must come from the farms.",
+   "goal": "Take a farming town.",
+   "prerequisite": "b3_take_the_heights",
+   "target_provinces": [
+    "chelsea",
+    "brookline",
+    "medford",
+    "watertown",
+    "menotomy",
+    "lexington"
+   ],
+   "complete": {
+    "type": "owner_any",
+    "provinces": [
+     "chelsea",
+     "brookline",
+     "medford",
+     "watertown",
+     "menotomy",
+     "lexington"
+    ]
+   },
+   "reward": {
+    "stores": {
+     "province": "boston",
+     "provisions": 20
+    },
+    "summary": "Forage brought into Boston: +20 provisions"
+   }
+  },
+  {
+   "id": "b5_hold_until_reinforced",
+   "faction": "british",
+   "title": "Hold Boston until reinforced",
+   "flavor": "Reinforcements sail with the spring.",
+   "goal": "Hold Boston to the end of March 1776.",
+   "prerequisite": "b4_forage_raids",
+   "target_provinces": [
+    "boston"
+   ],
+   "complete": {
+    "type": "all",
+    "of": [
+     {
+      "type": "owner_is",
+      "province": "boston"
+     },
+     {
+      "type": "date_reached",
+      "date": {
+       "y": 1776,
+       "m": 3,
+       "d": 31,
+       "h": 0
+      }
+     }
+    ]
+   },
+   "fail": {
+    "type": "owner_is",
+    "province": "boston",
+    "faction": "continental"
+   },
+   "reward": {
+    "army_morale": 5,
+    "summary": "The garrison has held"
+   }
+  }
+ ]
+}

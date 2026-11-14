@@ -1,0 +1,43 @@
+{
+ "name": "result_colours_taken",
+ "description": "the player takes the enemy colours: Support rises (a defender who wins also earns his +5); a side cannot lose more colours than it had ensigns to carry them",
+ "scenario": {
+  "province": "lexington",
+  "attacker": "british_regulars",
+  "defender": "continental_militia",
+  "units": {
+   "british_regulars": {
+    "grenadier": 5,
+    "light_infantry": 6,
+    "line_infantry": 12,
+    "officer": 1,
+    "ensign": 1
+   },
+   "continental_militia": {
+    "line_infantry": 4,
+    "militia": 17,
+    "officer": 1,
+    "ensign": 1
+   }
+  }
+ },
+ "result": {
+  "province_id": "lexington",
+  "winner": "continental",
+  "end_reason": "army_broke",
+  "colours_captured": {
+   "continental": 2
+  }
+ },
+ "expect": {
+  "schema_valid": true,
+  "applied": true,
+  "owner_after": "continental",
+  "siege_by": "",
+  "siege_hours": 0,
+  "report_colours": {
+   "continental": 1
+  },
+  "local_support_delta": 8
+ }
+}

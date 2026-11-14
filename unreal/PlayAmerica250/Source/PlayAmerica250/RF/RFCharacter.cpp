@@ -10,6 +10,8 @@
 #include "UnrealClient.h"
 #include "Camera/CameraComponent.h"
 #include "Components/CapsuleComponent.h"
+#include "PA250Cover.h"
+#include "pa250/sim.hpp"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/WidgetComponent.h"
@@ -192,14 +194,9 @@ void ARFCharacter::ApplyFactionVisuals()
 				CoatColor = FLinearColor(0.05f, 0.08f, 0.24f);
 				UnderColor = FLinearColor(0.62f, 0.52f, 0.34f);
 			}
-			else if (UnitClass == TEXT("line_infantry"))
-			{
-				// Enlisted provincials: the brown coat Congress chose in 1775, buff smallclothes.
-				// A little shade from man to man; militia keep every colour of homespun.
-				const float Shade = 0.9f + 0.2f * ((Seed >> 8) & 0xFF) / 255.f;
-				CoatColor = FLinearColor(0.22f, 0.12f, 0.05f) * Shade;
-				UnderColor = FLinearColor(0.52f, 0.47f, 0.36f);
-			}
+			// Enlisted provincials keep their own clothes as well (user request 2026-11-14: not a
+			// professional army yet, so nobody matches). Congress chose brown coats only in
+			// November 1775 and few were issued before 1776; the uniform brown coat is gone.
 		}
 		else if (UnitClass == TEXT("officer"))
 		{
@@ -209,9 +206,12 @@ void ARFCharacter::ApplyFactionVisuals()
 		{
 			// Slot 1 is the pack's outer clothing; leave skin, eyes, hair and kit untouched.
 			UMaterialInstanceDynamic* MID = UMaterialInstanceDynamic::Create(Coat, this);
-			// The pack's coat albedo is dark once desaturated, so the tint needs a strong boost
-			// for wool colours to read (homespun more than the regulars' red).
-			MID->SetVectorParameterValue(TEXT("CoatColor"), CoatColor * (bHomespun ? 3.5f : 3.f));
+			// The coat material lifts the pack's near-black cloth to about 0.22 grey before this
+			// tint (tools/ue/patch_soldier_coat_curve.py), so these boosts set the cloth's albedo:
+			// about 0.4 x the colour for homespun, 0.5 x for the regulars' red. With the old
+			// 3.5 / 3 (chosen when the cloth was still near black) every coat came out pastel in
+			// sunlight: indigo as sky blue, madder red as salmon.
+			MID->SetVectorParameterValue(TEXT("CoatColor"), CoatColor * (bHomespun ? 1.8f : 2.2f));
 			GetMesh()->SetMaterial(1, MID);
 		}
 		// Slot 0 is the pack's pants, waistcoat and boots material (M_american_s_armor2skin).
@@ -716,6 +716,7 @@ void ARFCharacter::Tick(float DeltaTime)
 	TickMovementLock(DeltaTime);
 	if (Musket) Musket->SetReloadPaused(IsReloadBlockedByMovement());
 	TickFootsteps(DeltaTime);
+	TickFireOverStance();
 	TickViewFeedback(DeltaTime);
 	SensitivityToastTimer = FMath::Max(0.f, SensitivityToastTimer - DeltaTime);
 	ReloadFeedbackTimer = FMath::Max(0.f, ReloadFeedbackTimer - DeltaTime);
@@ -875,9 +876,14 @@ void ARFCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompone
 	Super::SetupPlayerInputComponent(PlayerInputComponent);
 	BuildDefaultInput();
 	PlayerInputComponent->BindKey(EKeys::H, IE_Pressed, this, &ARFCharacter::ToggleMounted);
-    PlayerInputComponent->BindKey(EKeys::One, IE_Pressed, this, &ARFCharacter::SelectMountedSword);
-    PlayerInputComponent->BindKey(EKeys::Two, IE_Pressed, this, &ARFCharacter::SelectMountedRifle);
-    PlayerInputComponent->BindKey(EKeys::Three, IE_Pressed, this, &ARFCharacter::SelectMountedPistol);
+	// The class verb (order a volley or a charge, rally): T. Passive verbs answer with what they do.
+	PlayerInputComponent->BindKey(EKeys::T, IE_Pressed, this, &ARFCharacter::OnAbilityPressed);
+	PlayerInputComponent->BindKey(EKeys::One, IE_Pressed, this, &ARFCharacter::OnKey1);
+	PlayerInputComponent->BindKey(EKeys::Two, IE_Pressed, this, &ARFCharacter::OnKey2);
+	PlayerInputComponent->BindKey(EKeys::Three, IE_Pressed, this, &ARFCharacter::OnKey3);
+	PlayerInputComponent->BindKey(EKeys::Four, IE_Pressed, this, &ARFCharacter::OnKey4);
+	PlayerInputComponent->BindKey(EKeys::Five, IE_Pressed, this, &ARFCharacter::OnKey5);
+	PlayerInputComponent->BindKey(EKeys::Six, IE_Pressed, this, &ARFCharacter::OnKey6);
 	if (UEnhancedInputComponent* EIC = Cast<UEnhancedInputComponent>(PlayerInputComponent))
 	{
 		EIC->BindAction(IA_Move, ETriggerEvent::Triggered, this, &ARFCharacter::Move);
@@ -994,7 +1000,20 @@ void ARFCharacter::StopAim()
 void ARFCharacter::OnShoulderSwap() { ShoulderSign *= -1.f; }
 void ARFCharacter::OnGuardPressed() { if (MeleeComponent && !bIsDead) MeleeComponent->SetGuardHeld(true); }
 void ARFCharacter::OnGuardReleased() { if (MeleeComponent) MeleeComponent->SetGuardHeld(false); }
-void ARFCharacter::OnFirePressed() { if (bThrownFromHorse) return; if (MountedVisual && !MountedVisual->HasFirearm()) MountedVisual->Slash(); else FireMusket(); }
+void ARFCharacter::OnFirePressed()
+{
+	if (bThrownFromHorse) return;
+	// At a gun he serves, his trigger fires the gun, not his musket.
+	if (!MountedVisual && !bIsDead)
+	{
+		if (APA250BattleGameMode* GM = GetWorld() ? GetWorld()->GetAuthGameMode<APA250BattleGameMode>() : nullptr)
+		{
+			if (GM->PlayerFiresGun(this)) return;
+		}
+	}
+	if (MountedVisual && !MountedVisual->HasFirearm()) MountedVisual->Slash();
+	else FireMusket();
+}
 void ARFCharacter::OnMeleePressed()
 {
 	if (bThrownFromHorse) return;
@@ -1003,14 +1022,67 @@ void ARFCharacter::OnMeleePressed()
 	if (bSprinting) MeleeComponent->DoCharge();
 	else MeleeComponent->RequestThrust();
 }
-void ARFCharacter::OnDuckPressed() { if (MountedVisual) { MountedGaitDown(); return; } SetDucking(true); }
-void ARFCharacter::OnDuckReleased() { SetDucking(false); }
+void ARFCharacter::OnDuckPressed() { if (MountedVisual) { MountedGaitDown(); return; } bManualDuck = true; SetDucking(true); }
+void ARFCharacter::OnDuckReleased() { bManualDuck = false; if (!bAutoDucked) SetDucking(false); }
+
+void ARFCharacter::TickFireOverStance()
+{
+	if (!IsPlayerControlled() || bIsDead || MountedVisual)
+	{
+		bAutoDucked = false;
+		return;
+	}
+	const AMusketWeapon* Gun = GetEquippedFirearm();
+	const bool bLoading = Gun && Gun->IsReloading();
+	bool bAtCover = false;
+	if (bLoading)
+	{
+		const float HalfHeight = GetCapsuleComponent() ? GetCapsuleComponent()->GetScaledCapsuleHalfHeight() : 90.f;
+		const FVector Feet = GetActorLocation() - FVector(0.f, 0.f, HalfHeight);
+		TArray<const AActor*> Ignore = {this, Musket.Get()};
+		bAtCover = PA250Cover::IsAtCover(GetWorld(), Feet, GetActorForwardVector(), Ignore, pa250::battle_rules().cover_snap_cm);
+	}
+	const bool bDown = PA250Cover::FireOverDown(bAtCover, bLoading, bAiming, bSprinting);
+	if (bDown && !bAutoDucked)
+	{
+		bAutoDucked = true;
+		SetDucking(true);
+	}
+	else if (!bDown && bAutoDucked)
+	{
+		bAutoDucked = false;
+		if (!bManualDuck) SetDucking(false);
+	}
+}
 
 void ARFCharacter::SetDucking(bool bDuck)
 {
 	if (bIsDead || MountedVisual) return;
 	if (bDuck && !bIsCrouched) Crouch();
 	else if (!bDuck && bIsCrouched) UnCrouch();
+}
+
+void ARFCharacter::OnNumberKey(int32 Number)
+{
+	if (bIsDead) return;
+	if (MountedVisual)
+	{
+		if (Number >= 1 && Number <= 3) SelectMountedWeapon(Number - 1);
+		return;
+	}
+	if (APA250BattleGameMode* GM = GetWorld() ? GetWorld()->GetAuthGameMode<APA250BattleGameMode>() : nullptr)
+	{
+		GM->GivePlayerOrder(this, Number);
+	}
+}
+
+void ARFCharacter::OnAbilityPressed()
+{
+	if (bIsDead) return;
+	if (APA250BattleGameMode* GM = GetWorld() ? GetWorld()->GetAuthGameMode<APA250BattleGameMode>() : nullptr)
+	{
+		GM->UseClassAbility(this);
+	}
 }
 
 void ARFCharacter::OnChargePressed()
@@ -1120,7 +1192,9 @@ bool ARFCharacter::FireMusketAt(FVector TargetLocation, bool bCompensateDrop)
 	}
 	// Spread uses the speed at the trigger pull, so firing on the run is still inaccurate.
 	const float OwnerSpeed = GetVelocity().Size2D();
-	const bool bShot = Equipped->Fire(Dir, bAiming, OwnerSpeed, FormationAccuracyScale * OfficerAccuracyScale);
+	// The firelock's own reach: past its accurate range the cone widens (class kit, unit_classes.json).
+	const float RangeScale = Equipped->RangeSpreadScale(FVector::Dist(GetActorLocation(), TargetLocation));
+	const bool bShot = Equipped->Fire(Dir, bAiming, OwnerSpeed, FormationAccuracyScale * OfficerAccuracyScale * RangeScale);
 	if (bShot)
 	{
 		if (!MountedVisual) LockMovement(WeaponTuning ? WeaponTuning->Values.FireStillSeconds : 0.6f);
@@ -1169,6 +1243,23 @@ bool ARFCharacter::IsReloadBlockedByMovement() const
 
 void ARFCharacter::OnReloadStarted()
 {
+	// At a gun he serves, the key works the gun's drill.
+	if (!bIsDead && !MountedVisual)
+	{
+		if (APA250BattleGameMode* GM = GetWorld() ? GetWorld()->GetAuthGameMode<APA250BattleGameMode>() : nullptr)
+		{
+			EActiveReloadHit GunHit = EActiveReloadHit::None;
+			if (GM->PlayerWorksGun(this, GunHit))
+			{
+				if (GunHit != EActiveReloadHit::None)
+				{
+					LastReloadHit = GunHit;
+					ReloadFeedbackTimer = 0.9f;
+				}
+				return;
+			}
+		}
+	}
 	AMusketWeapon* Equipped = GetEquippedFirearm();
 	if (!Equipped || bIsDead) return;
 	Equipped->SetReloadHeld(true);

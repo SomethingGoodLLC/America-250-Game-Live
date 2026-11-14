@@ -164,6 +164,10 @@ protected:
 	/** Per frame: ease each token toward its sim position (presentation only; the sim stays hourly). */
 	void MoveArmyTokens(float DeltaSeconds);
 	void RefreshBattleMarker();
+	/** A brass mark beside each town the player's current mission points at (all 13 towns can be targets). */
+	void RefreshMissionMarkers();
+	/** "S 3 days" over every town under siege, either side. */
+	void RefreshSiegeMarkers();
 	void RefreshRoutes();
 	void ApplyCameraPostProcess();
 	UTexture2D* LoadPngToTexture(const FString& AbsPath);
@@ -199,6 +203,13 @@ protected:
 	TArray<TObjectPtr<APA250ArmyToken>> ArmyTokens;
 	UPROPERTY()
 	TObjectPtr<UTextRenderComponent> BattleMarker;
+	UPROPERTY()
+	TArray<TObjectPtr<UTextRenderComponent>> MissionMarkers;
+	int32 MissionMarkerHudEpoch = -1;
+	UPROPERTY()
+	TArray<TObjectPtr<UTextRenderComponent>> SiegeMarkers;
+	int32 SiegeMarkerHudEpoch = -1;
+	int32 SiegeMarkerLogged = -1;
 	UPROPERTY()
 	TArray<TObjectPtr<UStaticMeshComponent>> HotspotMarkers;
 	UPROPERTY()

@@ -1,0 +1,32 @@
+{
+ "name": "result_army_broke",
+ "description": "a broken army retreats with its survivors instead of shattering at the morale floor",
+ "scenario": {
+  "province": "lexington",
+  "attacker": "british_regulars",
+  "defender": "continental_militia",
+  "morale": {
+   "continental_militia": 20
+  }
+ },
+ "result": {
+  "province_id": "lexington",
+  "winner": "british",
+  "end_reason": "army_broke",
+  "objective_holder": "",
+  "losses": {
+   "continental": {
+    "militia": 2
+   }
+  }
+ },
+ "expect": {
+  "schema_valid": true,
+  "applied": true,
+  "owner_after": "british",
+  "siege_by": "",
+  "siege_hours": 0,
+  "loser_fate": "retreated",
+  "loser_units": 20
+ }
+}

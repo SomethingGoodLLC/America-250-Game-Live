@@ -304,9 +304,15 @@ TSharedRef<SWidget> UPA250BattleHUD::RebuildWidget()
 		auto Side = [GM, &Bleed](const TCHAR* Label, const TCHAR* F) {
 			FString S = FString::Printf(TEXT("%s %d"), Label, GM->MenRemaining(F));
 			const float Rout = GM->RemnantCountdown(F);
-			if (Rout >= 0.f) S += FString::Printf(TEXT(" breaking %.0fs"), Rout);
+			if (Rout >= 0.f) S += FString::Printf(TEXT(" left, quitting the field in %.0fs"), Rout);
 			else if (GM->TicketsRemaining(F) <= 0 && GM->MenRemaining(F) > 0) S += TEXT(" (last men)");
 			else S += Bleed(F);
+			// The two endings beside tickets and the clock, counted down where both sides can see them.
+			const float Broke = GM->ArmyBrokeCountdown(F);
+			if (Broke >= 0.f) S += FString::Printf(TEXT("  ARMY BREAKING %.0fs"), Broke);
+			FName Sweeper;
+			const float Sweep = GM->PostsSweptCountdown(Sweeper);
+			if (Sweep >= 0.f && Sweeper == FName(F)) S += FString::Printf(TEXT("  HOLDS EVERY POST %.0fs"), Sweep);
 			return S;
 		};
 		return FText::FromString(FString::Printf(TEXT("%s          %s          Time %.0fs"),
@@ -356,6 +362,28 @@ TSharedRef<SWidget> UPA250BattleHUD::RebuildWidget()
 		FString Line = FString::Printf(TEXT("%s  -  %s"), Kit.Label, Kit.Weapon);
 		if (Kit.bOfficer) Line += TEXT("\nYour men within 15 m aim steadier and load faster");
 		else if (Me->bNearOfficer) Line += TEXT("\nOfficer near: steadier aim, faster loading");
+		// The cartridge box: what he has, what the side has left, and where to fill it.
+		const APA250BattleGameMode* GM = WeakThis.IsValid() ? WeakThis->GameMode.Get() : nullptr;
+		// His class verb, and whether it is ready.
+		if (GM)
+		{
+			const FString Ability = GM->GetAbilityLine(Me);
+			if (!Ability.IsEmpty()) Line += TEXT("\n") + Ability;
+			// His file: men, loaded muskets, the standing order and the order keys.
+			const FString File = GM->GetFileLine(Me);
+			if (!File.IsEmpty()) Line += TEXT("\n") + File;
+		}
+		if (GM && Me->Musket && GM->GetRoundsPerMan(Me->FactionId) > 0 && Me->Musket->RoundsInBox >= 0)
+		{
+			Line += FString::Printf(TEXT("\nCartridges %d  (side %d)"), Me->Musket->RoundsInBox, GM->GetAmmoPool(Me->FactionId));
+			if (Me->Musket->RoundsInBox <= 2)
+			{
+				const APA250ControlPoint* Post = GM->NearestHeldPost(Me->FactionId, Me->GetActorLocation());
+				if (!GM->CanResupply(Me->FactionId, true)) Line += TEXT("  -  the side has none left: use the bayonet");
+				else if (Post) Line += FString::Printf(TEXT("  -  fill your box at %s (%.0f m)"), *Post->GetObjectiveTitle(), FVector::Dist2D(Post->GetActorLocation(), Me->GetActorLocation()) / 100.f);
+				else Line += TEXT("  -  take a post to fill your box");
+			}
+		}
 		return FText::FromString(Line);
 	};
 
@@ -373,6 +401,7 @@ TSharedRef<SWidget> UPA250BattleHUD::RebuildWidget()
 		const ARFCharacter* Me = MeP();
 		if (!Me || !Me->GetEquippedFirearm()) return FText::GetEmpty();
 		if (Me->GetEquippedFirearm()->IsJammed()) return FText::FromString(TEXT("WEAPON JAMMED  -  hold R to clear"));
+		if (Me->GetEquippedFirearm()->IsDry()) return FText::FromString(TEXT("NO CARTRIDGES  -  stand in a post your side holds to fill your box"));
 		if (Me->GetEquippedFirearm()->CanFire()) return FText::FromString(TEXT("Loaded"));
 		if (Me->GetEquippedFirearm()->IsReloadPaused()) return FText::FromString(TEXT("Slow down to reload"));
 		return FText::FromString(FString::Printf(TEXT("Reloading   %s"), *Me->GetEquippedFirearm()->GetReloadPhaseLabel()));
@@ -385,7 +414,7 @@ TSharedRef<SWidget> UPA250BattleHUD::RebuildWidget()
 	};
 	auto ReloadHint = [MeP]() {
 		const ARFCharacter* Me = MeP();
-		if (!Me || !Me->GetEquippedFirearm() || Me->GetEquippedFirearm()->CanFire() || Me->GetEquippedFirearm()->IsJammed()) return FText::GetEmpty();
+		if (!Me || !Me->GetEquippedFirearm() || Me->GetEquippedFirearm()->CanFire() || Me->GetEquippedFirearm()->IsJammed() || Me->GetEquippedFirearm()->IsDry()) return FText::GetEmpty();
 		return FText::FromString(TEXT("Tap R as the marker crosses the gold zone to load faster  -  3 perfect taps = +15% damage  -  or just wait"));
 	};
 	auto ReloadFlash = [MeP]() {

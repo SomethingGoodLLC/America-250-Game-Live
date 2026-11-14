@@ -13,6 +13,15 @@ constexpr float ChestOffsetCm = 0.f;    // ~0.9 m: a waist/chest-high fence or w
 constexpr float FiringOffsetCm = 55.f;  // ~1.45 m: the musket at the shoulder clears that fence
 constexpr float EnemyEyeCm = 70.f;
 
+/** Where a man looks from: 150 cm above his feet, standing or ducked. A man behind a wall or a
+ *  bank looks over it; measured from his (lowered) capsule centre a ducked man looked out from
+ *  110 cm, under a 120 cm breastwork, saw nobody, never rose to fire and was bayoneted where he
+ *  knelt (works matchup, 2026-11-14). */
+inline FVector EyePoint(const AActor* Man)
+{
+	return Man ? Man->GetActorLocation() + FVector(0.f, 0.f, 150.f - Man->GetSimpleCollisionHalfHeight()) : FVector::ZeroVector;
+}
+
 /** Line of sight from one eye point to another, ignoring the listed actors. */
 inline bool HasLineOfSight(const UWorld* World, const FVector& From, const FVector& To, const TArray<const AActor*>& Ignore)
 {
@@ -39,6 +48,31 @@ inline bool IsFiringPosition(const UWorld* World, const FVector& Point, const FV
 	if (FVector::Dist(Hit.ImpactPoint, Chest) > MaxObstacleDistCm) return false;               // blocked far away, not cover
 	FHitResult Hit2;
 	return !World->LineTraceSingleByChannel(Hit2, Point + FVector(0.f, 0.f, FiringOffsetCm), Eye, ECC_Visibility, Params);
+}
+
+/** Is a man whose feet are at Feet, fronting Facing, close behind something he can fire over? The
+ *  ray at his chest is stopped within SnapCm; the ray from his shoulder is clear. Heights are taken
+ *  from the ground, so it reads the same standing or knelt. */
+inline bool IsAtCover(const UWorld* World, const FVector& Feet, const FVector& Facing, const TArray<const AActor*>& Ignore, float SnapCm)
+{
+	if (!World) return false;
+	const FVector Dir = Facing.GetSafeNormal2D();
+	if (Dir.IsNearlyZero()) return false;
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(PA250AtCover), false);
+	for (const AActor* A : Ignore) Params.AddIgnoredActor(A);
+	const FVector Chest = Feet + FVector(0.f, 0.f, 90.f + ChestOffsetCm);
+	const FVector Shoulder = Feet + FVector(0.f, 0.f, 90.f + FiringOffsetCm);
+	FHitResult Hit;
+	if (!World->LineTraceSingleByChannel(Hit, Chest, Chest + Dir * FMath::Max(10.f, SnapCm), ECC_Visibility, Params)) return false;
+	FHitResult Hit2;
+	return !World->LineTraceSingleByChannel(Hit2, Shoulder, Shoulder + Dir * FMath::Max(10.f, SnapCm) * 2.f, ECC_Visibility, Params);
+}
+
+/** Pure: the fire-over stance. Behind cover a man is down while he loads and up while he presents;
+ *  he does not kneel on the run. */
+inline bool FireOverDown(bool bAtCover, bool bLoading, bool bPresenting, bool bRunning)
+{
+	return bAtCover && bLoading && !bPresenting && !bRunning;
 }
 
 /** Look around Desired (deterministic ring: centre, 8 x 0.5 R, 8 x R) for the closest firing

@@ -148,6 +148,13 @@ TSharedRef<SWidget> UPA250SpawnScreen::RebuildWidget()
 							[SNew(STextBlock).Font(Italic).ColorAndOpacity(FPA250HudStyle::CreamDim).Text(FText::FromString(Kit.Weapon))]
 							+ SVerticalBox::Slot().AutoHeight()
 							[SNew(STextBlock).Font(Body).ColorAndOpacity(FPA250HudStyle::Cream).WrapTextAt(222.f).Text(FText::FromString(Kit.Blurb))]
+							// The class in one line, and its one verb (unit_classes.json role / verb).
+							+ SVerticalBox::Slot().AutoHeight().Padding(0.f, 6.f, 0.f, 0.f)
+							[SNew(STextBlock).Font(Body).ColorAndOpacity(FPA250HudStyle::CreamDim).WrapTextAt(222.f).Text(FText::FromString(Kit.Role))
+								.Visibility(FString(Kit.Role).IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible)]
+							+ SVerticalBox::Slot().AutoHeight().Padding(0.f, 4.f, 0.f, 0.f)
+							[SNew(STextBlock).Font(Body).ColorAndOpacity(FPA250HudStyle::Brass).WrapTextAt(222.f).Text(FText::FromString(Kit.Verb))
+								.Visibility(FString(Kit.Verb).IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible)]
 							+ SVerticalBox::Slot().AutoHeight().Padding(0.f, 6.f, 0.f, 0.f)
 							[SNew(STextBlock).Font(Label).ColorAndOpacity(FPA250HudStyle::Brass).WrapTextAt(222.f).Text(FText::FromString(PA250UnitClasses::TraitLine(Kit)))]
 							+ SVerticalBox::Slot().FillHeight(1.f).VAlign(VAlign_Bottom).Padding(0.f, 8.f, 0.f, 0.f)

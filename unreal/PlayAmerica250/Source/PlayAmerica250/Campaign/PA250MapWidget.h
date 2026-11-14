@@ -30,10 +30,12 @@ public:
 	/** Last desk-news serial shown on the message line (-1 until the first look). */
 	int32 SeenDispatchSerial = -1;
 	void PressCommander(const FString& Action);
+	void PressBuyPowder();
 	void PressBuyCartridges();
 	void PressBuyMuskets();
 	void PressBuyProvisions();
 	/** Order sizes of the three purchase buttons (the town panel prices them from the sim). */
+	static constexpr int32 BuyPowderQty = 5;
 	static constexpr int32 BuyCartridgesQty = 20;
 	static constexpr int32 BuyMusketsQty = 4;
 	static constexpr int32 BuyProvisionsQty = 6;
@@ -47,14 +49,32 @@ public:
 	bool IsTreasuryOpen() const { return bShowTreasury; }
 	void PressBorrow();
 	void PressRepay();
+	// Campaign arc: the mission tracker's actions and the end screen's.
+	void PressSendForGuns();
+	void PressHaulGuns();
+	void PressLeaveGuns();
+	void PressReenlist();
+	void PressNewCampaign();
+	void PressQuitGame();
 	void PressSelectArmy(const FString& ArmyId);
 	void PressSelectArmyAtSelection();
 	void PressAboutToggle();
 	void PressDevToggle();
+	/** Mission tracker: fold it down to its one-line heading (so it stops covering what is under it), or open it again. */
+	void PressTrackerToggle();
+	bool IsTrackerMinimized() const { return bTrackerMinimized; }
 	void PressEnterBattleAtSelection();
 
 	/** True when a screen point falls on a HUD strip/panel (clicks there must not reach the map). */
 	bool IsPointOverHud(FVector2D ScreenPos) const;
+	/** Pure: the correspondence panel waits while a battle card is up (the pre-battle card of a pending
+	 *  battle, or an after-battle card not yet read). The letter is still there when the card is put away. */
+	static bool StaffPanelVisible(bool bStaffOpen, bool bBattlePending, bool bUnseenBattleReport)
+	{
+		return bStaffOpen && !bBattlePending && !bUnseenBattleReport;
+	}
+	/** Pure: what the status line says when "Send stores to depot" is refused (the sim's error code in words). */
+	static FString SendStoresRefusal(const FString& ErrorCode);
 	bool IsAboutOpen() const { return bShowAbout; }
 	bool IsDevOpen() const { return bShowDev; }
 	bool IsCityViewOpen() const;
@@ -71,11 +91,15 @@ public:
 	int32 HeldTownCount() const;
 	UPA250CityViewWidget* GetCityView() const { return CityView; }
 
-	/** Select / order by province id (used by autoplay and map-actor clicks). */
+	/** Inspect a province: select it, and a friendly army standing there. Never marches. */
 	UFUNCTION(BlueprintCallable, Category = "PA250")
 	FString ClickProvince(const FString& ProvinceId);
-	/** A real mouse click on a town: ClickProvince, then the town panel unless it was a march order. */
+	/** Left click: inspect the town and open its panel. */
 	FString HandleTownClicked(const FString& ProvinceId);
+	/** Right click: march the selected army to this town, or clear the selection when none is selected. */
+	FString HandleTownOrdered(const FString& ProvinceId);
+	/** Queue a march for the selected army. Same confirmation text the old left-click order used. */
+	FString OrderProvince(const FString& ProvinceId);
 	/** Show the docked town panel for a province (town click or View Town). */
 	void OpenCityView(const FString& ProvinceId);
 	void CloseCityView();
@@ -120,6 +144,7 @@ private:
 	FText TreasuryText() const;
 	FText StoresText() const;
 	FText SupportText() const;
+	FText ScoreboardText() const;
 	FText AboutText() const;
 	FText DisclaimerText() const;
 	FText StatusText() const;
@@ -155,6 +180,21 @@ private:
 	bool bShowLedger = false;
 	/** Last HudEpoch painted. Slate does not subscribe to the epoch; NativeTick invalidates when it changes. */
 	int32 PaintedHudEpoch = -1;
+	/** The pre-battle and after-battle cards (UI/PA250BattleCards): rebuilt when what they show changes. */
+	TSharedPtr<class SBox> PreBattleBox;
+	TSharedPtr<class SBox> AfterBattleBox;
+	FString PreBattleKey;
+	FString AfterBattleKey;
+	void RefreshBattleCards();
+	/** The mission tracker's text (UI/PA250CampaignArcPanels), rebuilt when the HUD epoch or the selected army changes. */
+	void RefreshTrackerCache() const;
+	mutable TSharedPtr<struct FPA250TrackerCache> TrackerCache;
+	mutable int32 TrackerEpoch = -1;
+	mutable FString TrackerArmy;
+	/** Folded to one line by the player (Hide / Show). Kept for the session, not in the save. */
+	bool bTrackerMinimized = false;
+	/** The tracker is on screen: a mission or notice to show, no battle pending, no report up, campaign not over. */
+	bool IsTrackerShown() const;
 	TWeakObjectPtr<APA250ProvinceMapActor> MapActor;
 	UPROPERTY()
 	TObjectPtr<UPA250CityViewWidget> CityView;

@@ -158,6 +158,17 @@ struct FPA250MoraleState
 	}
 };
 
+/** Pure: does this squad count toward a breaking army (the army_broke ending)? A rout always does.
+ *  A withdrawal does when it was forced on the squad (outnumbered and worn down); a skirmisher's
+ *  fall-back from open ground or from a bayonet charge is his drill - fire, give ground, fire
+ *  again - and does not. (Before 2026-11-14 it did, and in four bot-only battles out of four the
+ *  Continentals "broke" within 15-100 s of the opening guard because their militia were fighting
+ *  the way militia fight.) */
+inline bool PA250SquadIsBroken(EPA250Morale State, bool bDrillWithdrawal)
+{
+	return State == EPA250Morale::Routing || (State == EPA250Morale::Withdrawing && !bDrillWithdrawal);
+}
+
 /** Pure: should a squad order a bayonet charge now? No faction input - the same rules for every side.
  *  Line troops charge when they outnumber the enemy nearby, or catch him reloading while their own
  *  muskets are mostly empty (cold steel beats a 10 s reload). Cautious roles (light / irregular) only

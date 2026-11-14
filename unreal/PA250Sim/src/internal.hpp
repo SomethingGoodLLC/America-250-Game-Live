@@ -15,6 +15,19 @@ inline std::string other_faction(const std::string& f) {
     return f == kBritish ? std::string(kContinental) : std::string(kBritish);
 }
 
+// Words for player-facing text. Ids ("british", "line_infantry", "concord") never reach the player.
+inline std::string faction_word(const std::string& f) {
+    if (f == kBritish) return "British";
+    if (f == kContinental) return "Patriot";
+    return f.empty() ? std::string("nobody's") : f;
+}
+inline std::string class_words(const std::string& unit_class) {
+    std::string out = unit_class;
+    for (char& c : out)
+        if (c == '_') c = ' ';
+    return out;
+}
+
 inline uint64_t mix64(uint64_t x) {  // splitmix64 finalizer
     x += 0x9E3779B97F4A7C15ULL;
     x = (x ^ (x >> 30)) * 0xBF58476D1CE4E5B9ULL;
@@ -31,8 +44,30 @@ inline uint64_t fnv1a(const std::string& s) {
     return h;
 }
 
+// Text that came from outside the sim (a parser's error message quotes the bytes it choked on)
+// can hold bytes that are not UTF-8, and the save cannot be written with those. Anything outside
+// plain printable ASCII and well-formed multi-byte UTF-8 becomes '?'.
+inline std::string printable_utf8(const std::string& text) {
+    std::string out;
+    out.reserve(text.size());
+    for (size_t i = 0; i < text.size();) {
+        const unsigned char c = static_cast<unsigned char>(text[i]);
+        const size_t n = c < 0x80 ? 1 : (c >> 5) == 0x6 ? 2 : (c >> 4) == 0xE ? 3 : (c >> 3) == 0x1E ? 4 : 0;
+        bool ok = n > 0 && i + n <= text.size() && !(n == 1 && c < 0x20 && c != '\n' && c != '\t');
+        for (size_t k = 1; ok && k < n; ++k) ok = (static_cast<unsigned char>(text[i + k]) & 0xC0) == 0x80;
+        if (ok) {
+            out.append(text, i, n);
+            i += n;
+        } else {
+            out.push_back('?');
+            ++i;
+        }
+    }
+    return out;
+}
+
 inline void add_log(CampaignState& s, const std::string& line) {
-    s.log.push_back("h" + std::to_string(s.now.hour_index) + ": " + line);
+    s.log.push_back("h" + std::to_string(s.now.hour_index) + ": " + printable_utf8(line));
     constexpr size_t kMaxLog = 48;
     if (s.log.size() > kMaxLog) s.log.erase(s.log.begin(), s.log.begin() + (s.log.size() - kMaxLog));
 }

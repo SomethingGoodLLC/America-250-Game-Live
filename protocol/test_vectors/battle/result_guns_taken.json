@@ -1,0 +1,47 @@
+{
+ "name": "result_guns_taken",
+ "description": "the winner keeps the guns it overran, never more than the loser brought (3 guns, 2 crews: 2 fielded)",
+ "scenario": {
+  "province": "lexington",
+  "attacker": "british_regulars",
+  "defender": "continental_militia",
+  "units": {
+   "british_regulars": {
+    "grenadier": 5,
+    "light_infantry": 6,
+    "line_infantry": 12,
+    "officer": 1,
+    "artilleryman": 2
+   }
+  },
+  "guns": {
+   "british_regulars": 3
+  }
+ },
+ "result": {
+  "province_id": "lexington",
+  "winner": "continental",
+  "end_reason": "army_broke",
+  "guns_taken": {
+   "continental": 5
+  }
+ },
+ "expect": {
+  "schema_valid": true,
+  "applied": true,
+  "owner_after": "continental",
+  "siege_by": "",
+  "siege_hours": 0,
+  "setup_guns": {
+   "british": 2,
+   "continental": 0
+  },
+  "army_guns": {
+   "british_regulars": 1,
+   "continental_militia": 2
+  },
+  "report_guns": {
+   "continental": 2
+  }
+ }
+}

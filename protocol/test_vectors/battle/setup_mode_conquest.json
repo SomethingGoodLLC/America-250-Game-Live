@@ -1,0 +1,21 @@
+{
+ "name": "setup_mode_conquest",
+ "description": "an open town reached by road is the open fight for the posts",
+ "scenario": {
+  "province": "lexington",
+  "attacker": "british_regulars",
+  "defender": "continental_militia",
+  "attacker_from": "menotomy"
+ },
+ "expect": {
+  "field_strength": {
+   "british": 21,
+   "continental": 19
+  },
+  "fortification_level": {
+   "british": 0,
+   "continental": 0
+  },
+  "mode": "conquest"
+ }
+}

@@ -4,10 +4,15 @@
 #include "CoreMinimal.h"
 #include "RFGameMode.h"
 #include "PA250TicketLedger.h"
+#include "PA250BattleEndRules.h"
 #include "pa250/types.hpp"
 #include "PA250BattleGameMode.generated.h"
 
 class APA250ControlPoint;
+class APA250FieldWork;
+class APA250Colours;
+class APA250FieldGun;
+enum class EActiveReloadHit : uint8;
 class ARFCharacter;
 class UMusketTuning;
 class UPA250BattleHUD;
@@ -25,6 +30,9 @@ struct FPA250ScenarioFight
 {
 	bool bContestSingleCrossing = false;
 	bool bRewardForcePreservation = false;
+	/** BattleSetup.mode: conquest | assault | landing (PA250BattleModes.h). The scripted crossing and
+	 *  return-march fights are always conquest. */
+	FName Mode = TEXT("conquest");
 	FName CrossingPostId = TEXT("green");
 };
 
@@ -95,6 +103,10 @@ public:
 	TArray<FClassChoice> GetClassChoices(FName Faction) const;
 	/** Men of a class not yet dead: campaign units x SoldiersPerUnit minus the class's deaths. */
 	int32 ClassMenLeft(FName Faction, FName UnitClass) const;
+	/** Men of a class the army still has off the field: ClassMenLeft less its surrendered and the men
+	 *  of the class standing. A man can only come on as a class that has one (otherwise 18 line
+	 *  infantry could fall for an army that brought 16: autoplay, 2026-11-14). */
+	int32 ClassMenInReserve(FName Faction, FName UnitClass) const;
 	/** The class this controller last fought as (NAME_None before its first spawn). */
 	FName GetControllerClass(const AController* Controller) const;
 	/** Opening choice: the living player becomes UnitClass where he stands (no ticket, no respawn). */
@@ -121,17 +133,25 @@ public:
 	static bool SideIsOut(int32 Pool, int32 InitialUnits, bool bEverFielded, int32 Alive, bool bHumanAliveOnSide);
 	/** GAMEPLAY SETTINGS (user report 2026-11-14: both sides at 0 on the bar, the last enemies could
 	 *  not be found and the fight only ended on the clock). A side with no reserve and this few men
-	 *  left is a remnant: it breaks and quits the field after RemnantRoutSeconds; from
-	 *  RemnantMarkMen down its men are marked on the enemy player's HUD so they can be found. */
-	static constexpr int32 RemnantMen = 3;
-	static constexpr int32 RemnantMarkMen = 5;
-	static constexpr float RemnantRoutSeconds = 45.f;
+	 *  left is a remnant: it breaks and quits the field after the remnant seconds; from
+	 *  mark_men down its men are marked on the enemy player's HUD so they can be found. */
 	/** Pure: is this side a remnant about to break? Never the human player's side while he is alive
-	 *  on it (user decision 2026-11-10: the battle is not lost under a man who is still fighting). */
-	static bool RemnantBreaks(int32 Pool, int32 Alive, bool bHumanAliveOnSide);
+	 *  on it (user decision 2026-11-10: the battle is not lost under a man who is still fighting).
+	 *  The numbers are battle_rules.json "remnant". */
+	static bool RemnantBreaks(int32 Pool, int32 Alive, bool bHumanAliveOnSide, int32 RemnantMen);
+	/** Men of the side's army who are neither on the field nor down: the army's men (campaign units x
+	 *  SoldiersPerUnit) less its dead, its surrendered and the men standing. A side cannot put a man on
+	 *  the field that its army does not have, whatever its tickets say (a militiaman costs half a
+	 *  ticket, so tickets alone let 112 men fight and fall for an army of 88: autoplay, 2026-11-14). */
+	int32 MenInReserve(FName Faction) const;
+	/** Pure: the reserve a side can still call on - never more tickets than men, never more men than tickets. */
+	static int32 ReserveFor(int32 Tickets, int32 ArmyMen, int32 Down, int32 Standing)
+	{
+		return FMath::Max(0, FMath::Min(Tickets, ArmyMen - Down - Standing));
+	}
 	/** Every man a side still has: its reserve plus the men standing on the field. The HUD's number. */
 	int32 MenRemaining(FName Faction) const { return PoolTotal(Faction) + CountAlive(Faction); }
-	/** No reserve and RemnantMarkMen or fewer standing: the HUD marks these men for the other side. */
+	/** No reserve and mark_men or fewer standing: the HUD marks these men for the other side. */
 	bool IsMarkedRemnant(FName Faction) const;
 	/** Seconds until this side's remnant quits the field, or -1 when it is not breaking. */
 	float RemnantCountdown(FName Faction) const;
@@ -139,7 +159,98 @@ public:
 	 *  is spent, the bot's controller is retired). False when nobody is left to take over. */
 	bool TakeOverSoldier(APlayerController* PC);
 	const pa250::BattleResult& GetResult() const { return Result; }
+	/** Pure: the battle's own ledger as BattleResult.casualties, in men. The men shot or bayoneted down
+	 *  (Deaths) are split into killed and wounded by the sim's ratio (pa250::split_fallen,
+	 *  battle_rules.json); the men who surrendered are prisoners. Every man who fell is exactly one of
+	 *  the three, so a side's card total is its deaths plus its surrendered, to the man. */
+	static std::map<std::string, std::map<std::string, pa250::MenDown>> CasualtiesFromLedger(
+		const TMap<FName, TMap<FName, int32>>& Deaths, const TMap<FName, TMap<FName, int32>>& Surrendered,
+		const TMap<FName, TMap<FName, int32>>& SavedBySurgeon = TMap<FName, TMap<FName, int32>>());
+
+	// ---- Field guns (PA250FieldGun.h; values in battle_rules.json cannon) ----
+	const TArray<TObjectPtr<APA250FieldGun>>& GetGuns() const { return Guns; }
+	/** The gun a gunner of Faction should go to: the one he already has a post at, else the nearest of
+	 *  his side with a post free. OutPost is his place at it. Null when his side has none for him. */
+	APA250FieldGun* GunFor(ARFCharacter* Gunner, int32& OutPost) const;
+	/** The gun of his side the player stands at (within the crew radius), or null. */
+	APA250FieldGun* GunAt(const ARFCharacter* Soldier) const;
+	/** The player's trigger at a gun he serves: true when the key belonged to the gun (fired or not). */
+	bool PlayerFiresGun(ARFCharacter* Soldier);
+	/** His reload key at a gun he serves works its drill: true when the key belonged to the gun. */
+	bool PlayerWorksGun(ARFCharacter* Soldier, EActiveReloadHit& OutHit);
+	void NotifyGunTaken(APA250FieldGun* Gun, FName From);
+	void NotifyGunFired(APA250FieldGun* Gun, bool bCanister);
+	void NotifyRoundShot(ARFCharacter* Man, bool bStruck);
+	void NotifyWorkBattered(APA250FieldWork* Work, bool bBroken, FName ByFaction);
+	/** Guns a side has taken and still holds at this moment (BattleResult.guns_taken at the end). */
+	int32 GetGunsTakenBy(FName Faction) const;
+	// ---- Support roles (PA250Support.h; values in unit_classes.json) ----
+	/** A fallen man a surgeon may still save. */
+	struct FFallenMan
+	{
+		FVector Where = FVector::ZeroVector;
+		float FellAt = 0.f;
+		FName Faction;
+		FName UnitClass;
+		float Treated = 0.f;
+		bool bSaved = false;
+	};
+	/** The nearest fallen man of Faction within SeekCm of From who can still be saved, or INDEX_NONE. */
+	int32 NearestSavable(FName Faction, const FVector& From, float SeekCm) const;
+	FVector FallenLocation(int32 Index) const { return FallenMen.IsValidIndex(Index) ? FallenMen[Index].Where : FVector::ZeroVector; }
+	/** A surgeon's seconds with a fallen man; once he has had the treat time the man counts as wounded. */
+	void TreatFallen(int32 Index, float Seconds, const ARFCharacter* Surgeon);
+	int32 GetSavedBySurgeon(FName Faction) const;
+	/** Fallen colours within SeekCm of From (either side's), or null. */
+	APA250Colours* FallenColoursNear(const FVector& From, float SeekCm) const;
+	int32 GetColoursTaken(FName ByFaction) const { return ColoursTaken.FindRef(ByFaction); }
 	bool IsAutoplayMode() const { return bAutoplayBots; }
+	// ---- The battle reads the campaign (BattleSetup; numbers in battle_rules.json) ----
+	/** Soldiers a side has on the field at once: -PA250Bots, else the sim's field_strength, else BotsPerSide. */
+	int32 GetFieldStrength(FName Faction) const;
+	/** Seconds until the side holding every post wins (posts_swept); OutFaction is that side. -1 when nobody is. */
+	float PostsSweptCountdown(FName& OutFaction) const;
+	/** Seconds until this side's army breaks (army_broke), or -1 when it is not breaking. */
+	float ArmyBrokeCountdown(FName Faction) const;
+	/** Cartridges in a full box for this side (0 = boxes are not counted in this fight). */
+	int32 GetRoundsPerMan(FName Faction) const;
+	/** Rounds the side still has to hand out at its posts. */
+	int32 GetAmmoPool(FName Faction) const { return Ammo.Remaining(Faction); }
+	/** Is there anything left for this man to draw at a post his side holds? */
+	bool CanResupply(FName Faction, bool bHuman) const { return GetRoundsPerMan(Faction) > 0 && Ammo.Available(Faction, bHuman) > 0; }
+	/** Nearest post this side holds (where a man refills his cartridge box), or null. */
+	APA250ControlPoint* NearestHeldPost(FName Faction, const FVector& From) const;
+	const FPA250AmmoPool& GetAmmo() const { return Ammo; }
+	// ---- Class verbs (PA250UnitClasses; values in unit_classes.json) ----
+	/** The player's T key: order a volley (regular), a charge (grenadier), rally or order (officer).
+	 *  Passive verbs answer with what they do. Shows a notice either way. */
+	void UseClassAbility(ARFCharacter* Soldier);
+	/** The player's order to his file: 1 follow me, 2 form line here, 3 hold, 4 take cover, 5 charge,
+	 *  6 fall back to resupply. An officer's order also reaches the squads in his aura. Shows a notice. */
+	void GivePlayerOrder(ARFCharacter* Soldier, int32 OrderIndex);
+	/** One line for the HUD: his file's men, loaded muskets and standing order. Empty with no file. */
+	FString GetFileLine(const ARFCharacter* Soldier) const;
+	/** Pure: the HUD's words for a file. */
+	static FString FileLineText(int32 Men, int32 Loaded, int32 Presented, const TCHAR* OrderWords, bool bVolleyRole);
+	/** Pure: where the leader is aiming. The nearest enemy within RayCm of the line from Eye to
+	 *  HitPoint is his man (a ray at a man's chest lands far behind him); else the point the ray struck. */
+	static FVector ResolveLeaderAim(const FVector& Eye, const FVector& HitPoint, const TArray<FVector>& Enemies, float RayCm);
+	/** One line for the HUD: the class verb and whether it is ready. */
+	FString GetAbilityLine(const ARFCharacter* Soldier) const;
+	/** Men of a side taken prisoner so far (a dragoon riding down routers). */
+	int32 GetPrisonersTaken(FName Faction) const;
+	const pa250::BattleRules& GetRules() const { return Rules; }
+	const TArray<TObjectPtr<APA250FieldWork>>& GetWorks() const { return Works; }
+	/** The nearest work within ReachCm of From that needs a sapper's labour, or null. */
+	APA250FieldWork* NearestWorkNeedingLabour(const FVector& From, float ReachCm) const;
+	/** Is the post nearest Where held by Faction? (A sapper digs only on ground his side holds.) */
+	bool SideHoldsGroundAt(FName Faction, const FVector& Where) const;
+	/** Seconds of one sapper's labour on a work (unit_classes.json verbs.sapper.build_seconds raises a
+	 *  whole breastwork; a stronger work takes longer in proportion). Counts what it achieves. */
+	void LabourOnWork(APA250FieldWork* Work, float Seconds, const ARFCharacter* Sapper);
+	int32 GetWorksRaised(FName Faction) const { return WorksRaised.FindRef(Faction); }
+	/** A work changed (built up, or battered below cover): squads look again at where the cover is. */
+	void NotifyWorksChanged();
 	UMusketTuning* GetTuning() const;
 	UPA250WeaponTuning* GetWeaponTuning() const { return WeaponTuningAsset; }
 	UPA250BotTuning* GetBotTuning() const { return BotTuningAsset; }
@@ -167,12 +278,20 @@ public:
 	/** Campaign Army.morale (0..100) → extra battlefield pressure bias. Distinct from squad Steady/Shaken/Rout. */
 	float GetCampaignConfidencePressure(FName Faction) const;
 	/** concord_bridge / bridge_crossing contests one post; battle_road / return_march rewards men kept. */
-	static FPA250ScenarioFight ResolveScenario(const FString& Preset, const TArray<FString>& TerrainTags);
+	static FPA250ScenarioFight ResolveScenario(const FString& Preset, const TArray<FString>& TerrainTags, const FString& Mode = TEXT("conquest"));
+	/** Assault and landing: the post the attacker must take next (the only one he can contest in an
+	 *  assault; the landing post until he has landed). Null in the open fight or once it is all open. */
+	APA250ControlPoint* GetModeOpenPost() const;
+	FName GetBattleMode() const { return ScenarioFight.Mode; }
+	bool HasLanded() const { return bLanded; }
 	static void ConfigurePostForScenario(APA250ControlPoint* Post, const FPA250ScenarioFight& Fight);
+	/** Concord: the east bank (village side, tagged british in the level) is the easier ground.
+	 *  The faction that holds the town takes it; the other side starts on the west bank. */
+	static void ConcordBanks(FName TownHolder, FName& East, FName& West);
 	/** Higher share of the starting pool wins. Equal shares go to DefenderOnTie. */
 	static FName PreservationWinner(int32 RemainingA, int32 InitialA, int32 RemainingB, int32 InitialB, FName SideA,
 		FName SideB, FName DefenderOnTie);
-	static bool UsesPostBleed(const FPA250ScenarioFight& Fight) { return !Fight.bRewardForcePreservation; }
+	static bool UsesPostBleed(const FPA250ScenarioFight& Fight) { return !Fight.bRewardForcePreservation && Fight.Mode != TEXT("assault"); }
 	/** Ticket exhaustion is ignored until ElapsedSeconds reaches MinSeconds (default 120). */
 	static bool TicketsMayExhaust(float ElapsedSeconds, float MinSecondsBeforeExhaustion)
 	{
@@ -227,11 +346,53 @@ private:
 	/** -PA250MeleeProbe: stage the player against one enemy, run every melee move, save stills (PA250MeleeProbe.cpp). */
 	void MaybeStartMeleeProbe();
 	void MaybeStartClassPortraits();
+	/** -PA250GunStill: two stills of the first field gun with a soldier beside it, for scale. */
+	void MaybeStartGunStill();
 	void GatherPosts();
 	/** Post ownership, which posts can be taken, and how the clock is won, from the BattleSetup. */
 	void ApplyScenarioPreset();
-	/** Fort bonus: simple PA250Cover walls near posts the defender starts holding. */
-	void SpawnFortCoverNearHeldPosts();
+	/** Concord only: give the town's owner the east bank (starts, muster points, and the far bridgehead). */
+	void AssignConcordGround();
+	/** Field works (battle_rules.json works). Places for them are the level's PA250WorksSlot markers,
+	 *  or made up about the defender's post when the level has none. The defender's fortification_level
+	 *  stands some of them at the start (breastworks; a redoubt at the highest level); the rest are
+	 *  places a sapper can build on. Replaces the three cubes of the old fort bonus. */
+	void SpawnFieldWorks();
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<APA250FieldWork>> Works;
+	/** A side's guns: as many as the setup says its army brings (sides.*.guns), at the level's
+	 *  PA250GunSlot markers or drawn up by the side's start; a crew comes on at each. */
+	void SpawnFieldGuns();
+	/** The opening: a crew of the gun class comes on at each of the side's guns, as far as the army
+	 *  has gunners. Returns the men put on the field (they count in the side's field strength). */
+	int32 SpawnGunCrews(FName Faction, int32 MostMen);
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<APA250FieldGun>> Guns;
+	TMap<FName, int32> GunShots;        // discharges by side (battle trace)
+	TMap<FName, int32> CanisterShots;
+	int32 RoundShotStruck = 0;          // men a round shot went through
+	int32 RoundShotKnockedDown = 0;     // men knocked off their feet beside its path
+	TMap<FName, int32> WorksBroken;     // works battered below cover, by the side whose shot did it
+	int32 GunCaptures = 0;              // times a gun changed hands
+	/** One colours a side at a time: carried by its ensign, fallen, or taken. */
+	UPROPERTY(Transient)
+	TMap<FName, TObjectPtr<APA250Colours>> Colours;
+	/** Colours a side has lost to the enemy (it has no more than its ensign units to lose). */
+	TMap<FName, int32> ColoursLost;
+	TMap<FName, int32> ColoursTaken;   // by the captor
+	TMap<FName, int32> ColoursFell;    // times a side's colours went down with their bearer
+	TArray<FFallenMan> FallenMen;
+	TMap<FName, TMap<FName, int32>> SavedBySurgeon;
+	float SupportTimer = 0.f;
+	int32 SpawnedOnColours = 0;
+	/** Times a volley-role man was found loading in a musician's cadence (twice a second each). */
+	int32 CadenceManChecks = 0;
+	/** Colours taken up or carried off, the news to the coordinator; twice a second. */
+	void TickSupport(float DeltaSeconds);
+	/** An ensign taking the field raises his side's colours if it has colours left and none are up. */
+	void MaybeRaiseColours(ARFCharacter* Soldier);
+	/** Works a side's sappers have raised to cover in this battle (battle trace). */
+	TMap<FName, int32> WorksRaised;
 	int32 InitialSoldiers(FName Faction) const;
 	void CapturePreviewShot(const FString& Tag, const FString& OutStem, int32 Index, int32 Total);
 
@@ -275,6 +436,58 @@ private:
 	FName PluralityHolder() const;
 	FName OtherFaction(FName F) const { return F == TEXT("british") ? FName(TEXT("continental")) : FName(TEXT("british")); }
 	void CheckTicketExhaustion();
+	/** posts_swept and army_broke (PA250BattleEndRules.h). */
+	void TickEndConditions(float DeltaSeconds);
+	/** Opening boxes and refills at held posts. */
+	void TickAmmo(float DeltaSeconds);
+	/** Officers rally routing squads near them; mounted dragoons take routers they overtake. */
+	void TickClassVerbs();
+	/** The human player's file: made up from the field, told where he aims. */
+	void TickPlayerFile(float DeltaSeconds);
+	float FileTimer = 0.f;
+	FVector LeaderAim = FVector::ZeroVector;
+	/** -PA250LedVolley=<side> (bot battles): one man of that side leads a file as the player would;
+	 *  he holds his aim on the nearest enemy and fires when his line is presented. */
+	void TickLedVolleyProbe(float DeltaSeconds);
+	FName ProbeSide;
+	TWeakObjectPtr<ARFCharacter> ProbeLeader;
+	float ProbeHold = 0.f;
+	float ProbeNextAt = 0.f;
+	float ProbeOrderAt = 0.f;
+	float ProbeWatchUntil = -1.f;
+	int32 ProbeTargetSquad = -1;
+	int32 ProbeVolleys = 0;
+	int32 ProbeShook = 0;
+	void TakePrisoner(ARFCharacter* Prisoner, const ARFCharacter* Captor);
+	/** Debug matchup (-PA250HoldAt=<m>): the two sides drawn up that far apart, holding their ground. */
+	void ArrangeMatchup(float MetersApart);
+	/** faction -> class -> soldiers taken prisoner (BattleResult.prisoners, in units, at the end). */
+	TMap<FName, TMap<FName, int32>> Prisoners;
+	TMap<TWeakObjectPtr<ARFCharacter>, float> RallyReadyAt;
+	float PlayerAbilityReadyAt = 0.f;
+	/** The class being placed by PickSpawnTransform (light infantry may come on nearer the enemy). */
+	mutable FName SpawnClassHint;
+	bool bMatchupHold = false;
+	bool bBotsOverride = false;
+	pa250::BattleRules Rules;
+	TMap<FName, float> SweepTime;
+	// ---- Assault and landing (PA250BattleModes.h; battle_rules.json modes) ----
+	/** Locks the posts the mode closes, counts posts carried, adds the assault's clock, ends an assault the attacker has carried. */
+	void TickBattleMode();
+	TArray<int32> ModeOrder;      // indices into Posts, nearest the attacker's start first
+	int32 ModeCarried = 0;        // posts the attacker holds (assault: carried in order)
+	bool bLanded = false;         // landing: the attacker has held the landing post
+	float ModeClockAdded = 0.f;   // seconds the assault has added to the clock
+	/** A side that has held at least one post in this fight (the other side can then sweep). */
+	TMap<FName, bool> EverHeldAPost;
+	TMap<FName, float> BrokeTime;
+	/** Longest the break clock has run for a side (battle trace; tuning evidence). */
+	TMap<FName, float> BrokePeak;
+	TMap<FName, int32> PeakSquads;
+	FPA250AmmoPool Ammo;
+	TSet<TWeakObjectPtr<ARFCharacter>> AmmoIssued;
+	TMap<TWeakObjectPtr<ARFCharacter>, float> ResupplyClock;
+	float AmmoTimer = 0.f;
 	void RegisterConsoleCommands();
 
 	bool bInitialized = false;
@@ -285,6 +498,11 @@ private:
 	bool bDebugBattle = false;
 	float StartTime = 0.f;
 	int32 PostFlips = 0;
+	/** Battle trace (how long a side held): the game-second of the first post flip, and the second
+	 *  each side was first down to half the men it opened with on the field (-1: never). */
+	float FirstFlipAt = -1.f;
+	TMap<FName, float> HalfStrengthAt;
+	TMap<FName, int32> OpeningField;
 	float SpacingReportTimer = 5.f;
 	FString Banner;
 	FString Notice;

@@ -1,0 +1,31 @@
+{
+ "name": "result_tickets_exhausted",
+ "description": "the winner takes an unfortified town even without holding the posts",
+ "scenario": {
+  "province": "lexington",
+  "attacker": "british_regulars",
+  "defender": "continental_militia"
+ },
+ "result": {
+  "province_id": "lexington",
+  "winner": "british",
+  "end_reason": "tickets_exhausted",
+  "objective_holder": "",
+  "losses": {
+   "continental": {
+    "militia": 3
+   },
+   "british": {
+    "line_infantry": 1
+   }
+  }
+ },
+ "expect": {
+  "schema_valid": true,
+  "applied": true,
+  "owner_after": "british",
+  "siege_by": "",
+  "siege_hours": 0,
+  "loser_fate": "retreated"
+ }
+}

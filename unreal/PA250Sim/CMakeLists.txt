@@ -6,7 +6,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 add_library(pa250sim STATIC
   src/time.cpp src/path.cpp src/clock.cpp src/battle.cpp src/diplomacy.cpp src/logistics.cpp
-  src/buildings.cpp src/correspondence.cpp src/serialize.cpp src/controller.cpp)
+  src/buildings.cpp src/correspondence.cpp src/serialize.cpp src/controller.cpp src/campaign.cpp)
 target_include_directories(pa250sim PUBLIC include third_party PRIVATE src)
 target_compile_options(pa250sim PRIVATE -Wall -Wextra -Wno-unused-parameter)
 
@@ -17,3 +17,8 @@ target_compile_definitions(pa250sim_tests PRIVATE
   PA250_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data"
   PA250_VECTOR_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../../protocol/test_vectors/clauses")
 add_test(NAME pa250sim COMMAND pa250sim_tests)
+
+# Sim-only tool for checks and tuning (idle campaign run, income report). Not part of the game.
+add_executable(pa250sim_tool tools/sim_tool.cpp)
+target_link_libraries(pa250sim_tool PRIVATE pa250sim)
+target_compile_definitions(pa250sim_tool PRIVATE PA250_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data")

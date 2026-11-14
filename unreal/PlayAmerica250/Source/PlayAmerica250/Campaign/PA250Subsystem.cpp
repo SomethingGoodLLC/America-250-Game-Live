@@ -48,6 +48,21 @@ FString UPA250Subsystem::ProvinceSizesPath()
 	return FPaths::ConvertRelativePathToFull(
 		FPaths::Combine(FPaths::ProjectDir(), TEXT("../PA250Sim/data/province_sizes.json")));
 }
+FString UPA250Subsystem::CampaignRulesPath()
+{
+	return FPaths::ConvertRelativePathToFull(
+		FPaths::Combine(FPaths::ProjectDir(), TEXT("../PA250Sim/data/campaign_rules_boston_1775.json")));
+}
+FString UPA250Subsystem::MissionsPath()
+{
+	return FPaths::ConvertRelativePathToFull(
+		FPaths::Combine(FPaths::ProjectDir(), TEXT("../PA250Sim/data/missions_boston_1775.json")));
+}
+FString UPA250Subsystem::BattleRulesPath()
+{
+	return FPaths::ConvertRelativePathToFull(
+		FPaths::Combine(FPaths::ProjectDir(), TEXT("../PA250Sim/data/battle_rules.json")));
+}
 FString UPA250Subsystem::SavePath() { return FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("PA250/campaign.json")); }
 FString UPA250Subsystem::TracePath() { return FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("PA250/autoplay_trace.json")); }
 FString UPA250Subsystem::AutosaveDir() { return FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("Autosaves")); }
@@ -358,6 +373,28 @@ void UPA250Subsystem::LoadSimDataFiles()
 	Load(LogisticsTuningPath(), &pa250::load_logistics_tuning);
 	Load(BuildingsCatalogPath(), &pa250::load_buildings_catalog);
 	Load(ProvinceSizesPath(), &pa250::load_province_sizes);
+	Load(BattleRulesPath(), &pa250::load_battle_rules);
+	// The campaign arc (missions, enlistments, the scored AI, win and loss) runs only with its rules
+	// loaded, so a missing or refused file is an error, not a quiet fallback.
+	Load(CampaignRulesPath(), &pa250::load_campaign_rules);
+	if (!pa250::campaign_rules_loaded())
+	{
+		UE_LOG(LogTemp, Error, TEXT("PA250 sim data: campaign rules not loaded (%s): the campaign has no missions, no enlistments and no end"), *CampaignRulesPath());
+	}
+	try
+	{
+		const std::vector<std::string> Errors = pa250::load_missions(pa250::read_text_file(ToStd(MissionsPath())));
+		for (const std::string& E : Errors)
+		{
+			UE_LOG(LogTemp, Error, TEXT("PA250 sim data: missions refused: %s"), *ToFStr(E));
+		}
+	}
+	catch (...)
+	{
+		UE_LOG(LogTemp, Error, TEXT("PA250 sim data: missions not loaded (%s)"), *MissionsPath());
+	}
+	UE_LOG(LogTemp, Display, TEXT("PA250 sim data: campaign rules %s, %d missions"), pa250::campaign_rules_loaded() ? TEXT("loaded") : TEXT("MISSING"),
+		static_cast<int32>(pa250::mission_defs().size()));
 }
 
 bool UPA250Subsystem::NewCampaign(FString& OutError)
@@ -492,6 +529,18 @@ bool UPA250Subsystem::ApprovePurchaseOrder(const FString& DestProvince, int32 Po
 	return true;
 }
 
+bool UPA250Subsystem::SendStoresToDepot(const FString& SourceProvince, FString& OutError)
+{
+	const auto Errs = Controller.send_stores_to_depot_order(ToStd(SourceProvince));
+	if (!Errs.empty())
+	{
+		OutError = ToFStr(Errs.front());
+		return false;
+	}
+	BumpHudEpoch();
+	return true;
+}
+
 bool UPA250Subsystem::ApproveTransferOrder(const FString& SourceProvince, const FString& DestProvince, int32 Powder,
 										   int32 Cartridges, int32 Muskets, int32 Bayonets, int32 Provisions,
 										   int32 Lead, int32 Paper, FString& OutError)
@@ -551,6 +600,91 @@ bool UPA250Subsystem::DemolishBuilding(const FString& ProvinceId, const FString&
 bool UPA250Subsystem::TakeLoan(FString& OutError)
 {
 	const auto Errs = Controller.take_loan_action();
+	if (!Errs.empty())
+	{
+		OutError = ToFStr(Errs.front());
+		return false;
+	}
+	BumpHudEpoch();
+	return true;
+}
+
+FString UPA250Subsystem::GetMissionsJson() const
+{
+	return Controller.has_campaign() ? ToFStr(pa250::missions_json(Controller.state())) : FString(TEXT("{}"));
+}
+
+FString UPA250Subsystem::GetOutcomeJson() const
+{
+	return Controller.has_campaign() ? ToFStr(pa250::outcome_json(Controller.state())) : FString(TEXT("{}"));
+}
+
+TArray<FString> UPA250Subsystem::GetMissionTargetProvinces() const
+{
+	TArray<FString> Out;
+	if (!Controller.has_campaign()) return Out;
+	const pa250::CampaignState& St = Controller.state();
+	for (const pa250::MissionDef& M : pa250::mission_defs())
+	{
+		if (M.faction != St.player_faction) continue;
+		const auto It = St.progress.missions.find(M.id);
+		if (It == St.progress.missions.end() || It->second.status != "active") continue;
+		for (const std::string& Town : M.target_provinces) Out.Add(ToFStr(Town));
+		break; // the current mission only
+	}
+	return Out;
+}
+
+int32 UPA250Subsystem::GetReenlistCost(const FString& ArmyId) const
+{
+	if (!Controller.has_campaign()) return 0;
+	const pa250::CampaignState& St = Controller.state();
+	const auto It = St.armies.find(ToStd(ArmyId));
+	if (It == St.armies.end()) return 0;
+	int32 Cost = 0;
+	for (const auto& U : It->second.units) Cost += pa250::reenlist_cost(St, It->first, U.first);
+	return Cost;
+}
+
+bool UPA250Subsystem::ReenlistArmy(const FString& ArmyId, FString& OutError)
+{
+	if (!Controller.has_campaign()) return false;
+	const auto It = Controller.state().armies.find(ToStd(ArmyId));
+	if (It == Controller.state().armies.end())
+	{
+		OutError = TEXT("unknown_army");
+		return false;
+	}
+	// Class by class in the army's own order; what the treasury cannot pay for stays unsigned.
+	TArray<std::string> Classes;
+	for (const auto& U : It->second.units) Classes.Add(U.first);
+	bool bAny = false;
+	for (const std::string& Class : Classes)
+	{
+		if (pa250::reenlist_cost(Controller.state(), ToStd(ArmyId), Class) <= 0) continue;
+		const auto Errs = Controller.reenlist_action(ToStd(ArmyId), Class);
+		if (Errs.empty()) bAny = true;
+		else OutError = ToFStr(Errs.front());
+	}
+	if (bAny) BumpHudEpoch();
+	return bAny;
+}
+
+bool UPA250Subsystem::SendForSiegeGuns(FString& OutError)
+{
+	const auto Errs = Controller.send_for_siege_guns_action();
+	if (!Errs.empty())
+	{
+		OutError = ToFStr(Errs.front());
+		return false;
+	}
+	BumpHudEpoch();
+	return true;
+}
+
+bool UPA250Subsystem::AttachSiegeGuns(const FString& ArmyId, FString& OutError)
+{
+	const auto Errs = Controller.attach_siege_guns_action(ToStd(ArmyId));
 	if (!Errs.empty())
 	{
 		OutError = ToFStr(Errs.front());
@@ -1035,11 +1169,22 @@ FName UPA250Subsystem::BattleLevelForPreset(const FString& ScenarioPreset)
 	return LevelNameForFlow(EPA250Flow::Battle);
 }
 
+FName UPA250Subsystem::BattleLevelFor(const FString& ScenarioPreset, const FString& Mode)
+{
+	// A landing needs a shore: the harbour level, when it is built. The scripted fights keep theirs.
+	static const TCHAR* Harbor = TEXT("/Game/PA250/Maps/L_Harbor");
+	if (Mode == TEXT("landing") && ScenarioPreset != TEXT("concord_bridge") && ScenarioPreset != TEXT("battle_road") && FPackageName::DoesPackageExist(Harbor))
+	{
+		return FName(Harbor);
+	}
+	return BattleLevelForPreset(ScenarioPreset);
+}
+
 void UPA250Subsystem::TravelToFlowLevel(UObject* WorldContext) const
 {
 	if (GetFlow() == EPA250Flow::Battle)
 	{
-		const FName Level = BattleLevelForPreset(UTF8_TO_TCHAR(GetBattleSetup().scenario_preset.c_str()));
+		const FName Level = BattleLevelFor(UTF8_TO_TCHAR(GetBattleSetup().scenario_preset.c_str()), UTF8_TO_TCHAR(GetBattleSetup().mode.c_str()));
 		UE_LOG(LogTemp, Display, TEXT("PA250 battle level: %s"), *Level.ToString());
 		UGameplayStatics::OpenLevel(WorldContext, Level);
 		return;

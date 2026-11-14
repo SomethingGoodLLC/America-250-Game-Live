@@ -1,0 +1,145 @@
+# BattleSetup: what the sim hands a battle (Play America 250).
+# Written by PA250Sim `setup_to_json` (unreal/PA250Sim/src/serialize.cpp); read by the Unreal battle.
+# The battle may read every field and may change none: the campaign only changes through BattleResult.
+# Shared vectors: protocol/test_vectors/battle/setup_*.json (C++ ctest and pytest).
+$schema: "http://json-schema.org/draft-07/schema#"
+$id: "battle_setup.v1"
+title: BattleSetup
+type: object
+additionalProperties: false
+required:
+  - valid
+  - province_id
+  - province_name
+  - objective
+  - seed
+  - attacker_faction
+  - defender_faction
+  - player_faction
+  - sides
+properties:
+  valid: {type: boolean}
+  province_id: {type: string}
+  province_name: {type: string}
+  objective: {type: string, description: "Primary post id (\"green\")."}
+  scenario_preset:
+    enum: [lexington_common, concord_bridge, battle_road]
+  mode:
+    enum: [conquest, assault, landing]
+    description: >-
+      The kind of fight (PA250Sim `choose_battle_mode`, battle_rules.json "modes"). landing: the
+      attacker came over water (a boat or ferry edge) into a harbour town and comes ashore in boats.
+      assault: the defender fights behind works (its fortification_level is above zero) and the
+      attacker must carry the posts in order. conquest: the open fight for the posts; the Concord and
+      Battle Road presets are always conquest. Absent means conquest.
+  seed: {type: integer, minimum: 0, description: "From CampaignState.seed, the hour and the province; never the wall clock."}
+  attacker_faction: {$ref: "#/definitions/faction"}
+  defender_faction: {$ref: "#/definitions/faction"}
+  player_faction: {$ref: "#/definitions/faction"}
+  terrain_tags:
+    type: array
+    items: {type: string}
+    description: "Province tags plus chokepoint / disordered / bridge_crossing / return_march, sorted, unique."
+  province_cartridges: {type: integer, minimum: 0}
+  province_powder: {type: integer, minimum: 0}
+  force_notes: {type: string}
+  farm_level: {type: integer, minimum: 0, maximum: 3}
+  workshop_level: {type: integer, minimum: 0, maximum: 3}
+  depot_level: {type: integer, minimum: 0, maximum: 3}
+  fort_level: {type: integer, minimum: 0, maximum: 3}
+  church: {type: boolean}
+  militia_muster: {type: boolean}
+  initial_post_holders:
+    type: object
+    additionalProperties: {$ref: "#/definitions/faction"}
+  modifier_notes:
+    type: array
+    items: {type: string}
+    description: "Legacy free-text lines. New readers use sides.*.factors."
+  soldiers_per_unit:
+    type: integer
+    minimum: 1
+    description: "GAMEPLAY TUNING (battle_rules.json). Soldiers on the field per campaign unit; men = units x this."
+  sides:
+    type: object
+    additionalProperties: false
+    required: [british, continental]
+    properties:
+      british: {$ref: "#/definitions/side"}
+      continental: {$ref: "#/definitions/side"}
+definitions:
+  faction:
+    enum: [british, continental]
+  side:
+    type: object
+    additionalProperties: false
+    required:
+      - faction
+      - army_id
+      - tickets
+      - morale
+      - retreat_province
+      - field_strength
+      - rounds_per_man
+      - fortification_level
+      - factors
+    properties:
+      faction: {$ref: "#/definitions/faction"}
+      army_id: {type: string}
+      tickets:
+        type: object
+        additionalProperties: {type: integer, minimum: 0}
+        description: "Campaign units per class after stores gating."
+      morale: {type: integer, minimum: 0, maximum: 100}
+      readiness: {type: integer, minimum: 0, maximum: 100}
+      cartridge_budget: {type: integer, minimum: 0, description: "Cartridges this side may spend in the fight beyond its own boxes, from magazine_province: its stored cartridges, plus its powder made up when the army forms up (10 cartridges a powder), plus the Workshop bonus on the side's own ground. 0 for a column: it has only what it carries."}
+      magazine_province:
+        type: string
+        description: >-
+          The magazine this side has at hand: the town it holds and fights in. Empty: nothing but
+          what the men carry in their boxes (a column no longer draws on the town it marched from).
+          One magazine cartridge is a bundle of rounds (battle_rules.json rounds_per_cartridge).
+      reinforcement_scale: {type: number, minimum: 0}
+      retreat_province: {type: string, description: "Adjacent province the side falls back to, or empty."}
+      field_strength:
+        type: integer
+        minimum: 0
+        maximum: 30
+        description: >-
+          Soldiers of this side on the field at one time. The sim splits a bot budget between the two
+          sides in proportion to their fit soldiers and clamps each share (battle_rules.json:
+          budget 40, 10 to 30 a side), never more than the side has men.
+      rounds_per_man:
+        type: integer
+        minimum: 0
+        description: "Rounds in each soldier's box at the start of the fight: what the army carries (Army.rounds_per_man in the save, a full box is carried_per_man), or the magazine shared among the men when the side holds the town and that is more, never fewer than min_per_man. After the fight the army keeps what its boxes did not pay for; a beaten army drops a share (battle_rules.json defeat_drop_pct, rout_drop_pct)."
+      fortification_level:
+        type: integer
+        minimum: 0
+        maximum: 3
+        description: "Fort level this side fights behind: the province's fort when the side owns the ground, else 0."
+      guns:
+        type: integer
+        minimum: 0
+        description: >-
+          Field guns this side brings to the battle: the guns its army holds in the campaign
+          (Army.guns), as far as it has gun crews to serve them (battle_rules.json guns:
+          crew_units_per_gun units of crew_class a gun). A side has guns only if its army holds them.
+      factors:
+        type: array
+        description: >-
+          Why this side's numbers are what they are, for the pre-battle card. Rows with the same
+          label belong together: the first is the base value, later ones are signed changes to it.
+        items: {$ref: "#/definitions/factor"}
+  factor:
+    type: object
+    additionalProperties: false
+    required: [label, value, source]
+    properties:
+      label:
+        enum: [men, field_strength, rounds_per_man, morale, readiness, fortification, reinforcement, militia_muster, guns]
+      value: {type: integer}
+      source:
+        type: string
+        minLength: 1
+        description: "The building or condition that produced the value, e.g. \"Fort L1, Charlestown\"."

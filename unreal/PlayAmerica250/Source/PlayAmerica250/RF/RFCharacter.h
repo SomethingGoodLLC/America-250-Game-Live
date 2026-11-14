@@ -213,6 +213,9 @@ public:
 	static constexpr float CrouchedHalfHeightCm = 50.f;
 	/** Duck behind cover (or rise). Firing always rises first. */
 	void SetDucking(bool bDuck);
+	/** The player behind a wall, fence or work: he kneels by himself while he loads and rises when he
+	 *  presents (battle_rules.json cover.snap_cm). True while that stance has him down. */
+	bool IsAutoCovered() const { return bAutoDucked; }
 	UPROPERTY(EditDefaultsOnly, Category = "Input")
 	TObjectPtr<UInputAction> IA_SensUp;
 	UPROPERTY(EditDefaultsOnly, Category = "Input")
@@ -317,6 +320,15 @@ protected:
 	void OnButtStrokePressed();
 	void OnSensitivityUp();
 	void OnChargePressed();
+	void OnAbilityPressed();
+	/** Number keys: on foot an order to his file (1 to 6); in the saddle 1 to 3 choose the weapon. */
+	void OnNumberKey(int32 Number);
+	void OnKey1() { OnNumberKey(1); }
+	void OnKey2() { OnNumberKey(2); }
+	void OnKey3() { OnNumberKey(3); }
+	void OnKey4() { OnNumberKey(4); }
+	void OnKey5() { OnNumberKey(5); }
+	void OnKey6() { OnNumberKey(6); }
 	void OnGuardPressed();
 	void OnGuardReleased();
 	void OnDuckPressed();
@@ -351,6 +363,9 @@ private:
 	float ViewStressSmoothed = 0.f;
 	float StrideCm = 0.f;
 	void TickFootsteps(float DeltaTime);
+	void TickFireOverStance();
+	bool bAutoDucked = false;
+	bool bManualDuck = false;
 	void TickViewFeedback(float DeltaTime);
 	bool bSprinting = false;
 	float CurrentFOV = 80.f;

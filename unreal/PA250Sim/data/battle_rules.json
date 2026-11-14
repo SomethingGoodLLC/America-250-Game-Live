@@ -1,0 +1,130 @@
+{
+  "note": "GAMEPLAY TUNING, not historical fact. How a battle reads the campaign. Read by the sim (field strength, rounds, sieges) and by the Unreal battle (end conditions, resupply). Every value is a starting value.",
+  "field": {
+    "note": "A bot budget is split between the two sides in proportion to their fit soldiers, then each share is clamped. Soldiers on the field per campaign unit: soldiers_per_unit.",
+    "bot_budget": 40,
+    "min_per_side": 10,
+    "max_per_side": 30,
+    "soldiers_per_unit": 4
+  },
+  "casualties": {
+    "note": "A battle reports its casualties in men. Of the men shot or bayoneted down, wounded_pct_of_fallen in a hundred are wounded and the rest killed (rounded half up, a class at a time); men who surrendered are prisoners, and a man a surgeon reached in time is wounded whatever this ratio says. The campaign takes whole units (soldiers_per_unit men) out of the ranks and keeps the men left over on the army for the next battle.",
+    "wounded_pct_of_fallen": 60
+  },
+  "rounds": {
+    "note": "One cartridge in a town magazine is a bundle of rounds_per_cartridge rounds. Every army carries its own rounds (Army.rounds_per_man in the save): a full box is carried_per_man. The boxes pay for what the army fires and they fill only while the army stands in a town its side holds, charged to that town's magazine, never above carried_per_man. A side fighting in a town it holds also has that magazine at hand: it opens with the magazine shared among its men when that is more than the boxes hold (up to max_per_man), and the magazine is charged for its shots before the boxes are. A column has only its boxes. No side opens with fewer than min_per_man. A beaten army that quits the field leaves defeat_drop_pct of its boxes behind, rout_drop_pct when it routed or broke (end_reason routed, army_broke), rounded up to a whole round a man; the winner's men fill their boxes from what was dropped.",
+    "rounds_per_cartridge": 20,
+    "min_per_man": 3,
+    "max_per_man": 24,
+    "carried_per_man": 12,
+    "defeat_drop_pct": 25,
+    "rout_drop_pct": 50
+  },
+  "siege": {
+    "note": "A defender beaten on its own fortified ground is besieged instead of losing the town at once.",
+    "hours_per_fort_level": 72
+  },
+  "army_broke": {
+    "note": "End condition: this share of a side's squads withdrawing or routing for this long. Never before min_elapsed_seconds, never against a side that fielded fewer than min_squads squads. The loser retreats with its survivors and loses morale_penalty campaign morale (an ordinary defeat costs 20).",
+    "squad_fraction": 0.6,
+    "seconds": 25,
+    "min_elapsed_seconds": 120,
+    "min_squads": 3,
+    "morale_penalty": 25
+  },
+  "posts_swept": {
+    "note": "End condition: one side holds every post for this long. Never before min_elapsed_seconds, and only when the enemy has held at least one post in this fight: a sweep is posts taken from, or taken back from, the enemy. A garrison that starts with every post cannot win by standing still, and a defender cannot win by raising a flag on a neutral post before the attacker arrives.",
+    "seconds": 20,
+    "min_elapsed_seconds": 60
+  },
+  "colours": {
+    "note": "Colours taken on the field (BattleResult.colours_captured). Each unit of carried_by_class an army brought carried one, so a side cannot lose more than that. Support is the Patriot cause's: colours the player takes raise it by support_per_capture each, his own colours lost lower it by the same.",
+    "support_per_capture": 3,
+    "carried_by_class": "ensign"
+  },
+  "cover": {
+    "note": "The fire-over stance. A man within snap_cm behind a wall, fence or field work that stops a ball at his chest and leaves his shoulder clear is down while he loads and up while he presents. Bots do it at the covered places their squad gives them; the player does it by himself when he reloads facing such cover.",
+    "snap_cm": 160
+  },
+  "works": {
+    "note": "Field works. A breastwork is one bank a man fires over (height between a man's chest, 90 cm, and his shoulder, 145 cm); a redoubt is three banks about a post, open to the rear. The defender's fortification_level stands breastworks_by_level[level] breastworks and redoubts_by_level[level] redoubts at the start (the last entry serves any higher level); the other places are empty and a sapper can build on them. Places are the level's PA250WorksSlot markers, or breastwork_slots places made up slot_ring_cm out from the defender's post when the level has none. A work is cover once it stands to cover_built_share of its height; health is what round shot has to batter away. Whoever defends a post mans the works within man_radius_cm of it.",
+    "breastwork_length_cm": 420,
+    "breastwork_height_cm": 120,
+    "breastwork_thickness_cm": 90,
+    "breastwork_health": 300,
+    "redoubt_side_cm": 900,
+    "redoubt_height_cm": 135,
+    "redoubt_health": 900,
+    "cover_built_share": 0.6,
+    "man_radius_cm": 2200,
+    "slot_ring_cm": 1400,
+    "breastwork_slots": 6,
+    "breastworks_by_level": [0, 2, 4, 4],
+    "redoubts_by_level": [0, 0, 0, 1]
+  },
+  "remnant": {
+    "note": "End condition `routed`: a side with no reserve and this few men standing quits the field after this long (never the human player's side while he is alive on it). From mark_men down, its men are marked on the enemy player's HUD so the last of them can be found.",
+    "men": 3,
+    "mark_men": 5,
+    "seconds": 15
+  },
+  "resupply": {
+    "note": "A soldier inside a post his side holds refills his cartridge box from the side's pool. One full box is kept back for the human player.",
+    "seconds_per_refill": 4,
+    "held_for_player_boxes": 1
+  },
+  "modes": {
+    "note": "The kind of fight (BattleSetup.mode, chosen by the sim's choose_battle_mode). landing: the attacker arrived by an edge of one of landing_edge_types into a town with the landing_town_tag terrain tag; this comes first, so a fortified harbour town reached over the water is a landing. assault: otherwise, the defender's fortification level is assault_min_fort_level or more. conquest: everything else, and always for the presets in conquest_presets (the scripted North Bridge and Battle Road fights).",
+    "landing_edge_types": ["boat", "ferry"],
+    "landing_town_tag": "harbor",
+    "assault_min_fort_level": 1,
+    "conquest_presets": ["concord_bridge", "battle_road"],
+    "assault": {
+      "note": "GAME INVENTION. The defender holds every post. The attacker must carry them in order, nearest his start first: only the next one can be contested, and a post he has carried stays his. Each post carried adds seconds_per_post_carried to the clock. When the clock runs out the defender has held (time_limit, the defender wins); when the attacker carries the last post the field is his (posts_swept). No reserve bleed for posts. garrison_share_pct of the defender's squads stand at the post under attack.",
+      "seconds_per_post_carried": 120,
+      "garrison_share_pct": 67
+    },
+    "landing": {
+      "note": "GAME INVENTION. The attacker's first wave comes in by boat: boats boats of men_per_boat men start row_out_m off the landing place and row in at boat_speed_cm a second; nobody in a boat can fire or move, and the men are free disembark_seconds after the keel touches. Men beyond the first wave come ashore at the landing place. The post nearest the landing place is the landing post: until the attacker has held it every other post is closed to him; from then on it is the open fight for the posts.",
+      "boats": 3,
+      "men_per_boat": 8,
+      "boat_speed_cm": 260,
+      "row_out_m": 110,
+      "disembark_seconds": 2
+    }
+  },
+  "guns": {
+    "note": "Field guns in the campaign (Army.guns, ProvinceStores.guns). An army brings to a battle as many of its guns as it has crews for: crew_units_per_gun units of crew_class serve one gun. An army with crews standing in a town its side holds takes the guns laid up in that magazine, as many as its crews can serve. A beaten army that quits the field leaves the guns the enemy overran (BattleResult.guns_taken); an army destroyed leaves them all.",
+    "crew_units_per_gun": 1,
+    "crew_class": "artilleryman"
+  },
+  "cannon": {
+    "note": "The field gun in a battle (a light 3- or 6-pounder). GAME INVENTION throughout: times and ranges are shortened to the size of the field. crew_men serve one gun; with fewer than min_crew at it, it can be neither worked nor moved. The drill (sponge and load, ram home, prime and lay) takes the three *_seconds with a full crew of gunners; a short crew is slower in proportion and men who are not gunners are slower by untrained_drill_scale. Round shot flies round_shot_range_m at round_shot_speed_m a second, scatters within round_shot_spread_degrees of where the piece was laid (about 1 m at 100 m, 2.6 m at 300 m), goes through round_shot_pierce_men men (round_shot_damage each), knocks down for knockdown_seconds the men within knockdown_radius_cm of its path, takes works_damage off a field work it strikes, and puts morale_pressure for morale_seconds on a squad it ploughs through (and on a side that loses a gun). Inside canister_range_m the gun fires canister: canister_balls musket balls in a cone of canister_cone_degrees. An idle crew pushes its gun at push_speed_cm a second once its own men are follow_gap_m ahead. Enemies within capture_radius_cm with none of the gun's side by it take it after capture_seconds. A man within crew_radius_cm of a gun of his side is serving it. length_cm is the piece from trail to muzzle (the purchased mesh is fitted to it; 333 is its own length).",
+    "crew_men": 4,
+    "min_crew": 2,
+    "sponge_load_seconds": 6.0,
+    "ram_seconds": 4.0,
+    "prime_lay_seconds": 5.0,
+    "untrained_drill_scale": 1.6,
+    "traverse_deg_per_second": 8.0,
+    "round_shot_range_m": 350.0,
+    "round_shot_speed_m": 160.0,
+    "round_shot_damage": 400.0,
+    "round_shot_spread_degrees": 0.5,
+    "round_shot_pierce_men": 3,
+    "knockdown_radius_cm": 220.0,
+    "knockdown_seconds": 1.2,
+    "works_damage": 160.0,
+    "morale_pressure": 0.5,
+    "morale_seconds": 8.0,
+    "canister_range_m": 70.0,
+    "canister_balls": 20,
+    "canister_cone_degrees": 6.0,
+    "push_speed_cm": 70.0,
+    "follow_gap_m": 80.0,
+    "capture_radius_cm": 500.0,
+    "capture_seconds": 4.0,
+    "crew_radius_cm": 450.0,
+    "length_cm": 333.0
+  }
+}

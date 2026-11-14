@@ -15,6 +15,7 @@
 #include "Misc/Paths.h"
 #include "MusketWeapon.h"
 #include "PA250ControlPoint.h"
+#include "PA250FieldGun.h"
 #include "PA250UnitClasses.h"
 #include "RFCharacter.h"
 #include "TimerManager.h"
@@ -106,4 +107,77 @@ void APA250BattleGameMode::MaybeStartClassPortraits()
 		UE_LOG(LogTemp, Display, TEXT("PA250 portraits done"));
 	}), First + Each * UE_ARRAY_COUNT(Subjects) + 1.f, false);
 	UE_LOG(LogTemp, Display, TEXT("PA250 portraits: %d classes, stage %s"), static_cast<int32>(UE_ARRAY_COUNT(Subjects)), *Stage.ToCompactString());
+}
+
+// -PA250GunStill: the first field gun on the field with one soldier standing by its muzzle, from the
+// side and from three-quarters front, to Saved/PA250/gun_still_side.png and gun_still_front.png (no
+// HUD). Run with -PA250Bots=0 -PA250Guns=continental:1 so the gun stands alone. First still at 12 s.
+void APA250BattleGameMode::MaybeStartGunStill()
+{
+	if (!FParse::Param(FCommandLine::Get(), TEXT("PA250GunStill")) || !GetWorld())
+	{
+		return;
+	}
+	APlayerController* PC = GetWorld()->GetFirstPlayerController();
+	APA250FieldGun* Gun = Guns.Num() > 0 ? Guns[0].Get() : nullptr;
+	if (!PC || !Gun)
+	{
+		UE_LOG(LogTemp, Error, TEXT("PA250 gun still: no gun on the field (run with -PA250Guns=continental:1)"));
+		return;
+	}
+	const FVector At = Gun->GetActorLocation();
+	const FVector Fwd = Gun->GetActorForwardVector();
+	FVector Right = Gun->GetActorRightVector();
+	FVector Sun(1.f, 0.3f, 0.f);
+	if (TActorIterator<ADirectionalLight> It(GetWorld()); It)
+	{
+		Sun = It->GetActorForwardVector();
+	}
+	// The camera stands on the sunlit side.
+	if (FVector::DotProduct(-Right, Sun) < 0.f) Right = -Right;
+	if (APawn* Me = PC->GetPawn())
+	{
+		Me->SetActorHiddenInGame(true);
+		if (const ARFCharacter* C = Cast<ARFCharacter>(Me); C && C->Musket) C->Musket->SetActorHiddenInGame(true);
+		Me->SetCanBeDamaged(false);
+	}
+	// A soldier of the gun's side a pace in front of the muzzle, facing the camera side.
+	FActorSpawnParameters Params;
+	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	const FVector Stand = At + Fwd * 250.f + FVector(0.f, 0.f, 95.f);
+	if (ARFCharacter* Man = GetWorld()->SpawnActor<ARFCharacter>(DefaultPawnClass, Stand, Right.Rotation(), Params))
+	{
+		Man->SetClothingSeed(0x6A11u);
+		ConfigureSoldier(Man, Gun->GetFaction(), TEXT("line_infantry"));
+		Man->SetCanBeDamaged(false);
+	}
+	ACameraActor* Cam = GetWorld()->SpawnActor<ACameraActor>(At, FRotator::ZeroRotator);
+	if (!Cam) return;
+	Cam->GetCameraComponent()->SetFieldOfView(50.f);
+	Cam->GetCameraComponent()->SetConstraintAspectRatio(false);
+	PC->SetViewTarget(Cam);
+	IFileManager::Get().MakeDirectory(*FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("PA250")), true);
+	struct FView { const TCHAR* Name; FVector From; FVector LookAt; float Seconds; };
+	const FView Views[] = {
+		{TEXT("side"), At + Fwd * 45.f + Right * 640.f + FVector(0.f, 0.f, 135.f), At + Fwd * 45.f + FVector(0.f, 0.f, 90.f), 12.f},
+		{TEXT("front"), At + Fwd * 560.f + Right * 380.f + FVector(0.f, 0.f, 170.f), At + Fwd * 60.f + FVector(0.f, 0.f, 85.f), 15.f}};
+	for (const FView& V : Views)
+	{
+		const FString Name = V.Name;
+		const FVector From = V.From, LookAt = V.LookAt;
+		FTimerHandle Pose, Shot;
+		GetWorldTimerManager().SetTimer(Pose, FTimerDelegate::CreateWeakLambda(this, [Cam, From, LookAt]() {
+			Cam->SetActorLocationAndRotation(From, (LookAt - From).Rotation());
+		}), V.Seconds - 1.5f, false);
+		GetWorldTimerManager().SetTimer(Shot, FTimerDelegate::CreateWeakLambda(this, [Name]() {
+			const FString Path = FPaths::ConvertRelativePathToFull(FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("PA250"), FString::Printf(TEXT("gun_still_%s.png"), *Name)));
+			UE_LOG(LogTemp, Display, TEXT("PA250 gun still: %s -> %s"), *Name, *Path);
+			FScreenshotRequest::RequestScreenshot(Path, /*bShowUI=*/false, /*bAddFilenameSuffix=*/false);
+		}), V.Seconds, false);
+	}
+	FTimerHandle Done;
+	GetWorldTimerManager().SetTimer(Done, FTimerDelegate::CreateWeakLambda(this, []() {
+		UE_LOG(LogTemp, Display, TEXT("PA250 gun still done"));
+		FPlatformMisc::RequestExit(false);
+	}), 18.f, false);
 }

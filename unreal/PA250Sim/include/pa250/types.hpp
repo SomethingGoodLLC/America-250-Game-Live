@@ -55,10 +55,18 @@ struct Province {
     int workshop_level = 0;  // faster cartridge manufacture
     int depot_level = 0;     // faster shipments into this province
     int fort_level = 0;      // defender morale/readiness bonus at this province
+    int powder_mill_level = 0;  // monthly powder into this town's magazine (needs river or falls)
+    // Building ids that stood here before the ground rules (catalog requires_tags / income_requires_tags)
+    // and do not meet them: they keep working and upgrading. Sorted. Set by mark_grandfathered_buildings.
+    std::vector<std::string> grandfathered;
     // Discrete City View buildings (non-stackable). Soft-default false on old saves.
     bool church = false;          // Meeting House — Support
     bool militia_muster = false;  // Militia Muster — defender muster bonus
     int manpower_used = 0;        // men raised here this month (resets on the 1st)
+    // Siege (GAME INVENTION): a defender beaten on its own fortified ground keeps the town until
+    // the hours run out with a besieging army still there. Empty / 0 = no siege.
+    std::string siege_by;            // besieging faction
+    int siege_hours_remaining = 0;
 };
 
 // Timed muster of one company in a town. Gold and stores are charged on start; on completion the
@@ -88,6 +96,14 @@ struct ConstructionJob {
     std::string status;  // underway | complete | cancelled
 };
 
+// Men who fell, by what became of them. Every man who fell is exactly one of the three.
+struct MenDown {
+    int killed = 0;
+    int wounded = 0;
+    int prisoners = 0;
+    int total() const { return killed + wounded + prisoners; }
+};
+
 struct Army {
     std::string id;
     std::string name;
@@ -102,6 +118,21 @@ struct Army {
     int fatigue = 0;      // 0..100; rises with fighting, falls with rest
     std::vector<std::string> path;  // edge ids remaining (current edge first)
     int hours_into_edge = 0;
+    // "garrison": the AI never orders it out of its base (campaign rules). Empty: a field army.
+    std::string role;
+    // Units of each class re-enlisted for the new year (enlistments; cleared when they expire).
+    std::map<std::string, int> reenlisted;
+    // Rounds in each man's cartridge box. It falls with what the army fires and what a beaten army
+    // drops, and fills only in a town its side holds, from that town's magazine. -1: a full box
+    // (battle_rules carried_per_man); read it through carried_rounds().
+    int rounds_per_man = -1;
+    // Men who have fallen but do not yet make up a whole unit, per class: a battle reports its
+    // casualties in men, units leave the ranks a whole unit at a time, and what is left over waits
+    // here for the next battle. Never as many as a unit; cleared when the class has no units left.
+    std::map<std::string, MenDown> men_down;
+    // Field guns with the army. It fields as many as it has crews to serve (served_guns); it draws
+    // them from the magazine of a town its side holds, takes them in battle, and can lose them.
+    int guns = 0;
 };
 
 // Usable war materials at one province (not gold; not abstract faction "supplies").
@@ -114,6 +145,7 @@ struct ProvinceStores {
     int provisions = 0;
     int lead = 0;   // cartridge crafting input (gameplay tuning)
     int paper = 0;  // cartridge crafting input (gameplay tuning)
+    int guns = 0;   // field guns laid up here: shipped like other stores, drawn by an army that has crews
 };
 
 // Legacy faction bag kept for soft-migration of older schema-2 saves only.
@@ -158,6 +190,7 @@ struct Shipment {
     int provisions = 0;
     int lead = 0;
     int paper = 0;
+    int guns = 0;  // field guns on the wagons
     int64_t commit_hour = 0;
     int64_t deliver_on_hour = 0;
     std::string status;  // committed | in_transit | delivered | lost
@@ -205,6 +238,24 @@ struct BattleReport {
     int scavenged_cartridges = 0;
     int scavenged_powder = 0;
     int scavenged_muskets = 0;
+    std::string end_reason;  // BattleResult.end_reason as applied
+    std::map<std::string, std::map<std::string, int>> prisoners;  // faction -> class -> captured (clamped)
+    int siege_hours = 0;                    // > 0: a siege began; the town falls after this many hours
+    std::vector<std::string> map_changes;   // what changed on the map, in plain words (after-battle card)
+    // Cartridge boxes, in rounds a man, by faction: at form-up, as the armies leave the field, what
+    // the beaten army dropped and what the winner picked up of it.
+    std::map<std::string, int> rounds_before;
+    std::map<std::string, int> rounds_after;
+    std::map<std::string, int> rounds_dropped;
+    std::map<std::string, int> rounds_picked_up;
+    // Men who fell, as the battle counted them and the sim took them (never more than the army had):
+    // faction -> class -> killed / wounded / prisoners. `losses`, `wounded` and `prisoners` above are
+    // the whole units that left the ranks because of them.
+    std::map<std::string, std::map<std::string, MenDown>> casualties;
+    // Colours taken, as applied: captor faction -> colours.
+    std::map<std::string, int> colours_captured;
+    // Guns that changed hands, as applied: the faction that has them now -> guns.
+    std::map<std::string, int> guns_taken;
 };
 
 // One attributed treasury/stores/support delta (soft-default empty on old saves).
@@ -278,6 +329,30 @@ struct CampaignProject {
     int pieces = 0;
     int transport_committed = 0;
     bool fictionalized_authorization = false;
+    // Once delivered the guns are a campaign item: they lie in a town, or go where the army
+    // hauling them goes.
+    std::string province;
+    std::string army_id;
+    // The train's light pieces and their crews go to the first army that hauls it, once.
+    bool field_guns_issued = false;
+};
+
+// One mission of a faction's chain (definition: data/missions_boston_1775.json).
+struct MissionState {
+    std::string status = "locked";  // locked | active | complete | failed
+    int64_t activated_hour = 0;
+    int64_t deadline_hour = 0;  // 0 = none
+    int64_t resolved_hour = 0;
+};
+
+// How the campaign ended. Once decided the clock no longer advances.
+struct CampaignOutcome {
+    bool decided = false;
+    std::string winner;  // british | continental
+    // boston_taken | evacuation | hq_lost | support_collapsed | no_field_army | vassalage | window_score
+    std::string reason;
+    int64_t hour_index = 0;
+    std::vector<std::string> summary;  // plain-word lines for the end screen
 };
 
 struct CampaignProgress {
@@ -306,6 +381,16 @@ struct CampaignProgress {
     std::vector<std::string> resolved_event_ids;
     std::vector<std::string> received_source_ids;
     bool offensive_postponed = false;  // L7 conserve (gameplay tuning)
+    // ---- Campaign arc (campaign rules + missions; all soft-default on old saves) ----
+    std::map<std::string, MissionState> missions;  // mission id -> state
+    CampaignOutcome outcome;
+    int hq_lost_hours = 0;       // consecutive hours the Patriot headquarters town has been British
+    int support_low_hours = 0;   // consecutive hours Support has been under the floor
+    int evacuation_hours_remaining = 0;  // > 0: the British are preparing to sail
+    bool evacuated = false;
+    bool enlistment_warned = false;
+    bool enlistments_expired = false;
+    std::map<std::string, int> battles_won;  // faction -> battles won
 };
 
 struct Treaty {
@@ -351,6 +436,8 @@ enum class CommandKind : uint8_t {
     HaltArmy = 2,
     ApplyBattleResult = 3,
     ApplyDiplomacy = 4,
+    // A mission's reward or failure effect. result_json = {"mission_id":..., "outcome":"complete"|"failed"}.
+    MissionEffect = 5,
 };
 
 struct CommandPayload {
@@ -368,7 +455,7 @@ struct Command {
     CommandPayload payload;
 };
 
-enum class Interrupt : uint8_t { None = 0, ArmiesInContact, DiplomacyRequest, EventPopup };
+enum class Interrupt : uint8_t { None = 0, ArmiesInContact, DiplomacyRequest, EventPopup, CampaignOver };
 
 struct CampaignState {
     GameTime now;
@@ -457,6 +544,93 @@ struct CorrespondenceCatalogEntry {
     std::vector<CorrespondenceChoiceDef> choices;
 };
 
+// ---- Campaign arc definitions (data files; GAMEPLAY TUNING) ---------------
+// data/campaign_rules_boston_1775.json. The campaign arc (occupation, missions, enlistments, the
+// scored AI, win and loss) runs only while these rules are loaded.
+struct CampaignRules {
+    YMDH window_start{1775, 4, 19, 0};
+    YMDH window_end{1776, 3, 31, 23};
+    std::string patriot_hq = "cambridge";
+    std::string british_base = "boston";
+    std::string heights = "dorchester";
+    int hq_held_days = 14;
+    int support_floor = 20;
+    int support_floor_days = 30;
+    int score_per_town = 10;
+    int score_support_weight = 1;
+    std::string score_tie_goes_to = "british";
+    int evacuation_hours = 240;
+    YMDH enlist_warning{1775, 12, 1, 0};
+    YMDH enlist_expiry{1776, 1, 1, 0};
+    int enlist_gold_per_company = 15;
+    std::vector<std::string> enlist_exempt;
+    int siege_train_gold = 80;
+    int siege_train_haul_days = 40;
+    int knox_field_guns = 2;    // light pieces of the train, given with their crews to the army that first hauls it
+    int knox_crew_units = 2;
+    int occupation_hour = 0;
+    int ai_garrison_units = 20;
+    int ai_garrison_max = 32;
+    int ai_min_field = 6;
+    int ai_retreat_morale = 30;
+    int ai_rest_morale = 3;
+    int ai_rest_cap = 80;
+    // What the AI raises with its spare gold: class -> the share of its units (percent) it wants of
+    // that class. It buys the class furthest short of its share; empty: the cheapest company.
+    std::map<std::string, int> ai_recruit_targets;
+    // A column detached from the garrison takes this share of its guns, with their crews.
+    int ai_detachment_gun_share_pct = 50;
+    int v_cartridge = 1, v_powder = 4, v_musket = 3, v_provision = 1;
+    int v_hq = 60, v_heights = 30, v_heights_fortified = 200000, v_weak = 20, v_forage = 15, v_mission = 100000;
+    int ar_fort_pct = 50, ar_luck_pct = 15, ar_loser_pct = 30, ar_winner_pct = 10, ar_broke_pct = 150;
+};
+
+// A mission predicate (closed set, protocol/schemas/missions.yaml), read from the mission's side.
+struct MissionPredicate {
+    std::string type;
+    std::string province;
+    std::vector<std::string> provinces;
+    std::string faction;  // owner_is: default the mission's side
+    int amount = 0;
+    int rounds = 0;
+    std::string project;
+    std::string status;
+    int min_fort_level = 0;
+    YMDH date{};
+    std::vector<MissionPredicate> of;  // all
+};
+struct MissionEffects {
+    int gold = 0;
+    int local_support = 0;
+    int british_attitude = 0;
+    int army_morale = 0;
+    int army_readiness = 0;
+    std::string stores_province;
+    int powder = 0, cartridges = 0, muskets = 0, provisions = 0;
+    bool start_evacuation = false;
+    std::string summary;
+};
+struct MissionDef {
+    std::string id;
+    std::string faction;
+    std::string title;
+    std::string flavor;
+    std::string goal;
+    std::string prerequisite;
+    bool prerequisite_must_succeed = false;
+    bool has_available_from = false;
+    YMDH available_from{};
+    std::vector<std::string> target_provinces;
+    MissionPredicate complete;
+    bool has_fail = false;
+    MissionPredicate fail;
+    int deadline_days = 0;
+    bool has_deadline = false;
+    YMDH deadline{};
+    MissionEffects reward;
+    MissionEffects failure;
+};
+
 struct PathPlan {
     bool ok = false;
     std::string error;
@@ -476,15 +650,117 @@ struct Orders {
 };
 
 // ---- Battle -------------------------------------------------------------
+// GAMEPLAY TUNING read from data/battle_rules.json (defaults apply when the file is not loaded).
+struct BattleRules {
+    int bot_budget = 40;            // soldiers on the field, both sides together
+    int field_min = 10;             // per side
+    int field_max = 30;             // per side
+    int soldiers_per_unit = 4;      // soldiers on the field per campaign unit
+    int rounds_per_cartridge = 20;  // one magazine cartridge = this many rounds
+    int rounds_min = 3;
+    int rounds_max = 24;
+    int rounds_carried = 12;        // a full cartridge box on the march
+    int wounded_pct_of_fallen = 60; // of the men shot or bayoneted down, this share are wounded, the rest killed
+    // Battle modes (battle_rules.json "modes").
+    std::vector<std::string> mode_landing_edge_types = {"boat", "ferry"};  // arriving by one of these...
+    std::string mode_landing_town_tag = "harbor";                          // ...into a town with this tag is a landing
+    int mode_assault_min_fort = 1;                                         // a defender behind works of this level or more is assaulted
+    std::vector<std::string> mode_conquest_presets = {"concord_bridge", "battle_road"};  // scripted fights keep the open fight
+    float assault_seconds_per_post = 120.f;    // the clock gains this when the attacker carries a post
+    int assault_garrison_share_pct = 67;       // share of the defender's squads that stand at the post under attack
+    int landing_boats = 3;                     // boats in the first wave
+    int landing_men_per_boat = 8;
+    float landing_boat_speed_cm = 260.f;       // rowing speed
+    float landing_row_out_m = 110.f;           // how far off the landing place the boats start
+    float landing_disembark_seconds = 2.f;     // from the keel touching to the men being free to move
+    int guns_crew_units_per_gun = 1;            // units of the crew class that serve one gun
+    std::string guns_crew_class = "artilleryman";
+    int colours_support_per_capture = 3;  // Support the player gains for colours taken, and loses for his own
+    std::string colours_class = "ensign"; // the class whose units each carry one colour
+    int defeat_drop_pct = 25;       // share of its boxes a beaten army leaves on the field
+    int rout_drop_pct = 50;         // ...when it routed or broke (end_reason routed, army_broke)
+    int siege_hours_per_fort_level = 72;
+    float army_broke_fraction = 0.6f;
+    float army_broke_seconds = 15.f;
+    float army_broke_min_elapsed_seconds = 120.f;
+    int army_broke_min_squads = 3;
+    int army_broke_morale_penalty = 25;
+    float posts_swept_seconds = 20.f;
+    float posts_swept_min_elapsed_seconds = 60.f;
+    float resupply_seconds = 4.f;
+    int resupply_held_boxes = 1;
+    // The field gun in battle (battle_rules.json "cannon"). Read by the Unreal battle.
+    int cannon_crew_men = 4;                   // men who serve one gun
+    int cannon_min_crew = 2;                   // fewer cannot work it or move it
+    float cannon_sponge_load_seconds = 6.f;    // the drill with a full trained crew: sponge and load,
+    float cannon_ram_seconds = 4.f;            // ram home,
+    float cannon_prime_lay_seconds = 5.f;      // prime and lay
+    float cannon_untrained_scale = 1.6f;       // the drill is this much slower for men who are not gunners
+    float cannon_traverse_deg_per_second = 8.f;
+    float cannon_round_range_m = 350.f;
+    float cannon_round_speed_m = 160.f;        // metres a second (slow enough to be seen)
+    float cannon_round_damage = 400.f;
+    float cannon_round_spread_degrees = 0.5f;  // half-angle of the cone a laid round shot scatters in
+    int cannon_round_pierce = 3;               // men one round shot goes through
+    float cannon_knockdown_radius_cm = 220.f;  // men this close to its path are knocked off their feet
+    float cannon_knockdown_seconds = 1.2f;
+    float cannon_works_damage = 160.f;         // what one round shot batters off a field work
+    float cannon_pressure = 0.5f;              // the morale check on a squad under cannon fire...
+    float cannon_pressure_seconds = 8.f;       // ...fading over this long
+    float cannon_canister_range_m = 70.f;      // inside this the crew fires canister
+    int cannon_canister_balls = 20;
+    float cannon_canister_cone_degrees = 6.f;
+    float cannon_push_speed_cm = 70.f;         // a crew pushes its gun this fast
+    float cannon_follow_gap_m = 80.f;          // a gun this far behind its side's nearest squad is pushed up
+    float cannon_capture_radius_cm = 500.f;    // enemies this close with no crew by the gun overrun it...
+    float cannon_capture_seconds = 4.f;        // ...after this long
+    float cannon_crew_radius_cm = 450.f;       // a man this close to a gun of his side is serving it
+    float cannon_length_cm = 260.f;            // the piece from trail to muzzle, for fitting the mesh
+    // Cover and field works (battle_rules.json "cover", "works"). Read by the Unreal battle.
+    float cover_snap_cm = 160.f;        // a man this close behind a wall, fence or work is "at" it
+    float works_breastwork_length_cm = 420.f;
+    float works_breastwork_height_cm = 120.f;
+    float works_breastwork_thickness_cm = 90.f;
+    float works_breastwork_health = 300.f;
+    float works_redoubt_side_cm = 900.f;
+    float works_redoubt_height_cm = 135.f;
+    float works_redoubt_health = 900.f;
+    float works_cover_built_share = 0.6f;   // a work this far built stops a ball
+    float works_man_radius_cm = 2200.f;     // defenders of a post man the works within this distance of it
+    float works_slot_ring_cm = 1400.f;      // without marked slots: works stand this far out from the post
+    int works_breastwork_slots = 6;         // marked or made-up places for breastworks at a post
+    std::vector<int> works_breastworks_by_level = {0, 2, 4, 4};  // standing at the start, by fortification_level
+    std::vector<int> works_redoubts_by_level = {0, 0, 0, 1};
+    int remnant_men = 3;            // no reserve and this few standing: the remnant quits the field
+    int remnant_mark_men = 5;       // ...and from this few down they are marked on the enemy player's HUD
+    float remnant_seconds = 15.f;
+};
+// Why a side's number is what it is (pre-battle card). Rows with the same label belong together:
+// the first is the base value, later ones are signed changes to it.
+struct SideFactor {
+    std::string label;   // men | field_strength | rounds_per_man | morale | readiness | fortification | ...
+    int value = 0;
+    std::string source;  // the building or condition that produced the value
+};
+struct FieldSplit {
+    int a = 0;
+    int b = 0;
+};
 struct SideSetup {
     std::string faction;
     std::string army_id;
     std::map<std::string, int> tickets;  // per unit class, after stores gating
     int morale = 0;                     // campaign confidence (feeds UE pressure bias)
     int readiness = 100;
-    int cartridge_budget = 0;           // cartridges available to this side from the province
+    int cartridge_budget = 0;           // cartridges this side may spend beyond its boxes, from magazine_province
     float reinforcement_scale = 1.f;    // farm/depot: shortens bot respawn (UE)
     std::string retreat_province;
+    int field_strength = 0;             // soldiers of this side on the field at one time
+    int rounds_per_man = 0;             // rounds in each soldier's box at the start
+    int fortification_level = 0;        // fort this side fights behind (defender on its own ground)
+    std::string magazine_province;      // the town it holds and fights in; empty = only what it carries
+    int guns = 0;                       // field guns this side brings: those its army has crews to serve
+    std::vector<SideFactor> factors;
 };
 struct BattleSetup {
     bool valid = false;
@@ -492,6 +768,7 @@ struct BattleSetup {
     std::string province_name;
     std::string objective = "green";
     std::string scenario_preset = "lexington_common";  // lexington_common | concord_bridge | battle_road
+    std::string mode = "conquest";                     // conquest | assault | landing (choose_battle_mode)
     uint64_t seed = 0;
     std::string attacker_faction;
     std::string defender_faction;
@@ -509,7 +786,8 @@ struct BattleSetup {
     bool church = false;
     bool militia_muster = false;  // defender owns a Militia Muster here; UE raises its muster cap
     std::map<std::string, std::string> initial_post_holders;  // post_id -> faction
-    std::vector<std::string> modifier_notes;                 // sourced lines for pre-battle UI
+    std::vector<std::string> modifier_notes;                 // legacy free-text lines; see sides.*.factors
+    int soldiers_per_unit = 4;                               // battle_rules.json; men = units x this
 };
 struct BattleResult {
     std::string province_id;
@@ -525,6 +803,18 @@ struct BattleResult {
     int personal_kills = 0;  // deaths caused by the local player
     std::string retreat_province;  // loser's retreat; empty = sim chooses
     std::string province_owner_after;  // filled by apply when ownership flips
+    // tickets_exhausted | time_limit | force_preserved | routed | army_broke | posts_swept
+    std::string end_reason = "tickets_exhausted";
+    std::map<std::string, std::map<std::string, int>> prisoners;  // faction -> class -> captured
+    // Men, not units: faction -> class -> killed / wounded / prisoners. When it has any entry the
+    // unit fields above (losses, wounded, prisoners) are ignored.
+    std::map<std::string, std::map<std::string, MenDown>> casualties;
+    // Colours taken on the field: the faction that took them -> how many. Never more than the
+    // other side's army had ensign units to carry.
+    std::map<std::string, int> colours_captured;
+    // Guns overrun and taken: the faction that took them -> how many. Only the side that wins the
+    // field keeps what it took; never more than the other side brought.
+    std::map<std::string, int> guns_taken;
 };
 
 struct TickOutput {

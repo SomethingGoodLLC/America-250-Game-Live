@@ -2187,6 +2187,9 @@ def men_only(blk):
     return blk
 
 
+RIVER_WADE = 240.0  # the channel blocks reach this far past the channel's edge: the waterline
+
+
 def place_river(stone):
     """The river of a layout that has one: its surface (one ribbon mesh, kit water material), the
     bridge with its own collision, and an unseen wall down the channel that stops men - and only
@@ -2220,7 +2223,12 @@ def place_river(stone):
                 continue  # under the span: the deck and its rails are the barrier here
         # 24 m tall: the navmesh that forms on a block's top is then far above any point the game
         # projects onto the navmesh (at 3 m, post slots and spawns landed men on top, over the water).
-        men_only(block("River_Block_%d" % i, (mx, my, RIVER_BED_Z + 1200), (math.hypot(bx - ax, by - ay) + 60, 2 * RIVER_HALF - 500, 2400),
+        # Out to the waterline (RIVER_WADE beyond the channel, where the bank is ankle deep). The
+        # blocks used to stop 2.5 m short of the channel's edge, which left a 5 m strip of bank
+        # under water on each side that men could walk into, up to 2.4 m deep: militia stood
+        # waist-deep beside the bridge and fell back into the river (autoplay still, 2026-11-14).
+        men_only(block("River_Block_%d" % i, (mx, my, RIVER_BED_Z + 1200),
+                       (math.hypot(bx - ax, by - ay) + 200, 2 * (RIVER_HALF + RIVER_WADE), 2400),
                        stone, rot_yaw=math.degrees(math.atan2(by - ay, bx - ax))))
         n += 1
     if bridge:
@@ -2231,6 +2239,12 @@ def place_river(stone):
             off = side * (bridge["rail_y"] + 12.0)
             men_only(block("Bridge_Rail_%d" % k, (bridge["xy"][0] - s_ * off, bridge["xy"][1] + c * off, bridge["z"] + 160),
                            (2 * bridge["half_len"], 24, 420), stone, rot_yaw=bridge["yaw"]))
+            # The water beside the span, between its rail and the first channel block (no block
+            # is placed under the span): closed too, or the banks by the bridge are a way in.
+            inner, outer = bridge["rail_y"] + 24.0, bridge["half_wid"] + 640.0
+            off = side * (inner + outer) / 2.0
+            men_only(block("Bridge_Water_%d" % k, (bridge["xy"][0] - s_ * off, bridge["xy"][1] + c * off, RIVER_BED_Z + 1200),
+                           (2 * (RIVER_HALF + RIVER_WADE), outer - inner, 2400), stone, rot_yaw=bridge["yaw"]))
     LOG("PA250: river %d centreline points, %d channel blocks, bridge %s" % (len(RIVER), n, bridge["asset"] if bridge else "none"))
 
 

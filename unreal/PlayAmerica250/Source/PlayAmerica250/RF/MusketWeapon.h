@@ -22,7 +22,9 @@ enum class EMusketState : uint8
 {
 	Loaded,
 	Reloading,
-	Jammed
+	Jammed,
+	/** Fired, and no cartridge left to load: nothing happens until the box is filled (Resupply). */
+	Empty
 };
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnMusketStateChanged, EMusketState, NewState);
@@ -154,6 +156,24 @@ public:
 	 *  (> 1) or faster (< 1). The class's own scale times any officer bonus. */
 	float ReloadTimeScale = 1.f;
 
+	/** Beyond this distance the aim cone widens by ClassSpreadGrowth for every further such distance
+	 *  (PA250UnitClasses kit: AccurateM, SpreadGrowth). A single musket shot is a 50 m weapon. */
+	float ClassAccurateRangeCm = 5000.f;
+	float ClassSpreadGrowth = 1.5f;
+	float RangeSpreadScale(float DistCm) const
+	{
+		const float Accurate = FMath::Max(100.f, ClassAccurateRangeCm);
+		return DistCm <= Accurate ? 1.f : 1.f + FMath::Max(0.f, ClassSpreadGrowth) * (DistCm - Accurate) / Accurate;
+	}
+
+	// ---- Cartridge box (set by the battle game mode). -1 = no limit, the default outside a battle. ----
+	/** Cartridges left in the box. The round already in the barrel is not counted. */
+	int32 RoundsInBox = -1;
+	/** The piece is empty and there is no cartridge to load it with. */
+	bool IsDry() const { return State == EMusketState::Empty; }
+	/** Put cartridges in the box. A dry piece starts loading at once. */
+	void Resupply(int32 Rounds);
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weapon")
 	FMusketTuningValues DefaultTuning;
 
@@ -193,6 +213,8 @@ protected:
 	EMusketState State = EMusketState::Loaded;
 
 	void SetState(EMusketState NewState);
+	/** After a shot: take a cartridge and start loading, or stand empty when the box is. */
+	void BeginReloadOrRunDry();
 	void SyncTuningToSequencer();
 	void SyncStateFromSequencer();
 

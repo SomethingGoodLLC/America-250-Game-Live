@@ -1,0 +1,27 @@
+{
+ "name": "setup_clamped",
+ "description": "a ten to one mismatch is clamped to 30 against 10",
+ "scenario": {
+  "province": "lexington",
+  "attacker": "british_regulars",
+  "defender": "continental_militia",
+  "units": {
+   "british_regulars": {
+    "line_infantry": 40
+   },
+   "continental_militia": {
+    "militia": 4
+   }
+  }
+ },
+ "expect": {
+  "field_strength": {
+   "british": 30,
+   "continental": 10
+  },
+  "fortification_level": {
+   "british": 0,
+   "continental": 0
+  }
+ }
+}

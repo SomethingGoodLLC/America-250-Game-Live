@@ -1,0 +1,21 @@
+{
+ "name": "reject_unknown_end_reason",
+ "description": "an end reason outside the contract is not a command: state is left alone",
+ "scenario": {
+  "province": "lexington",
+  "attacker": "british_regulars",
+  "defender": "continental_militia"
+ },
+ "result": {
+  "province_id": "lexington",
+  "winner": "british",
+  "end_reason": "annihilated"
+ },
+ "expect": {
+  "schema_valid": false,
+  "applied": false,
+  "owner_after": "continental",
+  "siege_by": "",
+  "siege_hours": 0
+ }
+}

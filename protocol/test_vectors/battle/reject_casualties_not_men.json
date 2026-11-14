@@ -1,0 +1,28 @@
+{
+ "name": "reject_casualties_not_men",
+ "description": "casualties are whole men: a negative count is outside the contract",
+ "scenario": {
+  "province": "lexington",
+  "attacker": "british_regulars",
+  "defender": "continental_militia"
+ },
+ "result": {
+  "province_id": "lexington",
+  "winner": "british",
+  "end_reason": "time_limit",
+  "casualties": {
+   "continental": {
+    "militia": {
+     "killed": -2
+    }
+   }
+  }
+ },
+ "expect": {
+  "schema_valid": false,
+  "applied": false,
+  "owner_after": "continental",
+  "siege_by": "",
+  "siege_hours": 0
+ }
+}

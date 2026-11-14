@@ -51,6 +51,9 @@ public:
 	static FString LogisticsTuningPath();
 	static FString BuildingsCatalogPath();
 	static FString ProvinceSizesPath();
+	static FString BattleRulesPath();
+	static FString CampaignRulesPath();
+	static FString MissionsPath();
 	static FString SavePath();
 	bool EnsureCorrespondenceCatalog(FString& OutError);
 	static FString TracePath();
@@ -121,6 +124,9 @@ public:
 	bool ApproveTransferOrder(const FString& SourceProvince, const FString& DestProvince, int32 Powder,
 							  int32 Cartridges, int32 Muskets, int32 Bayonets, int32 Provisions, int32 Lead,
 							  int32 Paper, FString& OutError);
+	/** The town panel's "Send stores to depot": the whole magazine but its provisions leaves for the
+	 *  headquarters depot (sim: send_stores_to_depot). OutError is the sim's code when it is refused. */
+	bool SendStoresToDepot(const FString& SourceProvince, FString& OutError);
 	bool DevelopProvince(const FString& ProvinceId, const FString& Track, FString& OutError);
 	FString GetProvinceDevelopmentJson() const;
 	/** City View: timed build/upgrade, demolish, cancel. Gold via resource_changes + HudEpoch. */
@@ -137,6 +143,26 @@ public:
 	bool RepayLoan(FString& OutError);
 	UFUNCTION(BlueprintPure, Category = "PA250|Treasury")
 	FString GetTreasuryJson() const;
+	// ---- Campaign arc: missions, enlistments, the siege guns, win and loss ----
+	/** The mission tracker's data (pa250::missions_json): every mission, the current one, guns, enlistments. */
+	UFUNCTION(BlueprintPure, Category = "PA250|Campaign")
+	FString GetMissionsJson() const;
+	/** Towns the player's current mission points at (the map marks them). */
+	TArray<FString> GetMissionTargetProvinces() const;
+	UFUNCTION(BlueprintPure, Category = "PA250|Campaign")
+	bool IsCampaignOver() const { return Controller.state().progress.outcome.decided; }
+	UFUNCTION(BlueprintPure, Category = "PA250|Campaign")
+	FString GetOutcomeJson() const;
+	/** Re-enlist every company of the army the treasury can pay for, class by class. Returns the gold spent. */
+	UFUNCTION(BlueprintCallable, Category = "PA250|Campaign")
+	bool ReenlistArmy(const FString& ArmyId, FString& OutError);
+	/** Gold it would take to keep every company of the army. */
+	int32 GetReenlistCost(const FString& ArmyId) const;
+	UFUNCTION(BlueprintCallable, Category = "PA250|Campaign")
+	bool SendForSiegeGuns(FString& OutError);
+	/** Hitch the guns to this army (it must stand where they lie); an empty id leaves them where they are. */
+	UFUNCTION(BlueprintCallable, Category = "PA250|Campaign")
+	bool AttachSiegeGuns(const FString& ArmyId, FString& OutError);
 	UFUNCTION(BlueprintPure, Category = "PA250|Treasury")
 	int32 GetMonthlyNetGold() const;
 	/** Raise a company in a town the player holds / send a mustering company home (full return). */
@@ -227,6 +253,9 @@ public:
 	/** The battle level for a BattleSetup.scenario_preset: Concord's bridge has its own level
 	 *  (L_Concord) when that map is in the project; every other fight is on L_Lexington. */
 	static FName BattleLevelForPreset(const FString& ScenarioPreset);
+	/** The level a battle is fought on: a landing (BattleSetup.mode) on the harbour level when it is
+	 *  built; otherwise the preset's level. */
+	static FName BattleLevelFor(const FString& ScenarioPreset, const FString& Mode);
 	void TravelToFlowLevel(UObject* WorldContext) const;
 
 	static constexpr int32 MaxHoursPerFrame = 32;

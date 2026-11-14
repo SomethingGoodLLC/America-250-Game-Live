@@ -1,0 +1,51 @@
+{
+ "name": "result_men_clamped",
+ "description": "never more men of a class than the army has: killed first, then wounded, then prisoners",
+ "scenario": {
+  "province": "lexington",
+  "attacker": "british_regulars",
+  "defender": "continental_militia"
+ },
+ "result": {
+  "province_id": "lexington",
+  "winner": "british",
+  "end_reason": "army_broke",
+  "casualties": {
+   "continental": {
+    "officer": {
+     "killed": 3,
+     "wounded": 3,
+     "prisoners": 3
+    },
+    "rifleman": {
+     "killed": 8
+    }
+   }
+  }
+ },
+ "expect": {
+  "schema_valid": true,
+  "applied": true,
+  "owner_after": "british",
+  "siege_by": "",
+  "siege_hours": 0,
+  "loser_fate": "retreated",
+  "loser_units": 21,
+  "units": {
+   "continental_militia": {
+    "officer": 0,
+    "militia": 17,
+    "line_infantry": 4
+   }
+  },
+  "report_casualties": {
+   "continental": {
+    "officer": {
+     "killed": 3,
+     "wounded": 1,
+     "prisoners": 0
+    }
+   }
+  }
+ }
+}

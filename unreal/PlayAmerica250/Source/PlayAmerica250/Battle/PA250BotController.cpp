@@ -8,6 +8,11 @@
 #include "PA250BattleGameMode.h"
 #include "PA250BotTuning.h"
 #include "PA250ControlPoint.h"
+#include "PA250FieldWork.h"
+#include "PA250Support.h"
+#include "PA250Cover.h"
+#include "PA250FieldGun.h"
+#include "PA250UnitClasses.h"
 #include "PA250MeleeComponent.h"
 #include "PA250VolleyCoordinator.h"
 #include "RFCharacter.h"
@@ -115,7 +120,7 @@ bool APA250BotController::HasLineOfSight(const ARFCharacter* Me, const ARFCharac
 	{
 		Params.AddIgnoredActor(Me->Musket);
 	}
-	const FVector From = Me->GetActorLocation() + FVector(0.f, 0.f, 60.f);
+	const FVector From = PA250Cover::EyePoint(Me); // over his cover, ducked or not
 	const FVector To = Enemy->GetActorLocation() + FVector(0.f, 0.f, 40.f);
 	return !GetWorld()->LineTraceSingleByChannel(Hit, From, To, ECC_Visibility, Params);
 }
@@ -159,6 +164,8 @@ APA250ControlPoint* APA250BotController::PickGoal(const ARFCharacter* Me) const
 		}
 		else
 		{
+			// A post the assault or the landing has closed cannot be taken yet.
+			if (P->IsContestLocked()) continue;
 			// Weighted: prefer contested/neutral over distant enemy-held; spread via squad id.
 			const float ContestedBias = (P->IsContested() || P->GetHolder().IsNone()) ? 0.65f : 1.f;
 			const float SquadBias = 1.f + 0.08f * ((SquadId >= 0 ? SquadId : 0) % 5);
@@ -349,6 +356,11 @@ void APA250BotController::Tick(float DeltaSeconds)
 	}
 	Me->MisfireStress = bHasCombatProfile ? ComputeStress01(Me) : 0.f;
 
+	if (bScriptedHold)
+	{
+		StopMovement();
+		return;
+	}
 	ThinkTimer -= DeltaSeconds;
 	ReactionTimer = FMath::Max(0.f, ReactionTimer - DeltaSeconds);
 	VolleyJitter = FMath::Max(0.f, VolleyJitter - DeltaSeconds);
@@ -359,13 +371,50 @@ void APA250BotController::Tick(float DeltaSeconds)
 	ThinkTimer = 0.2f + FMath::FRand() * 0.15f;
 
 	const FPA250BotTuningValues& T = BotTuning ? BotTuning->Values : FPA250BotTuningValues();
+	// The class's own band (unit_classes.json): open fire inside the far edge, close to the near one.
+	const float FireMaxCm = BandMaxCm;
+	const float HoldMinCm = BandMinCm;
 
 	float Dist = 0.f;
 	ARFCharacter* Enemy = FindNearestEnemy(Me, Dist);
+	// A led squad's skirmishers take the leader's target rather than the nearest man.
+	if (HasFormationOrder() && Form.bFocusContact && Form.Contact.IsValid() && !Form.Contact->IsDead() && HasLineOfSight(Me, Form.Contact.Get()))
+	{
+		Enemy = Form.Contact.Get();
+		Dist = FVector::Dist(Enemy->GetActorLocation(), Me->GetActorLocation());
+	}
+	// Past the firelock's accurate range the aim cone widens.
+	const float RangeAim = (Me->Musket && Enemy) ? Me->Musket->RangeSpreadScale(Dist) : 1.f;
 	const bool bLoaded = Me->Musket && Me->Musket->CanFire();
 
 	// Dragoons ride, dismount and remount on their own; on foot they fall through to the skirmisher below.
 	if (TickDragoon(Me, Enemy, Dist)) return;
+
+	// A sapper's first business is the works; a surgeon's, the fallen; and colours on the ground are
+	// worth any man's leaving the ranks for.
+	if (TickSapper(Me, Enemy, Dist, T)) return;
+	LastSapperWork = -1.f;
+	if (TickGunner(Me, Enemy, Dist, T)) return;
+	if (TickSurgeon(Me, Enemy, Dist, T)) return;
+	LastSurgeonWork = -1.f;
+	if (TickFallenColours(Me, Enemy, Dist, T)) return;
+
+	// Out of cartridges with an empty piece: unless an enemy is on top of him he goes back to the
+	// nearest post his side holds and fills his box, as long as the side has rounds left for him.
+	// With nothing to draw he stays with his squad and the bayonet.
+	if (Me->Musket && Me->Musket->IsDry() && !(Enemy && Dist < T.ChargeRangeCm))
+	{
+		const APA250BattleGameMode* AmmoGM = GetWorld() ? GetWorld()->GetAuthGameMode<APA250BattleGameMode>() : nullptr;
+		const APA250ControlPoint* Depot = (AmmoGM && AmmoGM->CanResupply(Me->FactionId, false))
+			? AmmoGM->NearestHeldPost(Me->FactionId, Me->GetActorLocation()) : nullptr;
+		if (Depot)
+		{
+			State = EBotState::Reload;
+			ClearFocus(EAIFocusPriority::Gameplay);
+			MoveToward(Me, Depot->GetActorLocation(), Depot->Radius * 0.5f);
+			return;
+		}
+	}
 
 	// In a formed squad: the squad decides where to stand, when to fire and whether to run.
 	if (HasFormationOrder())
@@ -373,7 +422,7 @@ void APA250BotController::Tick(float DeltaSeconds)
 		{
 			const float ArriveForDuck = Form.ArriveCm > 0.f ? Form.ArriveCm : T.FormationArriveCm;
 			const bool bAtSpotNow = FVector::Dist2D(Me->GetActorLocation(), Form.Target) <= ArriveForDuck;
-			Me->SetDucking(PA250ShouldDuck(Form.bInCover, bAtSpotNow, bLoaded, Enemy != nullptr && Dist <= T.EngageMaxCm, Form.bRout, Form.bCharge));
+			Me->SetDucking(PA250ShouldDuck(Form.bInCover, bAtSpotNow, bLoaded, Enemy != nullptr && Dist <= FireMaxCm, Form.bRout, Form.bCharge));
 		}
 		if (Form.bRout)
 		{
@@ -410,7 +459,15 @@ void APA250BotController::Tick(float DeltaSeconds)
 			SetFocus(Form.Contact.Get());
 			State = EBotState::Aim;
 		}
-		else if (Form.bFireAtWill && Enemy && Dist <= T.EngageMaxCm)
+		else if (Form.bPresent && Form.bAimAtPoint)
+		{
+			// The leader is aiming at ground with nobody on it: present toward the point.
+			if (Me->MeleeComponent) Me->MeleeComponent->Present(0.3f);
+			ClearFocus(EAIFocusPriority::Gameplay);
+			SetFocalPoint(Form.AimPoint);
+			State = EBotState::Aim;
+		}
+		else if (Form.bFireAtWill && Enemy && Dist <= FireMaxCm)
 		{
 			SetFocus(Enemy);
 			State = bLoaded ? EBotState::Aim : EBotState::Reload;
@@ -425,7 +482,7 @@ void APA250BotController::Tick(float DeltaSeconds)
 		else MoveToward(Me, Form.Target, ArriveCm * 0.5f);
 
 		// Skirmish fire: only once in position (repositioning costs the shot), loaded, target in sight.
-		if (Form.bFireAtWill && bAtSpot && bLoaded && Enemy && Dist <= T.EngageMaxCm)
+		if (Form.bFireAtWill && bAtSpot && bLoaded && Enemy && Dist <= FireMaxCm)
 		{
 			if (!bReactionRolled)
 			{
@@ -439,7 +496,7 @@ void APA250BotController::Tick(float DeltaSeconds)
 					+ Enemy->GetVelocity() * (Dist / FMath::Max(Me->Musket->GetProjectileSpeed(), 1.f));
 				// Rested on the wall he is behind, a skirmisher's aim tightens.
 				const float Rested = Form.bInCover ? Role.RestedAimScale : 1.f;
-				const FVector Dir = FMath::VRandCone((Aim - Muzzle).GetSafeNormal(), FMath::DegreesToRadians(AimErrorDegrees * Rested));
+				const FVector Dir = FMath::VRandCone((Aim - Muzzle).GetSafeNormal(), FMath::DegreesToRadians(AimErrorDegrees * Rested * RangeAim));
 				if (Me->FireMusketAt(Muzzle + Dir * Dist))
 				{
 					State = EBotState::Fire;
@@ -483,11 +540,11 @@ void APA250BotController::Tick(float DeltaSeconds)
 		if (Enemy) SetFocus(Enemy);
 		MoveToward(Me, Cover, 150.f);
 		// Still return fire from cover.
-		if (Enemy && bLoaded && Dist <= T.EngageMaxCm && HasLineOfSight(Me, Enemy) && ReactionTimer <= 0.f)
+		if (Enemy && bLoaded && Dist <= FireMaxCm && HasLineOfSight(Me, Enemy) && ReactionTimer <= 0.f)
 		{
 			const FVector Muzzle = Me->Musket->GetMuzzleLocation()->GetComponentLocation();
 			const FVector Aim = Enemy->GetActorLocation() + FVector(0.f, 0.f, 20.f);
-			const FVector Dir = FMath::VRandCone((Aim - Muzzle).GetSafeNormal(), FMath::DegreesToRadians(AimErrorDegrees * 1.5f));
+			const FVector Dir = FMath::VRandCone((Aim - Muzzle).GetSafeNormal(), FMath::DegreesToRadians(AimErrorDegrees * 1.5f * RangeAim));
 			if (Me->FireMusketAt(Muzzle + Dir * Dist) && Volleys) Volleys->RecordEngagement(Dist);
 			ReactionTimer = FMath::FRandRange(T.ReactionMinSeconds, T.ReactionMaxSeconds);
 		}
@@ -497,7 +554,7 @@ void APA250BotController::Tick(float DeltaSeconds)
 	if (TryBayonet(Me, Enemy, Dist, T)) return;
 
 	// Inside the engage band with a clear line: halt, react, take the volley window, fire.
-	if (Enemy && Dist <= T.EngageMaxCm && HasLineOfSight(Me, Enemy))
+	if (Enemy && Dist <= FireMaxCm && HasLineOfSight(Me, Enemy))
 	{
 		SetFocus(Enemy);
 		if (!bLoaded)
@@ -505,7 +562,7 @@ void APA250BotController::Tick(float DeltaSeconds)
 			// Reload on the move while still outside the near edge of the band; hold once inside it.
 			State = EBotState::Reload;
 			bReactionRolled = false;
-			if (Dist > T.EngageMinCm && !bAtSlot) MoveToward(Me, SlotLoc, 120.f);
+			if (Dist > HoldMinCm && !bAtSlot) MoveToward(Me, SlotLoc, 120.f);
 			else StopMovement();
 			return;
 		}
@@ -528,7 +585,7 @@ void APA250BotController::Tick(float DeltaSeconds)
 		const FVector Lead = Enemy->GetVelocity() * (Dist / FMath::Max(Speed, 1.f));
 		const FVector Aim = Enemy->GetActorLocation() + FVector(0.f, 0.f, 20.f) + Lead;
 		const FVector Muzzle = Me->Musket->GetMuzzleLocation()->GetComponentLocation();
-		const FVector Dir = FMath::VRandCone((Aim - Muzzle).GetSafeNormal(), FMath::DegreesToRadians(AimErrorDegrees));
+		const FVector Dir = FMath::VRandCone((Aim - Muzzle).GetSafeNormal(), FMath::DegreesToRadians(AimErrorDegrees * RangeAim));
 		if (Me->FireMusketAt(Muzzle + Dir * Dist) && Volleys)
 		{
 			Volleys->RecordEngagement(Dist);
@@ -555,6 +612,106 @@ void APA250BotController::Tick(float DeltaSeconds)
 	}
 	State = bLoaded ? EBotState::Advance : EBotState::Reload;
 	MoveToward(Me, SlotLoc, 120.f);
+}
+
+bool APA250BotController::TickSapper(ARFCharacter* Me, ARFCharacter* Enemy, float Dist, const FPA250BotTuningValues& T)
+{
+	if (!PA250UnitClasses::KitFor(Me->FactionId, Me->UnitClass).bBuildsWorks) return false;
+	APA250BattleGameMode* GM = GetWorld() ? GetWorld()->GetAuthGameMode<APA250BattleGameMode>() : nullptr;
+	if (!GM || (Enemy && Dist < T.ChargeRangeCm)) return false; // cold steel first
+	const FPA250ClassVerbs& Verbs = PA250UnitClasses::Verbs();
+	APA250FieldWork* Work = GM->NearestWorkNeedingLabour(Me->GetActorLocation(), Verbs.SapperSeekM * 100.f);
+	if (!Work || !GM->SideHoldsGroundAt(Me->FactionId, Work->GetActorLocation())) return false;
+	const FVector At = Work->GetWorkPoint();
+	Me->SetDucking(false);
+	if (FVector::Dist2D(Me->GetActorLocation(), At) > Verbs.SapperReachM * 100.f)
+	{
+		State = EBotState::Advance;
+		ClearFocus(EAIFocusPriority::Gameplay);
+		MoveToward(Me, At, Verbs.SapperReachM * 50.f);
+		LastSapperWork = -1.f;
+		return true;
+	}
+	StopMovement();
+	SetFocalPoint(Work->GetActorLocation());
+	State = EBotState::Defend;
+	const float Now = GetWorld()->GetTimeSeconds();
+	const float Laboured = LastSapperWork >= 0.f ? FMath::Min(Now - LastSapperWork, 1.f) : 0.f;
+	LastSapperWork = Now;
+	GM->LabourOnWork(Work, Laboured, Me);
+	return true;
+}
+
+bool APA250BotController::TickGunner(ARFCharacter* Me, ARFCharacter* Enemy, float Dist, const FPA250BotTuningValues& T)
+{
+	if (!PA250UnitClasses::KitFor(Me->FactionId, Me->UnitClass).bServesGuns) return false;
+	APA250BattleGameMode* GM = GetWorld() ? GetWorld()->GetAuthGameMode<APA250BattleGameMode>() : nullptr;
+	if (!GM) return false;
+	int32 Post = INDEX_NONE;
+	APA250FieldGun* Gun = GM->GunFor(Me, Post);
+	if (!Gun) return false; // his side has no gun for him: he fights as infantry
+	const FVector At = Gun->GetCrewPost(Post);
+	const bool bAtPost = FVector::Dist2D(Me->GetActorLocation(), At) <= 120.f;
+	// A man with a bayonet in his face defends himself; the gun is lost if the crew are driven off.
+	if (Enemy && Dist < T.ChargeRangeCm * 0.5f && bAtPost) return false;
+	Me->SetDucking(false);
+	ClearFocus(EAIFocusPriority::Gameplay);
+	if (!bAtPost)
+	{
+		State = EBotState::Advance;
+		Me->GetCharacterMovement()->MaxWalkSpeed = Me->SprintSpeed;
+		MoveToward(Me, At, 60.f);
+		return true;
+	}
+	StopMovement();
+	SetFocalPoint(Gun->GetActorLocation() + Gun->GetActorForwardVector() * 3000.f);
+	State = EBotState::Defend;
+	return true;
+}
+
+bool APA250BotController::TickSurgeon(ARFCharacter* Me, ARFCharacter* Enemy, float Dist, const FPA250BotTuningValues& T)
+{
+	if (!PA250UnitClasses::KitFor(Me->FactionId, Me->UnitClass).bTendsWounded) return false;
+	APA250BattleGameMode* GM = GetWorld() ? GetWorld()->GetAuthGameMode<APA250BattleGameMode>() : nullptr;
+	if (!GM || (Enemy && Dist < T.ChargeRangeCm)) return false;
+	const FPA250ClassVerbs& Verbs = PA250UnitClasses::Verbs();
+	const int32 Man = GM->NearestSavable(Me->FactionId, Me->GetActorLocation(), Verbs.SurgeonSeekM * 100.f);
+	if (Man == INDEX_NONE) return false;
+	const FVector At = GM->FallenLocation(Man);
+	Me->SetDucking(false);
+	if (FVector::Dist2D(Me->GetActorLocation(), At) > Verbs.SurgeonReachM * 100.f)
+	{
+		State = EBotState::Advance;
+		ClearFocus(EAIFocusPriority::Gameplay);
+		Me->GetCharacterMovement()->MaxWalkSpeed = Me->SprintSpeed; // he runs to a man who is down
+		MoveToward(Me, At, Verbs.SurgeonReachM * 50.f);
+		LastSurgeonWork = -1.f;
+		return true;
+	}
+	StopMovement();
+	SetFocalPoint(At);
+	Me->SetDucking(true); // down beside him
+	State = EBotState::Defend;
+	const float Now = GetWorld()->GetTimeSeconds();
+	const float Spent = LastSurgeonWork >= 0.f ? FMath::Min(Now - LastSurgeonWork, 1.f) : 0.f;
+	LastSurgeonWork = Now;
+	GM->TreatFallen(Man, Spent, Me);
+	return true;
+}
+
+bool APA250BotController::TickFallenColours(ARFCharacter* Me, ARFCharacter* Enemy, float Dist, const FPA250BotTuningValues& T)
+{
+	APA250BattleGameMode* GM = GetWorld() ? GetWorld()->GetAuthGameMode<APA250BattleGameMode>() : nullptr;
+	if (!GM || Me->IsMounted() || (Enemy && Dist < T.ChargeRangeCm)) return false;
+	const APA250Colours* Flag = GM->FallenColoursNear(Me->GetActorLocation(), PA250UnitClasses::Verbs().ColoursSeekM * 100.f);
+	if (!Flag) return false;
+	// Routing men have other things on their minds.
+	if (HasFormationOrder() && Form.bRout) return false;
+	State = EBotState::Advance;
+	ClearFocus(EAIFocusPriority::Gameplay);
+	Me->SetDucking(false);
+	MoveToward(Me, Flag->GetActorLocation(), 80.f);
+	return true;
 }
 
 bool APA250BotController::TickDragoon(ARFCharacter* Me, ARFCharacter* Enemy, float Dist)

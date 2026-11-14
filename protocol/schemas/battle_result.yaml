@@ -1,0 +1,116 @@
+# BattleResult: the only way a battle changes the campaign (Play America 250).
+# Written by the Unreal battle (APA250BattleGameMode::EndBattle); parsed by PA250Sim `result_from_json`
+# and applied by the pure function `apply_battle_result`. `casualties` counts men; the older
+# `losses`, `wounded` and `prisoners` count campaign units and are read only when it is absent.
+# Shared vectors: protocol/test_vectors/battle/result_*.json and reject_*.json (C++ ctest and pytest).
+$schema: "http://json-schema.org/draft-07/schema#"
+$id: "battle_result.v1"
+title: BattleResult
+type: object
+additionalProperties: false
+required: [province_id, winner, end_reason]
+properties:
+  province_id: {type: string, description: "Must be the province of the pending battle."}
+  winner: {$ref: "#/definitions/faction"}
+  end_reason:
+    enum: [tickets_exhausted, time_limit, force_preserved, routed, army_broke, posts_swept]
+    description: >-
+      Why the fight stopped.
+      tickets_exhausted: a side's reserve was spent and its last man was down.
+      time_limit: the clock ran out; the side with more men left wins.
+      force_preserved: Battle Road clock; the side that kept the larger share of its force wins.
+      The winner takes the town only if it also held the posts (objective_holder).
+      routed: a remnant of a few men with no reserve quit the field.
+      army_broke: most of a side's squads were withdrawing or routing; it retreats with its
+      survivors and a morale penalty, with no casualties beyond those reported here.
+      posts_swept: one side held every post for the sweep time.
+      In every case but force_preserved the winner takes the province, unless the loser was
+      defending its own fort: then a siege starts instead.
+  objective_holder:
+    type: string
+    enum: ["", british, continental]
+    description: "Plurality owner of the posts at the end, or empty on a tie."
+  objectives_held:
+    type: object
+    additionalProperties: {$ref: "#/definitions/faction"}
+    description: "post id -> faction (neutral posts omitted)."
+  casualties:
+    $ref: "#/definitions/casualties_by_faction"
+    description: >-
+      Men, not units: faction -> class -> {killed, wounded, prisoners}. Every man who fell is exactly
+      one of the three. The battle writes it from its own ledger: the men shot or bayoneted down and
+      the men who surrendered. The fallen are split between killed and wounded by
+      battle_rules.json casualties.wounded_pct_of_fallen (sim function split_fallen). The sim never
+      takes more men of a class than the army has, turns men into units a class at a time and keeps
+      the men left over on the army (Army.men_down), so no man is rounded away between battles.
+      When this field has any entry, losses / wounded / prisoners below are ignored.
+  losses: {$ref: "#/definitions/by_faction_class", description: "Legacy input, used only when casualties is empty: faction -> class -> units killed."}
+  wounded: {$ref: "#/definitions/by_faction_class", description: "Legacy input, used only when casualties is empty: faction -> class -> units wounded."}
+  prisoners:
+    $ref: "#/definitions/by_faction_class"
+    description: >-
+      Legacy input, used only when casualties is empty: faction -> class -> units of that faction
+      taken prisoner. The sim removes them from the army and adds them to the other side's
+      prisoners_held, never more than the army has left.
+  colours_captured:
+    $ref: "#/definitions/by_faction"
+    description: >-
+      Colours taken on the field: the faction that took them -> how many. Each ensign unit an army
+      brought carried one, so the sim never credits more than the other side's army had. Colours the
+      player takes raise Support, his own colours lost lower it (battle_rules.json
+      colours.support_per_capture).
+  guns_taken:
+    $ref: "#/definitions/by_faction"
+    description: >-
+      Guns overrun in the fight: the faction that took them -> how many. Only the side that wins the
+      field keeps what it took (a beaten side cannot drag guns off), and never more than the other
+      side brought (BattleSetup sides.*.guns). They leave the loser's army and join the winner's. A
+      beaten army that is destroyed or dispersed leaves all its guns to the winner whatever is
+      reported here.
+  cartridges_spent: {$ref: "#/definitions/by_faction"}
+  powder_spent: {$ref: "#/definitions/by_faction"}
+  shots_fired: {$ref: "#/definitions/by_faction", description: "Successful discharges; preferred over cartridges_spent when present."}
+  morale_delta:
+    type: object
+    additionalProperties: {type: integer}
+    description: "army id -> delta (optional input)."
+  personal_kills:
+    type: integer
+    minimum: 0
+    description: "Enemy men who fell by the player's own hand. With casualties present the sim never reports more than the enemy's killed and wounded."
+  retreat_province: {type: string, description: "The loser's retreat; empty lets the sim choose."}
+  province_owner_after: {type: string, description: "Filled by the sim when ownership flips; ignored on input."}
+definitions:
+  faction:
+    enum: [british, continental]
+  by_faction:
+    type: object
+    additionalProperties: false
+    properties:
+      british: {type: integer, minimum: 0}
+      continental: {type: integer, minimum: 0}
+  by_faction_class:
+    type: object
+    additionalProperties: false
+    properties:
+      british: {$ref: "#/definitions/by_class"}
+      continental: {$ref: "#/definitions/by_class"}
+  by_class:
+    type: object
+    additionalProperties: {type: integer, minimum: 0}
+  casualties_by_faction:
+    type: object
+    additionalProperties: false
+    properties:
+      british: {$ref: "#/definitions/casualties_by_class"}
+      continental: {$ref: "#/definitions/casualties_by_class"}
+  casualties_by_class:
+    type: object
+    additionalProperties: {$ref: "#/definitions/men_down"}
+  men_down:
+    type: object
+    additionalProperties: false
+    properties:
+      killed: {type: integer, minimum: 0}
+      wounded: {type: integer, minimum: 0}
+      prisoners: {type: integer, minimum: 0}

@@ -29,12 +29,22 @@ struct FPA250TicketLedger
 		return true;
 	}
 
-	/** -1 ticket on death (M6: overrides the B1 spend-on-spawn rule). */
-	void SpendDeath(FName Faction, FName UnitClass)
+	/** Part-tickets owed by a side: a class may cost less than a whole ticket (militia: half). */
+	TMap<FName, float> Owed;
+
+	/** A ticket on death (M6: overrides the B1 spend-on-spawn rule). TicketCost is the class's price:
+	 *  a militiaman at 0.5 takes a ticket every second death. The death is always counted in full. */
+	void SpendDeath(FName Faction, FName UnitClass, float TicketCost = 1.f)
 	{
 		const int32 Floor = HeldFor(Faction);
 		int32& T = Pool.FindOrAdd(Faction);
-		if (T > Floor) --T;
+		float& Due = Owed.FindOrAdd(Faction);
+		Due += FMath::Max(0.f, TicketCost);
+		while (Due >= 1.f - KINDA_SMALL_NUMBER)
+		{
+			Due -= 1.f;
+			if (T > Floor) --T;
+		}
 		Deaths.FindOrAdd(Faction).FindOrAdd(UnitClass)++;
 	}
 
@@ -74,9 +84,4 @@ struct FPA250TicketLedger
 		}
 	}
 
-	/** Deaths converted back to campaign units, rounded and capped at the class's starting units. */
-	static int32 LossesInUnits(int32 DeathCount, int32 SoldiersPerUnit, int32 InitialUnits)
-	{
-		return FMath::Clamp(FMath::RoundToInt((float)DeathCount / (float)FMath::Max(1, SoldiersPerUnit)), 0, FMath::Max(0, InitialUnits));
-	}
 };

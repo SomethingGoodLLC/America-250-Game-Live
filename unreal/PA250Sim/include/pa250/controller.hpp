@@ -52,6 +52,9 @@ public:
 
     bool save(const std::string& path, std::string& error);
     bool load(const std::string& path, std::string& error);
+    // Probe only: paint a siege so the map can show one. Not a rule — tick_sieges still lifts a
+    // siege whose besieging army is gone, and finishes one whose hours run out.
+    std::string stamp_siege(const std::string& province_id, const std::string& siege_by, int hours);
 
     // Logistics / staff: purchase | request_assistance | requisition | capacity_investment | knox_support | dismiss
     std::vector<std::string> choose_logistics_action(const std::string& letter_id, const std::string& choice);
@@ -66,6 +69,7 @@ public:
                                                     const std::string& dest_province, int powder,
                                                     int cartridges, int muskets, int bayonets,
                                                     int provisions, int lead, int paper);
+    std::vector<std::string> send_stores_to_depot_order(const std::string& source_province);
     std::vector<std::string> develop_province_action(const std::string& province_id,
                                                      const std::string& track);
     std::vector<std::string> start_construction_action(const std::string& province_id,
@@ -79,6 +83,10 @@ public:
     std::vector<std::string> cancel_recruitment_action(const std::string& province_id);
     std::vector<std::string> take_loan_action();
     std::vector<std::string> repay_loan_action();
+    // Campaign arc: enlistments and the siege guns (see sim.hpp for the error codes).
+    std::vector<std::string> reenlist_action(const std::string& army_id, const std::string& unit_class);
+    std::vector<std::string> send_for_siege_guns_action();
+    std::vector<std::string> attach_siege_guns_action(const std::string& army_id);
     std::vector<std::string> start_cartridge_craft(const std::string& province_id,
                                                    const std::string& army_id, int workers, int powder,
                                                    int lead, int paper);

@@ -249,9 +249,10 @@ int32 UPA250VisualsCommandlet::Main(const FString& Params)
 			auto* Coat = Cast<UMaterialInstanceDynamic>(Continental->GetMesh()->GetMaterial(1));
 			auto* Under = Cast<UMaterialInstanceDynamic>(Continental->GetMesh()->GetMaterial(0));
 			const FLinearColor C = Coat ? Coat->K2_GetVectorParameterValue(TEXT("CoatColor")) : FLinearColor::Black;
-			Check(Coat && C.R >= C.B && C.R < 1.2f && Under && Under->GetMaterial()->GetName() == TEXT("M_PA250_SoldierUnder")
+			// (Blue, grey and black homespun are in the set since 2026-11-14; only red is kept out.)
+			Check(Coat && C.R < 2.f * C.G + 0.01f && C.R < 2.2f && Under && Under->GetMaterial()->GetName() == TEXT("M_PA250_SoldierUnder")
 				&& !Cast<UMaterialInstanceDynamic>(British->GetMesh()->GetMaterial(0)),
-				TEXT("Patriots wear homespun (earth-tone coat, own waistcoat/breeches); regulars keep the pack's whites"));
+				TEXT("Patriots wear homespun (their own coat, never red, own waistcoat/breeches); regulars keep the pack's whites"));
 			FLinearColor A, B, A2, B2;
 			int32 Distinct = 0;
 			TSet<uint32> Seen;

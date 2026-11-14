@@ -13,9 +13,11 @@
 #include "Misc/CommandLine.h"
 #include "PA250CampaignPlayerController.h"
 #include "PA250MapWidget.h"
+#include "UI/PA250CampaignArcPanels.h"
 #include "UI/PA250CityViewWidget.h"
 #include "PA250ProvinceMapActor.h"
 #include "TimerManager.h"
+#include "pa250/sim.hpp"
 #include "Misc/Paths.h"
 #include "UnrealClient.h"
 #include "Framework/Application/SlateApplication.h"
@@ -157,6 +159,49 @@ void APA250CampaignGameMode::BeginPlay()
 			12.f, false);
 	}
 
+	if (FParse::Param(FCommandLine::Get(), TEXT("PA250MapSliceProbe")))
+	{
+		// Siege mark, scoreboard and the left-inspect / right-order split, in a real window.
+		// Paused so the opening march cannot start a battle before the clicks. Never saves.
+		Sub->SetPaused(true);
+		auto Step = [this](float At, TFunction<void()> Fn) {
+			FTimerHandle H;
+			GetWorldTimerManager().SetTimer(H, FTimerDelegate::CreateLambda([this, Fn]() {
+				Fn();
+				if (APlayerController* PC = GetWorld()->GetFirstPlayerController()) PC->ConsoleCommand(TEXT("Shot showui"));
+			}), At, false);
+		};
+		Step(12.f, [this]() {
+			if (!MapWidget) return;
+			UPA250Subsystem* PS = UPA250Subsystem::Get(this);
+			if (!PS) return;
+			PS->SetPaused(true);
+			const int32 CommandsBefore = static_cast<int32>(PS->GetState().pending_commands.size());
+			MapWidget->PressSelectArmy(TEXT("continental_militia"));
+			const FString Inspect = MapWidget->HandleTownClicked(TEXT("boston"));
+			const pa250::Army& Militia = PS->GetState().armies.at("continental_militia");
+			UE_LOG(LogTemp, Display, TEXT("MAP_SLICE: inspect boston open=%d path=%d commands %d->%d msg=%s"),
+				   MapWidget->IsCityViewOpen() ? 1 : 0, Militia.path.empty() ? 0 : static_cast<int32>(Militia.path.size()),
+				   CommandsBefore, static_cast<int32>(PS->GetState().pending_commands.size()), *Inspect);
+			const FString March = MapWidget->OrderProvince(TEXT("lexington"));
+			UE_LOG(LogTemp, Display, TEXT("MAP_SLICE: order lexington msg=%s"), *March);
+			const std::string SiegeErr = PS->GetControllerMutable().stamp_siege("charlestown", "british", 72);
+			PS->BumpHudEpoch();
+			MapWidget->HandleTownClicked(TEXT("charlestown"));
+			UE_LOG(LogTemp, Display, TEXT("MAP_SLICE: siege stamp=%s scoreboard=%s"),
+				   UTF8_TO_TCHAR(SiegeErr.c_str()), *PA250ArcPanels::LiveScoreboard(PS->GetState()));
+		});
+		// The siege glyph is refreshed on the next tick after the stamp. Shoot again once it is up.
+		FTimerHandle LaterShot;
+		GetWorldTimerManager().SetTimer(LaterShot, FTimerDelegate::CreateLambda([this]() {
+			if (APlayerController* PC = GetWorld()->GetFirstPlayerController()) PC->ConsoleCommand(TEXT("Shot showui"));
+		}), 15.f, false);
+		FTimerHandle QuitHandle;
+		GetWorldTimerManager().SetTimer(QuitHandle, FTimerDelegate::CreateLambda([this]() {
+			UKismetSystemLibrary::QuitGame(this, nullptr, EQuitPreference::Quit, false);
+		}), 18.f, false);
+	}
+
 	if (FParse::Param(FCommandLine::Get(), TEXT("PA250CityProbe")))
 	{
 		// Town panel check in a real window: five "Shot showui" captures (build list, works under way,
@@ -173,6 +218,14 @@ void APA250CampaignGameMode::BeginPlay()
 			MapWidget->HandleTownClicked(TEXT("lexington"));
 			if (UPA250CityViewWidget* CV = MapWidget->GetCityView()) CV->SelectPlot(TEXT("+"));
 			UE_LOG(LogTemp, Display, TEXT("CITY_PROBE: lexington build list open=%d"), MapWidget->IsCityViewOpen() ? 1 : 0);
+		});
+		// The end of the build list: the Powder Mill, refused on Lexington's ground, with the sim's reason.
+		Step(13.f, [this]() {
+			if (UPA250CityViewWidget* CV = MapWidget ? MapWidget->GetCityView() : nullptr) CV->ScrollDetailToEnd();
+		});
+		Step(14.f, [this]() {
+			UE_LOG(LogTemp, Display, TEXT("CITY_PROBE: lexington build list scrolled; powder mill: %s"),
+				   *UPA250Subsystem::Get(this)->GetBuildingPreview(TEXT("lexington"), TEXT("powder_mill")));
 		});
 		auto Advance = [this](int32 Hours) {
 			FString Err;
@@ -228,7 +281,7 @@ void APA250CampaignGameMode::BeginPlay()
 			if (!Raised.IsEmpty())
 			{
 				MapWidget->PressSelectArmy(Raised);
-				const FString Msg = MapWidget->HandleTownClicked(TEXT("menotomy"));
+				const FString Msg = MapWidget->OrderProvince(TEXT("menotomy"));
 				Advance(3);
 				UE_LOG(LogTemp, Display, TEXT("CITY_PROBE: march order: %s | armies: %s"), *Msg, *Armies());
 			}
@@ -253,10 +306,30 @@ void APA250CampaignGameMode::BeginPlay()
 			UE_LOG(LogTemp, Display, TEXT("CITY_PROBE: boston (enemy) open=%d; treasury %s"), MapWidget->IsCityViewOpen() ? 1 : 0,
 				   *UPA250Subsystem::Get(this)->GetTreasuryJson());
 		});
+		// Powder comes in by sea: a Depot at Charlestown (a harbour) opens the Buy powder button.
+		Step(30.f, [this, Advance]() {
+			UPA250Subsystem* PS = UPA250Subsystem::Get(this);
+			if (!MapWidget || !PS) return;
+			if (MapWidget->IsTreasuryOpen()) MapWidget->PressTreasuryToggle();
+			MapWidget->ClearSelection();
+			FString Err;
+			const bool bDepot = PS->StartConstruction(TEXT("charlestown"), TEXT("depot"), Err);
+			Advance(24);
+			MapWidget->HandleTownClicked(TEXT("charlestown"));
+			if (UPA250CityViewWidget* CV = MapWidget->GetCityView()) CV->SelectTab(2);
+			UE_LOG(LogTemp, Display, TEXT("CITY_PROBE: charlestown depot started=%d %s; can buy powder=%d; gold %d"), bDepot ? 1 : 0, *Err,
+				   pa250::can_buy_powder(PS->GetState(), "charlestown") ? 1 : 0, PS->GetState().player_gold);
+		});
+		Step(33.f, [this]() {
+			UPA250Subsystem* PS = UPA250Subsystem::Get(this);
+			if (!MapWidget || !PS) return;
+			MapWidget->PressBuyPowder();
+			UE_LOG(LogTemp, Display, TEXT("CITY_PROBE: buy powder: %s; gold %d"), *PS->GetLastResourceChangeReason(), PS->GetState().player_gold);
+		});
 		FTimerHandle QuitHandle;
 		GetWorldTimerManager().SetTimer(QuitHandle, FTimerDelegate::CreateLambda([this]() {
 			UKismetSystemLibrary::QuitGame(this, nullptr, EQuitPreference::Quit, false);
-		}), 30.f, false);
+		}), 36.f, false);
 	}
 
 	if (FParse::Param(FCommandLine::Get(), TEXT("PA250DeskProbe")))
@@ -338,6 +411,127 @@ void APA250CampaignGameMode::BeginPlay()
 		GetWorldTimerManager().SetTimer(QuitHandle, FTimerDelegate::CreateLambda([this]() {
 			UKismetSystemLibrary::QuitGame(this, nullptr, EQuitPreference::Quit, false);
 		}), 37.f, false);
+	}
+
+	if (FParse::Param(FCommandLine::Get(), TEXT("PA250ArcProbe")))
+	{
+		// Campaign arc in a real window: the mission tracker and the marked town at the opening
+		// (captured at 12 s), then an idle campaign is played out through the sim (battles settled by
+		// the sim's resolver) and the end screen is captured. "Shot showui" twice, then quit. Never saves.
+		auto Shot = [this](const TCHAR* What) {
+			if (APlayerController* PC = GetWorld()->GetFirstPlayerController()) PC->ConsoleCommand(TEXT("Shot showui"));
+			UE_LOG(LogTemp, Display, TEXT("ARC_PROBE: shot %s"), What);
+		};
+		FTimerHandle Opening, OpeningShot, Fold, FoldShot, Unfold, Idle, EndShot, ArcQuit;
+		GetWorldTimerManager().SetTimer(Opening, FTimerDelegate::CreateLambda([this]() {
+			UPA250Subsystem* PS = UPA250Subsystem::Get(this);
+			if (!PS) return;
+			FString Err;
+			PS->AdvanceHours(1, Err); // the missions open on the first hour
+			FString Targets = FString::Join(PS->GetMissionTargetProvinces(), TEXT(","));
+			UE_LOG(LogTemp, Display, TEXT("ARC_PROBE: opening rules=%d missions=%d targets=[%s] over=%d"), pa250::campaign_rules_loaded() ? 1 : 0,
+				static_cast<int32>(pa250::mission_defs().size()), *Targets, PS->IsCampaignOver() ? 1 : 0);
+		}), 9.f, false);
+		GetWorldTimerManager().SetTimer(OpeningShot, FTimerDelegate::CreateLambda([Shot]() { Shot(TEXT("tracker")); }), 12.f, false);
+		// The tracker folded to one line (Hide), captured, then opened again.
+		GetWorldTimerManager().SetTimer(Fold, FTimerDelegate::CreateLambda([this]() {
+			if (!MapWidget) return;
+			MapWidget->PressTrackerToggle();
+			UE_LOG(LogTemp, Display, TEXT("ARC_PROBE: tracker minimized=%d"), MapWidget->IsTrackerMinimized() ? 1 : 0);
+		}), 13.f, false);
+		GetWorldTimerManager().SetTimer(FoldShot, FTimerDelegate::CreateLambda([Shot]() { Shot(TEXT("tracker_minimized")); }), 14.f, false);
+		GetWorldTimerManager().SetTimer(Unfold, FTimerDelegate::CreateLambda([this]() {
+			if (!MapWidget) return;
+			MapWidget->PressTrackerToggle();
+			UE_LOG(LogTemp, Display, TEXT("ARC_PROBE: tracker minimized=%d"), MapWidget->IsTrackerMinimized() ? 1 : 0);
+		}), 15.f, false);
+		GetWorldTimerManager().SetTimer(Idle, FTimerDelegate::CreateLambda([this]() {
+			UPA250Subsystem* PS = UPA250Subsystem::Get(this);
+			if (!PS) return;
+			FString Err;
+			int32 Hours = 0, Battles = 0;
+			const TCHAR* Step = TEXT("start");
+			try
+			{
+				for (; Hours < 24 * 400 && !PS->IsCampaignOver(); ++Hours)
+				{
+					if (PS->IsBattlePending())
+					{
+						Step = TEXT("setup");
+						const pa250::CampaignState St = PS->GetState(); // a copy: the calls below replace the controller's state
+						const pa250::BattleSetup Setup = pa250::build_battle_setup(St, St.pending_battle.province);
+						Step = TEXT("resolve");
+						const FString Result = UTF8_TO_TCHAR(pa250::result_to_json(pa250::auto_resolve_battle(St, Setup)).c_str());
+						Step = TEXT("apply");
+						if (!PS->BeginBattle(Err) || !PS->ApplyBattleResultJson(Result, Err)) break;
+						PS->AcknowledgeBattleReport();
+						++Battles;
+						continue;
+					}
+					Step = TEXT("advance");
+					PS->AdvanceHours(1, Err);
+				}
+			}
+			catch (const std::exception& E)
+			{
+				UE_LOG(LogTemp, Error, TEXT("ARC_PROBE: exception at hour %d (%s), step %s: %s"), Hours, *PS->FormatDate(), Step, UTF8_TO_TCHAR(E.what()));
+			}
+			const pa250::CampaignOutcome& O = PS->GetState().progress.outcome;
+			UE_LOG(LogTemp, Display, TEXT("ARC_PROBE: idle campaign %d hours, %d battles: decided=%d winner=%s reason=%s summary_lines=%d %s"), Hours, Battles,
+				O.decided ? 1 : 0, UTF8_TO_TCHAR(O.winner.c_str()), UTF8_TO_TCHAR(O.reason.c_str()), static_cast<int32>(O.summary.size()), *Err);
+		}), 16.f, false);
+		GetWorldTimerManager().SetTimer(EndShot, FTimerDelegate::CreateLambda([Shot]() { Shot(TEXT("end_screen")); }), 19.f, false);
+		GetWorldTimerManager().SetTimer(ArcQuit, FTimerDelegate::CreateLambda([this]() {
+			UKismetSystemLibrary::QuitGame(this, nullptr, EQuitPreference::Quit, false);
+		}), 22.f, false);
+	}
+
+	if (FParse::Param(FCommandLine::Get(), TEXT("PA250CardProbe")))
+	{
+		// Battle cards in a real window: the pre-battle card of the first contact (captured at 12 s),
+		// then that battle is settled through the sim as a broken army with prisoners and the
+		// after-battle card is captured. "Shot showui" twice, then quit. Never saves.
+		auto Shot = [this](const TCHAR* What) {
+			if (APlayerController* PC = GetWorld()->GetFirstPlayerController()) PC->ConsoleCommand(TEXT("Shot showui"));
+			UE_LOG(LogTemp, Display, TEXT("CARD_PROBE: shot %s"), What);
+		};
+		FTimerHandle PreSetup, PreShot, PostSetup, PostShot, CardQuit;
+		GetWorldTimerManager().SetTimer(PreSetup, FTimerDelegate::CreateLambda([this]() {
+			UPA250Subsystem* PS = UPA250Subsystem::Get(this);
+			if (!PS) return;
+			FString Err;
+			for (int32 i = 0; i < 72 && !PS->IsBattlePending(); ++i) PS->AdvanceHours(1, Err);
+			const pa250::CampaignState& St = PS->GetState();
+			const pa250::BattleSetup Setup = pa250::build_battle_setup(St, St.pending_battle.province);
+			for (const auto& Side : Setup.sides)
+			{
+				UE_LOG(LogTemp, Display, TEXT("CARD_PROBE: pre %s at %s: field %d, rounds %d, morale %d, fort %d, %d factor rows"),
+					UTF8_TO_TCHAR(Side.first.c_str()), UTF8_TO_TCHAR(Setup.province_id.c_str()), Side.second.field_strength,
+					Side.second.rounds_per_man, Side.second.morale, Side.second.fortification_level, static_cast<int32>(Side.second.factors.size()));
+			}
+		}), 10.f, false);
+		GetWorldTimerManager().SetTimer(PreShot, FTimerDelegate::CreateLambda([Shot]() { Shot(TEXT("pre_battle")); }), 12.f, false);
+		GetWorldTimerManager().SetTimer(PostSetup, FTimerDelegate::CreateLambda([this]() {
+			UPA250Subsystem* PS = UPA250Subsystem::Get(this);
+			if (!PS || !PS->IsBattlePending()) return;
+			FString Err;
+			const FString Field = UTF8_TO_TCHAR(PS->GetState().pending_battle.province.c_str());
+			const bool bBegun = PS->BeginBattle(Err);
+			const bool bDone = bBegun && PS->ApplyBattleResultJson(FString::Printf(
+				TEXT("{\"province_id\":\"%s\",\"winner\":\"british\",\"end_reason\":\"army_broke\",\"objective_holder\":\"british\","
+					 "\"losses\":{\"continental\":{\"militia\":3},\"british\":{\"line_infantry\":1}},"
+					 "\"wounded\":{\"continental\":{\"militia\":1}},\"prisoners\":{\"continental\":{\"militia\":2}},"
+					 "\"shots_fired\":{\"continental\":140,\"british\":180}}"),
+				*Field), Err);
+			const pa250::BattleReport& Br = PS->GetState().progress.last_battle_report;
+			UE_LOG(LogTemp, Display, TEXT("CARD_PROBE: post at %s begun=%d applied=%d reason=%s owner %s->%s map_changes=%d %s"), *Field, bBegun ? 1 : 0,
+				bDone ? 1 : 0, UTF8_TO_TCHAR(Br.end_reason.c_str()), UTF8_TO_TCHAR(Br.province_owner_before.c_str()),
+				UTF8_TO_TCHAR(Br.province_owner_after.c_str()), static_cast<int32>(Br.map_changes.size()), *Err);
+		}), 14.f, false);
+		GetWorldTimerManager().SetTimer(PostShot, FTimerDelegate::CreateLambda([Shot]() { Shot(TEXT("post_battle")); }), 16.f, false);
+		GetWorldTimerManager().SetTimer(CardQuit, FTimerDelegate::CreateLambda([this]() {
+			UKismetSystemLibrary::QuitGame(this, nullptr, EQuitPreference::Quit, false);
+		}), 19.f, false);
 	}
 
 	if (FParse::Param(FCommandLine::Get(), TEXT("PA250Shot")))

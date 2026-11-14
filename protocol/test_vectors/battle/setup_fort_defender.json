@@ -1,0 +1,24 @@
+{
+ "name": "setup_fort_defender",
+ "description": "a defender on its own fortified ground fights behind the fort, and the card says why",
+ "scenario": {
+  "province": "charlestown",
+  "attacker": "british_regulars",
+  "defender": "continental_militia"
+ },
+ "expect": {
+  "field_strength": {
+   "british": 21,
+   "continental": 19
+  },
+  "fortification_level": {
+   "british": 0,
+   "continental": 1
+  },
+  "factor_sources": {
+   "continental": [
+    "Fort L1, Charlestown"
+   ]
+  }
+ }
+}

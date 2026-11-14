@@ -1,0 +1,19 @@
+{
+ "name": "setup_opening_96_v_88",
+ "description": "the opening armies, 96 soldiers against 88, share the field 21 to 19",
+ "scenario": {
+  "province": "lexington",
+  "attacker": "british_regulars",
+  "defender": "continental_militia"
+ },
+ "expect": {
+  "field_strength": {
+   "british": 21,
+   "continental": 19
+  },
+  "fortification_level": {
+   "british": 0,
+   "continental": 0
+  }
+ }
+}

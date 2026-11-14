@@ -1,0 +1,28 @@
+{
+ "name": "result_posts_swept",
+ "description": "sweeping the posts of a fortified town starts a siege instead of taking it",
+ "scenario": {
+  "province": "charlestown",
+  "attacker": "british_regulars",
+  "defender": "continental_militia"
+ },
+ "result": {
+  "province_id": "charlestown",
+  "winner": "british",
+  "end_reason": "posts_swept",
+  "objective_holder": "british",
+  "objectives_held": {
+   "green": "british",
+   "meetinghouse": "british",
+   "buckman": "british"
+  }
+ },
+ "expect": {
+  "schema_valid": true,
+  "applied": true,
+  "owner_after": "continental",
+  "siege_by": "british",
+  "siege_hours": 72,
+  "loser_fate": "retreated"
+ }
+}

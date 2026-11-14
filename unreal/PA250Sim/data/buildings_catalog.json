@@ -1,7 +1,20 @@
 {
-  "note": "Gameplay tuning — building catalog for City View slots. Costs align with logistics_tuning development bases.",
+  "note": "Gameplay tuning: building catalog for City View slots. Track bases for farm, workshop, depot and fort are in logistics_tuning.json development; every level's cost and upkeep is the base times cost_multiplier_pct for that level.",
   "demolish_refund_pct": 10,
   "demolish_note": "Salvage only (timber, nails, brick sold off), not a refund.",
+  "cost_multiplier_pct": [
+    100,
+    250,
+    600
+  ],
+  "cost_note": "Level 1, 2 and 3 cost x1, x2.5 and x6 of the base, and a building's upkeep rises in the same steps.",
+  "powder_purchase": {
+    "note": "Powder is imported: it can be bought only into a town that has this building and one of these tags.",
+    "building": "depot",
+    "tags": [
+      "harbor"
+    ]
+  },
   "buildings": [
     {
       "id": "farm",
@@ -12,9 +25,12 @@
       "build_time_days": 1,
       "upkeep_gold": 0,
       "max_level": 3,
-      "campaign_effect": "+3 provisions/month; +supply income",
-      "battle_effect": "+2 readiness/level; faster reinforcement",
-      "description": "Fields and barns that feed the magazine and steady the muster."
+      "campaign_effect": "Each level: +3 provisions a month here and a larger town levy (monthly ledger).",
+      "battle_effect": "The town's holder: readiness +2 a level, reinforcements 5% faster (card: Readiness, Reinforcements).",
+      "description": "Fields and barns that feed the magazine and steady the muster.",
+      "requires_tags": [
+        "farmland"
+      ]
     },
     {
       "id": "workshop",
@@ -25,8 +41,8 @@
       "build_time_days": 1,
       "upkeep_gold": 2,
       "max_level": 3,
-      "campaign_effect": "Faster cartridge craft; +1 musket/month per level",
-      "battle_effect": "+8 cartridge budget/level (militia tickets)",
+      "campaign_effect": "Each level: +1 musket a month here (monthly ledger); faster cartridge making.",
+      "battle_effect": "The town's holder: +8 cartridges a level, so more rounds a man (card: Rounds a man).",
       "description": "A flintlock shop that turns powder, lead and paper into cartridges."
     },
     {
@@ -38,9 +54,13 @@
       "build_time_days": 1,
       "upkeep_gold": 2,
       "max_level": 3,
-      "campaign_effect": "Shorter shipment transit into this town; +8 gold/month trade per level",
-      "battle_effect": "+2 readiness/level; faster reinforcement",
-      "description": "Storehouse and wagons for powder, provisions and arms."
+      "campaign_effect": "Shipments arrive sooner. At a harbour or crossroads: +8 gold a month a level (monthly ledger). At a harbour: lets you buy powder.",
+      "battle_effect": "The town's holder: readiness +2 a level, reinforcements 5% faster (card: Readiness, Reinforcements).",
+      "description": "Storehouse and wagons for powder, provisions and arms.",
+      "income_requires_tags": [
+        "harbor",
+        "crossroads"
+      ]
     },
     {
       "id": "fort",
@@ -51,9 +71,27 @@
       "build_time_days": 1,
       "upkeep_gold": 3,
       "max_level": 3,
-      "campaign_effect": "Lets the town enlist provincial regulars",
-      "battle_effect": "Defender holds a post at start; +3 morale/+2 readiness per level; extra cover",
+      "campaign_effect": "Lets the town enlist provincial regulars. A garrison beaten here is besieged 72 hours a level before the town falls.",
+      "battle_effect": "The defender starts holding a post: morale +3 and readiness +2 a level, extra cover (card: Fortification, Morale, Readiness).",
       "description": "Earthworks and palisades that stiffen the defense."
+    },
+    {
+      "id": "powder_mill",
+      "name": "Powder Mill",
+      "kind": "track",
+      "stackable": false,
+      "gold_cost": 50,
+      "build_time_days": 2,
+      "upkeep_gold": 3,
+      "max_level": 3,
+      "requires_tags": [
+        "river",
+        "falls"
+      ],
+      "powder_per_month": 2,
+      "campaign_effect": "Each level: +2 powder a month here (monthly ledger).",
+      "battle_effect": "Powder here is made up into cartridges, 10 a powder: more rounds a man (card: Rounds a man).",
+      "description": "A stamping mill on running water that makes gunpowder."
     },
     {
       "id": "church",
@@ -67,8 +105,8 @@
       "support_on_complete": 5,
       "support_per_month": 1,
       "battle_morale": 2,
-      "campaign_effect": "+5 Support on completion; +1 Support/month",
-      "battle_effect": "Defender morale +2",
+      "campaign_effect": "+5 Support when built; +1 Support a month (monthly ledger).",
+      "battle_effect": "Defender morale +2 (card: Morale).",
       "description": "The parish meeting house that steadies local Support."
     },
     {
@@ -80,17 +118,17 @@
       "build_time_days": 1,
       "upkeep_gold": 2,
       "max_level": 1,
-      "campaign_effect": "Lets the town raise militia companies",
-      "battle_effect": "Extra defender militia muster waves",
+      "campaign_effect": "Lets the town raise militia companies.",
+      "battle_effect": "More militia companies march in for the defender (card: Militia muster).",
       "description": "Drill ground where minutemen form and march to the posts."
     }
   ],
   "recruit_note": "GAME INVENTION. One company musters per town at a time; men come from the town's monthly manpower (base below at Support 50, scaled by Support 25-100). Militia and riflemen bring their own firelocks; regulars are armed from the town magazine. 'faction' limits who may raise a company (empty = anyone); 'requires_chapter' holds it back until that campaign chapter (continental = Congress adopts the army, 14 June 1775, the day it voted the first rifle companies). 'role' is the battlefield summary shown to the player; the battle values themselves live in the Unreal class kits.",
-  "economy_note": "GAME INVENTION. Settled on the 1st of each month: levies, depot trade and workshop muskets in; army pay, building upkeep and loan interest out. A shortfall is borrowed up to credit_per_town x towns held; past that the army goes unpaid.",
+  "economy_note": "GAME INVENTION. Settled on the 1st of each month: levies, depot trade and workshop muskets in; army pay, building upkeep and loan interest out. A shortfall is borrowed up to credit_per_town x towns held; past that the army goes unpaid. Retuned in Phase 4 so that a level-1 building costs about two months of the opening net income (levy 15 -> 4 a supply point, regular pay 2 -> 3; the sea subsidy rose 80 -> 135, which leaves the British accounts where they stood: +3 gold a month at the opening). 2026-11-14: the Boston garrison opens with 4 gun crews (regular pay 12), so the subsidy rose 135 -> 147 to keep that +3.",
   "economy": {
-    "levy_per_supply": 15,
+    "levy_per_supply": 4,
     "pay_militia": 1,
-    "pay_regular": 2,
+    "pay_regular": 3,
     "depot_trade_gold": 8,
     "workshop_muskets": 1,
     "loan_step": 100,
@@ -98,7 +136,7 @@
     "credit_per_town": 60,
     "unpaid_morale": 8,
     "unpaid_support": 3,
-    "sea_subsidy_gold": 40,
+    "sea_subsidy_gold": 147,
     "sea_provisions": 12,
     "enemy_reserve_gold": 30
   },
@@ -234,6 +272,146 @@
       "requires_building": "fort",
       "role": "Dragoons (GAME INVENTION for 1775). Ride to the fight, dismount out of musket range and fight on foot with carbines; remount to move. No bayonet.",
       "description": "A troop of light dragoons with their carbines, pistols and sabres."
+    },
+    {
+      "id": "sapper_party",
+      "name": "Party of sappers",
+      "unit_class": "sapper",
+      "faction": "continental",
+      "men": 1,
+      "gold": 45,
+      "muskets": 4,
+      "provisions": 3,
+      "days": 4,
+      "requires_building": "fort",
+      "role": "Field works: in battle they build and mend breastworks at the places marked for them, on ground your side holds.",
+      "description": "Men with spades and axes, raised where a Fort gives them officers who know the work."
+    },
+    {
+      "id": "pioneer_party",
+      "name": "Party of pioneers",
+      "unit_class": "sapper",
+      "faction": "british",
+      "men": 1,
+      "gold": 45,
+      "muskets": 4,
+      "provisions": 3,
+      "days": 4,
+      "requires_building": "fort",
+      "role": "Field works: in battle they build and mend breastworks at the places marked for them, on ground their side holds.",
+      "description": "The regiment's pioneers with their axes, saws and spades."
+    },
+    {
+      "id": "colour_party",
+      "name": "Colour party",
+      "unit_class": "ensign",
+      "faction": "continental",
+      "men": 1,
+      "gold": 50,
+      "muskets": 0,
+      "provisions": 2,
+      "days": 3,
+      "requires_building": "fort",
+      "role": "Carries the colours in battle: squads near them rally in half the time; if they fall the whole side feels it, and colours taken raise or lower Support.",
+      "description": "An ensign and his guard with the regiment's colour."
+    },
+    {
+      "id": "fifes_and_drums",
+      "name": "Fifes and drums",
+      "unit_class": "musician",
+      "faction": "continental",
+      "men": 1,
+      "gold": 45,
+      "muskets": 0,
+      "provisions": 2,
+      "days": 3,
+      "requires_building": "fort",
+      "role": "Signals in battle: an order carries on through them, and line infantry near them load in cadence.",
+      "description": "A fifer and a drummer."
+    },
+    {
+      "id": "surgeons_mates",
+      "name": "Surgeon and mates",
+      "unit_class": "surgeon",
+      "faction": "continental",
+      "men": 1,
+      "gold": 55,
+      "muskets": 0,
+      "provisions": 2,
+      "days": 3,
+      "requires_building": "fort",
+      "role": "In battle a fallen man the surgeon reaches in time is wounded, not killed.",
+      "description": "A surgeon with his instruments and two mates."
+    },
+    {
+      "id": "kings_colour",
+      "name": "King's colour party",
+      "unit_class": "ensign",
+      "faction": "british",
+      "men": 1,
+      "gold": 50,
+      "muskets": 0,
+      "provisions": 2,
+      "days": 3,
+      "requires_building": "fort",
+      "role": "Carries the colours in battle: squads near them rally in half the time; if they fall the whole side feels it.",
+      "description": "An ensign and sergeants with the King's colour."
+    },
+    {
+      "id": "drums",
+      "name": "Drums",
+      "unit_class": "musician",
+      "faction": "british",
+      "men": 1,
+      "gold": 45,
+      "muskets": 0,
+      "provisions": 2,
+      "days": 3,
+      "requires_building": "fort",
+      "role": "Signals in battle: an order carries on through them, and line infantry near them load in cadence.",
+      "description": "The regiment's drummers."
+    },
+    {
+      "id": "regimental_surgeon",
+      "name": "Regimental surgeon",
+      "unit_class": "surgeon",
+      "faction": "british",
+      "men": 1,
+      "gold": 55,
+      "muskets": 0,
+      "provisions": 2,
+      "days": 3,
+      "requires_building": "fort",
+      "role": "In battle a fallen man the surgeon reaches in time is wounded, not killed.",
+      "description": "The regimental surgeon and his mate."
+    },
+    {
+      "id": "gun_crew",
+      "name": "Gun crew",
+      "unit_class": "artilleryman",
+      "faction": "continental",
+      "men": 1,
+      "gold": 60,
+      "muskets": 2,
+      "provisions": 3,
+      "days": 5,
+      "requires_building": "workshop",
+      "role": "Serves one field gun. An army with a crew, standing in a town you hold, takes a gun laid up in that town's magazine and brings it to its battles.",
+      "description": "Four men drilled to a gun, raised where a Workshop can make them rammers, sponges and cartridges. A crew with no gun fights as infantry."
+    },
+    {
+      "id": "royal_artillery_detachment",
+      "name": "Royal Artillery detachment",
+      "unit_class": "artilleryman",
+      "faction": "british",
+      "men": 1,
+      "gold": 60,
+      "muskets": 2,
+      "provisions": 3,
+      "days": 5,
+      "requires_building": "fort",
+      "role": "Serves one field gun. An army with a crew, standing in a town its side holds, takes a gun laid up in that town's magazine and brings it to its battles.",
+      "description": "A detachment of the Royal Regiment of Artillery."
     }
   ]
 }

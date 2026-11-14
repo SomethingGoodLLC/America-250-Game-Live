@@ -1,0 +1,21 @@
+{
+ "name": "setup_mode_assault",
+ "description": "a fortified town reached by land is an assault on its works",
+ "scenario": {
+  "province": "charlestown",
+  "attacker": "british_regulars",
+  "defender": "continental_militia",
+  "attacker_from": "medford"
+ },
+ "expect": {
+  "field_strength": {
+   "british": 21,
+   "continental": 19
+  },
+  "fortification_level": {
+   "british": 0,
+   "continental": 1
+  },
+  "mode": "assault"
+ }
+}

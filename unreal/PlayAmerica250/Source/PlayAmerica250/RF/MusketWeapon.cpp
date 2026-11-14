@@ -273,6 +273,10 @@ void AMusketWeapon::NoteReloadSounds()
 void AMusketWeapon::SyncStateFromSequencer()
 {
 	NoteReloadSounds();
+	if (State == EMusketState::Empty)
+	{
+		return; // nothing to load with: only Resupply ends this
+	}
 	if (Sequencer.IsJammed())
 	{
 		SetState(EMusketState::Jammed);
@@ -385,7 +389,7 @@ bool AMusketWeapon::Fire(FVector Direction, bool bIsAiming, float OwnerSpeed, fl
 		FireAnimRemaining = FireAnim->GetPlayLength();
 	}
 
-	StartReload();
+	BeginReloadOrRunDry();
 	return Ball != nullptr;
 }
 
@@ -407,8 +411,37 @@ bool AMusketWeapon::Misfire()
 		AnimatedMesh->PlayAnimation(FireAnim, false); // the lock still falls
 		FireAnimRemaining = FireAnim->GetPlayLength();
 	}
-	StartReload();
+	BeginReloadOrRunDry();
 	return true;
+}
+
+void AMusketWeapon::BeginReloadOrRunDry()
+{
+	if (RoundsInBox == 0)
+	{
+		Sequencer.Reset();
+		SetState(EMusketState::Empty);
+		return;
+	}
+	if (RoundsInBox > 0)
+	{
+		--RoundsInBox;
+	}
+	StartReload();
+}
+
+void AMusketWeapon::Resupply(int32 Rounds)
+{
+	if (Rounds <= 0)
+	{
+		return;
+	}
+	RoundsInBox = FMath::Max(0, RoundsInBox) + Rounds;
+	if (State == EMusketState::Empty)
+	{
+		--RoundsInBox;
+		StartReload();
+	}
 }
 
 void AMusketWeapon::StartReload()

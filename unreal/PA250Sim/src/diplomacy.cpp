@@ -330,6 +330,7 @@ CampaignState apply_diplomacy(const CampaignState& in, const DiplomacyResult& r)
                 if (kv.second.faction == r.faction) {
                     kv.second.faction = ctx.counterpart;
                     kv.second.path.clear();
+                    kv.second.role.clear();  // no longer the Crown's garrison
                     break;
                 }
             if (cl.title == "mayor_of_boston" && s.provinces.count("boston"))

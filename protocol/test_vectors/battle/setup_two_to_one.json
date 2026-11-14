@@ -1,0 +1,27 @@
+{
+ "name": "setup_two_to_one",
+ "description": "two to one in men gives 27 against 13",
+ "scenario": {
+  "province": "lexington",
+  "attacker": "british_regulars",
+  "defender": "continental_militia",
+  "units": {
+   "british_regulars": {
+    "line_infantry": 20
+   },
+   "continental_militia": {
+    "militia": 10
+   }
+  }
+ },
+ "expect": {
+  "field_strength": {
+   "british": 27,
+   "continental": 13
+  },
+  "fortification_level": {
+   "british": 0,
+   "continental": 0
+  }
+ }
+}

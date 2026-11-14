@@ -37,7 +37,6 @@ struct LogisticsTuning {
     int dev_workshop_gold = 40;
     int dev_depot_gold = 35;
     int dev_fort_gold = 45;
-    int dev_cost_growth = 20;
     int dev_max_level = 3;
     int farm_provisions_per_month = 3;
     int workshop_cartridges_per_level = 8;
@@ -234,7 +233,8 @@ void deliver_committed(CampaignState& s, CorrespondenceItem& letter) {
     letter.awaiting_choice = false;
     if (add_p || add_a || add_v) {
         ResourceChange ch;
-        ch.reason = "Delivered (" + letter.kind + "): +" + std::to_string(std::max(0, add_p)) + " powder, +" +
+        ch.reason = "Delivered to " + s.provinces.at(default_depot_province(s, s.player_faction)).name + ": +" +
+                    std::to_string(std::max(0, add_p)) + " powder, +" +
                     std::to_string(std::max(0, add_a)) + " muskets, +" + std::to_string(std::max(0, add_v)) +
                     " provisions";
         ch.powder = std::max(0, add_p);
@@ -292,10 +292,16 @@ void seed_concord_followup(CampaignState& s) {
     if (!s.progress.lexington_fought) return;
     if (s.pending_battle.active) return;  // columns are ordered once the field is clear
     s.progress.concord_followup_seeded = true;
-    s.ai_objective = "concord";
+    // With the campaign rules loaded the British commander scores his own targets (campaign.cpp);
+    // only the scripted fallback is pointed at Concord from here.
+    const bool scripted_enemy = !campaign_rules_loaded();
+    if (scripted_enemy) s.ai_objective = "concord";
     // Point British column toward Concord if still in the field.
-    auto brit = s.armies.find("british_regulars");
-    if (brit != s.armies.end() && brit->second.path.empty() && !s.pending_battle.active) {
+    auto brit = scripted_enemy ? s.armies.find("british_regulars") : s.armies.end();
+    // A column sitting down before a fort it has just beaten stays at its siege.
+    const bool brit_besieging = brit != s.armies.end() && s.provinces.count(brit->second.province) &&
+                                s.provinces.at(brit->second.province).siege_by == brit->second.faction;
+    if (brit != s.armies.end() && brit->second.path.empty() && !s.pending_battle.active && !brit_besieging) {
         PathPlan plan = plan_path(s, brit->first, "concord");
         if (plan.ok && !plan.edges.empty()) {
             CommandPayload p;
@@ -346,7 +352,7 @@ void maybe_commander_friction(CampaignState& s, std::vector<Interrupt>* interrup
             "[FICTIONALIZED] " + cmd.name +
             " prefers a narrower task — screen the stores and preserve the company — and asks "
             "whether to contest the North Bridge crossing now or hold back until powder arrives.";
-        letter.reason = "commander_risk:" + cmd.risk;
+        letter.reason = cmd.name + " is a " + cmd.risk + " officer.";
         s.staff.queue.push_back(letter);
         cmd.pending_clarification = true;
         cmd.last_request = letter.id;
@@ -577,7 +583,6 @@ void load_logistics_tuning(const std::string& json_text) {
             t.dev_workshop_gold = d.value("workshop_gold", t.dev_workshop_gold);
             t.dev_depot_gold = d.value("depot_gold", t.dev_depot_gold);
             t.dev_fort_gold = d.value("fort_gold", t.dev_fort_gold);
-            t.dev_cost_growth = d.value("cost_growth_per_level", t.dev_cost_growth);
             t.dev_max_level = d.value("max_level", t.dev_max_level);
             t.farm_provisions_per_month =
                 d.value("farm_provisions_per_month", t.farm_provisions_per_month);
@@ -639,11 +644,21 @@ std::string default_depot_province(const CampaignState& s, const std::string& fa
 
 int province_development(const Province& p) {
     return 1 + std::max(0, p.farm_level) + std::max(0, p.workshop_level) +
-           std::max(0, p.depot_level) + std::max(0, p.fort_level);
+           std::max(0, p.depot_level) + std::max(0, p.fort_level) + std::max(0, p.powder_mill_level);
 }
 
 int effective_supply_value(const Province& p) {
     return std::max(0, p.supply_value) + std::max(0, p.farm_level);
+}
+
+int cartridges_per_powder() {
+    return std::max(1, tuning().craft_cartridges / std::max(1, tuning().craft_powder));
+}
+
+int magazine_cartridges(const CampaignState& state, const std::string& province_id) {
+    if (!state.province_stores.count(province_id)) return 0;
+    const ProvinceStores& st = province_ledger(state, province_id);
+    return std::max(0, st.cartridges) + std::max(0, st.powder) * cartridges_per_powder();
 }
 
 int development_max_level() { return std::max(1, tuning().dev_max_level); }
@@ -655,7 +670,8 @@ int development_cost(const std::string& track, int current_level) {
     if (track == "depot") base = tuning().dev_depot_gold;
     if (track == "fort") base = tuning().dev_fort_gold;
     if (base < 0) return -1;
-    return base + std::max(0, current_level) * std::max(0, tuning().dev_cost_growth);
+    // Level costs scale x1, x2.5, x6 (buildings catalog cost_multiplier_pct).
+    return (base * level_cost_pct(current_level) + 50) / 100;
 }
 
 int purchase_cost(int powder, int cartridges, int muskets, int bayonets, int provisions, int lead,
@@ -756,6 +772,11 @@ CampaignState approve_purchase(const CampaignState& state, const std::string& de
         error = "empty_order";
         return state;
     }
+    // Powder comes in by sea: only through a Depot in a harbour town (buildings catalog).
+    if (powder > 0 && !can_buy_powder(state, dest_province)) {
+        error = "powder_needs_harbor_depot";
+        return state;
+    }
     const int cost = purchase_cost(powder, cartridges, muskets, bayonets, provisions, lead, paper);
     if (s.player_gold < cost) {
         error = "insufficient_gold";
@@ -789,8 +810,8 @@ CampaignState approve_purchase(const CampaignState& state, const std::string& de
     }
     {
         ResourceChange ch;
-        ch.reason = "Purchase order " + sh.id + ": -" + std::to_string(cost) + " gold (in transit to " +
-                    dest_province + ")";
+        ch.reason = "Purchase order: -" + std::to_string(cost) + " gold (on the road to " +
+                    s.provinces.at(dest_province).name + ")";
         ch.gold = -cost;
         ch.province_id = dest_province;
         detail::record_resource_change(s, ch);
@@ -801,6 +822,13 @@ CampaignState approve_purchase(const CampaignState& state, const std::string& de
 CampaignState approve_transfer(const CampaignState& state, const std::string& source_province,
                                const std::string& dest_province, int powder, int cartridges, int muskets,
                                int bayonets, int provisions, int lead, int paper, std::string& error) {
+    return transfer_stores(state, source_province, dest_province, powder, cartridges, muskets, bayonets, provisions, lead,
+                           paper, 0, error);
+}
+
+CampaignState transfer_stores(const CampaignState& state, const std::string& source_province,
+                              const std::string& dest_province, int powder, int cartridges, int muskets, int bayonets,
+                              int provisions, int lead, int paper, int guns, std::string& error) {
     error.clear();
     CampaignState s = state;
     ensure_logistics_defaults(s);
@@ -824,15 +852,17 @@ CampaignState approve_transfer(const CampaignState& state, const std::string& so
     provisions = std::max(0, provisions);
     lead = std::max(0, lead);
     paper = std::max(0, paper);
-    if (powder + cartridges + muskets + bayonets + provisions + lead + paper <= 0) {
+    guns = std::max(0, guns);
+    if (powder + cartridges + muskets + bayonets + provisions + lead + paper + guns <= 0) {
         error = "empty_order";
         return state;
     }
     ProvinceStores& src = province_ledger(s, source_province);
-    if (!debit_province(src, powder, cartridges, muskets, bayonets, provisions, lead, paper)) {
+    if (src.guns < guns || !debit_province(src, powder, cartridges, muskets, bayonets, provisions, lead, paper)) {
         error = "insufficient_stores";
         return state;
     }
+    src.guns -= guns;
     const int dest_before = province_ledger(s, dest_province).powder +
                             province_ledger(s, dest_province).cartridges +
                             province_ledger(s, dest_province).muskets;
@@ -848,6 +878,7 @@ CampaignState approve_transfer(const CampaignState& state, const std::string& so
     sh.provisions = provisions;
     sh.lead = lead;
     sh.paper = paper;
+    sh.guns = guns;
     sh.commit_hour = s.now.hour_index;
     sh.deliver_on_hour = s.now.hour_index + std::max(1, tuning().transfer_transit_hours -
                                                              s.provinces.at(dest_province).depot_level);
@@ -862,7 +893,11 @@ CampaignState approve_transfer(const CampaignState& state, const std::string& so
     }
     {
         ResourceChange ch;
-        ch.reason = "Transfer departed " + sh.id + ": " + source_province + " → " + dest_province;
+        ch.reason = "Stores leave " + s.provinces.at(source_province).name + " for " + s.provinces.at(dest_province).name +
+                    ": " + std::to_string(powder) + " powder, " + std::to_string(cartridges) + " cartridges, " +
+                    std::to_string(muskets) + " muskets" +
+                    (guns > 0 ? ", " + std::to_string(guns) + (guns == 1 ? " field gun" : " field guns") : std::string()) + " (" +
+                    std::to_string(sh.deliver_on_hour - sh.commit_hour) + " hours on the road)";
         ch.powder = -powder;
         ch.cartridges = -cartridges;
         ch.muskets = -muskets;
@@ -871,6 +906,28 @@ CampaignState approve_transfer(const CampaignState& state, const std::string& so
         detail::record_resource_change(s, ch);
     }
     return s;
+}
+
+// "Send the stores away": everything in a town's magazine that an enemy could use (powder,
+// cartridges, muskets, bayonets, lead, paper, and any field guns laid up there) leaves for the side's headquarters depot. Provisions
+// stay: they feed the town. Until 2026-11-14 the only transfer the game offered was two powder a
+// press, so a magazine could not be emptied at all (mission 1 asks for exactly that).
+CampaignState send_stores_to_depot(const CampaignState& state, const std::string& source_province,
+                                   std::string& error) {
+    error.clear();
+    if (!state.provinces.count(source_province)) {
+        error = "unknown_province";
+        return state;
+    }
+    const std::string depot = default_depot_province(state, state.player_faction);
+    if (depot == source_province) {
+        error = "already_at_depot";
+        return state;
+    }
+    const ProvinceStores& st = province_ledger(state, source_province);
+    return transfer_stores(state, source_province, depot, std::max(0, st.powder), std::max(0, st.cartridges),
+                           std::max(0, st.muskets), std::max(0, st.bayonets), 0, std::max(0, st.lead),
+                           std::max(0, st.paper), std::max(0, st.guns), error);
 }
 
 CampaignState start_cartridge_job(const CampaignState& state, const std::string& province_id,
@@ -958,7 +1015,7 @@ void tick_cartridge_jobs(CampaignState& s) {
             province_ledger(s, job.province_id).cartridges += made;
             job.status = "complete";
             ResourceChange ch;
-            ch.reason = "Cartridge job complete " + job.id + ": +" + std::to_string(made) + " cartridges";
+            ch.reason = "Cartridges made up at " + s.provinces.at(job.province_id).name + ": +" + std::to_string(made) + " cartridges";
             ch.cartridges = made;
             ch.province_id = job.province_id;
             detail::record_resource_change(s, ch);

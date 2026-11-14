@@ -1,0 +1,21 @@
+{
+ "name": "setup_mode_landing",
+ "description": "a harbour town reached over the water is a landing, fort or no fort",
+ "scenario": {
+  "province": "charlestown",
+  "attacker": "british_regulars",
+  "defender": "continental_militia",
+  "attacker_from": "boston"
+ },
+ "expect": {
+  "field_strength": {
+   "british": 21,
+   "continental": 19
+  },
+  "fortification_level": {
+   "british": 0,
+   "continental": 1
+  },
+  "mode": "landing"
+ }
+}

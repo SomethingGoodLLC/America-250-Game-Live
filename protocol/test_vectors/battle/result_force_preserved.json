@@ -1,0 +1,23 @@
+{
+ "name": "result_force_preserved",
+ "description": "Battle Road: preserving the column does not take the town without the posts",
+ "scenario": {
+  "province": "menotomy",
+  "attacker": "british_regulars",
+  "defender": "continental_militia"
+ },
+ "result": {
+  "province_id": "menotomy",
+  "winner": "british",
+  "end_reason": "force_preserved",
+  "objective_holder": ""
+ },
+ "expect": {
+  "schema_valid": true,
+  "applied": true,
+  "owner_after": "continental",
+  "siege_by": "",
+  "siege_hours": 0,
+  "loser_fate": "retreated"
+ }
+}

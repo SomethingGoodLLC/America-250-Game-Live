@@ -1,0 +1,155 @@
+{
+ "name": "setup_document",
+ "description": "a complete BattleSetup document: every field the sim writes, and it reads back unchanged",
+ "round_trip": true,
+ "setup": {
+  "valid": true,
+  "province_id": "charlestown",
+  "province_name": "Charlestown",
+  "objective": "green",
+  "scenario_preset": "lexington_common",
+  "mode": "landing",
+  "seed": 1775,
+  "attacker_faction": "british",
+  "defender_faction": "continental",
+  "player_faction": "continental",
+  "terrain_tags": [
+   "disordered",
+   "hills"
+  ],
+  "province_cartridges": 10,
+  "province_powder": 2,
+  "force_notes": "sourced approximation \u2014 not a precise muster roll",
+  "farm_level": 0,
+  "workshop_level": 0,
+  "depot_level": 0,
+  "fort_level": 1,
+  "church": false,
+  "militia_muster": false,
+  "initial_post_holders": {
+   "green": "continental"
+  },
+  "modifier_notes": [
+   "Fort L1 Charlestown: defender holds green at start; +3 morale/+2 readiness per level; extra cover"
+  ],
+  "soldiers_per_unit": 4,
+  "sides": {
+   "british": {
+    "faction": "british",
+    "army_id": "british_regulars",
+    "tickets": {
+     "grenadier": 5,
+     "light_infantry": 6,
+     "line_infantry": 12,
+     "officer": 1
+    },
+    "morale": 80,
+    "readiness": 100,
+    "cartridge_budget": 0,
+    "reinforcement_scale": 1,
+    "retreat_province": "boston",
+    "field_strength": 21,
+    "rounds_per_man": 12,
+    "fortification_level": 0,
+    "guns": 2,
+    "factors": [
+     {
+      "label": "men",
+      "value": 96,
+      "source": "British Regulars: 24 units of 4"
+     },
+     {
+      "label": "field_strength",
+      "value": 21,
+      "source": "96 of 184 men on the field: share of 40"
+     },
+     {
+      "label": "rounds_per_man",
+      "value": 12,
+      "source": "British Regulars: what the men carry in their boxes. They fill only in a town their side holds"
+     },
+     {
+      "label": "morale",
+      "value": 80,
+      "source": "British Regulars"
+     },
+     {
+      "label": "fortification",
+      "value": 0,
+      "source": "Enemy ground: no works"
+     },
+     {
+      "label": "guns",
+      "value": 2,
+      "source": "British Regulars: 2 field guns, 2 crews to serve them"
+     }
+    ],
+    "magazine_province": ""
+   },
+   "continental": {
+    "faction": "continental",
+    "army_id": "continental_militia",
+    "tickets": {
+     "line_infantry": 4,
+     "militia": 10,
+     "officer": 1
+    },
+    "morale": 73,
+    "readiness": 100,
+    "cartridge_budget": 10,
+    "reinforcement_scale": 1,
+    "retreat_province": "cambridge",
+    "field_strength": 19,
+    "rounds_per_man": 3,
+    "fortification_level": 1,
+    "guns": 0,
+    "factors": [
+     {
+      "label": "men",
+      "value": 88,
+      "source": "Massachusetts Militia: 22 units of 4"
+     },
+     {
+      "label": "field_strength",
+      "value": 19,
+      "source": "88 of 184 men on the field: share of 40"
+     },
+     {
+      "label": "rounds_per_man",
+      "value": 3,
+      "source": "Charlestown magazine: 10 cartridges for 88 men"
+     },
+     {
+      "label": "morale",
+      "value": 70,
+      "source": "Massachusetts Militia"
+     },
+     {
+      "label": "morale",
+      "value": 3,
+      "source": "Fort L1, Charlestown"
+     },
+     {
+      "label": "readiness",
+      "value": 100,
+      "source": "Massachusetts Militia"
+     },
+     {
+      "label": "readiness",
+      "value": 2,
+      "source": "Fort L1, Charlestown"
+     },
+     {
+      "label": "fortification",
+      "value": 1,
+      "source": "Fort L1, Charlestown"
+     }
+    ],
+    "magazine_province": "charlestown"
+   }
+  }
+ },
+ "expect": {
+  "schema_valid": true
+ }
+}
