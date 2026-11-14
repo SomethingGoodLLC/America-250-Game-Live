@@ -1,0 +1,80 @@
+#pragma once
+#include "CoreMinimal.h"
+#include "Engine/DataAsset.h"
+#include "GameFramework/Character.h"
+#include "GameFramework/GameModeBase.h"
+#include "MBTraversal.generated.h"
+
+class UAnimSequence;
+class UAnimMontage;
+class UStaticMeshComponent;
+
+UCLASS(BlueprintType)
+class MOTIONBRICKSTRAVERSAL_API UMBGeneratedClip : public UDataAsset {
+    GENERATED_BODY()
+public:
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="MotionBricks Evaluation") TObjectPtr<UAnimSequence> Animation;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="MotionBricks Evaluation") TArray<FVector> RootOffsets;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="MotionBricks Evaluation") float FPS = 30.f;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="MotionBricks Evaluation") float WallDistance = 167.f;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="MotionBricks Evaluation") float WallHeight = 68.f;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="MotionBricks Evaluation") FString Provenance;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="MotionBricks Evaluation") bool bEvaluationOnly = true;
+    float Duration() const { return RootOffsets.Num() > 1 ? (RootOffsets.Num()-1)/FPS : 0.f; }
+    FVector Sample(float Time) const;
+};
+
+UCLASS()
+class MOTIONBRICKSTRAVERSAL_API AMBTestCourse : public AActor {
+    GENERATED_BODY()
+public:
+    AMBTestCourse();
+    UPROPERTY(VisibleAnywhere, Category="MotionBricks Evaluation") TObjectPtr<UStaticMeshComponent> Floor;
+    UPROPERTY(VisibleAnywhere, Category="MotionBricks Evaluation") TObjectPtr<UStaticMeshComponent> Wall;
+    UPROPERTY(VisibleAnywhere, Category="MotionBricks Evaluation") TObjectPtr<UStaticMeshComponent> LandingBlocker;
+    void ToggleLanding();
+};
+
+UCLASS()
+class MOTIONBRICKSTRAVERSAL_API AMBTestCharacter : public ACharacter {
+    GENERATED_BODY()
+public:
+    AMBTestCharacter();
+    virtual void BeginPlay() override;
+    virtual void Tick(float DeltaSeconds) override;
+    virtual void SetupPlayerInputComponent(UInputComponent* Input) override;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="MotionBricks Evaluation") TObjectPtr<UMBGeneratedClip> Clip;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="MotionBricks Evaluation") bool bTraversing = false;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="MotionBricks Evaluation") FString LastResult = TEXT("Ready");
+    UFUNCTION(BlueprintCallable, Category="MotionBricks Evaluation") bool TryTraversal();
+    UFUNCTION(BlueprintCallable, Category="MotionBricks Evaluation") void ResetAttempt();
+    UFUNCTION(BlueprintCallable, Category="MotionBricks Evaluation") void ToggleBlockedLanding();
+private:
+    void Trigger();
+    void Finish(bool bSuccess);
+    bool ClearAt(const FVector& Position, float HalfHeight) const;
+    void SetResult(const FString& Message);
+    void TickVerification(float DeltaSeconds);
+    FVector Origin;
+    FRotator TraversalRotation;
+    float Elapsed = 0.f;
+    float NormalHalfHeight = 88.f;
+    TSubclassOf<UAnimInstance> LocomotionClass;
+    UPROPERTY(Transient) TObjectPtr<UAnimMontage> TraversalMontage;
+    bool bDebug = true;
+    bool bVerify = false;
+    bool bVerificationPassed = true;
+    int32 VerificationPhase = 0;
+    float VerificationTime = 0.f;
+    TArray<float> TraversalFrameTimes;
+    FVector VerificationStart;
+    FVector VerificationLanding;
+    int32 VerificationCapture = 0;
+};
+
+UCLASS()
+class MOTIONBRICKSTRAVERSAL_API AMBTestGameMode : public AGameModeBase {
+    GENERATED_BODY()
+public:
+    AMBTestGameMode();
+};
