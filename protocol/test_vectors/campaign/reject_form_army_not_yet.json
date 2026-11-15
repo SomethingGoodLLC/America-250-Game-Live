@@ -1,0 +1,23 @@
+{
+ "name": "reject_form_army_not_yet",
+ "description": "Washington serves only if Congress names him",
+ "start_ymdh": {
+  "y": 1775,
+  "m": 4,
+  "d": 20,
+  "h": 0
+ },
+ "setup": {
+  "armies": {
+   "continental_militia": {
+    "province": "charlestown"
+   }
+  }
+ },
+ "order": {
+  "order": "form_army",
+  "person": "george_washington",
+  "province": "charlestown"
+ },
+ "expect_error": "person_not_available"
+}

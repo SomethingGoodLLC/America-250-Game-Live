@@ -1,0 +1,23 @@
+{
+ "name": "order_use_agent_scout",
+ "description": "a scout counts an enemy army: its strength is known for the ability's days",
+ "start_ymdh": {
+  "y": 1775,
+  "m": 8,
+  "d": 10,
+  "h": 0
+ },
+ "order": {
+  "order": "use_agent",
+  "person": "daniel_morgan",
+  "army_id": "british_regulars"
+ },
+ "expect": {
+  "intel_known": {
+   "british_regulars": true
+  },
+  "uses_left": {
+   "daniel_morgan": 1
+  }
+ }
+}

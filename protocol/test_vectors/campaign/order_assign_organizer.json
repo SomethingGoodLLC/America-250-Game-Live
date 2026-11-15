@@ -1,0 +1,24 @@
+{
+ "name": "order_assign_organizer",
+ "description": "an organizer goes to a town the player holds",
+ "start_ymdh": {
+  "y": 1775,
+  "m": 4,
+  "d": 20,
+  "h": 0
+ },
+ "order": {
+  "order": "assign_person",
+  "person": "samuel_adams",
+  "role": "organizer",
+  "province": "cambridge"
+ },
+ "expect": {
+  "persons": {
+   "samuel_adams": {
+    "role": "organizer",
+    "province": "cambridge"
+   }
+  }
+ }
+}

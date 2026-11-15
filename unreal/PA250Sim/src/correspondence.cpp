@@ -15,6 +15,45 @@ std::mutex g_catalog_mu;
 bool g_catalog_loaded = false;
 std::vector<CorrespondenceCatalogEntry> g_entries;
 std::vector<DonorReserve> g_donor_defaults;
+std::vector<CommanderLetterChoice> g_commander_choices;
+std::string g_commander_province;
+
+CorrespondenceChoiceEffects effects_from_json(const json& fx) {
+    CorrespondenceChoiceEffects e;
+    e.gold = fx.value("gold", 0);
+    e.local_support = fx.value("local_support", 0);
+    e.british_attitude = fx.value("british_attitude", 0);
+    e.provisions = fx.value("provisions", 0);
+    e.powder = fx.value("powder", 0);
+    e.delivery_hours = fx.value("delivery_hours", 0);
+    e.army_morale = fx.value("army_morale", 0);
+    e.army_readiness = fx.value("army_readiness", 0);
+    e.clerk_load = fx.value("clerk_load", 0);
+    e.favors = fx.value("favors", 0);
+    if (fx.contains("factor")) {
+        const json& f = fx.at("factor");
+        e.factor_province = f.value("province", "");
+        e.factor_label = f.value("label", "");
+        e.factor_value = f.value("value", 0);
+        e.factor_days = f.value("days", 0);
+    }
+    return e;
+}
+
+// A battle factor a letter leaves at a town: on the pre-battle card with the letter as its source.
+void add_letter_factor(CampaignState& s, const std::string& province, const std::string& label, int value, int days,
+                       const std::string& source) {
+    if (province.empty() || label.empty() || value == 0) return;
+    TownFactor f;
+    f.province = province;
+    f.faction = s.player_faction;
+    f.label = label;
+    f.value = value;
+    f.source = source;
+    f.until_hour = days > 0 ? s.now.hour_index + 24LL * days : 0;
+    f.one_battle = days <= 0;
+    s.pass.town_factors.push_back(f);
+}
 
 bool contains_id(const std::vector<std::string>& v, const std::string& id) {
     return std::find(v.begin(), v.end(), id) != v.end();
@@ -60,18 +99,7 @@ CorrespondenceCatalogEntry entry_from_json(const json& j) {
             ch.id = c.value("id", "");
             ch.label = c.value("label", "");
             ch.effects_summary = c.value("effects_summary", "");
-            if (c.contains("effects")) {
-                const json& fx = c.at("effects");
-                ch.effects.gold = fx.value("gold", 0);
-                ch.effects.local_support = fx.value("local_support", 0);
-                ch.effects.british_attitude = fx.value("british_attitude", 0);
-                ch.effects.provisions = fx.value("provisions", 0);
-                ch.effects.powder = fx.value("powder", 0);
-                ch.effects.delivery_hours = fx.value("delivery_hours", 0);
-                ch.effects.army_morale = fx.value("army_morale", 0);
-                ch.effects.army_readiness = fx.value("army_readiness", 0);
-                ch.effects.clerk_load = fx.value("clerk_load", 0);
-            }
+            if (c.contains("effects")) ch.effects = effects_from_json(c.at("effects"));
             e.choices.push_back(ch);
         }
     }
@@ -164,7 +192,33 @@ void load_correspondence_catalog(const std::string& json_text) {
             if (!r.id.empty()) g_donor_defaults.push_back(r);
         }
     }
+    g_commander_choices.clear();
+    g_commander_province.clear();
+    if (root.contains("commander_letter")) {
+        const json& cl = root.at("commander_letter");
+        g_commander_province = cl.value("province", "");
+        for (const auto& c : cl.at("choices")) {
+            CommanderLetterChoice ch;
+            ch.id = c.value("id", "");
+            ch.aliases = c.value("aliases", std::vector<std::string>{});
+            ch.label = c.value("label", "");
+            ch.effects_summary = c.value("effects_summary", "");
+            if (c.contains("effects")) ch.effects = effects_from_json(c.at("effects"));
+            if (c.contains("factors"))
+                for (const auto& f : c.at("factors")) ch.factors.push_back({f.value("label", ""), f.value("value", 0)});
+            g_commander_choices.push_back(ch);
+        }
+    }
     g_catalog_loaded = true;
+}
+
+std::vector<CommanderLetterChoice> commander_letter_choices() {
+    std::lock_guard<std::mutex> lock(g_catalog_mu);
+    return g_commander_choices;
+}
+std::string commander_letter_province() {
+    std::lock_guard<std::mutex> lock(g_catalog_mu);
+    return g_commander_province;
 }
 
 bool correspondence_catalog_loaded() {
@@ -554,6 +608,33 @@ CampaignState apply_source_decision(const CampaignState& in, const std::string& 
                 "(distinct from transfer or procurement; gameplay tuning).";
             detail::add_log(s, "L7 conserve_ammunition");
         }
+    }
+    if ((sid == "L3" || sid == "L5" || sid == "L7") && chosen && chosen->effects.any()) {
+        // These three keep their own mechanics above (personnel held, donor reserve, purchases); the
+        // catalog adds what each choice gains or costs besides, so no answer is without effect.
+        const CorrespondenceChoiceEffects& fx = chosen->effects;
+        ResourceChange ch;
+        ch.reason = sid + " — " + chosen->label;
+        const int support_before = s.local_support;
+        s.local_support = detail::clamp_int(s.local_support + fx.local_support, 0, 100);
+        ch.local_support = s.local_support - support_before;
+        for (auto& kv : s.armies) {
+            if (kv.second.faction != s.player_faction) continue;
+            kv.second.morale = detail::clamp_int(kv.second.morale + fx.army_morale, 0, 100);
+            kv.second.readiness = detail::clamp_int(kv.second.readiness + fx.army_readiness, 0, 100);
+        }
+        s.pass.favors = std::max(0, s.pass.favors + fx.favors);
+        add_letter_factor(s, fx.factor_province, fx.factor_label, fx.factor_value, fx.factor_days, "Letter " + sid + ": " + chosen->label);
+        if (fx.delivery_hours > 0 && (fx.provisions > 0 || fx.powder > 0)) {
+            letter->committed_provisions += std::max(0, fx.provisions);
+            letter->committed_powder += std::max(0, fx.powder);
+            letter->resolve_on_hour = std::max(letter->resolve_on_hour, s.now.hour_index + fx.delivery_hours);
+            letter->status = "approved";
+        }
+        letter->reason += " " + chosen->effects_summary;
+        detail::record_resource_change(s, ch);
+    } else if (sid == "L3" || sid == "L5" || sid == "L7") {
+        // (handled above)
     } else if (chosen && chosen->effects.any()) {
         // Catalog-driven consequences (GAMEPLAY TUNING lives in the catalog JSON).
         const CorrespondenceChoiceEffects& fx = chosen->effects;
@@ -582,6 +663,8 @@ CampaignState apply_source_decision(const CampaignState& in, const std::string& 
             kv.second.readiness = detail::clamp_int(kv.second.readiness + fx.army_readiness, 0, 100);
         }
         s.staff.letters_processed_today += std::max(0, fx.clerk_load);
+        s.pass.favors = std::max(0, s.pass.favors + fx.favors);
+        add_letter_factor(s, fx.factor_province, fx.factor_label, fx.factor_value, fx.factor_days, "Letter " + sid + ": " + chosen->label);
         const bool later = fx.delivery_hours > 0 && (fx.provisions > 0 || fx.powder > 0);
         if (later) {
             // Commit now, receive later: resolve_due_letters credits the depot exactly once.

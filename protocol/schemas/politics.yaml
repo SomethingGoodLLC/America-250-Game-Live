@@ -1,0 +1,140 @@
+# Lobbying (Play America 250): the bodies the two sides answer to, and the measures they vote on.
+# Files: unreal/PA250Sim/data/bodies_boston_1775.json (root: #/definitions/bodies_file) and
+# measures_boston_1775.json (root: #/definitions/measures_file), read together by `load_politics`.
+# A body has exactly three blocs. A measure's effects are the closed set of effects.yaml. Every
+# historical note is marked `documented` or `invented`; every number is GAMEPLAY TUNING.
+$schema: "http://json-schema.org/draft-07/schema#"
+$id: "politics.v1"
+title: PoliticsFiles
+definitions:
+  ymd:
+    type: object
+    additionalProperties: false
+    required: [y, m, d]
+    properties:
+      y: {type: integer}
+      m: {type: integer, minimum: 1, maximum: 12}
+      d: {type: integer, minimum: 1, maximum: 31}
+  basis: {enum: [documented, invented]}
+  bodies_file:
+    type: object
+    additionalProperties: false
+    required: [lobby, dispatch, ministry, bodies]
+    properties:
+      note: {type: string}
+      lobby:
+        type: object
+        additionalProperties: false
+        required: [write_shift, favor_shift, vote_base_pct, vote_min_pct, vote_max_pct, blocs_to_pass, favors_at_start,
+                   favors_per_mission_done, favors_per_victory, unity_floor, unity_desertion_units_per_day]
+        properties:
+          write_shift: {type: integer}
+          favor_shift: {type: integer}
+          vote_base_pct: {type: integer}
+          vote_min_pct: {type: integer}
+          vote_max_pct: {type: integer}
+          blocs_to_pass: {type: integer, minimum: 1, maximum: 3}
+          favors_at_start: {type: integer, minimum: 0}
+          favors_per_mission_done: {type: integer, minimum: 0}
+          favors_per_victory: {type: integer, minimum: 0}
+          unity_floor: {type: integer, minimum: 0, maximum: 100}
+          unity_desertion_units_per_day: {type: integer, minimum: 0}
+      dispatch:
+        type: object
+        additionalProperties: false
+        required: [days_out, days_back, note, basis]
+        properties:
+          days_out: {type: integer, minimum: 1}
+          days_back: {type: integer, minimum: 1}
+          note: {type: string}
+          basis: {$ref: "#/definitions/basis"}
+      ministry:
+        type: object
+        additionalProperties: false
+        required: [confidence_start, on_defeat, on_victory, recall_floor, confidence_after_recall, replacements, note, basis]
+        properties:
+          confidence_start: {type: integer}
+          on_defeat: {type: integer}
+          on_victory: {type: integer}
+          recall_floor: {type: integer}
+          confidence_after_recall: {type: integer}
+          replacements: {type: array, items: {type: string}}
+          note: {type: string}
+          basis: {$ref: "#/definitions/basis"}
+      bodies:
+        type: array
+        minItems: 1
+        items:
+          type: object
+          additionalProperties: false
+          required: [id, side, name, button, note, basis, blocs]
+          properties:
+            id: {type: string}
+            side: {enum: [british, continental]}
+            name: {type: string}
+            button: {type: string, description: "The top-bar button that opens the floor."}
+            from: {$ref: "#/definitions/ymd"}
+            until: {$ref: "#/definitions/ymd"}
+            dispatch: {type: boolean, description: "Requests go by sea: voted on arrival, answered on the return."}
+            note: {type: string}
+            basis: {$ref: "#/definitions/basis"}
+            blocs:
+              type: array
+              minItems: 3
+              maxItems: 3
+              items:
+                type: object
+                additionalProperties: false
+                required: [id, name, lean, moves]
+                properties:
+                  id: {type: string}
+                  name: {type: string}
+                  lean: {type: integer, minimum: -100, maximum: 100}
+                  on_victory: {type: integer}
+                  on_defeat: {type: integer}
+                  moves: {type: string, description: "What moves the bloc, in words for the player."}
+  measures_file:
+    type: object
+    additionalProperties: false
+    required: [measures]
+    properties:
+      note: {type: string}
+      measures:
+        type: array
+        minItems: 1
+        items:
+          type: object
+          additionalProperties: false
+          required: [id, body, title, text, bias, passed, failed, note, basis]
+          properties:
+            id: {type: string}
+            body: {type: string}
+            title: {type: string}
+            text: {type: string}
+            earliest: {$ref: "#/definitions/ymd"}
+            vote: {$ref: "#/definitions/ymd"}
+            arrives: {$ref: "#/definitions/ymd", description: "A dispatch already at sea when the campaign opens: granted, and landed on this day."}
+            ai_send: {$ref: "#/definitions/ymd", description: "When the other side's commander sends this dispatch himself."}
+            bias: {type: object, additionalProperties: {type: integer}}
+            passed: {$ref: "effects.yaml"}
+            passed_later:
+              type: object
+              additionalProperties: false
+              required: [days, effects]
+              properties:
+                days: {type: integer, minimum: 1}
+                effects: {$ref: "effects.yaml"}
+            failed: {$ref: "effects.yaml"}
+            retry_days: {type: integer, minimum: 0, description: "A failed measure may return after this many days; 0 = never."}
+            repeatable: {type: boolean}
+            terms:
+              type: array
+              items:
+                type: object
+                additionalProperties: false
+                required: [text, basis]
+                properties:
+                  text: {type: string}
+                  basis: {$ref: "#/definitions/basis"}
+            note: {type: string, minLength: 1}
+            basis: {$ref: "#/definitions/basis"}

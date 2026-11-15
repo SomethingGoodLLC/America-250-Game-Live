@@ -28,7 +28,20 @@ CLASSES = (
     "continental_militia",
     "continental_rifleman",
     "continental_officer",
+    # The battle pass's classes (2026-11-14).
+    "british_sapper",
+    "british_ensign",
+    "british_musician",
+    "british_surgeon",
+    "british_artilleryman",
+    "continental_sapper",
+    "continental_ensign",
+    "continental_musician",
+    "continental_surgeon",
+    "continental_artilleryman",
 )
+# PA250_PORTRAITS_ONLY=a,b imports only those cards (the others are left as they are).
+ONLY = {n.strip() for n in os.environ.get("PA250_PORTRAITS_ONLY", "").split(",") if n.strip()}
 
 
 def _log(msg: str) -> None:
@@ -60,10 +73,11 @@ def import_texture(src: str, name: str) -> unreal.Texture2D:
 
 
 def main() -> None:
-    for name in CLASSES:
+    names = [n for n in CLASSES if not ONLY or n in ONLY]
+    for name in names:
         tex = import_texture(os.path.join(SRC_DIR, f"{name}.png"), f"T_Class_{name}")
         _log(f"{tex.get_path_name()} {tex.blueprint_get_size_x()}x{tex.blueprint_get_size_y()}")
-    _log(f"done: {len(CLASSES)} textures")
+    _log(f"done: {len(names)} textures")
 
 
 main()

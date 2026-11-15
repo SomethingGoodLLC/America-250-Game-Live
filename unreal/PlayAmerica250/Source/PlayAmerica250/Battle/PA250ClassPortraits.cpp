@@ -16,6 +16,7 @@
 #include "MusketWeapon.h"
 #include "PA250ControlPoint.h"
 #include "PA250FieldGun.h"
+#include "PA250RowBoat.h"
 #include "PA250UnitClasses.h"
 #include "RFCharacter.h"
 #include "TimerManager.h"
@@ -36,7 +37,30 @@ void APA250BattleGameMode::MaybeStartClassPortraits()
 	static const FSubject Subjects[] = {
 		{TEXT("british"), TEXT("line_infantry")}, {TEXT("british"), TEXT("grenadier")}, {TEXT("british"), TEXT("light_infantry")},
 		{TEXT("british"), TEXT("officer")}, {TEXT("continental"), TEXT("line_infantry")}, {TEXT("continental"), TEXT("militia")},
-		{TEXT("continental"), TEXT("rifleman")}, {TEXT("continental"), TEXT("officer")}};
+		{TEXT("continental"), TEXT("rifleman")}, {TEXT("continental"), TEXT("officer")},
+		// The battle pass's classes (2026-11-14).
+		{TEXT("british"), TEXT("sapper")},
+		{TEXT("british"), TEXT("ensign")},
+		{TEXT("british"), TEXT("musician")},
+		{TEXT("british"), TEXT("surgeon")},
+		{TEXT("british"), TEXT("artilleryman")},
+		{TEXT("continental"), TEXT("sapper")},
+		{TEXT("continental"), TEXT("ensign")},
+		{TEXT("continental"), TEXT("musician")},
+		{TEXT("continental"), TEXT("surgeon")},
+		{TEXT("continental"), TEXT("artilleryman")}};
+	// -PA250PortraitClasses=sapper,ensign shoots only those classes (both sides), so the other cards
+	// are not shot again.
+	TArray<FSubject> Wanted;
+	{
+		FString Only;
+		TArray<FString> Names;
+		if (FParse::Value(FCommandLine::Get(), TEXT("PA250PortraitClasses="), Only, /*bShouldStopOnSeparator=*/false)) Only.ParseIntoArray(Names, TEXT(","));
+		for (const FSubject& S : Subjects)
+		{
+			if (Names.Num() == 0 || Names.Contains(S.Class.ToString())) Wanted.Add(S);
+		}
+	}
 
 	// The stage: open ground near the first post. The camera looks the way the sunlight travels, so the
 	// man who faces it is lit from the front.
@@ -72,9 +96,9 @@ void APA250BattleGameMode::MaybeStartClassPortraits()
 
 	const float First = 3.f, Each = 3.f;
 	TSharedRef<TWeakObjectPtr<ARFCharacter>> Model = MakeShared<TWeakObjectPtr<ARFCharacter>>();
-	for (int32 i = 0; i < UE_ARRAY_COUNT(Subjects); ++i)
+	for (int32 i = 0; i < Wanted.Num(); ++i)
 	{
-		const FSubject Subject = Subjects[i];
+		const FSubject Subject = Wanted[i];
 		FTimerHandle Pose, Shot;
 		GetWorldTimerManager().SetTimer(Pose, FTimerDelegate::CreateWeakLambda(this, [this, Model, Subject, Stage, Sun]() {
 			if (ARFCharacter* Old = Model->Get())
@@ -105,8 +129,8 @@ void APA250BattleGameMode::MaybeStartClassPortraits()
 	FTimerHandle Done;
 	GetWorldTimerManager().SetTimer(Done, FTimerDelegate::CreateWeakLambda(this, []() {
 		UE_LOG(LogTemp, Display, TEXT("PA250 portraits done"));
-	}), First + Each * UE_ARRAY_COUNT(Subjects) + 1.f, false);
-	UE_LOG(LogTemp, Display, TEXT("PA250 portraits: %d classes, stage %s"), static_cast<int32>(UE_ARRAY_COUNT(Subjects)), *Stage.ToCompactString());
+	}), First + Each * Wanted.Num() + 1.f, false);
+	UE_LOG(LogTemp, Display, TEXT("PA250 portraits: %d classes, stage %s"), Wanted.Num(), *Stage.ToCompactString());
 }
 
 // -PA250GunStill: the first field gun on the field with one soldier standing by its muzzle, from the
@@ -180,4 +204,68 @@ void APA250BattleGameMode::MaybeStartGunStill()
 		UE_LOG(LogTemp, Display, TEXT("PA250 gun still done"));
 		FPlatformMisc::RequestExit(false);
 	}), 18.f, false);
+}
+
+// -PA250LandingStill: a landing seen from the shore. Run on L_Harbor with -PA250Mode=landing
+// -PA250Attacker=british. Stills (no HUD) to Saved/PA250/landing_boats.png at 12 s (the boats on the
+// way in) and landing_ashore.png three seconds after the first boat is in.
+void APA250BattleGameMode::MaybeStartLandingStill()
+{
+	if (!FParse::Param(FCommandLine::Get(), TEXT("PA250LandingStill")) || !GetWorld())
+	{
+		return;
+	}
+	APlayerController* PC = GetWorld()->GetFirstPlayerController();
+	if (!PC || Boats.Num() == 0)
+	{
+		UE_LOG(LogTemp, Error, TEXT("PA250 landing still: no boats (run with -PA250Mode=landing)"));
+		return;
+	}
+	// The middle of the landing places and the way inland, from the attacker's start and the boats.
+	FVector Sea = FVector::ZeroVector;
+	for (const APA250RowBoat* Boat : Boats) Sea += Boat ? Boat->GetActorLocation() / Boats.Num() : FVector::ZeroVector;
+	const FVector Rear = GetRearPoint(FName(UTF8_TO_TCHAR(Setup.attacker_faction.c_str())), Sea);
+	const FVector Inland = (Rear - Sea).GetSafeNormal2D();
+	const FVector Along(-Inland.Y, Inland.X, 0.f);
+	const FVector Shore = Rear - Inland * 900.f;
+	if (APawn* Me = PC->GetPawn())
+	{
+		Me->SetActorHiddenInGame(true);
+		if (const ARFCharacter* C = Cast<ARFCharacter>(Me); C && C->Musket) C->Musket->SetActorHiddenInGame(true);
+		Me->SetCanBeDamaged(false);
+	}
+	ACameraActor* Cam = GetWorld()->SpawnActor<ACameraActor>(Shore, FRotator::ZeroRotator);
+	if (!Cam) return;
+	Cam->GetCameraComponent()->SetFieldOfView(60.f);
+	Cam->GetCameraComponent()->SetConstraintAspectRatio(false);
+	PC->SetViewTarget(Cam);
+	IFileManager::Get().MakeDirectory(*FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("PA250")), true);
+	auto Shoot = [](const TCHAR* Name) {
+		const FString Path = FPaths::ConvertRelativePathToFull(FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("PA250"), FString::Printf(TEXT("landing_%s.png"), Name)));
+		UE_LOG(LogTemp, Display, TEXT("PA250 landing still: %s -> %s"), Name, *Path);
+		FScreenshotRequest::RequestScreenshot(Path, /*bShowUI=*/false, /*bAddFilenameSuffix=*/false);
+	};
+	// The boats on the way in, from the water's edge to one side of them.
+	FTimerHandle Pose1, Shot1, Poll;
+	GetWorldTimerManager().SetTimer(Pose1, FTimerDelegate::CreateWeakLambda(this, [this, Cam, Shore, Along]() {
+		FVector Mid = FVector::ZeroVector;
+		for (const APA250RowBoat* Boat : Boats) Mid += Boat ? Boat->GetActorLocation() / Boats.Num() : FVector::ZeroVector;
+		const FVector From = Shore + Along * 2600.f + FVector(0.f, 0.f, 260.f);
+		Cam->SetActorLocationAndRotation(From, (Mid + FVector(0.f, 0.f, 80.f) - From).Rotation());
+	}), 10.5f, false);
+	GetWorldTimerManager().SetTimer(Shot1, FTimerDelegate::CreateWeakLambda(this, [Shoot]() { Shoot(TEXT("boats")); }), 12.f, false);
+	// The men ashore: three seconds after the first boat is in, from above the beach.
+	TSharedRef<bool> bDone = MakeShared<bool>(false);
+	GetWorldTimerManager().SetTimer(Poll, FTimerDelegate::CreateWeakLambda(this, [this, Cam, Shore, Inland, Along, Shoot, bDone]() {
+		if (*bDone || FirstBoatInAt < 0.f || GetWorld()->GetTimeSeconds() - StartTime < FirstBoatInAt + 1.5f) return;
+		*bDone = true;
+		const FVector From = Shore + Inland * 1500.f + Along * 1700.f + FVector(0.f, 0.f, 420.f);
+		Cam->SetActorLocationAndRotation(From, (Shore + Inland * 250.f + FVector(0.f, 0.f, 60.f) - From).Rotation());
+		FTimerHandle Shot2, Done;
+		GetWorldTimerManager().SetTimer(Shot2, FTimerDelegate::CreateWeakLambda(this, [Shoot]() { Shoot(TEXT("ashore")); }), 1.5f, false);
+		GetWorldTimerManager().SetTimer(Done, FTimerDelegate::CreateWeakLambda(this, []() {
+			UE_LOG(LogTemp, Display, TEXT("PA250 landing still done"));
+			FPlatformMisc::RequestExit(false);
+		}), 4.f, false);
+	}), 0.5f, true);
 }

@@ -1,0 +1,82 @@
+# Decisions (Play America 250): rare large choices that stop the clock.
+# File: unreal/PA250Sim/data/decisions_boston_1775.json, read by PA250Sim `load_decisions`.
+# Exactly two options. Each option has a cost, a gain and a delayed consequence (the closed effect
+# set of effects.yaml), and may commit a person, who leaves the map for a set time. Triggers are a
+# date plus a closed set of requirements. The situations are marked documented or invented; every
+# number is GAMEPLAY TUNING.
+$schema: "http://json-schema.org/draft-07/schema#"
+$id: "decisions.v1"
+title: DecisionsFile
+type: object
+additionalProperties: false
+required: [decisions]
+properties:
+  note: {type: string}
+  decisions:
+    type: array
+    minItems: 1
+    items:
+      type: object
+      additionalProperties: false
+      required: [id, side, title, painting, from, text, ai_option, options, note, basis]
+      properties:
+        id: {type: string}
+        side: {enum: [british, continental]}
+        title: {type: string}
+        painting: {type: string, description: "Key of the full-screen image (battle_stories.json images)."}
+        from:
+          type: object
+          additionalProperties: false
+          required: [y, m, d]
+          properties:
+            y: {type: integer}
+            m: {type: integer, minimum: 1, maximum: 12}
+            d: {type: integer, minimum: 1, maximum: 31}
+        requires:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [type]
+            properties:
+              type: {enum: [flag, owner_is, fort_at_least, measure_passed, decision_taken, free_person]}
+              flag: {type: string}
+              province: {type: string}
+              faction: {enum: [british, continental]}
+              level: {type: integer}
+              measure: {type: string}
+              decision: {type: string}
+              option: {type: string}
+              role: {enum: [general, delegate, organizer, envoy, agent]}
+        text: {type: string, minLength: 1}
+        ai_option: {type: string, description: "What the side's commander takes when the player is not that side."}
+        options:
+          type: array
+          minItems: 2
+          maxItems: 2
+          items:
+            type: object
+            additionalProperties: false
+            required: [id, label, cost, gain, later]
+            properties:
+              id: {type: string}
+              label: {type: string}
+              commit:
+                type: object
+                additionalProperties: false
+                required: [role, days]
+                properties:
+                  role: {enum: [general, delegate, organizer, envoy, agent]}
+                  days: {type: integer, minimum: 1}
+              cost: {$ref: "effects.yaml"}
+              gain: {$ref: "effects.yaml"}
+              later:
+                type: object
+                additionalProperties: false
+                required: [days, effects]
+                properties:
+                  days: {type: integer, minimum: 1}
+                  text: {type: string}
+                  effects: {$ref: "effects.yaml"}
+        note: {type: string, minLength: 1}
+        basis: {enum: [documented, invented]}

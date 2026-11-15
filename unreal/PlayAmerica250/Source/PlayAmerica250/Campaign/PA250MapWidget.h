@@ -4,6 +4,7 @@
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
 #include "PA250ProvinceMapActor.h"
+#include "UI/PA250CampaignArcPanels.h"
 #include "Styling/SlateBrush.h"
 #include "PA250MapWidget.generated.h"
 
@@ -56,6 +57,24 @@ public:
 	void PressReenlist();
 	void PressNewCampaign();
 	void PressQuitGame();
+	// Campaign pass: the people panel, the floor of Congress (or Whitehall), the decision screen.
+	// The battle story (UI/PA250BattleStory): "To arms!" opens it; it stays while the battle level
+	// loads, offers Continue when the field is ready, and the field then fades in.
+	bool IsStoryUp() const { return bStoryUp; }
+	bool IsStoryReady() const { return bStoryUp && bStoryReady; }
+	/** Leave the story for the field (the Continue button; autoplay and probes call it too). */
+	void ContinueToBattle();
+	void PressPeopleToggle();
+	void PressFloorToggle();
+	bool IsPeopleOpen() const { return bShowPeople; }
+	bool IsFloorOpen() const { return bShowFloor; }
+	/** Issue a campaign order from a panel button; the status line carries the result or the refusal. */
+	void IssueOrder(const FString& OrderJson);
+	/** Halt the selected army (button on the army panel, key H): an order command. */
+	void PressHalt();
+	/** Pure: what the status line says when a halt is ordered. HoursIntoLeg > 0: the army turns about. */
+	static FString HaltMessage(const FString& ArmyName, const FString& TownName, int32 HoursIntoLeg);
+	bool CanHaltSelected() const;
 	void PressSelectArmy(const FString& ArmyId);
 	void PressSelectArmyAtSelection();
 	void PressAboutToggle();
@@ -85,6 +104,9 @@ public:
 	static constexpr int32 MaxForceRows = 6;
 	static constexpr float TownsPanelWidth = 250.f;
 	static constexpr float TreasuryPanelWidth = 460.f;
+	/** The selected army's panel: bottom left, to the right of the town panel. */
+	static constexpr float ArmyPanelLeft = 492.f;  // Slate units: the town panel is 472 wide
+	static constexpr float ArmyPanelWidth = 470.f;
 	/** Towns list (right): one line per town the player holds, with what is under way there. */
 	FText TownRowStatus(const FString& ProvinceId) const;
 	bool IsTownHeld(const FString& ProvinceId) const;
@@ -181,6 +203,31 @@ private:
 	/** Last HudEpoch painted. Slate does not subscribe to the epoch; NativeTick invalidates when it changes. */
 	int32 PaintedHudEpoch = -1;
 	/** The pre-battle and after-battle cards (UI/PA250BattleCards): rebuilt when what they show changes. */
+	TSharedPtr<class SBox> ArmyPanelBox;
+	bool bShowPeople = false;
+	bool bShowFloor = false;
+	TSharedPtr<class SBox> PeopleBox;
+	TSharedPtr<class SBox> FloorBox;
+	TSharedPtr<class SBox> DecisionBox;
+	TSharedPtr<class SBox> StoryBox;
+	bool bStoryUp = false;
+	bool bStoryReady = false;   // the battle level is in memory
+	bool bStoryLeaving = false;
+	double StoryStartSeconds = 0.0;
+	FString StoryLevelPackage;
+	/** Shows the story for the battle just begun and starts loading its level behind it. */
+	void StartBattleStory();
+	FString PeopleKey;
+	FString FloorKey;
+	FString DecisionKey;
+	/** Rebuilds the people panel, the floor and the decision screen when what they show changes. */
+	void RefreshPassPanels();
+	/** The painting behind a decision (a placeholder wash until the picture is supplied). */
+	UPROPERTY(Transient)
+	TObjectPtr<class UTexture2D> DecisionTexture;
+	FSlateBrush DecisionBrush;
+	/** True when a viewport pixel lies on a widget that is on screen (the town panel's own test). */
+	static bool IsViewportPointOver(const TSharedPtr<class SWidget>& Widget, FVector2D ViewportPx);
 	TSharedPtr<class SBox> PreBattleBox;
 	TSharedPtr<class SBox> AfterBattleBox;
 	FString PreBattleKey;
@@ -193,6 +240,10 @@ private:
 	mutable FString TrackerArmy;
 	/** Folded to one line by the player (Hide / Show). Kept for the session, not in the save. */
 	bool bTrackerMinimized = false;
+	/** The mission card: shown once when a mission of the player's ends (after any battle report), until Continue. */
+	bool IsMissionCardShown() const;
+	PA250ArcPanels::FMissionCard MissionCardNow() const;
+	void PressMissionCardContinue();
 	/** The tracker is on screen: a mission or notice to show, no battle pending, no report up, campaign not over. */
 	bool IsTrackerShown() const;
 	TWeakObjectPtr<APA250ProvinceMapActor> MapActor;

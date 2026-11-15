@@ -125,6 +125,42 @@ definitions:
           Field guns this side brings to the battle: the guns its army holds in the campaign
           (Army.guns), as far as it has gun crews to serve them (battle_rules.json guns:
           crew_units_per_gun units of crew_class a gun). A side has guns only if its army holds them.
+      commander:
+        type: object
+        additionalProperties: false
+        required: [id, name, traits, aura_radius_m]
+        description: >-
+          The general who commands this side's army (campaign pass; data/persons_boston_1775.json).
+          Absent: the army is a detachment under its own captains. In the battle he is an
+          officer-class figure near his side's home post whose aura reaches aura_radius_m; if he
+          falls his side takes a morale check and the result says what became of him
+          (BattleResult.commander_events). His traits are also factors[] rows with him as the source.
+        properties:
+          id: {type: string}
+          name: {type: string}
+          traits:
+            type: array
+            items: {enum: [defensive, aggressive, steadfast, adroit, engineer, popular]}
+          aura_radius_m: {type: number, minimum: 0}
+      alarmed:
+        type: boolean
+        description: >-
+          An agent raised the alarm for this (defending) side: every company is under arms when the
+          fight opens, so nobody is still mustering. Absent = false.
+      intel:
+        type: object
+        additionalProperties: false
+        required: [known, men_low, men_high, source]
+        description: >-
+          Written only on the side that is not the player's, and only when the player has not counted
+          it (no scout, no organizer in the town, no informer): the pre-battle card then shows this
+          rough count of men in place of the side's true rows. The battle itself always uses the
+          true numbers.
+        properties:
+          known: {type: boolean}
+          men_low: {type: integer, minimum: 0}
+          men_high: {type: integer, minimum: 0}
+          source: {type: string}
       factors:
         type: array
         description: >-
@@ -137,7 +173,16 @@ definitions:
     required: [label, value, source]
     properties:
       label:
-        enum: [men, field_strength, rounds_per_man, morale, readiness, fortification, reinforcement, militia_muster, guns]
+        enum: [men, field_strength, rounds_per_man, morale, readiness, fortification, reinforcement, militia_muster, guns, commander, alarm,
+               withdraw_early, stand_fast, magazine_saved]
+        description: >-
+          commander (value 1: a general commands, 0: a detachment) and alarm (1) are campaign-pass
+          rows. withdraw_early, stand_fast and magazine_saved are a letter's orders for this fight,
+          with the letter as their source: withdraw_early = percent of the battle clock at which
+          the side quits the field (the ground is then the enemy's, end_reason time_limit);
+          stand_fast = the side fights to the end and never ends the fight by army_broke (the value
+          is the sim resolver's loss percent); magazine_saved = percent of the town's magazine
+          carried off to headquarters if the town falls.
       value: {type: integer}
       source:
         type: string

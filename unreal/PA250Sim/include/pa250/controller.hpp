@@ -33,6 +33,11 @@ public:
     // Campaign: enqueue moves and advance hours
     std::vector<std::string> enqueue_move(const std::string& army_id, const std::string& to_province);
     std::vector<std::string> enqueue_halt(const std::string& army_id);
+    // A campaign order (protocol/schemas/campaign_orders.yaml). Refused orders come back as their
+    // code and nothing is queued. An accepted order is a CampaignOrder command, applied on the next
+    // hour; while the clock is stopped for a pending battle or decision it is applied at this hour
+    // boundary instead (as a battle result is), because no later hour will come until it is.
+    std::vector<std::string> issue_order(const std::string& order_json);
     TickOutput advance_one_hour();
     // Advance up to n hours or until an interrupt; returns last TickOutput.
     TickOutput advance_hours(int n, bool stop_on_interrupt = true);
@@ -55,6 +60,9 @@ public:
     // Probe only: paint a siege so the map can show one. Not a rule — tick_sieges still lifts a
     // siege whose besieging army is gone, and finishes one whose hours run out.
     std::string stamp_siege(const std::string& province_id, const std::string& siege_by, int hours);
+    // Probe only: put a general at the head of an army wherever it stands, so a debug battle can
+    // field one on each side. Not a rule: in play a general is given an army by the form_army order.
+    std::string stamp_general(const std::string& army_id, const std::string& person_id);
 
     // Logistics / staff: purchase | request_assistance | requisition | capacity_investment | knox_support | dismiss
     std::vector<std::string> choose_logistics_action(const std::string& letter_id, const std::string& choice);

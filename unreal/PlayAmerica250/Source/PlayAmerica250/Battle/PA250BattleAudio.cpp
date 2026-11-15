@@ -8,6 +8,8 @@
 #include "Sound/SoundBase.h"
 #include "Sound/SoundWave.h"
 #include "UObject/StrongObjectPtr.h"
+#include "TimerManager.h"
+#include "pa250/sim.hpp"
 
 namespace
 {
@@ -109,6 +111,26 @@ bool FPA250BattleAudio::PlayAt(const UObject* Ctx, const FString& Bank, const FV
 	USoundBase* Sound = Pick(Bank);
 	if (!Sound || !Ctx || !Ctx->GetWorld()) return false;
 	const float Pitch = 1.f + FMath::FRandRange(-PitchJitter, PitchJitter);
+	// Gunfire is seen before it is heard: its sound starts when it has crossed the ground to the
+	// listener (battle_rules.json sound). Everything else is close enough not to matter.
+	FVector Listener;
+	if (Range == EPA250SoundRange::Gunfire && GetListener(Ctx, Listener))
+	{
+		const pa250::BattleRules& R = pa250::battle_rules();
+		const float Delay = PA250Sound::DelaySeconds(FVector::Dist(Listener, Location), R.sound_speed_m_per_second, R.sound_no_delay_within_m);
+		if (Delay > 0.02f)
+		{
+			TWeakObjectPtr<UWorld> World = Ctx->GetWorld();
+			TStrongObjectPtr<USoundBase> Keep(Sound);
+			USoundAttenuation* Falloff = AttenuationFor(Range);
+			FTimerHandle Handle;
+			Ctx->GetWorld()->GetTimerManager().SetTimer(Handle, FTimerDelegate::CreateLambda([World, Keep, Location, Volume, Pitch, Falloff]() {
+				if (UWorld* W = World.Get()) UGameplayStatics::PlaySoundAtLocation(W, Keep.Get(), Location, FRotator::ZeroRotator, Volume, Pitch, 0.f, Falloff);
+			}), Delay, false);
+			Counts().FindOrAdd(TEXT("delayed"))++;
+			return true;
+		}
+	}
 	UGameplayStatics::PlaySoundAtLocation(Ctx, Sound, Location, FRotator::ZeroRotator, Volume, Pitch, 0.f, AttenuationFor(Range));
 	return true;
 }

@@ -12,6 +12,7 @@
 #include "NavigationSystem.h"
 #include "PA250Cover.h"
 #include "PA250Support.h"
+#include "PA250Smoke.h"
 #include "PA250BattleAudio.h"
 #include "GameFramework/PlayerController.h"
 #include "WorldCollision.h"
@@ -844,9 +845,10 @@ bool UPA250VolleyCoordinator::HasLineOfSight(const ARFCharacter* From, const ARF
 	Params.AddIgnoredActor(To);
 	if (From->Musket) Params.AddIgnoredActor(From->Musket);
 	FHitResult Hit;
-	return !From->GetWorld()->LineTraceSingleByChannel(Hit,
-		PA250Cover::EyePoint(From), To->GetActorLocation() + FVector(0.f, 0.f, 40.f),
-		ECC_Visibility, Params);
+	const FVector Eye = PA250Cover::EyePoint(From), Mark = To->GetActorLocation() + FVector(0.f, 0.f, 40.f);
+	if (From->GetWorld()->LineTraceSingleByChannel(Hit, Eye, Mark, ECC_Visibility, Params)) return false;
+	const UPA250SmokeSubsystem* Smoke = From->GetWorld()->GetSubsystem<UPA250SmokeSubsystem>();
+	return !(Smoke && Smoke->BlocksSight(Eye, Mark));
 }
 
 void UPA250VolleyCoordinator::TickSquads(float DeltaSeconds)
@@ -917,6 +919,16 @@ void UPA250VolleyCoordinator::SortFiles(FSquad& Sq, const TArray<ARFCharacter*>&
 	// Front rank = men nearest the enemy, then left to right, so a turning line doesn't cross itself.
 	const FVector Right(-Sq.Facing.Y, Sq.Facing.X, 0.f);
 	TArray<ARFCharacter*> Order = Live;
+	if (Sq.bAbreast)
+	{
+		// One rank at the leader's shoulders: left to right as the men stand, so nobody crosses.
+		Order.Sort([&](const ARFCharacter& A, const ARFCharacter& B) {
+			return FVector::DotProduct(A.GetActorLocation(), Right) < FVector::DotProduct(B.GetActorLocation(), Right);
+		});
+		Sq.FileOrder.Reset();
+		for (ARFCharacter* C : Order) Sq.FileOrder.Add(C);
+		return;
+	}
 	TArray<FVector2D> Offs;
 	const UPA250BotTuning* BT = GameMode.IsValid() ? GameMode->GetBotTuning() : nullptr;
 	FormationOffsets(Order.Num(), BT ? BT->Values.FileSpacingCm : 200.f, BT ? BT->Values.RankDepthCm : 200.f,
@@ -1169,8 +1181,17 @@ void UPA250VolleyCoordinator::TickFormation(FSquad& Sq, const TArray<ARFCharacte
 	}
 
 	// ---- Formation spots ----
+	// A file following its leader stands at his shoulders, half to each side of him, where he can
+	// see it; every other line stands in its ranks about its anchor.
+	const bool bAbreast = bLed && Sq.Order == EPA250SquadOrder::FollowMe && !Sq.bCharging;
+	if (bAbreast != Sq.bAbreast)
+	{
+		Sq.bAbreast = bAbreast;
+		Sq.FileOrder.Reset(); // sorted again for the new places
+	}
 	TArray<FVector2D> Offs;
-	FormationOffsets(Live.Num(), FileCm, T.RankDepthCm, PerRank, Offs);
+	if (bAbreast) PA250Squad::AbreastOffsets(Live.Num(), PA250UnitClasses::Verbs().SquadFollowSpacingM * 100.f, Offs);
+	else FormationOffsets(Live.Num(), FileCm, T.RankDepthCm, PerRank, Offs);
 	if (Sq.FileOrder.Num() != Live.Num()) SortFiles(Sq, Live);
 	auto SpotFor = [&](int32 i) {
 		const FVector Right(-Sq.Facing.Y, Sq.Facing.X, 0.f);
@@ -1221,7 +1242,11 @@ void UPA250VolleyCoordinator::TickFormation(FSquad& Sq, const TArray<ARFCharacte
 			// While he holds his aim the line halts where it is and turns to his aim point.
 			if (!bLedAim && !bHoldGround) Sq.Anchor = FVector(Want.X, Want.Y, Sq.Anchor.Z);
 			if (bLedAim) WantFacing = (Sq.LeaderAimPoint - Sq.Anchor).GetSafeNormal2D();
-			else if (Sq.Order == EPA250SquadOrder::FollowMe) WantFacing = GiverFacing;
+			else if (Sq.Order == EPA250SquadOrder::FollowMe)
+			{
+				// The line turns with him on the move; standing still he may look about without wheeling it.
+				WantFacing = PA250Squad::FollowTurns(Sq.Facing, GiverFacing, Giver->GetVelocity().Size2D() > 60.f, Verbs.SquadFollowTurnDegrees) ? GiverFacing : Sq.Facing;
+			}
 			else if (ARFCharacter* C = Sq.Contact.Get()) WantFacing = (C->GetActorLocation() - Sq.Anchor).GetSafeNormal2D();
 			else WantFacing = Sq.OrderFacing;
 		}
@@ -1520,6 +1545,9 @@ void UPA250VolleyCoordinator::TickFormation(FSquad& Sq, const TArray<ARFCharacte
 			O.bAimAtPoint = bLedAim && LedTarget == nullptr;
 			O.AimPoint = Sq.LeaderAimPoint;
 			O.bHoldFire = bLedVolley && Sq.Stage != EVolleyCall::Fire;
+			// His own file under his order does not dawdle: a man well behind his place runs to it.
+			O.bHurry = bLed && bObey;
+			O.HurryBeyondCm = PA250UnitClasses::Verbs().SquadRunWhenBehindM * 100.f;
 			O.bCharge = Sq.bCharging;
 			O.bInCover = Sq.bHasCover.IsValidIndex(i) && Sq.bHasCover[i];
 		}
@@ -1804,6 +1832,20 @@ const TCHAR* PA250Squad::OrderVoiceKey(EPA250SquadOrder Order)
 	}
 }
 
+const TCHAR* PA250Squad::OrderDrumCall(EPA250SquadOrder Order)
+{
+	switch (Order)
+	{
+	case EPA250SquadOrder::FollowMe: return TEXT("drum_call_follow");
+	case EPA250SquadOrder::FormLine: return TEXT("drum_call_line");
+	case EPA250SquadOrder::Hold: return TEXT("drum_call_hold");
+	case EPA250SquadOrder::TakeCover: return TEXT("drum_call_cover");
+	case EPA250SquadOrder::Charge: return TEXT("drum_call_charge");
+	case EPA250SquadOrder::FallBack: return TEXT("drum_call_retire");
+	default: return TEXT("drum_roll");
+	}
+}
+
 FVector PA250Squad::LedAnchor(EPA250SquadOrder Order, const FVector& LeaderLocation, const FVector& LeaderFacing,
 	const FVector& OrderPoint, const FVector& CurrentAnchor, float FollowBehindCm)
 {
@@ -2083,7 +2125,24 @@ int32 UPA250VolleyCoordinator::GiveOrder(ARFCharacter* Leader, EPA250SquadOrder 
 		if (Relayed > 0)
 		{
 			MoraleTransitions.FindOrAdd(FString::Printf(TEXT("%s.OrderRelayed"), *Leader->FactionId.ToString())) += Relayed;
-			FPA250BattleAudio::PlayAt(GameMode.Get(), TEXT("drum_roll"), Leader->GetActorLocation() + FVector(0.f, 0.f, 100.f), EPA250SoundRange::Voice, 0.8f, 0.03f);
+		}
+		// A musician who hears the order beats it: each order has its own call, so men (and the
+		// player) know it by ear. From where the drummer stands, and it carries as gunfire does.
+		const FVector* Drummer = nullptr;
+		float Nearest = Verbs.MusicianRelayM * 100.f;
+		for (const FVector& M : Musicians)
+		{
+			const float D = FVector::Dist2D(M, Leader->GetActorLocation());
+			if (D <= Nearest)
+			{
+				Nearest = D;
+				Drummer = &M;
+			}
+		}
+		if (Drummer)
+		{
+			MoraleTransitions.FindOrAdd(FString::Printf(TEXT("%s.DrumCall"), *Leader->FactionId.ToString()))++;
+			FPA250BattleAudio::PlayAtOr(GameMode.Get(), PA250Squad::OrderDrumCall(Order), TEXT("drum_roll"), *Drummer + FVector(0.f, 0.f, 100.f), EPA250SoundRange::Gunfire, 0.9f, 0.02f);
 		}
 	}
 	if (Took > 0)
@@ -2144,22 +2203,38 @@ bool UPA250VolleyCoordinator::LeaderFired(ARFCharacter* Leader)
 	return true;
 }
 
-bool UPA250VolleyCoordinator::GetFileStatus(const ARFCharacter* Leader, int32& OutMen, int32& OutLoaded, int32& OutPresented, EPA250SquadOrder& OutOrder) const
+bool UPA250VolleyCoordinator::GetFileStatus(const ARFCharacter* Leader, int32& OutMen, int32& OutLoaded, int32& OutPresented, EPA250SquadOrder& OutOrder, int32* OutWithLeader) const
 {
 	OutMen = OutLoaded = OutPresented = 0;
 	OutOrder = EPA250SquadOrder::None;
+	if (OutWithLeader) *OutWithLeader = 0;
 	const FSquad* Sq = FindLedSquad(Leader);
 	if (!Sq) return false;
+	const float WithCm = PA250UnitClasses::Verbs().SquadWithYouM * 100.f;
 	for (const TWeakObjectPtr<ARFCharacter>& W : Sq->Members)
 	{
 		const ARFCharacter* C = W.Get();
 		if (!C || C->IsDead()) continue;
 		++OutMen;
+		if (OutWithLeader && Leader && FVector::Dist2D(C->GetActorLocation(), Leader->GetActorLocation()) <= WithCm) ++*OutWithLeader;
 		OutLoaded += (C->Musket && C->Musket->CanFire()) ? 1 : 0;
 	}
 	OutPresented = Sq->DebugPresented;
 	OutOrder = Sq->Order;
 	return true;
+}
+
+TArray<ARFCharacter*> UPA250VolleyCoordinator::GetFileMembers(const ARFCharacter* Leader) const
+{
+	TArray<ARFCharacter*> Out;
+	if (const FSquad* Sq = FindLedSquad(Leader))
+	{
+		for (const TWeakObjectPtr<ARFCharacter>& W : Sq->Members)
+		{
+			if (ARFCharacter* C = W.Get(); C && !C->IsDead()) Out.Add(C);
+		}
+	}
+	return Out;
 }
 
 ARFCharacter* UPA250VolleyCoordinator::PickSuccessor(const ARFCharacter* FallenLeader) const

@@ -10,6 +10,8 @@
 #include "PA250ControlPoint.h"
 #include "PA250FieldWork.h"
 #include "PA250Support.h"
+#include "pa250/sim.hpp"
+#include "PA250Smoke.h"
 #include "PA250Cover.h"
 #include "PA250FieldGun.h"
 #include "PA250UnitClasses.h"
@@ -122,7 +124,10 @@ bool APA250BotController::HasLineOfSight(const ARFCharacter* Me, const ARFCharac
 	}
 	const FVector From = PA250Cover::EyePoint(Me); // over his cover, ducked or not
 	const FVector To = Enemy->GetActorLocation() + FVector(0.f, 0.f, 40.f);
-	return !GetWorld()->LineTraceSingleByChannel(Hit, From, To, ECC_Visibility, Params);
+	if (GetWorld()->LineTraceSingleByChannel(Hit, From, To, ECC_Visibility, Params)) return false;
+	// Powder smoke between them hides him (battle_rules.json smoke).
+	const UPA250SmokeSubsystem* Smoke = GetWorld()->GetSubsystem<UPA250SmokeSubsystem>();
+	return !(Smoke && Smoke->BlocksSight(From, To));
 }
 
 void APA250BotController::MoveToward(const ARFCharacter* Me, const FVector& Dest, float Acceptance)
@@ -247,8 +252,14 @@ void APA250BotController::MeleeAttack(ARFCharacter* Me, ARFCharacter* Target, fl
 	V.bResting = MeleeRest > 0.f;
 	V.bChargeReady = Melee->GetChargeCooldownRemaining() <= 0.f;
 	V.bFacing = bFacing;
+	V.ShoveReachCm = pa250::battle_rules().duel_shove_range_cm;
+	V.bShoveReady = Melee->GetShoveCooldownRemaining() <= 0.f;
+	V.bLastWasButt = bLastMoveWasButt;
 	switch (PA250ChooseMeleeMove(V))
 	{
+	case EPA250BotMelee::Shove:
+		if (Melee->DoShove()) bLastMoveWasButt = false;
+		break;
 	case EPA250BotMelee::Thrust:
 		if (Melee->DoThrust()) bLastMoveWasButt = false;
 		break;
@@ -395,6 +406,7 @@ void APA250BotController::Tick(float DeltaSeconds)
 	if (TickSapper(Me, Enemy, Dist, T)) return;
 	LastSapperWork = -1.f;
 	if (TickGunner(Me, Enemy, Dist, T)) return;
+	if (TickGeneral(Me, Enemy, Dist, T)) return;
 	if (TickSurgeon(Me, Enemy, Dist, T)) return;
 	LastSurgeonWork = -1.f;
 	if (TickFallenColours(Me, Enemy, Dist, T)) return;
@@ -449,7 +461,8 @@ void APA250BotController::Tick(float DeltaSeconds)
 				return;
 			}
 		}
-		MoveComp->MaxWalkSpeed = BaseWalkSpeed;
+		// Under his leader's order a man well behind his place runs to it; otherwise the line's own pace.
+		MoveComp->MaxWalkSpeed = (Form.bHurry && FVector::Dist2D(Me->GetActorLocation(), Form.Target) > Form.HurryBeyondCm) ? Me->SprintSpeed : BaseWalkSpeed;
 		if (Form.bMayCharge && TryBayonet(Me, Enemy, Dist, T)) return;
 		const float ArriveCm = Form.ArriveCm > 0.f ? Form.ArriveCm : T.FormationArriveCm;
 		const bool bAtSpot = FVector::Dist2D(Me->GetActorLocation(), Form.Target) <= ArriveCm;
@@ -639,6 +652,29 @@ bool APA250BotController::TickSapper(ARFCharacter* Me, ARFCharacter* Enemy, floa
 	const float Laboured = LastSapperWork >= 0.f ? FMath::Min(Now - LastSapperWork, 1.f) : 0.f;
 	LastSapperWork = Now;
 	GM->LabourOnWork(Work, Laboured, Me);
+	return true;
+}
+
+bool APA250BotController::TickGeneral(ARFCharacter* Me, ARFCharacter* Enemy, float Dist, const FPA250BotTuningValues& T)
+{
+	APA250BattleGameMode* GM = GetWorld() ? GetWorld()->GetAuthGameMode<APA250BattleGameMode>() : nullptr;
+	FVector Station;
+	float RadiusCm = 0.f;
+	if (!GM || !GM->GeneralStation(Me, Station, RadiusCm)) return false;
+	const float Away = FVector::Dist2D(Me->GetActorLocation(), Station);
+	// A bayonet in his face is his own affair, as long as it has not drawn him off his ground.
+	if (Enemy && Dist < T.ChargeRangeCm * 0.5f && Away <= RadiusCm) return false;
+	Me->SetDucking(false);
+	if (Away > RadiusCm * 0.5f)
+	{
+		State = EBotState::Advance;
+		ClearFocus(EAIFocusPriority::Gameplay);
+		MoveToward(Me, Station, 100.f);
+		return true;
+	}
+	StopMovement();
+	if (Enemy) SetFocalPoint(Enemy->GetActorLocation());
+	State = EBotState::Defend;
 	return true;
 }
 

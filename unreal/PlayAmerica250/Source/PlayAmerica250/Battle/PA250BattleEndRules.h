@@ -36,9 +36,12 @@ inline bool PostsAreSwept(int32 Owned, int32 Total, bool bEnemyEverHeldAPost, fl
 }
 
 /** In plain words, for the banner and the after-battle card. */
-inline const TCHAR* EndReasonWords(const FString& Reason)
+inline const TCHAR* EndReasonWords(const FString& Reason, FName Mode = NAME_None)
 {
 	if (Reason == TEXT("tickets_exhausted")) return TEXT("the last men were down");
+	// An assault's clock is the defender's: he wins it by holding, whatever the count of men.
+	if (Reason == TEXT("time_limit") && Mode == TEXT("assault")) return TEXT("the works were held until the attack was spent");
+	if (Reason == TEXT("posts_swept") && Mode == TEXT("assault")) return TEXT("every post was carried");
 	if (Reason == TEXT("time_limit")) return TEXT("the day ended with more men standing");
 	if (Reason == TEXT("force_preserved")) return TEXT("the column kept more of its force");
 	if (Reason == TEXT("routed")) return TEXT("the last handful quit the field");

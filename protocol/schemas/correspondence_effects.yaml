@@ -1,0 +1,75 @@
+# What a letter's choice does (Play America 250): the `effects` object of a choice in
+# unreal/PA250Sim/data/opening_war_correspondence.json, and the `commander_letter` block.
+# The letters' writing lives in the catalog; this is only what a choice costs and gains. A CLOSED
+# set: gold, Support, the envoy's attitude, stores (now, or later with delivery_hours), army morale
+# and readiness, desk time, favors, and one battle factor at a named town for a set number of days
+# (shown on the pre-battle card with the letter as its source). Every number is GAMEPLAY TUNING.
+# Every choice except "set aside" must cost or gain something: the sim case
+# `letters_have_consequences` walks every letter and fails on a choice that changes nothing.
+$schema: "http://json-schema.org/draft-07/schema#"
+$id: "correspondence_effects.v1"
+title: CorrespondenceEffects
+definitions:
+  effects:
+    type: object
+    additionalProperties: false
+    properties:
+      gold: {type: integer, description: "Negative: a cost; the choice is refused if the treasury is short."}
+      local_support: {type: integer}
+      british_attitude: {type: integer}
+      provisions: {type: integer, description: "To the player's depot; with delivery_hours it arrives later."}
+      powder: {type: integer}
+      delivery_hours: {type: integer, minimum: 0}
+      army_morale: {type: integer}
+      army_readiness: {type: integer}
+      clerk_load: {type: integer, minimum: 0}
+      favors: {type: integer, description: "Favors owed to the player in his Congress (never below 0)."}
+      factor:
+        type: object
+        additionalProperties: false
+        required: [province, label, value, days]
+        properties:
+          province: {type: string}
+          label: {enum: [morale, readiness, fortification, reinforcement]}
+          value: {type: integer}
+          days: {type: integer, minimum: 1}
+  choice:
+    type: object
+    additionalProperties: false
+    required: [id, label, effects_summary]
+    properties:
+      id: {type: string}
+      label: {type: string, minLength: 1}
+      effects_summary: {type: string, minLength: 1, description: "Printed on the button: what the choice costs and gains."}
+      effects: {$ref: "#/definitions/effects"}
+      hardcoded: {type: string, description: "What the sim itself does for this choice besides `effects` (personnel held, a donor reserve, a purchase), in words."}
+  commander_letter:
+    type: object
+    additionalProperties: false
+    required: [province, choices]
+    properties:
+      note: {type: string}
+      province: {type: string, description: "The town its factors stand at until the next battle there."}
+      choices:
+        type: array
+        minItems: 3
+        maxItems: 3
+        items:
+          type: object
+          additionalProperties: false
+          required: [id, aliases, label, effects_summary, effects, factors]
+          properties:
+            id: {enum: [preserve_force, contest_crossing, escalate]}
+            aliases: {type: array, items: {type: string}}
+            label: {type: string, minLength: 1}
+            effects_summary: {type: string, minLength: 1}
+            effects: {$ref: "#/definitions/effects"}
+            factors:
+              type: array
+              items:
+                type: object
+                additionalProperties: false
+                required: [label, value]
+                properties:
+                  label: {enum: [morale, readiness, withdraw_early, stand_fast, magazine_saved]}
+                  value: {type: integer}

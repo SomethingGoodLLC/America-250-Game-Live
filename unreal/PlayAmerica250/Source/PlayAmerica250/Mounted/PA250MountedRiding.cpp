@@ -255,13 +255,48 @@ void ARFCharacter::OnHorseKilled()
     ThrowRider(Velocity);
 }
 
+bool ARFCharacter::KnockDown(const FVector& Push)
+{
+    if (bIsDead || bThrownFromHorse || bEmbarked || MountedVisual || !GetMesh()) return false;
+    // His feet go from under him the way the shot went: legs carried a little, shoulders more.
+    const FVector Dir = Push.GetSafeNormal2D();
+    const float Speed = Push.Size2D();
+    LooseBody(Dir * Speed * 0.35f, Dir * Speed, FVector(0.f, 0.f, 110.f), 0.f);
+    UE_LOG(LogTemp, Verbose, TEXT("PA250 knockdown: %s thrown at %.0f cm/s"), *GetName(), Speed);
+    return true;
+}
+
 void ARFCharacter::ThrowRider(const FVector& HorseVelocity)
 {
-    USkeletalMeshComponent* MeshComp = GetMesh();
-    if (!MeshComp) return;
+    if (!GetMesh()) return;
     const float Speed = HorseVelocity.Size2D();
     const FVector Fwd = GetActorForwardVector();
     const FVector Right = GetActorRightVector();
+    // At a walk he slides off the high side (the horse falls on its left); at speed he keeps the
+    // horse's momentum, goes over its neck and tumbles head first.
+    const bool bFast = Speed > APA250MountedSoldier::GaitClipSpeed(EPA250Gait::Trot) * 0.8f;
+    // The horse stops under him: his legs are checked with it while his shoulders and head carry on.
+    // Each body part is launched by its height above the pelvis, and that difference is what pitches
+    // him over the neck (at speed) or topples him off the high side (at a walk; the horse falls left).
+    const FVector Carry = FVector(HorseVelocity.X, HorseVelocity.Y, 0.f) * (bFast ? ThrowLegCarry : 0.2f);
+    const FVector Topple = bFast ? Fwd * (Speed * ThrowUpperCarry + 150.f) : Right * 230.f;
+    const FVector Lift(0.f, 0.f, bFast ? 180.f + Speed * 0.12f : 90.f);
+    // He starts in the saddle: the body is lifted to seat height so it falls from there.
+    LooseBody(Carry, Topple, Lift, 70.f);
+    UE_LOG(LogTemp, Display, TEXT("PA250 riding: thrown at %.0f cm/s (%s), legs %s, head %s"), Speed,
+           bFast ? TEXT("over the neck") : TEXT("slid off"), *(Carry + Lift).ToCompactString(), *(Carry + Topple + Lift).ToCompactString());
+
+    if (Speed > APA250MountedSoldier::GaitClipSpeed(EPA250Gait::Trot))
+    {
+        UGameplayStatics::ApplyDamage(this, FallDamagePerSpeed * (Speed - APA250MountedSoldier::GaitClipSpeed(EPA250Gait::Trot)),
+                                      GetController(), this, nullptr);
+    }
+}
+
+void ARFCharacter::LooseBody(const FVector& Carry, const FVector& Topple, const FVector& Lift, float RaiseCm)
+{
+    USkeletalMeshComponent* MeshComp = GetMesh();
+    if (!MeshComp) return;
     bThrownFromHorse = true;
     ThrownTime = 0.f;
     ThrowRecoverAlpha = -1.f;
@@ -270,12 +305,12 @@ void ARFCharacter::ThrowRider(const FVector& HorseVelocity)
     SavedMeshProfile = MeshComp->GetCollisionProfileName();
     SavedMeshRelative = MeshComp->GetRelativeTransform();
 
-    // He starts in the saddle: lift the body to seat height so it falls from there (same order as
-    // OnDeath: the capsule goes first, or the ragdoll collides with it).
+    // Same order as OnDeath: the capsule goes first, or the ragdoll collides with it. A rider is
+    // lifted to seat height so he falls from there; a man on foot goes down where he stands.
     GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
     GetCharacterMovement()->StopMovementImmediately();
     GetCharacterMovement()->DisableMovement();
-    SetActorLocation(GetActorLocation() + FVector(0.f, 0.f, 70.f), false, nullptr, ETeleportType::TeleportPhysics);
+    if (RaiseCm > 0.f) SetActorLocation(GetActorLocation() + FVector(0.f, 0.f, RaiseCm), false, nullptr, ETeleportType::TeleportPhysics);
     // Loose from the capsule while he flies: the capsule follows the pelvis (for the camera), and an
     // attached body would be dragged along with it.
     MeshComp->DetachFromComponent(FDetachmentTransformRules::KeepWorldTransform);
@@ -287,15 +322,6 @@ void ARFCharacter::ThrowRider(const FVector& HorseVelocity)
     MeshComp->WakeAllRigidBodies();
     MeshComp->SetEnableGravity(true);
 
-    // At a walk he slides off the high side (the horse falls on its left); at speed he keeps the
-    // horse's momentum, goes over its neck and tumbles head first.
-    const bool bFast = Speed > APA250MountedSoldier::GaitClipSpeed(EPA250Gait::Trot) * 0.8f;
-    // The horse stops under him: his legs are checked with it while his shoulders and head carry on.
-    // Each body part is launched by its height above the pelvis, and that difference is what pitches
-    // him over the neck (at speed) or topples him off the high side (at a walk; the horse falls left).
-    const FVector Carry = FVector(HorseVelocity.X, HorseVelocity.Y, 0.f) * (bFast ? ThrowLegCarry : 0.2f);
-    const FVector Topple = bFast ? Fwd * (Speed * ThrowUpperCarry + 150.f) : Right * 230.f;
-    const FVector Lift(0.f, 0.f, bFast ? 180.f + Speed * 0.12f : 90.f);
     const float PelvisZ = MeshComp->GetSocketLocation(TEXT("pelvis")).Z;
     SavedBodyDamping = -1.f;
     for (FBodyInstance* Body : MeshComp->Bodies)
@@ -308,14 +334,6 @@ void ARFCharacter::ThrowRider(const FVector& HorseVelocity)
         // Grass and a tumbling body: he comes to rest a few metres on, not skating across the field.
         Body->LinearDamping = ThrowLinearDamping;
         Body->UpdateDampingProperties();
-    }
-    UE_LOG(LogTemp, Display, TEXT("PA250 riding: thrown at %.0f cm/s (%s), legs %s, head %s"), Speed,
-           bFast ? TEXT("over the neck") : TEXT("slid off"), *(Carry + Lift).ToCompactString(), *(Carry + Topple + Lift).ToCompactString());
-
-    if (Speed > APA250MountedSoldier::GaitClipSpeed(EPA250Gait::Trot))
-    {
-        UGameplayStatics::ApplyDamage(this, FallDamagePerSpeed * (Speed - APA250MountedSoldier::GaitClipSpeed(EPA250Gait::Trot)),
-                                      GetController(), this, nullptr);
     }
 }
 

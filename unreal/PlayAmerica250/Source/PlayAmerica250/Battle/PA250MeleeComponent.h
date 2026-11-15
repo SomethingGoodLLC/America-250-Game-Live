@@ -59,6 +59,18 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Melee")
 	bool DoButtStroke();
 
+	/** B: the shove (battle_rules.json duel). The musket across the body driven into the man in front:
+	 *  no harm, but he is driven back, planted, and for a moment can neither block nor parry. */
+	UFUNCTION(BlueprintCallable, Category = "Melee")
+	bool DoShove();
+	/** Victim side of a shove. */
+	void ReceiveShove(const FVector& WorldPushDir, float PushCm, float StaggerSeconds, float OpenSeconds);
+	/** Shoved a moment ago: his guard is open (he can neither block nor parry). */
+	bool IsGuardOpen() const { return GuardOpenTimer > 0.f; }
+	float GetShoveCooldownRemaining() const { return ShoveCooldown; }
+	/** Pure: launch speed (cm/s) that carries a man about PushCm along the ground before he stops. */
+	static float ShoveLaunchSpeed(float PushCm) { return FMath::Sqrt(FMath::Max(0.f, PushCm)) * 45.f; }
+
 	/** G (or Shift+E): dash ~6 m with the bayonet levelled, snapping toward an enemy in front; the first enemy met takes 70. */
 	UFUNCTION(BlueprintCallable, Category = "Melee")
 	bool DoCharge();
@@ -180,6 +192,8 @@ private:
 
 	float BusyTimer = 0.f;
 	float ChargeCooldown = 0.f;
+	float ShoveCooldown = 0.f;
+	float GuardOpenTimer = 0.f;
 	float PendingThrustTimer = -1.f;
 	float ChargeTimer = 0.f;
 	uint16 ChargeRootMotionId = 0;

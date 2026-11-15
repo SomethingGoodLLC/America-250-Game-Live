@@ -58,6 +58,10 @@ FString UPA250Subsystem::MissionsPath()
 	return FPaths::ConvertRelativePathToFull(
 		FPaths::Combine(FPaths::ProjectDir(), TEXT("../PA250Sim/data/missions_boston_1775.json")));
 }
+FString UPA250Subsystem::SimDataPath(const TCHAR* FileName)
+{
+	return FPaths::ConvertRelativePathToFull(FPaths::Combine(FPaths::ProjectDir(), TEXT("../PA250Sim/data"), FileName));
+}
 FString UPA250Subsystem::BattleRulesPath()
 {
 	return FPaths::ConvertRelativePathToFull(
@@ -91,10 +95,37 @@ void UPA250Subsystem::SetCampaignActive(bool bActive)
 	}
 }
 
+bool UPA250Subsystem::HasUnseenMissionResult() const
+{
+	// Scripted runs have nobody to read a card.
+	static const bool bScripted = FCString::Strifind(FCommandLine::Get(), TEXT("PA250Autoplay")) || FCString::Strifind(FCommandLine::Get(), TEXT("PA250Selftest"));
+	return !bScripted && Controller.has_campaign() && MissionResultsSeen < static_cast<int32>(Controller.state().progress.mission_results.size());
+}
+
+const pa250::MissionResult* UPA250Subsystem::PeekMissionResult() const
+{
+	if (!HasUnseenMissionResult()) return nullptr;
+	return &Controller.state().progress.mission_results[FMath::Max(0, MissionResultsSeen)];
+}
+
+void UPA250Subsystem::AcknowledgeMissionResult()
+{
+	if (!HasUnseenMissionResult()) return;
+	++MissionResultsSeen;
+	if (!HasUnseenMissionResult() && bPausedByMission)
+	{
+		// The clock was running when the mission ended: it runs on.
+		bPausedByMission = false;
+		if (!Controller.battle_pending() && Controller.state().pending_event_id.empty()) bPaused = false;
+	}
+	BumpHudEpoch();
+}
+
 void UPA250Subsystem::SetPaused(bool bInPaused)
 {
 	bPaused = bInPaused;
 	bPausedByLetter = false;  // the player's own pause or resume always wins
+	bPausedByMission = false;
 	if (bPaused)
 	{
 		HourAccumulator = 0.f;
@@ -135,10 +166,19 @@ void UPA250Subsystem::Tick(float DeltaTime)
 		BumpHudEpoch();
 		MaybeAutosave(Before, Out.state);
 		NoteDispatches(Before, Out.state);
+		// A mission of his has ended: the clock waits while he reads what it paid or cost.
+		if (HasUnseenMissionResult() && Out.interrupts.empty())
+		{
+			bPaused = true;
+			bPausedByMission = true;
+			HourAccumulator = 0.f;
+			break;
+		}
 		if (!Out.interrupts.empty())
 		{
 			// The sim interrupts only for contact and for a letter that needs an answer now.
 			bPaused = true;
+			bPausedByDecision = Out.interrupts.end() != std::find(Out.interrupts.begin(), Out.interrupts.end(), pa250::Interrupt::Decision);
 			bPausedByLetter = !Controller.battle_pending() &&
 							  Out.interrupts.end() != std::find(Out.interrupts.begin(), Out.interrupts.end(),
 																pa250::Interrupt::EventPopup);
@@ -395,6 +435,29 @@ void UPA250Subsystem::LoadSimDataFiles()
 	}
 	UE_LOG(LogTemp, Display, TEXT("PA250 sim data: campaign rules %s, %d missions"), pa250::campaign_rules_loaded() ? TEXT("loaded") : TEXT("MISSING"),
 		static_cast<int32>(pa250::mission_defs().size()));
+	// The campaign pass (people, lobbying, decisions): each part runs only with its file loaded, so a
+	// missing or refused file is an error too.
+	auto LoadChecked = [](const TCHAR* What, TFunction<std::vector<std::string>()> Fn) {
+		try
+		{
+			for (const std::string& E : Fn())
+			{
+				UE_LOG(LogTemp, Error, TEXT("PA250 sim data: %s refused: %s"), What, *ToFStr(E));
+			}
+		}
+		catch (...)
+		{
+			UE_LOG(LogTemp, Error, TEXT("PA250 sim data: %s not loaded"), What);
+		}
+	};
+	LoadChecked(TEXT("persons"), []() { return pa250::load_persons(pa250::read_text_file(ToStd(SimDataPath(TEXT("persons_boston_1775.json"))))); });
+	LoadChecked(TEXT("bodies and measures"), []() {
+		return pa250::load_politics(pa250::read_text_file(ToStd(SimDataPath(TEXT("bodies_boston_1775.json")))),
+									pa250::read_text_file(ToStd(SimDataPath(TEXT("measures_boston_1775.json")))));
+	});
+	LoadChecked(TEXT("decisions"), []() { return pa250::load_decisions(pa250::read_text_file(ToStd(SimDataPath(TEXT("decisions_boston_1775.json"))))); });
+	UE_LOG(LogTemp, Display, TEXT("PA250 sim data: persons %s, politics %s, decisions %s"), pa250::persons_loaded() ? TEXT("loaded") : TEXT("MISSING"),
+		pa250::politics_loaded() ? TEXT("loaded") : TEXT("MISSING"), pa250::decisions_loaded() ? TEXT("loaded") : TEXT("MISSING"));
 }
 
 bool UPA250Subsystem::NewCampaign(FString& OutError)
@@ -407,6 +470,8 @@ bool UPA250Subsystem::NewCampaign(FString& OutError)
 		}
 		LoadSimDataFiles();
 		Controller.new_campaign(pa250::read_text_file(ToStd(ScenarioPath())));
+		MissionResultsSeen = 0;
+		bPausedByMission = false;
 		bPaused = true;
 		HourAccumulator = 0.f;
 		return true;
@@ -433,6 +498,53 @@ bool UPA250Subsystem::QueueMove(const FString& ArmyId, const FString& ToProvince
 		return false;
 	}
 	return true;
+}
+
+bool UPA250Subsystem::IssueOrderJson(const FString& OrderJson, FString& OutError)
+{
+	const bool bWasDecision = IsDecisionPending();
+	const auto Errs = Controller.issue_order(ToStd(OrderJson));
+	if (!Errs.empty())
+	{
+		OutError = ToFStr(Errs.front());
+		return false;
+	}
+	BumpHudEpoch();
+	if (bWasDecision && !IsDecisionPending() && bPausedByDecision)
+	{
+		// The decision stopped a running clock: answered, it runs again.
+		bPausedByDecision = false;
+		bPaused = false;
+		HourAccumulator = 0.f;
+	}
+	return true;
+}
+
+bool UPA250Subsystem::HaltArmy(const FString& ArmyId, FString& OutError)
+{
+	const auto Errs = Controller.enqueue_halt(ToStd(ArmyId));
+	if (!Errs.empty())
+	{
+		OutError = ToFStr(Errs.front());
+		return false;
+	}
+	BumpHudEpoch();
+	return true;
+}
+
+bool UPA250Subsystem::IsArmyOnTheMarch(const FString& ArmyId) const
+{
+	if (!Controller.has_campaign())
+	{
+		return false;
+	}
+	const pa250::CampaignState& St = Controller.state();
+	const auto It = St.armies.find(ToStd(ArmyId));
+	if (It == St.armies.end())
+	{
+		return false;
+	}
+	return !It->second.path.empty() || pa250::march_plan(St, It->first).ok;
 }
 
 #define PA250_FORWARD(Call)                    \
@@ -471,6 +583,38 @@ bool UPA250Subsystem::PrepareDebugBattle(FString& OutError)
 		return false;
 	}
 	Controller.advance_hours(72, true);
+	// Debug only: -PA250Generals=continental:artemas_ward,british:francis_smith puts a general at the
+	// head of that side's army in the pending battle; -PA250UseAgent=paul_revere spends that agent
+	// through the real order (so it is refused exactly as the game would refuse it).
+	if (Controller.battle_pending())
+	{
+		FString Generals;
+		if (FParse::Value(FCommandLine::Get(), TEXT("PA250Generals="), Generals, false))
+		{
+			TArray<FString> Pairs;
+			Generals.ParseIntoArray(Pairs, TEXT(","));
+			for (const FString& Pair : Pairs)
+			{
+				FString Side, Person;
+				if (!Pair.Split(TEXT(":"), &Side, &Person)) continue;
+				const pa250::PendingBattle& Pb = Controller.state().pending_battle;
+				for (const std::string& Aid : {Pb.attacker_army, Pb.defender_army})
+				{
+					const auto It = Controller.state().armies.find(Aid);
+					if (It == Controller.state().armies.end() || ToFStr(It->second.faction) != Side) continue;
+					const std::string Why = Controller.stamp_general(Aid, ToStd(Person));
+					UE_LOG(LogTemp, Display, TEXT("PA250 debug battle: general %s for %s: %s"), *Person, *ToFStr(Aid), Why.empty() ? TEXT("set") : *ToFStr(Why));
+				}
+			}
+		}
+		FString Agent;
+		if (FParse::Value(FCommandLine::Get(), TEXT("PA250UseAgent="), Agent) && !Agent.IsEmpty())
+		{
+			FString Why;
+			const bool bSpent = IssueOrderJson(FString::Printf(TEXT("{\"order\":\"use_agent\",\"person\":\"%s\"}"), *Agent), Why);
+			UE_LOG(LogTemp, Display, TEXT("PA250 debug battle: agent %s %s%s"), *Agent, bSpent ? TEXT("spent") : TEXT("refused: "), *Why);
+		}
+	}
 	return BeginBattle(OutError);
 }
 
@@ -1048,6 +1192,9 @@ bool UPA250Subsystem::LoadCampaign(FString& OutError)
 		OutError = ToFStr(Err);
 		return false;
 	}
+	// Missions that ended before the save were read then: no cards for them again.
+	MissionResultsSeen = static_cast<int32>(Controller.state().progress.mission_results.size());
+	bPausedByMission = false;
 	BumpHudEpoch();
 	return true;
 }

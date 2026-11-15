@@ -321,6 +321,10 @@ bool PA250UnitClasses::LoadFromFile(const FString& Path, TArray<FString>* OutErr
 		Verbs.SquadFileMin = FMath::Max(1, FMath::RoundToInt(FileMin));
 		Verbs.SquadFileMax = FMath::Max(Verbs.SquadFileMin, FMath::RoundToInt(FileMax));
 		Get(TEXT("squad"), TEXT("follow_behind_m"), Verbs.SquadFollowBehindM);
+		Get(TEXT("squad"), TEXT("follow_spacing_m"), Verbs.SquadFollowSpacingM);
+		Get(TEXT("squad"), TEXT("follow_turn_degrees"), Verbs.SquadFollowTurnDegrees);
+		Get(TEXT("squad"), TEXT("run_when_behind_m"), Verbs.SquadRunWhenBehindM);
+		Get(TEXT("squad"), TEXT("with_you_m"), Verbs.SquadWithYouM);
 		Get(TEXT("squad"), TEXT("line_ahead_m"), Verbs.SquadLineAheadM);
 		Get(TEXT("squad"), TEXT("order_seconds"), Verbs.SquadOrderSeconds);
 		Get(TEXT("squad"), TEXT("aim_snap_m"), Verbs.SquadAimSnapM);

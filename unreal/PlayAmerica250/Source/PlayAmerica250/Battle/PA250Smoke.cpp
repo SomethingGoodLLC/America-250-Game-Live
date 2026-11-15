@@ -1,4 +1,6 @@
 #include "PA250Smoke.h"
+#include "Misc/CommandLine.h"
+#include "pa250/sim.hpp"
 #include "Camera/PlayerCameraManager.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
@@ -40,8 +42,9 @@ FVector UPA250SmokeSubsystem::Wind()
 
 bool UPA250SmokeSubsystem::ShouldCreateSubsystem(UObject* Outer) const
 {
-	// Nothing to see without a renderer (commandlets, -nullrhi autoplay).
-	return FApp::CanEverRender() && Super::ShouldCreateSubsystem(Outer);
+	// With or without a renderer: the smoke hides men from the bots, so a headless battle needs it
+	// too. Only the drawing is skipped there (Tick, Flash).
+	return Super::ShouldCreateSubsystem(Outer);
 }
 
 bool UPA250SmokeSubsystem::DoesSupportWorldType(const EWorldType::Type WorldType) const
@@ -73,6 +76,62 @@ void UPA250SmokeSubsystem::AddShot(const FVector& Muzzle, const FVector& Directi
 	}
 	bForceRebuild = true;
 	Flash(Muzzle + Dir * 40.f);
+}
+
+void UPA250SmokeSubsystem::AddDirtBurst(const FVector& Where, const FVector& Normal, float Scale)
+{
+	const FVector N = Normal.IsNearlyZero() ? FVector::UpVector : Normal.GetSafeNormal();
+	const float K = FMath::Clamp(Scale, 1.f, 8.f);
+	const int32 Count = FMath::Clamp(FMath::RoundToInt(2.f * K), 2, 12);
+	for (int32 i = 0; i < Count; ++i)
+	{
+		FPA250SmokePuff& P = NewPuff();
+		P.bPowder = false;
+		const bool bSpout = i < Count / 2; // half thrown high and falling back, half a cloud that hangs
+		P.Pos = Where + N * 10.f + Rng.GetUnitVector() * 30.f * K;
+		P.Vel = N * (bSpout ? Rng.FRandRange(380.f, 620.f) : Rng.FRandRange(120.f, 220.f)) * FMath::Sqrt(K) + Rng.GetUnitVector() * 90.f * K;
+		P.Life = bSpout ? Rng.FRandRange(1.2f, 1.8f) : Rng.FRandRange(2.6f, 4.0f);
+		P.Size0 = (bSpout ? 14.f : 30.f) * K;
+		P.Size1 = (bSpout ? 110.f : 200.f) * K;
+		P.Peak = bSpout ? 0.9f : 0.6f;
+		P.Tint = FLinearColor(0.30f, 0.24f, 0.17f);
+		P.Rise = bSpout ? -80.f : 5.f;
+		P.WindShare = 0.5f;
+		P.Spin = Rng.FRandRange(0.f, 2.f * PI);
+	}
+	bForceRebuild = true;
+}
+
+float UPA250SmokeSubsystem::SightOpacity(const TArray<FPA250SmokePuff>& Puffs, const FVector& From, const FVector& To, float RadiusScale)
+{
+	float Through = 1.f; // what still gets through
+	for (const FPA250SmokePuff& P : Puffs)
+	{
+		if (!P.bPowder) continue; // dust and blood are brief and thin
+		const float Radius = P.Size() * RadiusScale;
+		if (Radius <= 1.f) continue;
+		const float Off = FMath::PointDistToSegment(P.Pos, From, To);
+		if (Off >= Radius) continue;
+		Through *= 1.f - FMath::Clamp(P.Opacity() * (1.f - Off / Radius), 0.f, 1.f);
+		if (Through <= 0.01f) return 1.f;
+	}
+	return 1.f - Through;
+}
+
+bool UPA250SmokeSubsystem::BlocksSight(const FVector& From, const FVector& To) const
+{
+	if (!bSightFlagRead)
+	{
+		UPA250SmokeSubsystem* Self = const_cast<UPA250SmokeSubsystem*>(this);
+		Self->bSightFlagRead = true;
+		Self->bSightOff = FParse::Param(FCommandLine::Get(), TEXT("PA250NoSmokeSight"));
+	}
+	++SightChecks;
+	if (bSightOff || Puffs.Num() == 0) return false;
+	const pa250::BattleRules& R = pa250::battle_rules();
+	const bool bBlocked = SightOpacity(Puffs, From, To, R.smoke_sight_radius_scale) >= R.smoke_sight_block_opacity;
+	SightBlocks += bBlocked ? 1 : 0;
+	return bBlocked;
 }
 
 FPA250SmokePuff& UPA250SmokeSubsystem::NewPuff()
@@ -176,6 +235,7 @@ void UPA250SmokeSubsystem::MergeAged()
 
 void UPA250SmokeSubsystem::Flash(const FVector& Where, float Strength)
 {
+	if (!FApp::CanEverRender()) return; // no light to show
 	EnsureMesh();
 	if (!Host) return;
 	if (Flashes.Num() < MaxFlashes)
@@ -245,6 +305,11 @@ void UPA250SmokeSubsystem::Tick(float DeltaTime)
 	{
 		MergeWait = 0.35f;
 		MergeAged();
+	}
+	if (!FApp::CanEverRender())
+	{
+		SectionQuads = Puffs.Num(); // nothing is drawn: the puffs only stand between men
+		return;
 	}
 	EnsureMesh();
 	// The bank drifts about 0.8 m/s, so rebuilding on alternate frames is not visible,

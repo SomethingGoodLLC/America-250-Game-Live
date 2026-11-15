@@ -157,6 +157,32 @@ inline bool contains(const std::vector<std::string>& v, const std::string& x) {
     return std::find(v.begin(), v.end(), x) != v.end();
 }
 
+// ---- Campaign pass (people.cpp, politics.cpp) ----
+std::string pass_to_json(const CampaignPass& pass);
+CampaignPass pass_from_json(const std::string& json_text);
+// Battle hooks. build_battle_setup calls the first for each side once its own numbers stand; the
+// second once both sides are built. apply_battle_result calls the third as its last act.
+void pass_side_setup(const CampaignState& s, const Province& ground, const Army& army, bool is_attacker,
+                     bool owns_ground, SideSetup& side);
+void pass_setup_done(const CampaignState& s, BattleSetup& setup);
+void pass_after_battle(CampaignState& s, const CampaignState& before, const BattleResult& r, const PendingBattle& pb);
+// Hourly, from tick_campaign's place in advance_hour.
+void pass_tick(CampaignState& s, std::vector<Interrupt>& interrupts);
+// An army with no general is a detachment: it cannot besiege. True when persons are not loaded.
+bool army_can_besiege(const CampaignState& s, const Army& army);
+// Most units an army may hold (a detachment's cap, or an army's under a general); 0 = no cap.
+int army_unit_cap(const CampaignState& s, const Army& army);
+// A side's body pays this share of its army's pay (0 without the measure).
+int upkeep_share_pct(const CampaignState& s, const std::string& faction);
+// Hours a company takes to muster in this town, after an organizer's help.
+int organizer_muster_hours(const CampaignState& s, const std::string& province, const std::string& faction, int hours);
+// The boats an agent found let this army use water edges without the harbour.
+bool army_has_boats(const CampaignState& s, const std::string& army_id);
+// Units of an enemy army as `viewer` counts them: exact when scouted, else a rough figure.
+int units_as_seen(const CampaignState& s, const std::string& viewer, const Army& army);
+// Extra value of a town to the AI of `faction` (a decision drew it there).
+long ai_lure_value(const CampaignState& s, const std::string& faction, const std::string& province);
+
 inline std::string err(const std::string& code, const std::string& detail = std::string()) {
     return detail.empty() ? code : code + ": " + detail;
 }

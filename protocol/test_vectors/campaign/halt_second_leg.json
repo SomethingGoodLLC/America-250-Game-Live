@@ -1,0 +1,13 @@
+{
+ "name": "halt_second_leg",
+ "description": "halted on the second leg of a route the army returns to the start of that leg, not to where the march began",
+ "start_ymdh": {"y": 1775, "m": 4, "d": 19, "h": 0},
+ "army": "continental_militia",
+ "army_province": "concord",
+ "march_to": "lexington",
+ "march_hours_before_halt": 3,
+ "order": {"order": "halt", "army_id": "continental_militia"},
+ "expect_after_order": {"province": "lincoln", "path_edges": 0, "hours_into_edge": 0, "returning_hours": 1, "returning_edge": "lincoln-lexington"},
+ "hours_after": 1,
+ "expect": {"province": "lincoln", "path_edges": 0, "hours_into_edge": 0, "returning_hours": 0}
+}

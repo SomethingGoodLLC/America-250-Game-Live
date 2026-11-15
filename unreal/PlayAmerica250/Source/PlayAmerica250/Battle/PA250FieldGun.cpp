@@ -515,9 +515,11 @@ void APA250CannonBall::Tick(float DeltaSeconds)
 		}
 		else
 		{
-			// Knocked down, not hit: off his feet and his aim gone for a moment.
+			// Knocked down, not hit: thrown off his feet away from the shot's path, his aim gone for a while.
 			KnockedDown.Add(Man);
-			Man->LockMovement(R.cannon_knockdown_seconds);
+			FVector Away = (Body - OnPath).GetSafeNormal2D();
+			if (Away.IsNearlyZero()) Away = FVector::CrossProduct(Velocity.GetSafeNormal2D(), FVector::UpVector);
+			if (!Man->KnockDown(Away * R.cannon_knockdown_push_cm)) Man->LockMovement(R.cannon_knockdown_seconds);
 			Man->ApplySuppression(R.cannon_knockdown_seconds * 2.f, 6.f);
 		}
 		if (GM) GM->NotifyRoundShot(Man, bHit);
@@ -540,7 +542,7 @@ void APA250CannonBall::Tick(float DeltaSeconds)
 		}
 		if (UPA250SmokeSubsystem* Bank = World->GetSubsystem<UPA250SmokeSubsystem>())
 		{
-			for (int32 i = 0; i < 6; ++i) Bank->AddImpact(Hit.ImpactPoint + FVector(FMath::FRandRange(-60.f, 60.f), FMath::FRandRange(-60.f, 60.f), 0.f), FVector(Hit.ImpactNormal), false);
+			Bank->AddDirtBurst(Hit.ImpactPoint, FVector(Hit.ImpactNormal), R.cannon_dirt_burst_scale);
 		}
 		FPA250BattleAudio::PlayAt(this, TEXT("impact_ground"), Hit.ImpactPoint, EPA250SoundRange::Gunfire, 1.f, 0.1f);
 		Destroy();

@@ -594,6 +594,8 @@ void ARFCharacter::BeginPlay()
 {
 	Super::BeginPlay();
 	LoadLookSensitivity();
+	// -PA250FirstPerson: start with the camera at his eyes (for stills; Z toggles it in play).
+	if (FParse::Param(FCommandLine::Get(), TEXT("PA250FirstPerson"))) bFirstPerson = true;
 
 	CurrentFOV = TargetFOV = DefaultFOV;
 	CurrentArmLength = HipArmLength;
@@ -672,8 +674,11 @@ void ARFCharacter::ApplyCameraPose(float DeltaTime)
 {
 	if (!SpringArm || !Camera) return;
 	const float Y = ShoulderSign * (bAiming ? AdsSocketOffset.Y : HipSocketOffset.Y);
-	const FVector TargetSocket(0.f, Y, MountedVisual ? 175.f : (bAiming ? AdsSocketOffset.Z : HipSocketOffset.Z));
-	const float TargetArm = MountedVisual ? (bAiming ? 330.f : 550.f) : (bAiming ? AdsArmLength : HipArmLength);
+	// First person (on foot): no boom, the camera a hand in front of his eyes so his own head and hat
+	// are behind it and his musket is before it.
+	const bool bEyes = bFirstPerson && !MountedVisual;
+	const FVector TargetSocket = bEyes ? FirstPersonOffset() : FVector(0.f, Y, MountedVisual ? 175.f : (bAiming ? AdsSocketOffset.Z : HipSocketOffset.Z));
+	const float TargetArm = bEyes ? 0.f : (MountedVisual ? (bAiming ? 330.f : 550.f) : (bAiming ? AdsArmLength : HipArmLength));
 	const float Alpha = CameraBlendSeconds > KINDA_SMALL_NUMBER
 		? FMath::Clamp(DeltaTime / CameraBlendSeconds, 0.f, 1.f)
 		: 1.f;
@@ -876,6 +881,8 @@ void ARFCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompone
 	Super::SetupPlayerInputComponent(PlayerInputComponent);
 	BuildDefaultInput();
 	PlayerInputComponent->BindKey(EKeys::H, IE_Pressed, this, &ARFCharacter::ToggleMounted);
+	PlayerInputComponent->BindKey(EKeys::Z, IE_Pressed, this, &ARFCharacter::ToggleFirstPerson); // first / third person
+	PlayerInputComponent->BindKey(EKeys::B, IE_Pressed, this, &ARFCharacter::OnShovePressed);    // the shove
 	// The class verb (order a volley or a charge, rally): T. Passive verbs answer with what they do.
 	PlayerInputComponent->BindKey(EKeys::T, IE_Pressed, this, &ARFCharacter::OnAbilityPressed);
 	PlayerInputComponent->BindKey(EKeys::One, IE_Pressed, this, &ARFCharacter::OnKey1);
@@ -998,6 +1005,16 @@ void ARFCharacter::StopAim()
 }
 
 void ARFCharacter::OnShoulderSwap() { ShoulderSign *= -1.f; }
+void ARFCharacter::ToggleFirstPerson()
+{
+	bFirstPerson = !bFirstPerson;
+	UE_LOG(LogTemp, Display, TEXT("PA250 view: %s person"), bFirstPerson ? TEXT("first") : TEXT("third"));
+}
+void ARFCharacter::OnShovePressed()
+{
+	if (MountedVisual || bIsDead || !MeleeComponent) return;
+	MeleeComponent->DoShove();
+}
 void ARFCharacter::OnGuardPressed() { if (MeleeComponent && !bIsDead) MeleeComponent->SetGuardHeld(true); }
 void ARFCharacter::OnGuardReleased() { if (MeleeComponent) MeleeComponent->SetGuardHeld(false); }
 void ARFCharacter::OnFirePressed()
@@ -1142,7 +1159,7 @@ bool ARFCharacter::FireMusket()
 bool ARFCharacter::FireMusketAt(FVector TargetLocation, bool bCompensateDrop)
 {
     AMusketWeapon* Equipped = GetEquippedFirearm();
-	if (bIsDead || bThrownFromHorse || !Equipped || !Equipped->CanFire())
+	if (bIsDead || bThrownFromHorse || bEmbarked || !Equipped || !Equipped->CanFire())
 	{
 		return false;
 	}

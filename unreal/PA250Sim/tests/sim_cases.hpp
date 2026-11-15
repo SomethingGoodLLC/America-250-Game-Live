@@ -2125,6 +2125,17 @@ static void test_battle_modes() {
     CHECK(mode_of("dorchester", "roxbury", 0) == "conquest" && mode_of("dorchester", "roxbury", 1) == "assault");
     CHECK(mode_of("cambridge", "boston", 0) == "conquest");  // Back Bay boats land on a river bank, not in a harbour
     CHECK(mode_of("concord", "lincoln", 2) == "conquest");   // the bridge fight stays the bridge fight
+    // The report keeps the kind of fight (for the card's sentence); the open fight writes nothing.
+    {
+        CampaignState s = battle_at("charlestown");
+        s.armies.at("british_regulars").previous_province = "medford";
+        const CampaignState after = apply_battle_result(s, ended("charlestown", kContinental, "time_limit"));
+        CHECK(after.progress.last_battle_report.mode == "assault");
+        CHECK(deserialize(serialize(after)).progress.last_battle_report.mode == "assault");
+        const CampaignState open_fight = apply_battle_result(battle_at("lexington"), ended("lexington", kContinental, "time_limit"));
+        CHECK(open_fight.progress.last_battle_report.mode.empty());
+        CHECK(serialize(open_fight).find("\"mode\"") == std::string::npos);
+    }
     // The setup's tags still say how he came: disordered from the boats, a chokepoint by the neck.
     {
         CampaignState s = battle_at("dorchester");
@@ -2847,6 +2858,145 @@ static void test_halt_cancels_move() {
     c.advance_hours(4, false);
     CHECK(c.state().armies.at("continental_militia").province == "concord");
     CHECK(c.state().armies.at("continental_militia").path.empty());
+}
+
+// M1 (campaign pass): halt at rest and mid-leg, from the shared vectors (protocol/test_vectors/campaign).
+static void test_halt_orders() {
+    const std::string dir = g_vector_dir() + "/../campaign";
+    std::vector<std::string> files;
+    if (DIR* d = opendir(dir.c_str())) {
+        while (dirent* e = readdir(d)) {
+            const std::string n = e->d_name;
+            if (n.size() > 5 && n.substr(n.size() - 5) == ".json" && (n.rfind("halt_", 0) == 0 || n.rfind("reject_halt", 0) == 0))
+                files.push_back(n);
+        }
+        closedir(d);
+    }
+    std::sort(files.begin(), files.end());
+    CHECK(files.size() >= 5);
+    auto check_army = [](const Army& a, const json& want) {
+        CHECK(a.province == want.at("province").get<std::string>());
+        CHECK(static_cast<int>(a.path.size()) == want.at("path_edges").get<int>());
+        CHECK(a.hours_into_edge == want.at("hours_into_edge").get<int>());
+        CHECK(a.returning_hours == want.at("returning_hours").get<int>());
+        if (want.contains("returning_edge")) CHECK(a.returning_edge == want.at("returning_edge").get<std::string>());
+        else CHECK(a.returning_edge.empty());
+    };
+    for (const std::string& name : files) {
+        const json v = json::parse(read_text_file(dir + "/" + name));
+        CampaignController c;
+        c.new_campaign(read_text_file(g_data_dir() + "/boston1775.json"));
+        // The vectors want a quiet map: no enemy column, no scripted march, a fixed hour.
+        CampaignState base = c.state();
+        const auto& t = v.at("start_ymdh");
+        base.now = from_ymdh(YMDH{t.at("y").get<int>(), static_cast<uint8_t>(t.at("m").get<int>()),
+                                  static_cast<uint8_t>(t.at("d").get<int>()), static_cast<uint8_t>(t.at("h").get<int>())});
+        base.ai_objective.clear();
+        base.treaties.push_back({"ceasefire", 24 * 30, "", ""});
+        const std::string order = v.at("order").dump();
+        const std::string army = v.at("order").at("army_id").get<std::string>();
+        if (v.contains("expect_error")) {
+            std::string error;
+            const CampaignState same = halt_army(base, army, error);
+            CHECK(error == v.at("expect_error").get<std::string>());
+            CHECK(state_hash(same) == state_hash(base));
+            continue;
+        }
+        base.armies.at(army).province = v.at("army_province").get<std::string>();
+        base.armies.at(army).previous_province = base.armies.at(army).province;
+        // March first, by the same command path the game uses.
+        CommandPayload move;
+        move.kind = CommandKind::MoveArmy;
+        move.army_id = army;
+        move.dest_province = v.at("march_to").get<std::string>();
+        CampaignState s = enqueue_command(base, move);
+        const int before = v.at("march_hours_before_halt").get<int>();
+        for (int i = 0; i < before; ++i) s = advance_hour(s).state;
+        if (before > 0) CHECK(!s.armies.at(army).path.empty());
+        // The pure function: what the order does at the moment it is applied.
+        {
+            // (before == 0: the order has been applied and no hour of it marched.)
+            CampaignState ordered = s;
+            if (before == 0) {
+                ordered = base;
+                ordered.armies.at(army).path = plan_path(base, army, move.dest_province).edges;
+            }
+            std::string error;
+            const CampaignState halted = halt_army(ordered, army, error);
+            CHECK(error.empty());
+            check_army(halted.armies.at(army), v.at("expect_after_order"));
+            // A halted army's next march waits for it to be back: the planner counts the return.
+            const PathPlan again = plan_path(halted, army, move.dest_province);
+            const PathPlan fresh_plan = plan_path(base, army, move.dest_province);
+            if (v.at("expect_after_order").at("province").get<std::string>() == base.armies.at(army).province)
+                CHECK(again.arrival.hour_index - halted.now.hour_index ==
+                      fresh_plan.arrival.hour_index - base.now.hour_index + halted.armies.at(army).returning_hours);
+            // Save and load keep the turning back.
+            const CampaignState loaded = deserialize(serialize(halted));
+            CHECK(loaded.armies.at(army).returning_hours == halted.armies.at(army).returning_hours);
+            CHECK(loaded.armies.at(army).returning_edge == halted.armies.at(army).returning_edge);
+            CHECK(state_hash(loaded) == state_hash(halted));
+        }
+        // The command: queued now, applied on the next hour, like every order.
+        CommandPayload halt;
+        halt.kind = CommandKind::HaltArmy;
+        halt.army_id = army;
+        s = enqueue_command(s, halt);
+        CHECK(s.pending_commands.back().payload.kind == CommandKind::HaltArmy);
+        if (v.contains("then_march_to")) {
+            CommandPayload next;
+            next.kind = CommandKind::MoveArmy;
+            next.army_id = army;
+            next.dest_province = v.at("then_march_to").get<std::string>();
+            s = enqueue_command(s, next);
+        }
+        const int after = v.at("hours_after").get<int>();
+        for (int i = 0; i < after; ++i) {
+            // Until the last hour of the return the army is still on the road.
+            s = advance_hour(s).state;
+            if (i + 1 < after) CHECK(s.armies.at(army).returning_hours > 0 || v.at("expect_after_order").at("returning_hours").get<int>() == 0);
+        }
+        check_army(s.armies.at(army), v.at("expect"));
+        if (v.contains("then_march_to")) {
+            // The new march starts only now, and march_plan says when it ends.
+            const PathPlan plan = march_plan(s, army);
+            CHECK(plan.ok && plan.provinces.back() == v.at("then_march_to").get<std::string>());
+            CampaignState t2 = s;
+            int guard = 0;
+            while (t2.armies.at(army).province != plan.provinces.back() && guard++ < 48) t2 = advance_hour(t2).state;
+            CHECK(t2.now.hour_index == plan.arrival.hour_index);
+        }
+    }
+    // march_plan: a march in progress, a queued one, and none.
+    {
+        CampaignState s = fresh();
+        s.now = from_ymdh({1775, 4, 19, 0});
+        s.ai_objective.clear();
+        s.treaties.push_back({"ceasefire", 24 * 30, "", ""});
+        CHECK(!march_plan(s, "continental_militia").ok);
+        CHECK(march_plan(s, "continental_militia").error == "not_marching");
+        CommandPayload move;
+        move.kind = CommandKind::MoveArmy;
+        move.army_id = "continental_militia";
+        move.dest_province = "cambridge";
+        const PathPlan planned = plan_path(s, "continental_militia", "cambridge");
+        s = enqueue_command(s, move);
+        // (the controller queues the planned edges; a bare command plans when it is applied)
+        s.pending_commands.back().payload.edge_path = planned.edges;
+        const PathPlan queued = march_plan(s, "continental_militia");
+        CHECK(queued.ok && queued.provinces.size() == 5 && queued.provinces.back() == "cambridge");
+        CHECK(queued.arrival.hour_index == planned.arrival.hour_index);
+        for (int i = 0; i < 3; ++i) s = advance_hour(s).state;
+        const PathPlan mid = march_plan(s, "continental_militia");
+        CHECK(mid.ok && mid.total_march_hours == planned.total_march_hours - 3);
+        CHECK(mid.arrival.hour_index == planned.arrival.hour_index);  // the same arrival, whenever it is asked
+        // The controller refuses a halt for an army that is not the player's, and queues one that is.
+        CampaignController c;
+        c.new_campaign(read_text_file(g_data_dir() + "/boston1775.json"));
+        CHECK(!c.enqueue_halt("british_regulars").empty());
+        CHECK(!c.enqueue_halt("nobody").empty());
+        CHECK(c.enqueue_halt("continental_militia").empty());
+    }
 }
 
 static void test_broken_path_does_not_teleport() {
@@ -4461,7 +4611,7 @@ static void test_opening_war_l3_loop() {
         if (c.source_id == "L3") share_id = c.id;
     share = choose_logistics(share, share_id, "shared_lodging");
     CHECK(share.player_gold == gold_s);
-    CHECK(share.local_support == support_s);
+    CHECK(share.local_support == support_s + 2);  // campaign pass M5: every answer has a gain; this one's is Support
     CHECK(share.armies.at("continental_militia").readiness == ready_s);
 
     // L2 never appears as Patriot live intelligence (retrospective exhibit only).
@@ -4634,7 +4784,8 @@ static void test_opening_war_l5_l7() {
           s.staff.queue.back().body.find("Game adaptation") != std::string::npos);
     const int support5 = s.local_support;
     s = choose_logistics(s, l5_id, "evacuate_preserve_boats");
-    CHECK(s.local_support == support5);
+    CHECK(s.local_support == support5 + 3);  // campaign pass M5: the families covered (+3) and a factor at Chelsea
+    CHECK(s.pass.town_factors.size() == 1 && s.pass.town_factors[0].province == "chelsea" && s.pass.town_factors[0].label == "readiness");
     CHECK(std::find(s.progress.resolved_event_ids.begin(), s.progress.resolved_event_ids.end(),
                     "evt_l5_forage_boats") != s.progress.resolved_event_ids.end());
 
@@ -5444,6 +5595,9 @@ static void test_commander_and_knox_gates() {
     CHECK(s.progress.knox.pieces == 0);
 }
 
+#include "pass_cases.hpp"
+#include "playtest_cases.hpp"
+
 inline int run_all(Reporter& rep, const std::string& data_dir, const std::string& vector_dir,
                    bool write_golden = false) {
     g_reporter() = &rep;
@@ -5460,6 +5614,8 @@ inline int run_all(Reporter& rep, const std::string& data_dir, const std::string
     };
     Case cases[] = {
         {"scenario_loads", test_scenario_loads},
+        {"playtest_mission_results", test_playtest_mission_results},
+        {"playtest_no_general_is_explained", test_playtest_no_general_is_explained},
         {"calendar_round_trip", test_calendar_round_trip},
         {"graph_and_path_harbor", test_graph_and_path_harbor},
         {"contact_halts", test_contact_halts},
@@ -5471,6 +5627,7 @@ inline int run_all(Reporter& rep, const std::string& data_dir, const std::string
         {"escalate_risks_the_ground", test_escalate_risks_the_ground},
         {"concord_bridge_company", test_concord_bridge_company},
         {"halt_cancels_move", test_halt_cancels_move},
+        {"halt_orders", test_halt_orders},
         {"broken_path_does_not_teleport", test_broken_path_does_not_teleport},
         {"monthly_supply_once", test_monthly_supply_once},
         {"clock_golden", test_clock_golden},
@@ -5530,6 +5687,12 @@ inline int run_all(Reporter& rep, const std::string& data_dir, const std::string
         {"opening_war_l3_loop", test_opening_war_l3_loop},
         {"opening_war_l5_l7", test_opening_war_l5_l7},
         {"desk_letters_do_not_stop_the_clock", test_desk_letters_do_not_stop_the_clock},
+        {"pass_order_vectors", test_pass_order_vectors},
+        {"pass_commander_vectors", test_pass_commander_vectors},
+        {"pass_people", test_pass_people},
+        {"pass_politics", test_pass_politics},
+        {"pass_decisions", test_pass_decisions},
+        {"letters_have_consequences", test_letters_have_consequences},
     };
     for (auto& c : cases) {
         int before = g_failed();

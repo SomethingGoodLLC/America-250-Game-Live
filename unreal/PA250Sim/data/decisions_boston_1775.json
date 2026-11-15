@@ -1,0 +1,202 @@
+{
+  "note": "Rare large decisions. Each stops the clock until it is answered. The situations are the record's; every cost, gain and consequence is GAMEPLAY TUNING and invented. The other side's commander takes his 'ai_option' without stopping the clock. Contract: protocol/schemas/decisions.yaml.",
+  "decisions": [
+    {
+      "id": "which_heights",
+      "side": "continental",
+      "title": "Which heights first?",
+      "painting": "heights_1775",
+      "from": {"y": 1775, "m": 6, "d": 13},
+      "text": "Word has come out of Boston that General Gage means to seize the heights that command the town. There are tools and men to fortify one of them before he moves: Charlestown, across the ferry from the North End, or Dorchester, above the harbour's southern channel.",
+      "ai_option": "charlestown",
+      "options": [
+        {
+          "id": "charlestown",
+          "label": "Fortify Charlestown",
+          "cost": {"gold": -15, "summary": "-15 gold for tools and timber"},
+          "gain": {"fort": {"province": "charlestown", "levels": 1}, "battle_factors": [{"province": "charlestown", "label": "morale", "value": 6, "days": 10, "text": "Works dug in a night"}],
+                   "summary": "Charlestown gains a level of fortification; its defenders +6 morale for 10 days"},
+          "later": {"days": 3, "text": "The British answer at once.", "effects": {"lure": {"province": "charlestown", "days": 14}, "summary": "The British march on Charlestown."}}
+        },
+        {
+          "id": "dorchester",
+          "label": "Fortify Dorchester",
+          "cost": {"gold": -15, "summary": "-15 gold for tools and timber"},
+          "gain": {"fort": {"province": "dorchester", "levels": 1}, "summary": "Dorchester gains a level of fortification"},
+          "later": {"days": 5, "text": "Charlestown is left open.", "effects": {"lure": {"province": "charlestown", "days": 14}, "local_support": -2, "summary": "The British move on the open heights at Charlestown. Support -2."}}
+        }
+      ],
+      "note": "The Committee of Safety resolved on 15 June 1775 that Bunker Hill be occupied, and Dorchester Neck secured as well; only Charlestown was fortified, on the night of 16 June.",
+      "basis": "documented"
+    },
+    {
+      "id": "canada_expedition",
+      "side": "continental",
+      "title": "An expedition to Canada?",
+      "painting": "wilderness_march",
+      "from": {"y": 1775, "m": 9, "d": 5},
+      "requires": [{"type": "free_person", "role": "general"}],
+      "text": "Congress wishes Canada joined to the cause before the winter. A column could go up the Kennebec and through the wilderness to Quebec. It would take good men from the lines for the rest of the year, and a general to lead them.",
+      "ai_option": "keep_the_men",
+      "options": [
+        {
+          "id": "send_expedition",
+          "label": "Send the expedition",
+          "commit": {"role": "general", "days": 120},
+          "cost": {"detach_units": 4, "summary": "4 units and a general leave the army for 120 days"},
+          "gain": {"favors": 2, "bloc_shift": {"middle_colonies": 6, "new_england": 4}, "summary": "+2 favors; Congress is pleased"},
+          "later": {"days": 120, "text": "The column is beaten before Quebec in a snowstorm; the survivors come home.", "effects": {"units": [{"province": "cambridge", "class": "line_infantry", "count": 1}], "local_support": -2, "summary": "One unit returns to Cambridge. Support -2."}}
+        },
+        {
+          "id": "keep_the_men",
+          "label": "Keep the men before Boston",
+          "cost": {"bloc_shift": {"middle_colonies": -5}, "summary": "The Middle colonies cool"},
+          "gain": {"army_readiness": 5, "summary": "Army readiness +5"},
+          "later": {"days": 60, "text": "Canada stays quiet and British.", "effects": {"british_attitude": -3, "summary": "The British envoy's Attitude -3."}}
+        }
+      ],
+      "note": "Benedict Arnold marched from Cambridge for Quebec in September 1775 with about 1,100 men; the assault on Quebec failed on 31 December 1775.",
+      "basis": "documented"
+    },
+    {
+      "id": "reenlist_how",
+      "side": "continental",
+      "title": "How to keep the army?",
+      "painting": "winter_camp",
+      "from": {"y": 1775, "m": 12, "d": 1},
+      "text": "The enlistments run out with the year. The men can be kept by a bounty paid now in paper, or by an appeal to stay for the cause, made by someone they will listen to.",
+      "ai_option": "appeal",
+      "options": [
+        {
+          "id": "bounty",
+          "label": "Pay a bounty",
+          "cost": {"gold": -60, "summary": "-60 gold"},
+          "gain": {"reenlist_share_pct": 100, "summary": "Every company re-enlists for the new year"},
+          "later": {"days": 45, "text": "The bounty money has gone round.", "effects": {"price_rise_pct": 10, "summary": "Everything bought costs a tenth more."}}
+        },
+        {
+          "id": "appeal",
+          "label": "Appeal to the men",
+          "commit": {"role": "general", "days": 14},
+          "cost": {"summary": "A general spends 14 days going from regiment to regiment"},
+          "gain": {"reenlist_share_pct": 50, "local_support": 2, "summary": "Half of every class re-enlists; Support +2"},
+          "later": {"days": 20, "text": "The men who stayed without pay remember it.", "effects": {"army_morale": -4, "summary": "Army morale -4."}}
+        }
+      ],
+      "note": "Most enlistments ended with 1775; the Connecticut regiments went home in December and the army was re-formed in the face of the enemy.",
+      "basis": "documented"
+    },
+    {
+      "id": "assault_or_guns",
+      "side": "continental",
+      "title": "Assault Boston, or wait for the guns?",
+      "painting": "council_of_war",
+      "from": {"y": 1776, "m": 2, "d": 16},
+      "requires": [{"type": "owner_is", "province": "boston", "faction": "british"}],
+      "text": "The harbour is frozen hard enough to bear men. The town could be stormed over the ice before the British are reinforced in the spring; or the army could wait for the heavy guns and take the heights instead.",
+      "ai_option": "wait_for_guns",
+      "options": [
+        {
+          "id": "assault",
+          "label": "Assault over the ice",
+          "cost": {"local_support": -2, "summary": "Support -2: the town is full of the army's own kin"},
+          "gain": {"battle_factors": [{"province": "boston", "label": "morale", "value": 10, "days": 14, "text": "The assault over the ice"}], "summary": "Your men +10 morale in a battle at Boston for 14 days"},
+          "later": {"days": 14, "text": "The ice breaks up.", "effects": {"army_morale": -6, "summary": "If Boston still stands: army morale -6."}}
+        },
+        {
+          "id": "wait_for_guns",
+          "label": "Wait for the guns",
+          "cost": {"army_morale": -3, "summary": "Army morale -3: another month in the lines"},
+          "gain": {"battle_factors": [{"province": "dorchester", "label": "fortification", "value": 1, "days": 45, "text": "Fascines and frames made ready"}], "summary": "Dorchester's defenders fight behind one more level of works for 45 days"},
+          "later": {"days": 30, "text": "The council's patience is noted in Congress.", "effects": {"favors": 1, "summary": "+1 favor."}}
+        }
+      ],
+      "note": "Washington proposed an assault over the ice to a council of war on 16 February 1776; the council advised against it and Dorchester Heights was fortified on the night of 4 March.",
+      "basis": "documented"
+    },
+    {
+      "id": "take_the_heights_how",
+      "side": "british",
+      "title": "How to take the heights?",
+      "painting": "heights_1775",
+      "from": {"y": 1775, "m": 6, "d": 17},
+      "requires": [{"type": "fort_at_least", "province": "charlestown", "faction": "continental", "level": 1}],
+      "text": "The rebels have thrown up works above Charlestown in the night. The hill can be carried from the front with the boats and the tide as they are, or the troops can be landed at the neck behind it to cut the rebels off.",
+      "ai_option": "frontal_assault",
+      "options": [
+        {
+          "id": "frontal_assault",
+          "label": "Carry it from the front",
+          "cost": {"battle_factors": [{"province": "charlestown", "label": "readiness", "value": -8, "days": 7, "text": "Heavy packs up a hill in the heat"}], "summary": "Your men -8 readiness in a battle at Charlestown for 7 days"},
+          "gain": {"battle_factors": [{"province": "charlestown", "label": "morale", "value": 6, "days": 7, "text": "Regulars sent straight at the works"}], "lure": {"province": "charlestown", "days": 7}, "summary": "Your men +6 morale there for 7 days; the army marches on Charlestown at once"},
+          "later": {"days": 8, "text": "The returns of killed and wounded reach London.", "effects": {"ministry_confidence": -6, "summary": "The ministry's confidence -6."}}
+        },
+        {
+          "id": "land_behind",
+          "label": "Land behind them at the neck",
+          "cost": {"army_readiness": -4, "summary": "Army readiness -4: a day lost waiting for the tide"},
+          "gain": {"battle_factors": [{"province": "charlestown", "label": "fortification", "value": -1, "days": 7, "faction": "enemy", "text": "Works turned from the rear"}], "lure": {"province": "charlestown", "days": 7}, "summary": "The defenders of Charlestown lose a level of works for 7 days; the army marches on Charlestown"},
+          "later": {"days": 8, "text": "The Navy grumbles at the risk to its boats in the Mystic.", "effects": {"bloc_shift": {"admiralty": -6}, "summary": "The Admiralty cools."}}
+        }
+      ],
+      "note": "On 17 June 1775 Clinton urged a landing at Charlestown Neck behind the redoubt; Gage and Howe chose to land at Moulton's Point and attack from the front.",
+      "basis": "documented"
+    },
+    {
+      "id": "burn_charlestown",
+      "side": "british",
+      "title": "Burn Charlestown?",
+      "painting": "town_burning",
+      "from": {"y": 1775, "m": 6, "d": 17},
+      "requires": [{"type": "decision_taken", "decision": "take_the_heights_how"}],
+      "text": "Marksmen in the houses of Charlestown gall the left of the attack. The ships can set the town on fire with carcasses and hot shot, or it can be spared.",
+      "ai_option": "burn",
+      "options": [
+        {
+          "id": "burn",
+          "label": "Burn the town",
+          "cost": {"local_support": 5, "summary": "Patriot Support +5: four hundred buildings burn"},
+          "gain": {"battle_factors": [{"province": "charlestown", "label": "morale", "value": -6, "days": 7, "faction": "enemy", "text": "The town in flames behind them"}], "summary": "The defenders of Charlestown -6 morale for 7 days"},
+          "later": {"days": 30, "text": "The burning is printed in every colony.", "effects": {"british_attitude": -5, "summary": "The envoy's Attitude -5: there is less left to talk about."}}
+        },
+        {
+          "id": "spare",
+          "label": "Spare the town",
+          "cost": {"battle_factors": [{"province": "charlestown", "label": "readiness", "value": -5, "days": 7, "text": "Marksmen in the houses"}], "summary": "Your men -5 readiness in a battle at Charlestown for 7 days"},
+          "gain": {"local_support": -2, "summary": "Patriot Support -2"},
+          "later": {"days": 30, "text": "The forbearance is remarked on.", "effects": {"british_attitude": 4, "summary": "The envoy's Attitude +4."}}
+        }
+      ],
+      "note": "Charlestown was set on fire by the ships and by a landing party on 17 June 1775 and burned to the ground.",
+      "basis": "documented"
+    },
+    {
+      "id": "hold_or_sail",
+      "side": "british",
+      "title": "Hold Boston, or sail for Halifax?",
+      "painting": "harbour_fleet",
+      "from": {"y": 1775, "m": 11, "d": 10},
+      "requires": [{"type": "flag", "flag": "leave_to_evacuate"}, {"type": "owner_is", "province": "boston", "faction": "british"}],
+      "text": "The ministers leave it to you. The town is hungry, the rebels hold every road out of it, and there are transports enough for the army, if not for all the King's friends. Halifax is ten days' sail.",
+      "ai_option": "hold",
+      "options": [
+        {
+          "id": "hold",
+          "label": "Hold Boston through the winter",
+          "cost": {"stores": {"province": "boston", "provisions": -15}, "summary": "-15 provisions at Boston: the garrison eats its reserve"},
+          "gain": {"army_morale": 4, "ministry_confidence": 4, "summary": "Army morale +4; the ministry's confidence +4"},
+          "later": {"days": 60, "text": "The winter in a town under siege.", "effects": {"army_readiness": -8, "summary": "Army readiness -8."}}
+        },
+        {
+          "id": "sail",
+          "label": "Sail for Halifax",
+          "cost": {"ministry_confidence": -10, "summary": "The ministry's confidence -10"},
+          "gain": {"start_evacuation": true, "summary": "The army embarks: Boston is given up when the countdown ends"},
+          "later": {"days": 20, "text": "The loyal families who could not be carried are left to their neighbours.", "effects": {"local_support": 4, "summary": "Patriot Support +4."}}
+        }
+      ],
+      "note": "Howe held Boston through the winter of 1775-76 and sailed for Halifax on 17 March 1776, after the guns appeared on Dorchester Heights.",
+      "basis": "documented"
+    }
+  ]
+}

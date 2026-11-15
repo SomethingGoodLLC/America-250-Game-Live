@@ -1,0 +1,40 @@
+{
+ "name": "battle_result_commander_killed",
+ "description": "a general killed on the field is gone for the campaign",
+ "start_ymdh": {
+  "y": 1775,
+  "m": 4,
+  "d": 20,
+  "h": 0
+ },
+ "battle": {
+  "province": "lexington",
+  "attacker": "british_regulars",
+  "defender": "continental_militia"
+ },
+ "generals": {
+  "continental_militia": "artemas_ward",
+  "british_regulars": "francis_smith"
+ },
+ "result": {
+  "province_id": "lexington",
+  "winner": "british",
+  "end_reason": "posts_swept",
+  "commander_events": {
+   "continental": "killed"
+  }
+ },
+ "expect": {
+  "schema_valid": true,
+  "applied": true,
+  "persons": {
+   "artemas_ward": {
+    "status": "killed",
+    "role": ""
+   }
+  },
+  "report_commander_events": {
+   "continental": "killed"
+  }
+ }
+}

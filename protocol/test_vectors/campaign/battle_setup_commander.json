@@ -1,0 +1,55 @@
+{
+ "name": "battle_setup_commander",
+ "description": "a general's two traits are factor rows with him as the source, and the setup names him",
+ "start_ymdh": {
+  "y": 1775,
+  "m": 4,
+  "d": 20,
+  "h": 0
+ },
+ "battle": {
+  "province": "lexington",
+  "attacker": "british_regulars",
+  "defender": "continental_militia"
+ },
+ "generals": {
+  "continental_militia": "artemas_ward",
+  "british_regulars": "francis_smith"
+ },
+ "expect_setup": {
+  "commander": {
+   "continental": "artemas_ward",
+   "british": "francis_smith"
+  },
+  "factor_rows": [
+   {
+    "faction": "continental",
+    "label": "morale",
+    "value": 8,
+    "source_has": "Artemas Ward: Defensive"
+   },
+   {
+    "faction": "continental",
+    "label": "readiness",
+    "value": 10,
+    "source_has": "Artemas Ward: Steadfast"
+   },
+   {
+    "faction": "british",
+    "label": "readiness",
+    "value": 10,
+    "source_has": "Francis Smith: Steadfast"
+   },
+   {
+    "faction": "continental",
+    "label": "commander",
+    "value": 1,
+    "source_has": "Artemas Ward commands"
+   }
+  ],
+  "morale": {
+   "continental": 78,
+   "british": 80
+  }
+ }
+}

@@ -1,0 +1,85 @@
+{
+  "note": "The bodies the two sides answer to. Every number is GAMEPLAY TUNING. A bloc's lean runs from -100 to 100; it is the bloc's general temper toward what its commander asks. How the members are grouped into three blocs is the game's. Contract: protocol/schemas/politics.yaml.",
+  "lobby": {
+    "write_shift": 5,
+    "favor_shift": 15,
+    "vote_base_pct": 50,
+    "vote_min_pct": 5,
+    "vote_max_pct": 95,
+    "blocs_to_pass": 2,
+    "favors_at_start": 1,
+    "favors_per_mission_done": 1,
+    "favors_per_victory": 1,
+    "unity_floor": 40,
+    "unity_desertion_units_per_day": 1
+  },
+  "dispatch": {
+    "days_out": 38,
+    "days_back": 38,
+    "note": "A dispatch to London and its answer. The Cerberus took about five weeks to bring the three generals out in the spring of 1775; 38 days each way is the game's round figure.",
+    "basis": "invented"
+  },
+  "ministry": {
+    "confidence_start": 60,
+    "on_defeat": -8,
+    "on_victory": 4,
+    "recall_floor": 30,
+    "confidence_after_recall": 55,
+    "replacements": ["william_howe", "henry_clinton", "john_burgoyne"],
+    "note": "Gage was recalled after Bunker Hill and Howe took the command in October 1775. The confidence figure and its floor are the game's.",
+    "basis": "invented"
+  },
+  "bodies": [
+    {
+      "id": "provincial_congress",
+      "side": "continental",
+      "name": "Massachusetts Provincial Congress",
+      "button": "Congress",
+      "until": {"y": 1775, "m": 5, "d": 10},
+      "note": "The Provincial Congress governed Massachusetts outside Boston in the spring of 1775, sitting at Concord and then Watertown.",
+      "basis": "documented",
+      "blocs": [
+        {"id": "committee_men", "name": "Committee men", "lean": 20, "on_victory": 4, "on_defeat": -2,
+         "moves": "The Committee of Safety's friends. They want the army raised and used; a victory warms them, delay cools them."},
+        {"id": "country_towns", "name": "Country towns", "lean": 5, "on_victory": 6, "on_defeat": -8,
+         "moves": "Farmers' delegates. They count the cost in men and harvests; a lost battle near home frightens them."},
+        {"id": "seaport_merchants", "name": "Seaport merchants", "lean": -10, "on_victory": 3, "on_defeat": -4,
+         "moves": "Trading towns with ships in the Navy's reach. They fear for their trade and warm slowly."}
+      ]
+    },
+    {
+      "id": "continental_congress",
+      "side": "continental",
+      "name": "Continental Congress",
+      "button": "Congress",
+      "from": {"y": 1775, "m": 5, "d": 10},
+      "note": "The Second Continental Congress met at Philadelphia on 10 May 1775.",
+      "basis": "documented",
+      "blocs": [
+        {"id": "new_england", "name": "New England", "lean": 30, "on_victory": 4, "on_defeat": -3,
+         "moves": "The war is at their door. They want an army and no talk of petitions."},
+        {"id": "middle_colonies", "name": "Middle colonies", "lean": -5, "on_victory": 6, "on_defeat": -6,
+         "moves": "New York and Pennsylvania still hope to be reconciled. Victories persuade them; a petition to the King pleases them."},
+        {"id": "southern_colonies", "name": "Southern colonies", "lean": 0, "on_victory": 5, "on_defeat": -4,
+         "moves": "They doubt a New England army led by New England men. A commander of their own choosing warms them."}
+      ]
+    },
+    {
+      "id": "home_government",
+      "side": "british",
+      "name": "The King's ministers",
+      "button": "Whitehall",
+      "dispatch": true,
+      "note": "The commander at Boston answered to the Secretary of State for the Colonies, and depended on the Admiralty and the Treasury for ships and money.",
+      "basis": "documented",
+      "blocs": [
+        {"id": "colonial_office", "name": "Colonial Office", "lean": 15, "on_victory": 6, "on_defeat": -8,
+         "moves": "Lord Dartmouth's office. It wants the rebellion ended quickly and loses patience with every check."},
+        {"id": "admiralty", "name": "Admiralty", "lean": 5, "on_victory": 3, "on_defeat": -3,
+         "moves": "The Navy's board. It will find ships for a commander who is winning."},
+        {"id": "treasury", "name": "Treasury", "lean": -10, "on_victory": 4, "on_defeat": -6,
+         "moves": "Lord North's own board. It grudges every regiment and every convoy."}
+      ]
+    }
+  ]
+}

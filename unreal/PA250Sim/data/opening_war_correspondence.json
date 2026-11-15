@@ -8,6 +8,36 @@
       "provisions": 0
     }
   ],
+  "commander_letter": {
+    "note": "The detached commander's letter after the first fight (\"Detached command: timing at Concord\"). GAMEPLAY TUNING and invented; the commander is a fictionalized composite. Morale and readiness move his own army. A factor stands at the named town until the next battle there and shows on the pre-battle card with this letter as its source: withdraw_early (the company quits the field at this percent of the battle clock, and its losses in a lost fight are this percent of what they would be), stand_fast (it fights to the end and never breaks; losses at this percent), magazine_saved (this percent of the town's magazine is carried off to headquarters if the town falls), morale.",
+    "province": "concord",
+    "choices": [
+      {
+        "id": "preserve_force",
+        "aliases": ["clarify"],
+        "label": "Preserve the company",
+        "effects_summary": "Cost: at the next battle at Concord the company withdraws early (at half the clock). Gain: readiness +10 now; in that battle its losses are halved and half the magazine is carried off if the town falls.",
+        "effects": {"army_readiness": 10},
+        "factors": [{"label": "withdraw_early", "value": 50}, {"label": "magazine_saved", "value": 50}]
+      },
+      {
+        "id": "contest_crossing",
+        "aliases": ["counterorder"],
+        "label": "Contest the bridge",
+        "effects_summary": "Cost: readiness −5 now; at the next battle at Concord the company fights at the bridge to the end, and its losses run a quarter higher. Gain: morale +5 now and +8 more in that battle.",
+        "effects": {"army_morale": 5, "army_readiness": -5},
+        "factors": [{"label": "morale", "value": 8}, {"label": "stand_fast", "value": 125}]
+      },
+      {
+        "id": "escalate",
+        "aliases": [],
+        "label": "Escalate through the town",
+        "effects_summary": "Cost: one clerk slot today; if the company then loses the field the town is forfeit even without the post. Gain: Support +4, morale +5.",
+        "effects": {"clerk_load": 1, "local_support": 4, "army_morale": 5},
+        "factors": []
+      }
+    ]
+  },
   "entries": [
     {
       "source_id": "L1",
@@ -99,17 +129,22 @@
         {
           "id": "purchase_provisions",
           "label": "Purchase household provisions",
-          "effects_summary": "Gameplay tuning: spend 25 gold now; +8 provisions after 8 hours (commit ≠ receive). No automatic local-support or recruitment bonus."
+          "effects_summary": "Gameplay tuning: spend 25 gold now; +8 provisions after 8 hours (commit ≠ receive). No automatic local-support or recruitment bonus.",
+          "hardcoded": "25 gold now, 8 provisions after 8 hours (sim: apply_source_decision)"
         },
         {
           "id": "shared_lodging",
           "label": "Arrange shared lodging and rotating escorts",
-          "effects_summary": "Gameplay tuning: uses clerk capacity (desk work slips). No gold spend; no automatic local-support gain; serving soldiers' readiness unchanged."
+          "effects_summary": "Gameplay tuning: uses one clerk slot today; +2 local support (the households are seen to). No gold spent; serving soldiers' readiness unchanged.",
+          "effects": {"local_support": 2},
+          "hardcoded": "one clerk slot (sim: apply_source_decision)"
         },
         {
           "id": "retain_workers",
           "label": "Retain workers locally; limit immediate mobilization",
-          "effects_summary": "Gameplay tuning: commit 3 militia paper units to household labor for 72 hours (personnel availability only). Arms, readiness, and morale of serving soldiers unchanged. No automatic local-support gain."
+          "effects_summary": "Gameplay tuning: 3 militia units are held at household labor for 72 hours (not fielded); +6 provisions when the work is done. Arms, readiness, and morale of serving soldiers unchanged.",
+          "effects": {"provisions": 6, "delivery_hours": 72},
+          "hardcoded": "3 militia units held 72 hours (sim: apply_source_decision)"
         }
       ]
     },
@@ -150,8 +185,8 @@
         {
           "id": "refer_to_congress",
           "label": "Refer the place to the Provincial Congress",
-          "effects_summary": "Gameplay tuning: uses one clerk slot today; nothing else changes.",
-          "effects": {"clerk_load": 1}
+          "effects_summary": "Gameplay tuning: uses one clerk slot today; +1 favor in your Congress (the choice is left to them).",
+          "effects": {"clerk_load": 1, "favors": 1}
         }
       ]
     },
@@ -180,17 +215,22 @@
         {
           "id": "guarded_removal",
           "label": "Attempt guarded removal of forage",
-          "effects_summary": "Gameplay tuning: commit 2 militia paper units for 48 hours as boat/guard crews; risk −4 provisions if boats are delayed. Civilian consent assumed contested."
+          "effects_summary": "Gameplay tuning: 2 militia units are held 48 hours as boat and guard crews, and 4 provisions go with them now; +10 provisions when the forage is brought off. Civilian consent assumed contested.",
+          "effects": {"provisions": 10, "delivery_hours": 48},
+          "hardcoded": "2 militia units held 48 hours, -4 provisions now (sim: apply_source_decision)"
         },
         {
           "id": "negotiate_local",
           "label": "Negotiate local denial or removal",
-          "effects_summary": "Gameplay tuning: spend 15 gold and 8 hours waiting; on delivery gain +4 provisions if consent holds. No automatic loyalty bonus."
+          "effects_summary": "Gameplay tuning: spend 15 gold and 8 hours waiting; on delivery gain +4 provisions if consent holds. No automatic loyalty bonus.",
+          "hardcoded": "15 gold now, 4 provisions after 8 hours (sim: apply_source_decision)"
         },
         {
           "id": "evacuate_preserve_boats",
           "label": "Cover evacuation; preserve boats",
-          "effects_summary": "Gameplay tuning: −6 provisions (forage left exposed/lost); no personnel hold; boats kept for later use (no instant powder)."
+          "effects_summary": "Gameplay tuning: −6 provisions (forage left exposed and lost); +3 local support (the families are covered); the boats kept on the shore give your men +5 readiness in a battle at Chelsea for 30 days.",
+          "effects": {"local_support": 3, "factor": {"province": "chelsea", "label": "readiness", "value": 5, "days": 30}},
+          "hardcoded": "-6 provisions now (sim: apply_source_decision)"
         }
       ]
     },
@@ -231,8 +271,8 @@
         {
           "id": "await_confirmed_funds",
           "label": "Hold course until funds are confirmed",
-          "effects_summary": "Gameplay tuning: nothing gained and nothing risked.",
-          "effects": {}
+          "effects_summary": "Gameplay tuning: army morale −2 (the men wait on rumor); +1 favor in your Congress (you spent nothing it had not voted).",
+          "effects": {"army_morale": -2, "favors": 1}
         }
       ]
     },
@@ -273,8 +313,8 @@
         {
           "id": "send_summary_returns",
           "label": "Send summary returns only",
-          "effects_summary": "Gameplay tuning: no desk time spent; nothing else changes.",
-          "effects": {}
+          "effects_summary": "Gameplay tuning: no desk time spent, so army readiness +3 (the staff stays with the lines); −1 favor in your Congress, if you are owed one.",
+          "effects": {"army_readiness": 3, "favors": -1}
         }
       ]
     },
@@ -303,17 +343,21 @@
         {
           "id": "request_transfer",
           "label": "Request transfer from donor reserve",
-          "effects_summary": "Gameplay tuning: if ny_powder has ≥8 powder, subtract 8 from the donor immediately, ship 12 hours, credit continental stores only on delivery. Insufficient reserve → partial or refusal with explanation."
+          "effects_summary": "Gameplay tuning: if ny_powder has ≥8 powder, subtract 8 from the donor immediately, ship 12 hours, credit continental stores only on delivery. Insufficient reserve → partial or refusal with explanation.",
+          "hardcoded": "donor reserve -8 powder now, +8 powder after 12 hours (sim: apply_source_decision)"
         },
         {
           "id": "fund_procurement",
           "label": "Fund procurement",
-          "effects_summary": "Gameplay tuning: spend 35 gold; separate merchant shipment (not the donor reserve) for 6 powder after 16 hours—may delay. Never silently equals a transfer."
+          "effects_summary": "Gameplay tuning: spend 35 gold; separate merchant shipment (not the donor reserve) for 6 powder after 16 hours—may delay. Never silently equals a transfer.",
+          "hardcoded": "35 gold now, 6 powder after 16 hours (sim: apply_source_decision)"
         },
         {
           "id": "conserve_ammunition",
           "label": "Conserve ammunition; postpone offensive",
-          "effects_summary": "Gameplay tuning: no powder added; mark offensive postponed. Distinct from transfer or procurement."
+          "effects_summary": "Gameplay tuning: no powder added and the offensive is put off: army morale −3; army readiness +5 (the time goes to drill without powder). Distinct from transfer or procurement.",
+          "effects": {"army_morale": -3, "army_readiness": 5},
+          "hardcoded": "offensive marked postponed (sim: apply_source_decision)"
         }
       ]
     }

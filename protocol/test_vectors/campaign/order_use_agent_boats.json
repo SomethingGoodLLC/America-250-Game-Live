@@ -1,0 +1,31 @@
+{
+ "name": "order_use_agent_boats",
+ "description": "with boats found for it an army may use the ferry it could not use before",
+ "start_ymdh": {
+  "y": 1775,
+  "m": 6,
+  "d": 25,
+  "h": 0
+ },
+ "setup": {
+  "armies": {
+   "continental_militia": {
+    "province": "charlestown"
+   }
+  }
+ },
+ "order": {
+  "order": "use_agent",
+  "person": "john_glover",
+  "army_id": "continental_militia"
+ },
+ "expect": {
+  "path_ok": {
+   "army": "continental_militia",
+   "to": "boston"
+  },
+  "uses_left": {
+   "john_glover": 1
+  }
+ }
+}

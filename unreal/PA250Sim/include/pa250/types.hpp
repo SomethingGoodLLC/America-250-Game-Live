@@ -118,6 +118,13 @@ struct Army {
     int fatigue = 0;      // 0..100; rises with fighting, falls with rest
     std::vector<std::string> path;  // edge ids remaining (current edge first)
     int hours_into_edge = 0;
+    // Halted part-way along a leg, the army turns about: it is on `returning_edge`, this many march
+    // hours short of the town the leg began in (`province`). It starts no new march until it is back.
+    std::string returning_edge;
+    int returning_hours = 0;
+    // Units of each class that came from other colonies (campaign pass, lobbying): they are among
+    // `units`, and begin to go home while Unity is under its floor.
+    std::map<std::string, int> allied;
     // "garrison": the AI never orders it out of its base (campaign rules). Empty: a field army.
     std::string role;
     // Units of each class re-enlisted for the new year (enlistments; cleared when they expire).
@@ -239,6 +246,7 @@ struct BattleReport {
     int scavenged_powder = 0;
     int scavenged_muskets = 0;
     std::string end_reason;  // BattleResult.end_reason as applied
+    std::string mode;        // the kind of fight it was (BattleSetup.mode); empty for the open fight
     std::map<std::string, std::map<std::string, int>> prisoners;  // faction -> class -> captured (clamped)
     int siege_hours = 0;                    // > 0: a siege began; the town falls after this many hours
     std::vector<std::string> map_changes;   // what changed on the map, in plain words (after-battle card)
@@ -256,6 +264,8 @@ struct BattleReport {
     std::map<std::string, int> colours_captured;
     // Guns that changed hands, as applied: the faction that has them now -> guns.
     std::map<std::string, int> guns_taken;
+    // Generals who fell, as applied: faction -> wounded | killed | captured.
+    std::map<std::string, std::string> commander_events;
 };
 
 // One attributed treasury/stores/support delta (soft-default empty on old saves).
@@ -345,6 +355,24 @@ struct MissionState {
     int64_t resolved_hour = 0;
 };
 
+// A mission of the player's that has ended, as it was applied. The campaign map shows each one
+// once, as a card: what happened and what it paid (or cost).
+struct MissionResult {
+    std::string mission_id;
+    std::string title;
+    std::string outcome;       // complete | failed
+    int64_t hour_index = 0;
+    int gold = 0;              // as applied (a purse never goes below nothing)
+    int local_support = 0;     // as applied, after the 0..100 clamp
+    int army_morale = 0;       // as the mission file gives it; every army of the side takes it
+    int army_readiness = 0;
+    int british_attitude = 0;  // as applied
+    std::string stores_province;
+    int powder = 0, cartridges = 0, muskets = 0, provisions = 0;
+    bool start_evacuation = false;
+    std::string summary;       // the mission file's own line
+};
+
 // How the campaign ended. Once decided the clock no longer advances.
 struct CampaignOutcome {
     bool decided = false;
@@ -383,6 +411,7 @@ struct CampaignProgress {
     bool offensive_postponed = false;  // L7 conserve (gameplay tuning)
     // ---- Campaign arc (campaign rules + missions; all soft-default on old saves) ----
     std::map<std::string, MissionState> missions;  // mission id -> state
+    std::vector<MissionResult> mission_results;    // the player's missions as they ended, oldest first (saved only when any)
     CampaignOutcome outcome;
     int hq_lost_hours = 0;       // consecutive hours the Patriot headquarters town has been British
     int support_low_hours = 0;   // consecutive hours Support has been under the floor
@@ -438,6 +467,8 @@ enum class CommandKind : uint8_t {
     ApplyDiplomacy = 4,
     // A mission's reward or failure effect. result_json = {"mission_id":..., "outcome":"complete"|"failed"}.
     MissionEffect = 5,
+    // A campaign order (protocol/schemas/campaign_orders.yaml): result_json is the order object.
+    CampaignOrder = 6,
 };
 
 struct CommandPayload {
@@ -455,7 +486,88 @@ struct Command {
     CommandPayload payload;
 };
 
-enum class Interrupt : uint8_t { None = 0, ArmiesInContact, DiplomacyRequest, EventPopup, CampaignOver };
+enum class Interrupt : uint8_t { None = 0, ArmiesInContact, DiplomacyRequest, EventPopup, CampaignOver, Decision };
+
+// ---- Campaign pass: people, lobbying, decisions (all soft-default; saved only when used) ----
+// A battle factor at a named town for a set time (a letter, a decision or an agent put it there).
+// It shows on the pre-battle card with its source.
+struct TownFactor {
+    std::string province;
+    std::string faction;    // the side whose number it moves
+    std::string label;      // morale | readiness | fortification | reinforcement | losses | magazine_saved | alarm
+    int value = 0;
+    std::string source;     // player-facing: the letter, decision or person
+    int64_t until_hour = 0; // 0: until used
+    bool one_battle = false;  // spent by the next battle there
+};
+// What a person is doing now. A person holds one role at a time.
+struct PersonState {
+    std::string role;       // "" (at hand) | general | delegate | organizer | envoy | agent
+    std::string army_id;    // general
+    std::string province;   // organizer
+    std::string bloc;       // delegate
+    int uses_left = -1;     // agent: -1 = as the data gives
+    std::string status;     // "" | wounded | killed | captured | away | recalled | exposed
+    int64_t away_until_hour = 0;  // wounded / away: back at hand at this hour
+    bool unlocked = false;  // a measure made him available
+    bool envoy_counted = false;  // the envoy's one-time Attitude was given
+};
+struct MeasureState {
+    std::string status;     // "" | sent | passed | failed | lapsed
+    int64_t vote_hour = 0;  // when the vote falls (set when it opens or a dispatch is sent)
+    int64_t answer_hour = 0;  // dispatch: when the answer reaches Boston
+    int64_t retry_hour = 0;   // failed: it may be put again from this hour
+    int yes = 0;            // blocs that voted for it
+    bool voted_yes = false; // dispatch in transit: how London voted
+    int times = 0;          // times passed (repeatable requests)
+};
+struct DelayedEffect {
+    int64_t due_hour = 0;
+    std::string faction;    // the side it belongs to
+    std::string source;     // measure or decision title
+    std::string text;       // what is told when it lands
+    std::string effects_json;  // the effect set, as in the data file
+    std::string condition;  // "" | boston_not_taken
+};
+struct MonthlyGrant {
+    std::string source;
+    std::string faction;
+    std::string province;
+    int powder = 0, muskets = 0, provisions = 0;
+};
+struct AiLure {
+    std::string province;
+    std::string faction;    // the side drawn there
+    int64_t until_hour = 0;
+};
+struct CampaignPass {
+    bool seeded = false;
+    std::map<std::string, PersonState> persons;
+    std::map<std::string, int> bloc_lean;          // bloc id -> lean (-100..100)
+    std::map<std::string, MeasureState> measures;  // measure id -> state
+    int favors = 0;
+    int ministry_confidence = 0;
+    std::string pending_decision;                  // a decision waiting for the player
+    std::map<std::string, std::string> decisions;  // decision id -> option taken
+    std::vector<DelayedEffect> delayed;
+    std::vector<TownFactor> town_factors;
+    std::vector<MonthlyGrant> grants;
+    std::vector<AiLure> lures;
+    std::map<std::string, int64_t> scouted_until;  // "<viewer faction>:<army id>" -> hour
+    std::map<std::string, int64_t> boats_until;    // army id -> hour
+    std::map<std::string, int> upkeep_share_pct;   // faction -> share of army pay its body carries
+    int price_rise_pct = 0;
+    std::vector<std::string> flags;
+    std::vector<std::string> counted_missions;     // missions already paid in favors
+    int unity_desertion_day = -1;                  // last day units left for low Unity
+    bool any() const {
+        return seeded || !persons.empty() || !bloc_lean.empty() || !measures.empty() || favors != 0 ||
+               ministry_confidence != 0 || !pending_decision.empty() || !decisions.empty() || !delayed.empty() ||
+               !town_factors.empty() || !grants.empty() || !lures.empty() || !scouted_until.empty() ||
+               !boats_until.empty() || !upkeep_share_pct.empty() || price_rise_pct != 0 || !flags.empty() ||
+               !counted_missions.empty();
+    }
+};
 
 struct CampaignState {
     GameTime now;
@@ -492,6 +604,7 @@ struct CampaignState {
     uint64_t next_command_seq = 1;
     std::vector<std::string> log;
     std::vector<ResourceChange> resource_changes;  // attributed treasury/stores/support history
+    CampaignPass pass;  // people, lobbying, decisions (campaign pass)
 };
 
 // Immutable catalog entry (opening-war correspondence registry). Never mutated by choices.
@@ -506,10 +619,32 @@ struct CorrespondenceChoiceEffects {
     int army_morale = 0;       // every army of the player's faction
     int army_readiness = 0;
     int clerk_load = 0;        // desk slots used today
+    int favors = 0;            // favors owed to the player in his Congress (campaign pass)
+    // A battle factor at a named town for a set number of days, shown on the pre-battle card with
+    // the letter as its source. label: morale | readiness | fortification | reinforcement.
+    std::string factor_province;
+    std::string factor_label;
+    int factor_value = 0;
+    int factor_days = 0;
     bool any() const {
         return gold || local_support || british_attitude || provisions || powder || army_morale ||
-               army_readiness || clerk_load;
+               army_readiness || clerk_load || favors || (factor_value != 0 && !factor_province.empty());
     }
+};
+
+// One answer to the detached commander's letter (catalog "commander_letter"): what it does to his
+// army now, and the factors it leaves at the town for the next battle there.
+struct CommanderLetterFactor {
+    std::string label;  // morale | readiness | withdraw_early | stand_fast | magazine_saved
+    int value = 0;
+};
+struct CommanderLetterChoice {
+    std::string id;
+    std::vector<std::string> aliases;
+    std::string label;
+    std::string effects_summary;
+    CorrespondenceChoiceEffects effects;
+    std::vector<CommanderLetterFactor> factors;
 };
 
 struct CorrespondenceChoiceDef {
@@ -542,6 +677,15 @@ struct CorrespondenceCatalogEntry {
     std::string adaptation_dispatch;
     std::string adaptation_label = "Game adaptation—not a historical quotation.";
     std::vector<CorrespondenceChoiceDef> choices;
+};
+
+// What the battle needs to know of a general (persons data rules.commander).
+struct CommanderRules {
+    float aura_radius_m = 30.f;        // his officer's aura
+    float home_post_radius_m = 25.f;   // how far from his station he lets himself be drawn
+    float fall_pressure = 0.6f;        // the morale check on his side when he falls...
+    float fall_pressure_seconds = 10.f;  // ...fading over this long
+    int fate_wounded = 60, fate_killed = 25, fate_captured = 15;  // what becomes of him, in 100
 };
 
 // ---- Campaign arc definitions (data files; GAMEPLAY TUNING) ---------------
@@ -655,6 +799,8 @@ struct BattleRules {
     int bot_budget = 40;            // soldiers on the field, both sides together
     int field_min = 10;             // per side
     int field_max = 30;             // per side
+    float fps_bar = 45.f;           // the frame rate the battle must hold (battle_rules.json field.frame_rate_bar)
+    int fps_bar_bots = 60;          // ...with this many bots, 3 samples of 3, before bot_budget may rise
     int soldiers_per_unit = 4;      // soldiers on the field per campaign unit
     int rounds_per_cartridge = 20;  // one magazine cartridge = this many rounds
     int rounds_min = 3;
@@ -668,11 +814,13 @@ struct BattleRules {
     std::vector<std::string> mode_conquest_presets = {"concord_bridge", "battle_road"};  // scripted fights keep the open fight
     float assault_seconds_per_post = 120.f;    // the clock gains this when the attacker carries a post
     int assault_garrison_share_pct = 67;       // share of the defender's squads that stand at the post under attack
-    int landing_boats = 3;                     // boats in the first wave
+    int landing_boats = 4;                     // most boats in the first wave
     int landing_men_per_boat = 8;
     float landing_boat_speed_cm = 260.f;       // rowing speed
     float landing_row_out_m = 110.f;           // how far off the landing place the boats start
     float landing_disembark_seconds = 2.f;     // from the keel touching to the men being free to move
+    float landing_player_wait_seconds = 20.f;  // the boats wait this long for the player to take his place
+    float landing_boat_spacing_cm = 900.f;     // boats land this far apart when the level marks no places
     int guns_crew_units_per_gun = 1;            // units of the crew class that serve one gun
     std::string guns_crew_class = "artilleryman";
     int colours_support_per_capture = 3;  // Support the player gains for colours taken, and loses for his own
@@ -734,6 +882,19 @@ struct BattleRules {
     int remnant_men = 3;            // no reserve and this few standing: the remnant quits the field
     int remnant_mark_men = 5;       // ...and from this few down they are marked on the enemy player's HUD
     float remnant_seconds = 15.f;
+    // Feel (battle_rules.json "smoke", "sound", "duel"; read only by the Unreal battle).
+    float smoke_sight_block_opacity = 0.7f;   // powder smoke this thick on a line of sight hides the man beyond it
+    float smoke_sight_radius_scale = 0.4f;    // share of a puff's width that counts as thick
+    float sound_speed_m_per_second = 343.f;   // a shot is heard this long after it is seen
+    float sound_no_delay_within_m = 20.f;     // no delay worth hearing inside this
+    float duel_shove_range_cm = 170.f;
+    float duel_shove_recover_seconds = 0.5f;  // the shover's own recovery
+    float duel_shove_stagger_seconds = 0.7f;  // the man shoved cannot move
+    float duel_shove_open_seconds = 0.9f;     // ...and cannot guard or parry
+    float duel_shove_push_cm = 140.f;         // how far he is driven back
+    float duel_shove_cooldown_seconds = 1.6f;
+    float cannon_knockdown_push_cm = 320.f;   // speed a near miss throws a man off his feet at
+    float cannon_dirt_burst_scale = 3.f;      // a round shot's dirt against a musket ball's
 };
 // Why a side's number is what it is (pre-battle card). Rows with the same label belong together:
 // the first is the base value, later ones are signed changes to it.
@@ -761,6 +922,18 @@ struct SideSetup {
     std::string magazine_province;      // the town it holds and fights in; empty = only what it carries
     int guns = 0;                       // field guns this side brings: those its army has crews to serve
     std::vector<SideFactor> factors;
+    // The general who commands this side (campaign pass). Empty id: a detachment under its own captain.
+    std::string commander_id;
+    std::string commander_name;
+    std::vector<std::string> commander_traits;
+    float commander_aura_radius_m = 0.f;  // his officer's aura, larger than a company officer's
+    bool alarmed = false;                 // an agent raised the alarm: every company is under arms at the start
+    // What the other side knows of this side before the fight: its true numbers ("exact") or a
+    // rough count ("estimate": men_low..men_high). The pre-battle card shows the enemy column from this.
+    std::string intel = "exact";
+    int intel_men_low = 0;
+    int intel_men_high = 0;
+    std::string intel_source;
 };
 struct BattleSetup {
     bool valid = false;
@@ -815,6 +988,8 @@ struct BattleResult {
     // Guns overrun and taken: the faction that took them -> how many. Only the side that wins the
     // field keeps what it took; never more than the other side brought.
     std::map<std::string, int> guns_taken;
+    // What became of a side's general on the field: faction -> wounded | killed | captured.
+    std::map<std::string, std::string> commander_events;
 };
 
 struct TickOutput {

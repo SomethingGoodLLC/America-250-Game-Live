@@ -1,0 +1,43 @@
+{
+ "name": "battle_result_commander_captured",
+ "description": "a captured general joins the other side's prisoner pool",
+ "start_ymdh": {
+  "y": 1775,
+  "m": 4,
+  "d": 20,
+  "h": 0
+ },
+ "battle": {
+  "province": "lexington",
+  "attacker": "british_regulars",
+  "defender": "continental_militia"
+ },
+ "generals": {
+  "continental_militia": "artemas_ward",
+  "british_regulars": "francis_smith"
+ },
+ "result": {
+  "province_id": "lexington",
+  "winner": "continental",
+  "end_reason": "army_broke",
+  "commander_events": {
+   "british": "captured"
+  }
+ },
+ "expect": {
+  "schema_valid": true,
+  "applied": true,
+  "persons": {
+   "francis_smith": {
+    "status": "captured",
+    "role": ""
+   }
+  },
+  "prisoners_held_delta": {
+   "continental": 1
+  },
+  "report_commander_events": {
+   "british": "captured"
+  }
+ }
+}

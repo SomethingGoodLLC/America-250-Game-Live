@@ -1,0 +1,16 @@
+{
+ "name": "reject_form_army_no_muster",
+ "description": "Concord has neither a Militia Muster nor a Fort: no army can be formed there",
+ "start_ymdh": {
+  "y": 1775,
+  "m": 4,
+  "d": 20,
+  "h": 0
+ },
+ "order": {
+  "order": "form_army",
+  "person": "william_heath",
+  "province": "concord"
+ },
+ "expect_error": "no_muster"
+}

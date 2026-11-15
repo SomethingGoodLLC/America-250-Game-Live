@@ -1,4 +1,7 @@
-// PA250Smoke.h — lingering, drifting black-powder smoke (visual only, never affects the battle).
+// PA250Smoke.h — lingering, drifting black-powder smoke. It is drawn, and since 2026-11-14 it also
+// hides men from the bots: a line of sight through enough of it is no line of sight
+// (battle_rules.json "smoke"). The puffs are simulated with or without a renderer, so a headless bot
+// battle fights in the same smoke a played one does.
 #pragma once
 
 #include "CoreMinimal.h"
@@ -53,6 +56,17 @@ public:
 	/** Where a ball struck: dirt thrown up from the ground or a wall, or a brief red mist on a man. */
 	void AddImpact(const FVector& Where, const FVector& Normal, bool bHitMan);
 
+	/** A round shot striking the ground: a spout of dirt Scale times a musket ball's. */
+	void AddDirtBurst(const FVector& Where, const FVector& Normal, float Scale);
+
+	/** Pure: how much powder smoke lies on the line From-To: 0 clear, 1 solid. A puff counts within
+	 *  RadiusScale of its width, most at its heart; puffs multiply up as layers of gauze do. */
+	static float SightOpacity(const TArray<FPA250SmokePuff>& Puffs, const FVector& From, const FVector& To, float RadiusScale);
+	/** The smoke on this line hides what is beyond it (battle_rules.json smoke; -PA250NoSmokeSight turns it off). */
+	bool BlocksSight(const FVector& From, const FVector& To) const;
+	int32 GetSightChecks() const { return SightChecks; }
+	int32 GetSightBlocks() const { return SightBlocks; }
+
 	int32 NumPuffs() const { return Puffs.Num(); }
 	const TArray<FPA250SmokePuff>& GetPuffs() const { return Puffs; }
 	static constexpr int32 MaxPuffs = 300;
@@ -94,4 +108,8 @@ private:
 	int32 MeshFrame = 0;
 	float MergeWait = 0.f;
 	FRandomStream Rng{1775};
+	mutable int32 SightChecks = 0;
+	mutable int32 SightBlocks = 0;
+	bool bSightOff = false;
+	bool bSightFlagRead = false;
 };

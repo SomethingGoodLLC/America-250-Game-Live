@@ -33,6 +33,22 @@ struct FTracker
 /** SelectedArmyId may be empty. */
 PLAYAMERICA250_API FTracker Tracker(const pa250::CampaignState& State, const FString& SelectedArmyId);
 
+/** The card shown once when a mission of the player's ends: what happened and what it paid or cost. */
+struct FMissionCard
+{
+	bool bDone = false;   // complete (true) or failed
+	FString Heading;      // "MISSION DONE" / "MISSION FAILED"
+	FString Title;
+	FString Summary;      // the mission file's own line
+	TArray<FString> Lines;  // each thing that changed, with where it stands now
+	FString Next;         // the mission that is open now or opens next
+};
+PLAYAMERICA250_API FMissionCard MissionCard(const pa250::MissionResult& Result, const pa250::CampaignState& State);
+
+/** Standing notices for an army that cannot besiege where it stands or where it is marching (it has
+ *  no general), with how to get one. Empty when nothing of the kind applies. */
+PLAYAMERICA250_API TArray<FString> SiegeNotices(const pa250::CampaignState& State);
+
 /** The end screen. */
 struct FEnd
 {

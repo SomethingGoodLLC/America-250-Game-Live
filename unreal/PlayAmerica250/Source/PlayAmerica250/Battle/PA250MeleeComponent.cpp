@@ -17,6 +17,7 @@
 #include "EngineUtils.h"
 #include "RFCharacter.h"
 #include "RFHealthComponent.h"
+#include "pa250/sim.hpp"
 
 UPA250MeleeComponent::UPA250MeleeComponent()
 {
@@ -710,7 +711,7 @@ void UPA250MeleeComponent::NotifyIncoming(float Seconds)
 EPA250Guard UPA250MeleeComponent::ResolveGuard(const FVector& AttackerLocation) const
 {
 	const ARFCharacter* Me = OwnerChar();
-	if (!bGuarding || !Me || Me->IsDead()) return EPA250Guard::None;
+	if (!bGuarding || GuardOpenTimer > 0.f || !Me || Me->IsDead()) return EPA250Guard::None; // shoved: his guard is open
 	const FPA250MeleeTuningValues& V = GetValues();
 	const FVector To = (AttackerLocation - Me->GetActorLocation()).GetSafeNormal2D();
 	if (FVector::DotProduct(Me->GetActorForwardVector().GetSafeNormal2D(), To) < FMath::Cos(FMath::DegreesToRadians(V.GuardArcDegrees))) return EPA250Guard::None;
@@ -723,6 +724,8 @@ void UPA250MeleeComponent::TickGuard(float DeltaTime)
 	ThreatTimer = FMath::Max(0.f, ThreatTimer - DeltaTime);
 	RiposteTimer = FMath::Max(0.f, RiposteTimer - DeltaTime);
 	GuardLockout = FMath::Max(0.f, GuardLockout - DeltaTime);
+	GuardOpenTimer = FMath::Max(0.f, GuardOpenTimer - DeltaTime);
+	ShoveCooldown = FMath::Max(0.f, ShoveCooldown - DeltaTime);
 	BufferedThrustTimer = FMath::Max(0.f, BufferedThrustTimer - DeltaTime);
 
 	// The guard is a stance, not an attack: it drops for any swing, and a man who is reeling cannot hold it.
@@ -770,6 +773,44 @@ bool UPA250MeleeComponent::DoButtStroke()
 	const ARFCharacter* Victim = SweepAttack(V.ButtStrokeReachCm, 35.f, V.ButtStrokeDamage, false, EPA250MeleeAction::ButtStroke);
 	SetFeedback(Victim ? TEXT("Butt-stroke - staggered") : TEXT("Butt-stroke missed"), Victim != nullptr);
 	return true;
+}
+
+bool UPA250MeleeComponent::DoShove()
+{
+	ARFCharacter* Me = OwnerChar();
+	if (!Me || Me->IsDead() || IsBusy() || ShoveCooldown > 0.f || Me->IsKnockedDown() || Me->bEmbarked) return false;
+	const pa250::BattleRules& R = pa250::battle_rules();
+	BusyTimer = FMath::Max(0.1f, R.duel_shove_recover_seconds);
+	ShoveCooldown = R.duel_shove_cooldown_seconds;
+	// PLACEHOLDER: the butt-stroke's motion stands in for the shove (a shove pose is art still needed).
+	SetVisual(EPA250MeleeVisual::ButtStroke);
+	FPA250BattleAudio::PlayAt(Me, TEXT("melee_swing"), Me->GetActorLocation(), EPA250SoundRange::Near, 0.6f, 0.15f);
+	ARFCharacter* Victim = FindAssistTarget(R.duel_shove_range_cm, 50.f);
+	if (Victim && Victim->MeleeComponent && !Victim->IsMounted())
+	{
+		FaceTarget(Victim, false);
+		const FVector Dir = (Victim->GetActorLocation() - Me->GetActorLocation()).GetSafeNormal2D();
+		Victim->MeleeComponent->ReceiveShove(Dir, R.duel_shove_push_cm, R.duel_shove_stagger_seconds, R.duel_shove_open_seconds);
+		FPA250BattleAudio::PlayAt(Me, TEXT("butt_thud"), Victim->GetActorLocation(), EPA250SoundRange::Near, 0.8f, 0.12f);
+		if (APA250BattleGameMode* GM = GetWorld() ? GetWorld()->GetAuthGameMode<APA250BattleGameMode>() : nullptr) GM->NotifyShove(Me, Victim);
+	}
+	SetFeedback(Victim ? TEXT("Shoved - his guard is open") : TEXT("Shove missed"), Victim != nullptr);
+	return true;
+}
+
+void UPA250MeleeComponent::ReceiveShove(const FVector& WorldPushDir, float PushCm, float StaggerSeconds, float OpenSeconds)
+{
+	ARFCharacter* Me = OwnerChar();
+	if (!Me || Me->IsDead()) return;
+	ReceiveHit(WorldPushDir, 1.f, StaggerSeconds); // rocks him, breaks a wind-up, plants his feet
+	GuardOpenTimer = FMath::Max(GuardOpenTimer, OpenSeconds);
+	bGuarding = false;
+	GuardAge = 0.f;
+	if (!Me->IsKnockedDown() && !Me->bEmbarked)
+	{
+		// Driven back a pace or two (a short hop; he lands planted).
+		Me->LaunchCharacter(WorldPushDir.GetSafeNormal2D() * ShoveLaunchSpeed(PushCm) + FVector(0.f, 0.f, 90.f), true, true);
+	}
 }
 
 bool UPA250MeleeComponent::DoCharge()

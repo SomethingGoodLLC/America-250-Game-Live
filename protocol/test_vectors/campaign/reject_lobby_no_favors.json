@@ -1,0 +1,19 @@
+{
+ "name": "reject_lobby_no_favors",
+ "description": "no favor, no call",
+ "start_ymdh": {
+  "y": 1775,
+  "m": 4,
+  "d": 20,
+  "h": 0
+ },
+ "setup": {
+  "favors": 0
+ },
+ "order": {
+  "order": "lobby",
+  "action": "favor",
+  "bloc": "seaport_merchants"
+ },
+ "expect_error": "no_favors"
+}

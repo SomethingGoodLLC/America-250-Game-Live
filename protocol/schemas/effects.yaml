@@ -1,0 +1,96 @@
+# Campaign effects (Play America 250): the CLOSED set of things a measure or a decision can do.
+# Shared by politics.yaml and decisions.yaml. A key not listed here is refused at load, so a typo
+# cannot silently become "nothing happens". Every number is GAMEPLAY TUNING.
+$schema: "http://json-schema.org/draft-07/schema#"
+$id: "effects.v1"
+title: CampaignEffects
+type: object
+additionalProperties: false
+properties:
+  summary: {type: string, description: "Player-facing: what it costs or gives, in the words printed on the button and in the ledger."}
+  gold: {type: integer, description: "To the acting side's treasury (negative: a cost)."}
+  favors: {type: integer, description: "Favors owed to the player in his body."}
+  local_support: {type: integer, description: "Support: the country's support for the Patriot cause (0..100), whoever acts."}
+  british_attitude: {type: integer, description: "The British envoy's attitude toward the player."}
+  army_morale: {type: integer, description: "Every army of the acting side."}
+  army_readiness: {type: integer}
+  clerk_load: {type: integer, minimum: 0}
+  ministry_confidence: {type: integer, description: "The home government's confidence in the commander at Boston."}
+  upkeep_share_pct: {type: integer, minimum: 0, maximum: 100, description: "The body carries this share of the side's army pay from now on."}
+  price_rise_pct: {type: integer, description: "Everything the player buys costs this much more (added to any earlier rise)."}
+  reenlist_share_pct: {type: integer, minimum: 0, maximum: 100, description: "This share of every class of the side's armies re-enlists at no charge."}
+  detach_units: {type: integer, minimum: 0, description: "Units leave the side's army at headquarters, its largest classes first."}
+  start_evacuation: {type: boolean, description: "Starts the British evacuation countdown (campaign rules evacuation.countdown_hours)."}
+  set_flag: {type: string}
+  bloc_shift:
+    type: object
+    additionalProperties: {type: integer}
+    description: "Bloc id -> change of its lean."
+  persons:
+    type: array
+    items: {type: string}
+    description: "Persons (persons data ids) who become available."
+  stores:
+    type: object
+    additionalProperties: false
+    required: [province]
+    properties:
+      province: {type: string}
+      powder: {type: integer}
+      cartridges: {type: integer}
+      muskets: {type: integer}
+      provisions: {type: integer}
+      guns: {type: integer}
+  monthly:
+    type: object
+    additionalProperties: false
+    required: [province]
+    description: "A grant on the 1st of every month into that town's magazine, while the side holds the town."
+    properties:
+      province: {type: string}
+      powder: {type: integer, minimum: 0}
+      muskets: {type: integer, minimum: 0}
+      provisions: {type: integer, minimum: 0}
+  units:
+    type: array
+    items:
+      type: object
+      additionalProperties: false
+      required: [province, class, count]
+      properties:
+        province: {type: string}
+        class: {type: string}
+        count: {type: integer, minimum: 1}
+        allied: {type: boolean, description: "From another colony: these units begin to go home while Unity is under its floor."}
+        own_army: {type: string, description: "They form an army of their own under this id: never merged, and gone if left unpaid."}
+        army_name: {type: string}
+  battle_factors:
+    type: array
+    description: "A factor at a named town for a set number of days, shown on the pre-battle card with its source."
+    items:
+      type: object
+      additionalProperties: false
+      required: [province, label, value]
+      properties:
+        province: {type: string}
+        label: {enum: [morale, readiness, fortification, reinforcement]}
+        value: {type: integer}
+        days: {type: integer, minimum: 1}
+        one_battle: {type: boolean}
+        faction: {enum: [own, enemy], description: "Whose number it moves; own by default."}
+        text: {type: string}
+  fort:
+    type: object
+    additionalProperties: false
+    required: [province, levels]
+    properties:
+      province: {type: string}
+      levels: {type: integer}
+  lure:
+    type: object
+    additionalProperties: false
+    required: [province, days]
+    description: "The other side's field armies are drawn to this town for so many days."
+    properties:
+      province: {type: string}
+      days: {type: integer, minimum: 1}

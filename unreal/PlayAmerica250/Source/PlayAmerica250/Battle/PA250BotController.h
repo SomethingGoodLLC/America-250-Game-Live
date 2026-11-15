@@ -47,6 +47,8 @@ struct FPA250FormationOrder
 	bool bAimAtPoint = false;                  // presenting toward AimPoint (no man stands there)
 	FVector AimPoint = FVector::ZeroVector;
 	bool bHoldFire = false;                    // presented and waiting for the leader's shot
+	bool bHurry = false;                       // his leader's order: further than HurryBeyondCm from his place he runs
+	float HurryBeyondCm = 400.f;
 };
 
 /** Pure: duck behind the wall unless moving, charging, routing, or loaded with a target in sight (rise to fire). */
@@ -56,7 +58,7 @@ inline bool PA250ShouldDuck(bool bInCover, bool bAtSpot, bool bLoaded, bool bTar
 }
 
 /** What a bot does with his bayonet this instant. */
-enum class EPA250BotMelee : uint8 { Close, Thrust, Butt, Charge };
+enum class EPA250BotMelee : uint8 { Close, Thrust, Butt, Charge, Shove };
 
 struct FPA250BotMeleeView
 {
@@ -69,6 +71,9 @@ struct FPA250BotMeleeView
 	bool bResting = false;         // still recovering from my last blow
 	bool bChargeReady = false;
 	bool bFacing = true;           // a dash goes where I face
+	float ShoveReachCm = 170.f;    // battle_rules.json duel
+	bool bShoveReady = false;
+	bool bLastWasButt = false;     // my last blow was the stock: vary it
 };
 
 /** Pure: close in, thrust, butt-stroke or charge. A guard read correctly is answered by closing to
@@ -77,7 +82,12 @@ struct FPA250BotMeleeView
 inline EPA250BotMelee PA250ChooseMeleeMove(const FPA250BotMeleeView& V)
 {
 	if (V.bResting) return EPA250BotMelee::Close;
-	if (V.bFoeGuardsMe && V.bReadsGuard) return V.DistCm <= V.ButtReachCm ? EPA250BotMelee::Butt : EPA250BotMelee::Close;
+	if (V.bFoeGuardsMe && V.bReadsGuard)
+	{
+		// The shove opens his guard for the thrust that follows; used turn about with the stock.
+		if (V.bShoveReady && V.bLastWasButt && V.DistCm <= V.ShoveReachCm) return EPA250BotMelee::Shove;
+		return V.DistCm <= V.ButtReachCm ? EPA250BotMelee::Butt : EPA250BotMelee::Close;
+	}
 	if (V.DistCm <= V.ThrustReachCm) return EPA250BotMelee::Thrust;
 	if (V.DistCm <= V.LungeCm && V.bChargeReady && V.bFacing) return EPA250BotMelee::Charge;
 	return EPA250BotMelee::Close;
@@ -208,6 +218,9 @@ private:
 	 *  when there is none (or the enemy is on top of him) and he fights like any other man. */
 	bool TickSapper(ARFCharacter* Me, ARFCharacter* Enemy, float Dist, const struct FPA250BotTuningValues& T);
 	float LastSapperWork = -1.f;
+	/** A general keeps near his side's home post: drawn further than his radius he walks back, and
+	 *  with no enemy on top of him he stands at his station. False for every other man. */
+	bool TickGeneral(ARFCharacter* Me, ARFCharacter* Enemy, float Dist, const struct FPA250BotTuningValues& T);
 	/** A gunner goes to his place at one of his side's guns and stays there (the gun does the rest). */
 	bool TickGunner(ARFCharacter* Me, ARFCharacter* Enemy, float Dist, const struct FPA250BotTuningValues& T);
 	/** A surgeon goes to the nearest fallen man of his side he can still save and stays with him. */

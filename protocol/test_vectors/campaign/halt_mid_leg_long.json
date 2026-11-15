@@ -1,0 +1,14 @@
+{
+ "name": "halt_mid_leg_long",
+ "description": "two hours into the three-hour Chelsea road the army needs two march hours to get back to Medford, and a new march ordered meanwhile waits for it",
+ "start_ymdh": {"y": 1775, "m": 4, "d": 19, "h": 0},
+ "army": "continental_militia",
+ "army_province": "medford",
+ "march_to": "chelsea",
+ "march_hours_before_halt": 2,
+ "order": {"order": "halt", "army_id": "continental_militia"},
+ "expect_after_order": {"province": "medford", "path_edges": 0, "hours_into_edge": 0, "returning_hours": 2, "returning_edge": "chelsea-medford"},
+ "then_march_to": "menotomy",
+ "hours_after": 2,
+ "expect": {"province": "medford", "path_edges": 1, "hours_into_edge": 0, "returning_hours": 0}
+}

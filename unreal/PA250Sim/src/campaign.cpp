@@ -191,17 +191,19 @@ void cmp_tick_occupation(CampaignState& s) {
     if (detail::has_ceasefire(s)) return;
     for (auto& pk : s.provinces) {
         Province& p = pk.second;
-        bool brit = false, cont = false, passage = false;
+        bool brit = false, cont = false, passage = false, general = false;
         for (const auto& ak : s.armies) {
             if (ak.second.province != pk.first || detail::total_units(ak.second) <= 0) continue;
             (ak.second.faction == kBritish ? brit : cont) = true;
             if (detail::has_safe_passage(s, ak.first, pk.first)) passage = true;
+            general = general || detail::army_can_besiege(s, ak.second);
         }
         if (brit == cont || passage) continue;  // nobody, or both (a battle), or a guest
         const std::string occupier = brit ? kBritish : kContinental;
         if (p.owner == occupier) continue;
         if (p.fort_level > 0) {
             if (p.siege_by == occupier) continue;
+            if (!general) continue;  // a detachment with no general cannot besiege
             p.siege_by = occupier;
             p.siege_hours_remaining = battle_rules().siege_hours_per_fort_level * p.fort_level;
             cmp_note(s,
@@ -613,6 +615,27 @@ CampaignState apply_mission_effect(const CampaignState& in, const std::string& m
     }
     if (e.start_evacuation && !s.progress.evacuated && s.progress.evacuation_hours_remaining <= 0)
         s.progress.evacuation_hours_remaining = std::max(1, campaign_rules().evacuation_hours);
+    if (players) {
+        // What the card on the campaign map shows: the mission, and each thing it changed.
+        MissionResult res;
+        res.mission_id = m->id;
+        res.title = m->title;
+        res.outcome = outcome;
+        res.hour_index = s.now.hour_index;
+        res.gold = s.player_gold - in.player_gold;
+        res.local_support = s.local_support - support_before;
+        res.army_morale = e.army_morale;
+        res.army_readiness = e.army_readiness;
+        res.british_attitude = detail::map_get(s.relations, std::string(kBritish)) - detail::map_get(in.relations, std::string(kBritish));
+        res.stores_province = e.stores_province;
+        res.powder = e.powder;
+        res.cartridges = e.cartridges;
+        res.muskets = e.muskets;
+        res.provisions = e.provisions;
+        res.start_evacuation = e.start_evacuation && s.progress.evacuation_hours_remaining > in.progress.evacuation_hours_remaining;
+        res.summary = e.summary;
+        s.progress.mission_results.push_back(res);
+    }
     ResourceChange ch;
     ch.reason = std::string(players ? "Mission " : "The enemy's mission ") + (outcome == "complete" ? "done: " : "failed: ") +
                 m->title + (e.summary.empty() ? "" : " - " + e.summary);
@@ -939,8 +962,12 @@ std::string choose_ai_target(const CampaignState& s, const std::string& army_id)
             const bool guns = s.progress.knox.status == "delivered" && s.progress.knox.province == pk.first;
             value += (p.fort_level > 0 || guns) ? R.v_heights_fortified : R.v_heights;
         }
-        const int defenders = cmp_units_in(s, pk.first, enemy);
+        // What the army's side knows of the defenders: exact when scouted, else a rough count.
+        int defenders = 0;
+        for (const auto& dk : s.armies)
+            if (dk.second.province == pk.first && dk.second.faction == enemy) defenders += detail::units_as_seen(s, army.faction, dk.second);
         if (defenders <= 0) value += R.v_weak;
+        value += detail::ai_lure_value(s, army.faction, pk.first);
         if (detail::contains(p.terrain, "farmland")) value += R.v_forage;
         if (wanted.count(pk.first)) value += R.v_mission;
         const long score = value * 1000L / (static_cast<long>(std::max(1, hours)) * (1 + defenders));
@@ -987,6 +1014,13 @@ void campaign_daily_ai(CampaignState& s) {
         if (!garrison.empty() && detail::total_units(s.armies.at(garrison)) > R.ai_garrison_max) {
             Army& g = s.armies.at(garrison);
             int surplus = detail::total_units(g) - R.ai_garrison_units;
+            // A column with no general to lead it is a detachment, and no bigger than one.
+            {
+                Army probe;
+                probe.id = "";
+                const int cap = detail::army_unit_cap(s, probe);
+                if (cap > 0) surplus = std::min(surplus, cap);
+            }
             Army field;
             field.id = ai + "_field_" + std::to_string(s.next_command_seq++);
             field.name = ai == kBritish ? "British Column" : "Continental Column";
@@ -1131,16 +1165,44 @@ BattleResult auto_resolve_battle(const CampaignState& state, const BattleSetup& 
             }
         r.shots_fired[faction] = static_cast<int>(men * std::min(sit->second.rounds_per_man, B.rounds_max) / 2);
     };
-    take(loser, R.ar_loser_pct);
-    take(r.winner, R.ar_winner_pct);
+    // A letter's orders for this fight: a side that withdraws early loses fewer men, one that stands
+    // fast loses more (the factor's value is the percent of what it would have lost).
+    auto ordered = [&](const std::string& faction, int pct) {
+        auto sit = setup.sides.find(faction);
+        if (sit == setup.sides.end()) return pct;
+        for (const SideFactor& f : sit->second.factors)
+            if ((f.label == "withdraw_early" || f.label == "stand_fast") && f.value > 0) pct = pct * f.value / 100;
+        return pct;
+    };
+    take(loser, ordered(loser, R.ar_loser_pct));
+    take(r.winner, ordered(r.winner, R.ar_winner_pct));
     auto lit = setup.sides.find(loser);
     if (lit != setup.sides.end()) r.retreat_province = lit->second.retreat_province;
+    // A general on the beaten side falls in one fight in five; a rout doubles it (sim only, seeded).
+    if (lit != setup.sides.end() && !lit->second.commander_id.empty()) {
+        const int chance = r.end_reason == "army_broke" ? 40 : 20;
+        if (static_cast<int>(detail::mix64(setup.seed ^ detail::fnv1a("falls:" + loser)) % 100ULL) < chance)
+            r.commander_events[loser] = commander_fate(setup.seed, loser);
+    }
     return r;
 }
 
 CampaignState run_idle_campaign(const CampaignState& state, int max_hours) {
     CampaignState s = state;
     for (int i = 0; i < max_hours && !s.progress.outcome.decided; ++i) {
+        if (!s.pass.pending_decision.empty()) {
+            // The idle player takes each decision's first option that needs nobody sent.
+            const nlohmann::json d = nlohmann::json::parse(decision_json(s));
+            std::string taken;
+            for (const auto& o : d.at("options"))
+                if (taken.empty() && o.value("commit_role", std::string()).empty()) taken = o.at("id").get<std::string>();
+            std::string error;
+            const CampaignState after = apply_campaign_order(
+                s, nlohmann::json{{"order", "decide"}, {"decision", s.pass.pending_decision}, {"option", taken}}.dump(), error);
+            if (error.empty()) s = after;
+            else
+                s.pass.pending_decision.clear();
+        }
         s = advance_hour(s).state;
         if (!s.pending_battle.active) continue;
         const BattleSetup setup = build_battle_setup(s, s.pending_battle.province);
