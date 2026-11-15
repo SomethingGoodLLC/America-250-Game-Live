@@ -682,9 +682,9 @@ static void test_field_never_exceeds_the_men_fielded() {
     const BattleSetup b = build_battle_setup(s, "concord");
     CHECK(ticket_sum(b.sides.at(kContinental).tickets) == 22);  // every unit of the Massachusetts Militia
     CHECK(b.sides.at(kContinental).field_strength >= battle_rules().field_min);
-    // One British company goes down to the bridge, and the field is shared out over that company.
-    CHECK(ticket_sum(b.sides.at(kBritish).tickets) == 6);
-    CHECK(b.sides.at(kBritish).field_strength <= 6 * spu);
+    // Bridge company matches the defender (parity); the field is shared out over those men.
+    CHECK(ticket_sum(b.sides.at(kBritish).tickets) == 22);
+    CHECK(b.sides.at(kBritish).field_strength <= 22 * spu);
     bool named = false;
     for (const auto& f : b.sides.at(kBritish).factors)
         if (f.label == "men" && f.value < 0 && f.source.find("North Bridge") != std::string::npos) named = true;
@@ -2004,6 +2004,55 @@ static void test_ai_recruits_support_classes() {
         s.province_stores["boston"].provisions = 500;
         return s;
     };
+    // Colour party / drums need a Militia Muster (Boston opens with one). In April 1775 they can be raised.
+    {
+        CampaignArc arc;
+        CHECK(fresh().provinces.at("boston").militia_muster);
+        std::string err;
+        auto crown_april = [&]() {
+            CampaignState s = funded();
+            s.player_faction = kBritish;
+            s.player_gold = 5000;
+            return s;
+        };
+        CHECK(to_ymdh(crown_april().now).m == 4 && to_ymdh(crown_april().now).y == 1775);
+        // As the Crown in April: King's colour and drums need the Muster; pioneers still need the Fort.
+        start_recruitment(crown_april(), "boston", "kings_colour", err);
+        CHECK(err.empty());
+        start_recruitment(crown_april(), "boston", "drums", err);
+        CHECK(err.empty());
+        start_recruitment(crown_april(), "boston", "pioneer_party", err);
+        CHECK(err.empty());
+        // Without a Muster, colour party is refused.
+        CampaignState no_muster = crown_april();
+        no_muster.provinces.at("boston").militia_muster = false;
+        start_recruitment(no_muster, "boston", "kings_colour", err);
+        CHECK(err == "needs_building");
+        // AI settle in April also raises ensign/musician once furthest under target.
+        CampaignState ai = funded();
+        const int ensign_before = detail_units(british_units(ai), "ensign");
+        const int musician_before = detail_units(british_units(ai), "musician");
+        for (int i = 0; i < 24; ++i) settle_enemy_budget(ai);
+        CHECK(detail_units(british_units(ai), "ensign") > ensign_before ||
+              detail_units(british_units(ai), "musician") > musician_before);
+        // Continental colour / fifes at Concord need a Muster (Concord opens without one).
+        CampaignState pat = fresh();
+        pat.player_gold = 500;
+        pat.province_stores["concord"].provisions = 50;
+        start_recruitment(pat, "concord", "colour_party", err);
+        CHECK(err == "needs_building");
+        start_recruitment(pat, "concord", "fifes_and_drums", err);
+        CHECK(err == "needs_building");
+        CampaignState with_muster = pat;
+        with_muster.provinces.at("concord").militia_muster = true;
+        start_recruitment(with_muster, "concord", "colour_party", err);
+        CHECK(err.empty());
+        start_recruitment(pat, "concord", "fifes_and_drums", err);  // still no muster on pat
+        CHECK(err == "needs_building");
+        CampaignState fifes = with_muster;
+        start_recruitment(fifes, "concord", "fifes_and_drums", err);
+        CHECK(err.empty());
+    }
     {
         CampaignArc arc;
         CHECK(!campaign_rules().ai_recruit_targets.empty());
@@ -2017,7 +2066,11 @@ static void test_ai_recruits_support_classes() {
                 if (kv.second > detail_units(was, kv.first)) raised.push_back(kv.first);
         }
         CHECK(raised.size() == 12);  // one company a month
+        // Opening line is the furthest under its share, so the first company is foot, not colour.
+        // The Muster lets ensign and drums be raised; it does not spend the whole year on them.
+        CHECK(!raised.empty() && raised.front() == "line_infantry");
         const std::map<std::string, int> after = british_units(s);
+        CHECK(detail_units(after, "line_infantry") > detail_units(before, "line_infantry"));
         for (const char* cls : {"sapper", "ensign", "musician", "surgeon"}) {
             if (detail_units(after, cls) <= detail_units(before, cls)) g_reporter()->message(std::string("never raised: ") + cls);
             CHECK(detail_units(after, cls) > detail_units(before, cls));
@@ -2777,7 +2830,8 @@ static void test_escalate_risks_the_ground() {
 }
 
 static void test_concord_bridge_company() {
-    // The fight just played: seventeen British companies against five provincials.
+    // A worn fight: seventeen British companies against five provincials — the bridge company
+    // matches the defender (parity), never outnumbers them.
     CampaignState late = fresh();
     late.ai_objective.clear();
     late.pending_battle = {true, "concord", "british_regulars", "continental_militia"};
@@ -2793,9 +2847,9 @@ static void test_concord_bridge_company() {
     for (const auto& kv : worn.sides.at("continental").tickets) prov += std::max(0, kv.second);
     CHECK(brit == 5);
     CHECK(prov == 5);
-    CHECK(brit <= 6);
+    CHECK(brit == prov);
 
-    // A fresh column still sends only one company onto the bridge.
+    // Opening shipped column at Concord: British fielded men at least match the militia (parity).
     CampaignState early = fresh();
     early.ai_objective.clear();
     early.pending_battle = {true, "concord", "british_regulars", "continental_militia"};
@@ -2805,20 +2859,45 @@ static void test_concord_bridge_company() {
     early.province_stores["concord"].muskets = 40;
     early.province_stores["concord"].cartridges = 80;
     BattleSetup open = build_battle_setup(early, "concord");
-    // The opening column is mixed (line, grenadiers, light infantry, an officer): the company of six
-    // is drawn from each in proportion, and every class it sends is one the column has.
     int company = 0;
     for (const auto& kv : open.sides.at("british").tickets) {
         company += kv.second;
         CHECK(kv.second <= early.armies.at("british_regulars").units.at(kv.first));
     }
-    CHECK(company == 6);
-    CHECK(open.sides.at("british").tickets.at("line_infantry") == 3);
-    CHECK(open.sides.at("british").tickets.at("grenadier") == 1);
-    CHECK(open.sides.at("british").tickets.at("light_infantry") == 2);
     int full = 0;
     for (const auto& kv : open.sides.at("continental").tickets) full += std::max(0, kv.second);
-    CHECK(full > 6);
+    CHECK(full == 22);  // opening militia
+    CHECK(company == full);  // match_defender_units: parity
+    const int spu = battle_rules().soldiers_per_unit;
+    CHECK(company * spu >= full * spu);
+    // The rest of the column waits in the town (2 units → 8 men stood down).
+    int stood_men = 0;
+    for (const auto& f : open.sides.at(kBritish).factors)
+        if (f.label == "men" && f.value < 0 && f.source.find("North Bridge") != std::string::npos) stood_men += -f.value;
+    CHECK(stood_men == 2 * spu);
+}
+
+static void test_concord_opening_parity() {
+    // Shipped scenario: Concord fight gives the British at least parity with the Continentals.
+    CampaignState s = fresh();
+    s.ai_objective.clear();
+    s.pending_battle = {true, "concord", "british_regulars", "continental_militia"};
+    s.armies.at("british_regulars").province = "concord";
+    s.armies.at("continental_militia").province = "concord";
+    s.province_stores["concord"].muskets = 40;
+    s.province_stores["concord"].cartridges = 80;
+    const BattleSetup b = build_battle_setup(s, "concord");
+    auto men_of = [](const SideSetup& side) {
+        int n = 0;
+        for (const auto& f : side.factors)
+            if (f.label == "men") n += f.value;
+        return n;
+    };
+    const int brit = men_of(b.sides.at(kBritish));
+    const int cont = men_of(b.sides.at(kContinental));
+    CHECK(cont == 88);
+    CHECK(brit >= cont);
+    CHECK(brit == 88);
 }
 
 static void test_ceasefire_blocks_march() {
@@ -2957,6 +3036,34 @@ static void test_halt_orders() {
             if (i + 1 < after) CHECK(s.armies.at(army).returning_hours > 0 || v.at("expect_after_order").at("returning_hours").get<int>() == 0);
         }
         check_army(s.armies.at(army), v.at("expect"));
+        // A 1 h turn-about is finished by the hour that applies the halt, so a probe that
+        // advances once never sees returning_hours. Two hours into a 3 h edge still owes one.
+        if (name == files.front()) {
+            CampaignState live = fresh();
+            live.now = from_ymdh(YMDH{1775, 4, 19, 8});
+            live.ai_objective.clear();
+            live.treaties.push_back({"ceasefire", 24 * 30, "", ""});
+            Army& col = live.armies.at("british_regulars");
+            col.province = "boston";
+            col.previous_province = "boston";
+            col.path = {"boston-cambridge"};
+            col.hours_into_edge = 2;
+            std::string error;
+            const CampaignState turned = halt_army(live, "british_regulars", error);
+            CHECK(error.empty() && turned.armies.at("british_regulars").returning_hours == 2 &&
+                  turned.armies.at("british_regulars").province == "boston" && turned.armies.at("british_regulars").path.empty());
+            const CampaignState hour = advance_hour(turned).state;
+            CHECK(hour.armies.at("british_regulars").returning_hours == 1);
+            CHECK(hour.armies.at("british_regulars").province == "boston");
+            CHECK(hour.armies.at("british_regulars").path.empty());
+            Army& short_leg = live.armies.at("continental_militia");
+            short_leg.path = {"lincoln-lexington"};
+            short_leg.province = "lincoln";
+            short_leg.hours_into_edge = 1;
+            const CampaignState about = halt_army(live, "continental_militia", error);
+            CHECK(about.armies.at("continental_militia").returning_hours == 1);
+            CHECK(advance_hour(about).state.armies.at("continental_militia").returning_hours == 0);
+        }
         if (v.contains("then_march_to")) {
             // The new march starts only now, and march_plan says when it ends.
             const PathPlan plan = march_plan(s, army);
@@ -3707,7 +3814,7 @@ static void test_province_supply_and_battle_ledger() {
         const int prov = ticket_sum(b.sides.at("continental").tickets);
         const int brit = ticket_sum(b.sides.at("british").tickets);
         CHECK(prov > 1);
-        CHECK(brit <= 6);
+        CHECK(brit == prov);  // bridge_company.match_defender_units: parity
         CHECK(brit <= prov);
         CHECK(b.sides.at("continental").tickets.at("militia") == 17);
     }
@@ -3847,7 +3954,7 @@ static void test_starting_buildings_satisfy_tags() {
             CHECK(!building_grandfathered(pk.second, id));
         }
     }
-    CHECK(standing == 8);  // Concord 2, Cambridge 2, Charlestown 1, Boston 3
+    CHECK(standing == 9);  // Concord 2, Cambridge 2, Charlestown 1, Boston 4 (Fort, Depot, Workshop, Militia Muster)
     CHECK(count_log(s, "grandfathered:") == 0);
     // The three starting Depots all trade: Concord and Cambridge at a crossroads, Boston on its harbour.
     for (const char* town : {"concord", "cambridge"}) {
@@ -5483,9 +5590,12 @@ static void test_enemy_economy() {
     CHECK(enemy_faction(s) == kBritish);
     CHECK(s.progress.enemy_gold == 60);
     // Boston: levy + depot trade + the subsidy by sea, against pay for the field army, the garrison
-    // and upkeep. The Phase 4 retune (levy 4, pay 3, subsidy 135) leaves the Crown +3 a month, as before.
+    // and upkeep. Subsidy 149 keeps the Crown at +3 with the Militia Muster's 2 gold of upkeep.
     const int net = enemy_monthly_net_gold(s);
     CHECK(net == 3);
+    CampaignState no_muster = s;
+    no_muster.provinces.at("boston").militia_muster = false;
+    CHECK(enemy_monthly_net_gold(no_muster) == net + 2);
     const int men0 = s.armies.at("british_regulars").units.at("line_infantry");
     CampaignState m = s;
     const int prov0 = m.province_stores.at("boston").provisions;
@@ -5626,6 +5736,7 @@ inline int run_all(Reporter& rep, const std::string& data_dir, const std::string
         {"letter_survives_contact", test_letter_survives_contact},
         {"escalate_risks_the_ground", test_escalate_risks_the_ground},
         {"concord_bridge_company", test_concord_bridge_company},
+        {"concord_opening_parity", test_concord_opening_parity},
         {"halt_cancels_move", test_halt_cancels_move},
         {"halt_orders", test_halt_orders},
         {"broken_path_does_not_teleport", test_broken_path_does_not_teleport},
@@ -5693,6 +5804,7 @@ inline int run_all(Reporter& rep, const std::string& data_dir, const std::string
         {"pass_politics", test_pass_politics},
         {"pass_decisions", test_pass_decisions},
         {"letters_have_consequences", test_letters_have_consequences},
+        {"letter_numbers_are_data", test_letter_numbers_are_data},
     };
     for (auto& c : cases) {
         int before = g_failed();

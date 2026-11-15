@@ -18,8 +18,10 @@ public:
 	/** Local player's hit: X on the crosshair (white hit / red kill) + "HIT -78" / "KILL  68 m". */
 	void ShowHitmarker(bool bKill, float Damage = 0.f, float DistanceM = 0.f);
 	/** Victim-facing damage direction (world hit location → screen edge wedge). */
-	/** Pure: 1 for the first 25 s of the HUD's life, fading to 0 by 30 s. */
+	/** Pure: controls legend no longer auto-shows (always 0); F1 hold is handled in the widget. */
 	static float LegendFade(float AgeSeconds);
+	/** Pure: an open class picker paints no battle chrome (score, reticle, legend, feeds). */
+	static bool ChromeSuppressed(bool bPickerOpen) { return bPickerOpen; }
 	void ShowDamageDirection(const FVector& WorldHitLocation);
 	bool IsReticleHostile() const;
 	bool IsReticleBlocked() const;

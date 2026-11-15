@@ -100,6 +100,11 @@
     "landing_town_tag": "harbor",
     "assault_min_fort_level": 1,
     "conquest_presets": ["concord_bridge", "battle_road"],
+    "bridge_company": {
+      "note": "GAME INVENTION. At Concord (concord_bridge) only part of the British column goes down to the North Bridge; the rest waits in the town. When match_defender_units is true the company matches the provincial units on the field (never outnumbers them), so the opening fight is at least parity when the column is large enough. fallback_units is used only if the defender has no units.",
+      "match_defender_units": true,
+      "fallback_units": 6
+    },
     "assault": {
       "note": "GAME INVENTION. The defender holds every post. The attacker must carry them in order, nearest his start first: only the next one can be contested, and a post he has carried stays his. Each post carried adds seconds_per_post_carried to the clock. When the clock runs out the defender has held (time_limit, the defender wins); when the attacker carries the last post the field is his (posts_swept). No reserve bleed for posts. garrison_share_pct of the defender's squads stand at the post under attack.",
       "seconds_per_post_carried": 120,

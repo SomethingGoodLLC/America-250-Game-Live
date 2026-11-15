@@ -117,6 +117,9 @@ public:
 	bool RekitPlayer(APlayerController* PC, FName UnitClass);
 	/** The class picker is up before the player's first shot of the battle (Deploy re-kits, it does not spawn). */
 	bool IsOpeningClassPick() const { return bOpeningClassPick; }
+	/** Class / spawn picker is on screen (opening pick or respawn). Battle HUD chrome hides while this is true. */
+	bool IsClassPickerOpen() const;
+	class UPA250BattleHUD* GetBattleHud() const { return Hud; }
 	void EndOpeningClassPick();
 	int32 TicketsRemaining(FName Faction, FName UnitClass) const;
 	float TimeRemaining() const;

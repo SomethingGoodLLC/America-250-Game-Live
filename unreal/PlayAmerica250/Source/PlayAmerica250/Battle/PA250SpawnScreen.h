@@ -26,6 +26,8 @@ public:
 	void OpenFor(APlayerController* PC, APA250BattleGameMode* GM);
 	/** What the Deploy button does. Public so scripted probes can press it. */
 	void Confirm();
+	/** Headless: the portrait plate this class would get. Always a slot; bOutMissing when LoadObject fails (logged MISSING). */
+	static bool PortraitSlotFor(const FString& Side, const FString& ClassId, bool& bOutMissing);
 
 protected:
 	virtual TSharedRef<SWidget> RebuildWidget() override;

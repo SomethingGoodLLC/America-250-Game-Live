@@ -166,6 +166,9 @@ void pass_side_setup(const CampaignState& s, const Province& ground, const Army&
                      bool owns_ground, SideSetup& side);
 void pass_setup_done(const CampaignState& s, BattleSetup& setup);
 void pass_after_battle(CampaignState& s, const CampaignState& before, const BattleResult& r, const PendingBattle& pb);
+// The opening roles and what is already at sea, once per campaign: load_scenario calls it, and the
+// first tick or order does for a state made before the data was loaded. Nothing without pass data.
+void pass_seed(CampaignState& s);
 // Hourly, from tick_campaign's place in advance_hour.
 void pass_tick(CampaignState& s, std::vector<Interrupt>& interrupts);
 // An army with no general is a detachment: it cannot besiege. True when persons are not loaded.

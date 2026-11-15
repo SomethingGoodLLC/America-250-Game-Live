@@ -58,6 +58,7 @@ DECISIONS = _data("decisions_boston_1775.json")["decisions"]
 SCENARIO = _data("boston1775.json")
 TOWNS = {p["id"] for p in SCENARIO["provinces"]}
 ARMIES = {a["id"] for a in SCENARIO["armies"]}
+ARMY_FACTION = {a["id"]: a["faction"] for a in SCENARIO["armies"]}
 CLASSES = {
     c for faction in _data("unit_classes.json")["factions"].values() for c in faction
 }
@@ -159,6 +160,8 @@ def test_the_roster_the_task_names_is_all_there() -> None:
         john_hancock paul_revere william_dawes richard_gridley henry_knox john_glover daniel_morgan
         mercy_otis_warren benjamin_church thomas_gage hugh_percy francis_smith john_pitcairn
         samuel_graves henry_de_berniere timothy_ruggles william_howe henry_clinton john_burgoyne""".split()
+    # Not in the task's list: the colonel who commands the opening militia (user decision 2026-11-15).
+    wanted.append("james_barrett")
     assert set(wanted) == PERSON_IDS
     by_id = {p["id"]: p for p in PERSONS["persons"]}
     for general in (p for p in PERSONS["persons"] if "general" in p["roles"]):
@@ -179,6 +182,22 @@ def test_the_roster_the_task_names_is_all_there() -> None:
         abilities["mercy_otis_warren"] == "pen"
         and abilities["henry_de_berniere"] == "scout"
     )
+
+
+def test_every_opening_army_has_a_commander_from_the_first_hour() -> None:
+    """No army opens as a detachment: each has one man who starts as its general."""
+    commands: dict[str, list[str]] = {}
+    for p in PERSONS["persons"]:
+        start = p.get("starts_as", {})
+        if start.get("role") == "general":
+            commands.setdefault(start["army_id"], []).append(p["id"])
+            assert p["side"] == ARMY_FACTION[start["army_id"]], p["id"]
+            assert "general" in p["roles"] and len(p["traits"]) == 2, p["id"]
+    assert set(commands) == ARMIES
+    assert all(len(who) == 1 for who in commands.values()), commands
+    assert commands["continental_militia"] == ["james_barrett"]
+    barrett = next(p for p in PERSONS["persons"] if p["id"] == "james_barrett")
+    assert barrett["rank"] == "Colonel" and barrett["basis"] == "documented"
 
 
 def test_persons_name_only_things_that_exist() -> None:

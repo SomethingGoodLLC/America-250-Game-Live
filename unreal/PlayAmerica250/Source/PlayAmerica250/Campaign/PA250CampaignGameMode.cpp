@@ -13,6 +13,7 @@
 #include "Misc/CommandLine.h"
 #include "PA250CampaignPlayerController.h"
 #include "PA250MapWidget.h"
+#include "UI/PA250BattleCards.h"
 #include "UI/PA250CampaignArcPanels.h"
 #include "UI/PA250CityViewWidget.h"
 #include "PA250ProvinceMapActor.h"
@@ -242,6 +243,27 @@ void APA250CampaignGameMode::BeginPlay()
 		}), 16.f, false);
 	}
 
+	if (FParse::Param(FCommandLine::Get(), TEXT("PA250RecruitProbe")))
+	{
+		// Colour party / Fifes need a Militia Muster: Concord Forces tab, then quit. Never saves.
+		Sub->SetPaused(true);
+		FTimerHandle Open, Shot, QuitHandle;
+		GetWorldTimerManager().SetTimer(Open, FTimerDelegate::CreateLambda([this]() {
+			if (!MapWidget) return;
+			MapWidget->HandleTownClicked(TEXT("concord"));
+			if (UPA250CityViewWidget* CV = MapWidget->GetCityView()) CV->SelectTab(1);
+			UE_LOG(LogTemp, Display, TEXT("RECRUIT_PROBE: concord Forces open=%d; scoreboard '%s'"), MapWidget->IsCityViewOpen() ? 1 : 0,
+				   *PA250ArcPanels::LiveScoreboard(UPA250Subsystem::Get(this)->GetState()));
+		}), 10.f, false);
+		GetWorldTimerManager().SetTimer(Shot, FTimerDelegate::CreateLambda([this]() {
+			if (APlayerController* PC = GetWorld()->GetFirstPlayerController()) PC->ConsoleCommand(TEXT("Shot showui"));
+			UE_LOG(LogTemp, Display, TEXT("RECRUIT_PROBE: shot town_forces_muster"));
+		}), 13.f, false);
+		GetWorldTimerManager().SetTimer(QuitHandle, FTimerDelegate::CreateLambda([this]() {
+			UKismetSystemLibrary::QuitGame(this, nullptr, EQuitPreference::Quit, false);
+		}), 15.f, false);
+	}
+
 	if (FParse::Param(FCommandLine::Get(), TEXT("PA250MarchProbe")))
 	{
 		// M1 of the campaign pass, in a real window: the militia is ordered Concord to Menotomy,
@@ -288,23 +310,67 @@ void APA250CampaignGameMode::BeginPlay()
 			Line(TEXT("marching"));
 		}), 11.f, false);
 		GetWorldTimerManager().SetTimer(Shot1, FTimerDelegate::CreateLambda([Shot, Line]() { Line(TEXT("before the shot")); Shot(TEXT("march_route")); }), 13.f, false);
-		GetWorldTimerManager().SetTimer(Halt, FTimerDelegate::CreateLambda([this, Line]() {
+		auto TokenAtTown = [this](const TCHAR* What) {
 			UPA250Subsystem* PS = UPA250Subsystem::Get(this);
-			if (!PS || !MapWidget) return;
+			if (!PS || !MapActor) return;
+			FVector Tok;
+			if (!MapActor->GetArmyTokenLocation(TEXT("continental_militia"), Tok))
+			{
+				UE_LOG(LogTemp, Warning, TEXT("MARCH_PROBE: %s: no militia token"), What);
+				return;
+			}
+			const pa250::Army& A = PS->GetState().armies.at("continental_militia");
+			const FString Pid = UTF8_TO_TCHAR(A.province.c_str());
+			const FVector Town = MapActor->GetTokenWorld(Pid);
+			const float DistTown = FVector::Dist2D(Tok, Town);
+			FVector Anchor;
+			const bool bAnchor = MapActor->GetArmyTargetAnchor(TEXT("continental_militia"), Anchor);
+			const float DistAnchor = bAnchor ? FVector::Dist2D(Tok, Anchor) : -1.f;
+			// The slot sits beside the label. A halted army snaps onto that slot, including while it still owes the turn-about.
+			const bool bLive = A.returning_hours > 0 && A.path.empty() && A.province == "lincoln" && bAnchor && DistAnchor < 5.f;
+			UE_LOG(LogTemp, Display, TEXT("MARCH_PROBE: %s: token at province %s returning=%d dist_to_town=%.1f dist_to_slot=%.1f path_empty=%d live_turnabout=%d"),
+				   What, *Pid, A.returning_hours, DistTown, DistAnchor, A.path.empty() ? 1 : 0, bLive ? 1 : 0);
+			if (FCString::Strcmp(What, TEXT("halt mid-leg")) == 0 && !bLive)
+			{
+				UE_LOG(LogTemp, Warning, TEXT("MARCH_PROBE: halt mid-leg expected a live turn-about snapped to Lincoln (returning=%d dist_to_slot=%.1f)"),
+					A.returning_hours, DistAnchor);
+			}
+		};
+		GetWorldTimerManager().SetTimer(Halt, FTimerDelegate::CreateLambda([this, Line, TokenAtTown]() {
+			UPA250Subsystem* PS = UPA250Subsystem::Get(this);
+			if (!PS || !MapWidget || !MapActor) return;
 			UE_LOG(LogTemp, Display, TEXT("MARCH_PROBE: halt button shown=%d"), MapWidget->CanHaltSelected() ? 1 : 0);
 			MapWidget->PressHalt();
-			FString Err;
-			PS->AdvanceHours(1, Err); // the halt is an order: it applies on the next hour
+			// The halt is queued for the next hour, and that hour would also finish a 1 h turn-about.
+			// Apply it now, before anyone marches, so the token is read while returning_hours is still owed.
+			pa250::CampaignState St = PS->GetState();
+			std::vector<pa250::Command> Kept;
+			for (const pa250::Command& C : St.pending_commands)
+			{
+				if (C.payload.kind == pa250::CommandKind::HaltArmy && C.payload.army_id == "continental_militia") continue;
+				Kept.push_back(C);
+			}
+			St.pending_commands = std::move(Kept);
+			std::string Herr;
+			St = pa250::halt_army(St, "continental_militia", Herr);
+			const std::string Path = TCHAR_TO_UTF8(*FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("PA250"), TEXT("halt_probe_state.json")));
+			std::string LoadErr;
+			const bool bLoaded = pa250::write_text_file(Path, pa250::serialize(St)) && PS->GetControllerMutable().load(Path, LoadErr);
 			PS->BumpHudEpoch();
-			Line(TEXT("halted"));
+			MapActor->SnapArmyTokens();
+			UE_LOG(LogTemp, Display, TEXT("MARCH_PROBE: halt applied before movement loaded=%d %s"), bLoaded ? 1 : 0, UTF8_TO_TCHAR(LoadErr.c_str()));
+			Line(TEXT("halted mid-leg"));
+			TokenAtTown(TEXT("halt mid-leg"));
 		}), 15.f, false);
 		GetWorldTimerManager().SetTimer(Shot2, FTimerDelegate::CreateLambda([Shot]() { Shot(TEXT("march_halted")); }), 17.f, false);
-		GetWorldTimerManager().SetTimer(Back, FTimerDelegate::CreateLambda([this, Line]() {
+		GetWorldTimerManager().SetTimer(Back, FTimerDelegate::CreateLambda([this, Line, TokenAtTown]() {
 			UPA250Subsystem* PS = UPA250Subsystem::Get(this);
 			if (!PS) return;
 			FString Err;
 			for (int32 i = 0; i < 12 && PS->GetState().armies.at("continental_militia").returning_hours > 0; ++i) PS->AdvanceHours(1, Err);
-			Line(TEXT("back"));
+			PS->BumpHudEpoch();
+			Line(TEXT("back at rest"));
+			TokenAtTown(TEXT("halt at rest"));
 		}), 18.5f, false);
 		GetWorldTimerManager().SetTimer(QuitHandle, FTimerDelegate::CreateLambda([this]() {
 			UKismetSystemLibrary::QuitGame(this, nullptr, EQuitPreference::Quit, false);
@@ -314,8 +380,8 @@ void APA250CampaignGameMode::BeginPlay()
 	if (FParse::Param(FCommandLine::Get(), TEXT("PA250PassProbe")))
 	{
 		// The campaign pass in a real window: the people panel, the floor of the Provincial Congress,
-		// the pre-battle card of the first contact with a general on each side (the militia's is
-		// stamped on for the picture), and the decision of 13 June reached by loading a quiet copy of
+		// the pre-battle card of the first contact with a commander on each side (Colonel Barrett has
+		// the militia from the first hour), and the decision of 13 June reached by loading a quiet copy of
 		// the campaign at that date. Four stills, the decision answered through its own button's
 		// order, then quit. The save is never written.
 		Sub->SetPaused(true);
@@ -335,7 +401,21 @@ void APA250CampaignGameMode::BeginPlay()
 			UE_LOG(LogTemp, Display, TEXT("PASS_PROBE: people open=%d; persons loaded=%d politics=%d decisions=%d"), MapWidget->IsPeopleOpen() ? 1 : 0,
 				pa250::persons_loaded() ? 1 : 0, pa250::politics_loaded() ? 1 : 0, pa250::decisions_loaded() ? 1 : 0);
 		}), 10.f, false);
-		GetWorldTimerManager().SetTimer(T2, FTimerDelegate::CreateLambda([Shot]() { Shot(TEXT("people_panel")); }), 12.5f, false);
+		GetWorldTimerManager().SetTimer(T2, FTimerDelegate::CreateLambda([this, Shot]() {
+			// The top bar as laid out in this window: every piece at the width it wants, on the screen.
+			if (MapWidget)
+			{
+				bool bFits = false;
+				const FString Report = MapWidget->TopBarReport(bFits);
+				UE_LOG(LogTemp, Display, TEXT("PASS_PROBE: top bar %s: %s"), bFits ? TEXT("FITS") : TEXT("DOES NOT FIT"), *Report);
+			}
+			if (UPA250Subsystem* PS = UPA250Subsystem::Get(this))
+			{
+				UE_LOG(LogTemp, Display, TEXT("PASS_PROBE: the militia's commander: '%s'"),
+					UTF8_TO_TCHAR(pa250::person_name(pa250::general_of(PS->GetState(), "continental_militia")).c_str()));
+			}
+			Shot(TEXT("people_panel"));
+		}), 12.5f, false);
 		GetWorldTimerManager().SetTimer(T3, FTimerDelegate::CreateLambda([this]() {
 			if (!MapWidget) return;
 			MapWidget->PressFloorToggle();
@@ -348,8 +428,7 @@ void APA250CampaignGameMode::BeginPlay()
 			MapWidget->PressFloorToggle();
 			FString Err;
 			for (int32 i = 0; i < 72 && !PS->IsBattlePending(); ++i) PS->AdvanceHours(1, Err);
-			PS->GetControllerMutable().stamp_general(PS->GetState().pending_battle.defender_army, "william_heath");
-			PS->BumpHudEpoch();
+			PS->BumpHudEpoch(); // the militia's colonel is its own since the first hour: nobody is stamped on for the picture
 			const pa250::BattleSetup Setup = pa250::build_battle_setup(PS->GetState(), PS->GetState().pending_battle.province);
 			for (const auto& Side : Setup.sides)
 			{
@@ -743,6 +822,52 @@ void APA250CampaignGameMode::BeginPlay()
 		GetWorldTimerManager().SetTimer(ArcQuit, FTimerDelegate::CreateLambda([this]() {
 			UKismetSystemLibrary::QuitGame(this, nullptr, EQuitPreference::Quit, false);
 		}), 22.f, false);
+	}
+
+	if (FParse::Param(FCommandLine::Get(), TEXT("PA250ConcordIntel")))
+	{
+		// Concord with an organizer in the town: the British Men row is the bridge company, not an estimate.
+		Sub->SetPaused(true);
+		auto Shot = [this](const TCHAR* What) {
+			if (APlayerController* PC = GetWorld()->GetFirstPlayerController()) PC->ConsoleCommand(TEXT("Shot showui"));
+			UE_LOG(LogTemp, Display, TEXT("CARD_PROBE: shot %s"), What);
+		};
+		FTimerHandle Setup, Still, QuitHandle;
+		GetWorldTimerManager().SetTimer(Setup, FTimerDelegate::CreateLambda([this]() {
+			UPA250Subsystem* PS = UPA250Subsystem::Get(this);
+			if (!PS) return;
+			pa250::CampaignState St = PS->GetState();
+			St.ai_objective.clear();
+			St.armies.at("continental_militia").province = "concord";
+			St.armies.at("british_regulars").province = "concord";
+			St.armies.at("british_regulars").previous_province = "lincoln";
+			St.pending_battle = {true, "concord", "british_regulars", "continental_militia"};
+			St.pass.persons["samuel_adams"].role = "organizer";
+			St.pass.persons["samuel_adams"].province = "concord";
+			const std::string Path = TCHAR_TO_UTF8(*FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("PA250"), TEXT("concord_intel_state.json")));
+			std::string LoadErr;
+			const bool bLoaded = pa250::write_text_file(Path, pa250::serialize(St)) && PS->GetControllerMutable().load(Path, LoadErr);
+			PS->BumpHudEpoch();
+			const pa250::BattleSetup Setup = pa250::build_battle_setup(PS->GetState(), "concord");
+			const pa250::SideSetup& Brit = Setup.sides.at("british");
+			int32 Fielded = 0;
+			for (const pa250::SideFactor& F : Brit.factors)
+			{
+				if (F.label == "men") Fielded += F.value;
+			}
+			FString Headline = TEXT("none");
+			for (const PA250BattleCards::FRow& R : PA250BattleCards::SideRows(Brit))
+			{
+				if (R.Label == TEXT("Men") && !R.bChange) Headline = R.Value;
+			}
+			const bool bPass = bLoaded && Brit.intel == "exact" && Headline == TEXT("88") && Fielded == 88;
+			UE_LOG(LogTemp, Display, TEXT("CARD_PROBE: concord exact organizer loaded=%d intel=%s Men=%s fielded=%d %s"),
+				bLoaded ? 1 : 0, UTF8_TO_TCHAR(Brit.intel.c_str()), *Headline, Fielded, bPass ? TEXT("PASS") : TEXT("FAIL"));
+		}), 10.f, false);
+		GetWorldTimerManager().SetTimer(Still, FTimerDelegate::CreateLambda([Shot]() { Shot(TEXT("pre_battle_exact")); }), 12.f, false);
+		GetWorldTimerManager().SetTimer(QuitHandle, FTimerDelegate::CreateLambda([this]() {
+			UKismetSystemLibrary::QuitGame(this, nullptr, EQuitPreference::Quit, false);
+		}), 15.f, false);
 	}
 
 	if (FParse::Param(FCommandLine::Get(), TEXT("PA250CardProbe")))

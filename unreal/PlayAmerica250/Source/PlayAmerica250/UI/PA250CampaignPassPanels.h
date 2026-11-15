@@ -47,6 +47,19 @@ PLAYAMERICA250_API FString ForceLine(const pa250::CampaignState& State, const pa
 PLAYAMERICA250_API FString UnityChip(const pa250::CampaignState& State);
 /** Pure: the top-bar button that opens the floor: "Congress" or "Whitehall" (empty: no body). */
 PLAYAMERICA250_API FString FloorButton(const pa250::CampaignState& State);
+/** Pure: that button's whole label: "Congress · Unity 70 · 1 favor". The Crown's player reads
+ *  "Whitehall · Confidence 60 · 1 favor": Unity only sends the Patriots' allies home. Empty: no body. */
+PLAYAMERICA250_API FString FloorChip(const pa250::CampaignState& State);
+/** Pure: the top bar's stores chip. Shipments are counted only when some are on the road. */
+PLAYAMERICA250_API FString StoresChip(int32 Powder, int32 Cartridges, int32 Muskets, int32 Provisions, int32 InTransit);
+/** The top bar is one row: treasury, stores, Support, the floor's button, People, the date. At the
+ *  usual play size (1710x1112, about 1660 Slate units wide) that row is full, so the title plaque
+ *  shows only on a bar at least this wide (16:9 is 1920 units at any size). 0 = not measured yet. */
+inline constexpr float TopBarTitleMinWidth = 1800.f;
+PLAYAMERICA250_API bool TopBarShowsTitle(float BarWidthUnits);
+/** Pure: the floor panel's width (Slate units) on a screen that wide: 700, less where it would run
+ *  under the open mission tracker (350 wide, top centre), never under 560. */
+PLAYAMERICA250_API float FloorPanelWidth(float ScreenWidthUnits, bool bTrackerOpen);
 /** Pure: a bloc's chance of voting for a measure as ten marks and the figure: "######....  62 in 100". */
 PLAYAMERICA250_API FString ChanceBar(int32 Pct);
 /** Pure: a bloc's lean in words: "warm (+20)", "cool (-10)", "divided (0)". */

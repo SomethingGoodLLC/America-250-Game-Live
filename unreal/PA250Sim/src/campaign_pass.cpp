@@ -211,7 +211,7 @@ struct CpPersonRules {
     float aura_radius_m = 30.f, home_post_radius_m = 25.f, fall_pressure = 0.6f, fall_pressure_seconds = 10.f;
     int fate_wounded = 60, fate_killed = 25, fate_captured = 15;
     int wounded_days = 21, army_morale_on_fall = -8;
-    int step_men = 20, error_pct = 30;
+    int step_men = 20, width_pct = 30;
     int exposed_support = 2;
 };
 CpPersonRules g_cp_prules;
@@ -304,16 +304,22 @@ CpIntel cp_intel(const CampaignState& s, const std::string& viewer, const Army& 
         out.source = "An informer in their councils";
         return out;
     }
+    // Unscouted: a band centred on the true count (never shifted past it). Width comes from data;
+    // a seed may only widen the band further. width_pct 0 adds nothing.
     const int step = std::max(1, g_cp_prules.step_men);
-    const int err = std::max(0, g_cp_prules.error_pct);
-    const uint64_t h = detail::mix64(s.seed ^ detail::fnv1a(army.id) ^ detail::mix64(static_cast<uint64_t>(s.now.hour_index / 24)));
-    const int pct = err > 0 ? static_cast<int>(h % static_cast<uint64_t>(2 * err + 1)) - err : 0;
-    int est = out.men * (100 + pct) / 100;
-    est = ((est + step / 2) / step) * step;
+    const int width = std::max(0, g_cp_prules.width_pct);
+    const int truth = out.men;
+    int extra = 0;
+    if (width > 0) {
+        const int half0 = std::max(step, truth * width / 100);
+        const uint64_t h = detail::mix64(s.seed ^ detail::fnv1a(army.id) ^ detail::mix64(static_cast<uint64_t>(s.now.hour_index / 24)));
+        extra = static_cast<int>(h % static_cast<uint64_t>(half0 + 1));
+    }
+    const MenBand band = unscouted_men_band(truth, step, width, extra);
     out.known = false;
-    out.men_low = std::max(step, est - step);
-    out.men_high = std::max(out.men_low + step, est + step);
-    out.men = (out.men_low + out.men_high) / 2;
+    out.men_low = band.low;
+    out.men_high = band.high;
+    out.men = band.mid;
     out.source = "Rough estimate: nobody has counted them";
     return out;
 }
@@ -1276,7 +1282,7 @@ std::vector<std::string> load_persons(const std::string& json_text) {
         rules.wounded_days = c.at("wounded_days").get<int>();
         rules.army_morale_on_fall = c.at("army_morale_on_fall").get<int>();
         rules.step_men = r.at("estimates").at("step_men").get<int>();
-        rules.error_pct = r.at("estimates").at("error_pct").get<int>();
+        rules.width_pct = r.at("estimates").at("width_pct").get<int>();
         rules.exposed_support = r.at("informer").at("exposed_local_support").get<int>();
         for (auto it = j.at("traits").begin(); it != j.at("traits").end(); ++it) {
             if (!cp_known(it.key(), {"defensive", "aggressive", "steadfast", "adroit", "engineer", "popular"}))
@@ -1722,8 +1728,11 @@ bool army_has_boats(const CampaignState& s, const std::string& army_id) {
 
 int units_as_seen(const CampaignState& s, const std::string& viewer, const Army& army) {
     const CpIntel in = cp_intel(s, viewer, army);
-    if (in.known) return std::max(0, total_units(army));
-    return std::max(1, in.men / std::max(1, battle_rules().soldiers_per_unit));
+    const int truth = std::max(0, total_units(army));
+    if (in.known || truth == 0) return truth;
+    // The midpoint can sit above the true count (the band rounds outward). Targeting stops at the truth.
+    const int mid_units = in.men / std::max(1, battle_rules().soldiers_per_unit);
+    return std::min(truth, std::max(1, mid_units));
 }
 
 long ai_lure_value(const CampaignState& s, const std::string& faction, const std::string& province) {
@@ -1899,6 +1908,11 @@ void pass_after_battle(CampaignState& s, const CampaignState& before, const Batt
         }
     }
     (void)loser;
+}
+
+void pass_seed(CampaignState& s) {
+    if (!g_cp_persons_loaded && !g_cp_politics_loaded && !g_cp_decisions_loaded) return;
+    cp_seed(s);
 }
 
 void pass_tick(CampaignState& s, std::vector<Interrupt>& interrupts) {
@@ -2326,6 +2340,32 @@ std::string decision_json(const CampaignState& s) {
     return cp_json{{"pending", true}, {"id", d->id},     {"title", d->title}, {"painting", d->painting},
                    {"text", d->text}, {"options", options}, {"note", d->note},   {"basis", d->basis}}
         .dump();
+}
+
+MenBand unscouted_men_band(int truth_men, int step_men, int width_pct, int extra_half) {
+    MenBand out;
+    const int step = std::max(1, step_men);
+    const int width = std::max(0, width_pct);
+    const int truth = std::max(0, truth_men);
+    int half = std::max(step, truth * width / 100);
+    if (width > 0 && extra_half > 0) half += extra_half;
+    int low = (truth - half) / step * step;
+    if (low < step) low = step;
+    int high = ((truth + half + step - 1) / step) * step;
+    if (high < low + step) high = low + step;
+    if (low > truth) low = truth / step * step;
+    if (low < 0) low = 0;
+    if (high < truth) high = ((truth + step - 1) / step) * step;
+    out.low = low;
+    out.high = high;
+    out.mid = (low + high) / 2;
+    return out;
+}
+
+int units_as_seen(const CampaignState& s, const std::string& viewer, const std::string& army_id) {
+    auto it = s.armies.find(army_id);
+    if (it == s.armies.end()) return 0;
+    return detail::units_as_seen(s, viewer, it->second);
 }
 
 std::string army_intel_json(const CampaignState& s, const std::string& viewer, const std::string& army_id) {

@@ -972,7 +972,10 @@ bool write_text_file(const std::string& path, const std::string& text) {
 
 CampaignState load_scenario(const std::string& text) {
     try {
-        return state_from_json(json::parse(text), false);
+        CampaignState s = state_from_json(json::parse(text), false);
+        // Who commands what when the campaign opens stands from the first hour, before the clock runs.
+        detail::pass_seed(s);
+        return s;
     } catch (const json::exception& e) {
         throw std::runtime_error(std::string("scenario parse error: ") + e.what());
     }

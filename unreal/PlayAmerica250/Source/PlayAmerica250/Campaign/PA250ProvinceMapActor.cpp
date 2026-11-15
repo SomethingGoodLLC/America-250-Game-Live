@@ -1231,8 +1231,9 @@ void APA250ProvinceMapActor::RefreshArmyTokens()
 	FString Sig = SelectedArmyId + TEXT("|");
 	for (const FPlan& Pl : Plans)
 	{
-		Sig += FString::Printf(TEXT("%s@%s>%s+%d#%d;"), UTF8_TO_TCHAR(Pl.Army->id.c_str()), UTF8_TO_TCHAR(Pl.Army->province.c_str()),
-							   UTF8_TO_TCHAR(Pl.Next.c_str()), Pl.Army->hours_into_edge, static_cast<int32>(Pl.Art));
+		Sig += FString::Printf(TEXT("%s@%s>%s+%d#%d~%d/%s;"), UTF8_TO_TCHAR(Pl.Army->id.c_str()), UTF8_TO_TCHAR(Pl.Army->province.c_str()),
+							   UTF8_TO_TCHAR(Pl.Next.c_str()), Pl.Army->hours_into_edge, static_cast<int32>(Pl.Art), Pl.Army->returning_hours,
+							   UTF8_TO_TCHAR(Pl.Army->returning_edge.c_str()));
 		for (const auto& U : Pl.Army->units)
 		{
 			Sig += FString::Printf(TEXT("%s%d"), UTF8_TO_TCHAR(U.first.c_str()), U.second);
@@ -1393,9 +1394,12 @@ void APA250ProvinceMapActor::MoveArmyTokens(float DeltaSeconds)
 {
 	// Presentation smoothing only: the sim moves a column once per campaign hour; the drawn column
 	// eases to that position instead of hopping. It never runs ahead of the sim.
+	// Halted (path empty — at rest or turning back): sit on the town the label names; do not ease from mid-road.
 	constexpr float TimeConstant = 0.25f;
 	constexpr float SnapUU = 250.f; // e.g. a save loaded elsewhere on the map: jump, don't glide across it
 	const float Alpha = 1.f - FMath::Exp(-FMath::Max(0.f, DeltaSeconds) / TimeConstant);
+	const UPA250Subsystem* Subsys = Sub();
+	const pa250::CampaignState* St = (Subsys && Subsys->GetController().has_campaign()) ? &Subsys->GetState() : nullptr;
 	for (APA250ArmyToken* Tok : ArmyTokens)
 	{
 		if (!IsValid(Tok))
@@ -1409,7 +1413,13 @@ void APA250ProvinceMapActor::MoveArmyTokens(float DeltaSeconds)
 		}
 		const FVector Cur = Tok->GetActorLocation();
 		const float Dist = FVector::Dist2D(Cur, *Target);
-		if (Dist < 0.05f || Dist > SnapUU)
+		bool bAtTown = false;
+		if (St)
+		{
+			const auto It = St->armies.find(TCHAR_TO_UTF8(*Tok->ArmyId));
+			bAtTown = It != St->armies.end() && It->second.path.empty();
+		}
+		if (Dist < 0.05f || Dist > SnapUU || bAtTown)
 		{
 			Tok->SetAnchor(*Target);
 		}
@@ -2836,6 +2846,22 @@ FVector APA250ProvinceMapActor::GetLabelWorld(const FString& ProvinceId) const
 		return UVToWorld(*UV, 4.f);
 	}
 	return GetActorLocation();
+}
+
+void APA250ProvinceMapActor::SnapArmyTokens()
+{
+	RefreshArmyTokens();
+	MoveArmyTokens(1.f);
+}
+
+bool APA250ProvinceMapActor::GetArmyTargetAnchor(const FString& ArmyId, FVector& OutWorld) const
+{
+	if (const FVector* P = ArmyTargetAnchor.Find(ArmyId))
+	{
+		OutWorld = *P;
+		return true;
+	}
+	return false;
 }
 
 FVector APA250ProvinceMapActor::GetTokenWorld(const FString& ProvinceId) const

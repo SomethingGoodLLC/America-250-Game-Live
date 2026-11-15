@@ -1,5 +1,6 @@
 #include "PA250SpawnScreen.h"
 #include "PA250BattleGameMode.h"
+#include "PA250BattleHUD.h"
 #include "PA250ControlPoint.h"
 #include "PA250UnitClasses.h"
 #include "RFCharacter.h"
@@ -54,6 +55,47 @@ void UPA250SpawnScreen::OpenFor(APlayerController* PC, APA250BattleGameMode* GM)
 	}
 }
 
+namespace
+{
+struct FPortraitPlate
+{
+	TSharedRef<SBox> Slot;
+	TSharedPtr<FSlateBrush> Brush;
+	UTexture2D* Texture = nullptr;
+	bool bMissing = false;
+};
+
+FPortraitPlate MakePortraitPlate(const FString& Side, const FString& ClassId)
+{
+	FPortraitPlate Plate{SNew(SBox).WidthOverride(222.f).HeightOverride(166.5f).Visibility(EVisibility::Visible), MakeShared<FSlateBrush>(), nullptr, false};
+	const FString TexPath = FString::Printf(TEXT("/Game/PA250/UI/Classes/T_Class_%s_%s.T_Class_%s_%s"), *Side, *ClassId, *Side, *ClassId);
+	Plate.Brush->ImageSize = FVector2D(222.f, 166.5f);
+	Plate.Brush->DrawAs = ESlateBrushDrawType::Image;
+	if (UTexture2D* Tex = LoadObject<UTexture2D>(nullptr, *TexPath, nullptr, LOAD_NoWarn | LOAD_Quiet))
+	{
+		Plate.Texture = Tex;
+		Plate.Brush->SetResourceObject(Tex);
+		UE_LOG(LogTemp, Display, TEXT("PA250 class portrait: %s_%s ok"), *Side, *ClassId);
+	}
+	else
+	{
+		Plate.bMissing = true;
+		Plate.Brush->TintColor = FSlateColor(FLinearColor(0.12f, 0.1f, 0.08f, 0.85f));
+		UE_LOG(LogTemp, Warning, TEXT("PA250 class portrait: MISSING %s_%s (%s)"), *Side, *ClassId, *TexPath);
+	}
+	Plate.Slot->SetContent(SNew(SImage).Image(Plate.Brush.Get()));
+	return Plate;
+}
+}
+
+bool UPA250SpawnScreen::PortraitSlotFor(const FString& Side, const FString& ClassId, bool& bOutMissing)
+{
+	const FPortraitPlate Plate = MakePortraitPlate(Side, ClassId);
+	bOutMissing = Plate.bMissing;
+	const FChildren* Kids = Plate.Slot->GetChildren();
+	return Plate.Slot->GetVisibility() != EVisibility::Collapsed && Kids && Kids->Num() >= 1;
+}
+
 void UPA250SpawnScreen::Confirm()
 {
 	APA250BattleGameMode* GM = GameMode.Get();
@@ -81,6 +123,7 @@ void UPA250SpawnScreen::Confirm()
 		RemoveFromParent();
 		PC->SetInputMode(FInputModeGameOnly());
 		PC->bShowMouseCursor = false;
+		if (UPA250BattleHUD* Hud = GM->GetBattleHud()) Hud->SetVisibility(ESlateVisibility::Visible);
 	}
 }
 
@@ -112,19 +155,11 @@ TSharedRef<SWidget> UPA250SpawnScreen::RebuildWidget()
 				return G ? G->ClassMenLeft(Side, Cls) : 0;
 			};
 			auto Selected = [WeakThis, Cls]() { return WeakThis.IsValid() && WeakThis->SelectedClass == Cls; };
-			// The class as the battle draws him (a still of the in-game soldier). No image, no gap.
-			TSharedRef<SWidget> Portrait = SNullWidget::NullWidget;
-			const FString TexPath = FString::Printf(TEXT("/Game/PA250/UI/Classes/T_Class_%s_%s.T_Class_%s_%s"), *Side.ToString(), *Cls.ToString(), *Side.ToString(), *Cls.ToString());
-			if (UTexture2D* Tex = LoadObject<UTexture2D>(nullptr, *TexPath, nullptr, LOAD_NoWarn | LOAD_Quiet))
-			{
-				PortraitTextures.Add(Tex);
-				TSharedPtr<FSlateBrush> Brush = MakeShared<FSlateBrush>();
-				Brush->SetResourceObject(Tex);
-				Brush->ImageSize = FVector2D(222.f, 166.5f); // 4:3, the card's inner width
-				Brush->DrawAs = ESlateBrushDrawType::Image;
-				PortraitBrushes.Add(Brush);
-				Portrait = SNew(SBox).WidthOverride(222.f).HeightOverride(166.5f)[SNew(SImage).Image(Brush.Get())];
-			}
+			// Each card keeps a portrait slot; a missing still leaves an empty plate (not a collapsed gap).
+			const FPortraitPlate Plate = MakePortraitPlate(Side.ToString(), Cls.ToString());
+			if (Plate.Texture) PortraitTextures.Add(Plate.Texture);
+			PortraitBrushes.Add(Plate.Brush);
+			TSharedRef<SWidget> Portrait = Plate.Slot;
 			Cards->AddSlot()
 			[
 				SNew(SBox).WidthOverride(250.f).MinDesiredHeight(360.f)

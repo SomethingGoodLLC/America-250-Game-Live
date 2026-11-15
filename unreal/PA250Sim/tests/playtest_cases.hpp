@@ -89,7 +89,22 @@ static void test_playtest_no_general_is_explained() {
         CHECK(how.find("People") != std::string::npos);
         CHECK(raw_ids_in(s, how).empty());
     }
-    CampaignState s = pass_campaign_decided(YMDH{1775, 4, 25, 8});
+    // Since the playtest the militia opens under Colonel Barrett (user decision 2026-11-15): the same
+    // attack on Boston now sits down to a siege. What a detachment is told is checked with him relieved.
+    {
+        CampaignState b = pass_campaign_decided(YMDH{1775, 4, 25, 8});
+        CHECK(general_of(b, "continental_militia") == "james_barrett");
+        b.treaties.clear();
+        b.armies.at("continental_militia").province = "boston";
+        b.armies.at("continental_militia").previous_province = "roxbury";
+        b.armies.at("british_regulars").province = "chelsea";
+        b.pending_battle = {true, "boston", "continental_militia", "british_garrison"};
+        CHECK(why_cannot_besiege(b, "continental_militia", "boston").empty());
+        const CampaignState after = apply_battle_result(b, ended("boston", kContinental, "posts_swept"));
+        CHECK(after.provinces.at("boston").owner == kBritish && after.provinces.at("boston").siege_by == kContinental);
+        CHECK(after.progress.last_battle_report.ownership_reason != "no_general_no_siege");
+    }
+    CampaignState s = relieved(pass_campaign_decided(YMDH{1775, 4, 25, 8}));
     CHECK(general_of(s, "continental_militia").empty());
     {
         const std::string how = how_to_form_army(s, kContinental);

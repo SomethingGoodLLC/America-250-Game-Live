@@ -37,6 +37,22 @@ CorrespondenceChoiceEffects effects_from_json(const json& fx) {
         e.factor_value = f.value("value", 0);
         e.factor_days = f.value("days", 0);
     }
+    e.provisions_now = fx.value("provisions_now", 0);
+    if (fx.contains("hold_units")) {
+        const json& h = fx.at("hold_units");
+        e.hold_army = h.value("army_id", "");
+        e.hold_class = h.value("unit_class", "");
+        e.hold_reason = h.value("reason", "");
+        e.hold_count = h.value("count", 0);
+        e.hold_hours = h.value("hours", 0);
+    }
+    if (fx.contains("donor_transfer")) {
+        const json& d = fx.at("donor_transfer");
+        e.donor_reserve = d.value("reserve", "");
+        e.donor_powder = d.value("powder", 0);
+        e.donor_hours = d.value("hours", 0);
+    }
+    e.postpone_offensive = fx.value("postpone_offensive", false);
     return e;
 }
 
@@ -432,217 +448,33 @@ CampaignState apply_source_decision(const CampaignState& in, const std::string& 
 
     const std::string sid = letter->source_id;
 
-    if (sid == "L3") {
-        // No guaranteed local_support changes.
-        if (choice == "purchase_provisions") {
-            const int cost = 25;  // gameplay tuning
-            if (s.player_gold < cost) {
-                letter->status = "refused";
-                letter->reason = "Treasury cannot spare 25 gold for household provisions (gameplay tuning).";
-                if (s.pending_event_id == letter->id) s.pending_event_id.clear();
-                return s;
-            }
-            s.player_gold -= cost;
-            letter->gold_cost = cost;
-            letter->kind = "source_decision";
-            letter->status = "approved";
-            letter->committed_provisions = 8;
-            letter->resolve_on_hour = s.now.hour_index + 8;
-            letter->reason =
-                "Gold committed. Provisions deliver in 8 hours (gameplay tuning). "
-                "No automatic local-support or recruitment bonus.";
-            {
-                ResourceChange ch;
-                ch.reason = "L3 purchase provisions: -" + std::to_string(cost) + " gold (delivery in 8h)";
-                ch.gold = -cost;
-                detail::record_resource_change(s, ch);
-            }
-        } else if (choice == "shared_lodging") {
-            ++s.staff.letters_processed_today;
-            letter->status = "delivered";
-            letter->reason =
-                "Shared lodging and rotating escorts arranged (uses clerk capacity; gameplay tuning). "
-                "No automatic local-support gain; serving readiness unchanged.";
-            detail::add_log(s, "L3 shared_lodging resolved");
-        } else if (choice == "retain_workers") {
-            PersonnelCommitment pc;
-            pc.id = "pc_" + letter->id;
-            pc.army_id = "continental_militia";
-            pc.unit_class = "militia";
-            pc.count = 3;  // gameplay tuning
-            pc.reason = "local_household_labor";
-            pc.release_on_hour = s.now.hour_index + 72;
-            s.progress.personnel_commitments.push_back(pc);
-            letter->status = "delivered";
-            letter->reason =
-                "3 militia paper units committed to household labor for 72 hours (gameplay tuning). "
-                "Equipment, readiness, and morale of serving soldiers unchanged.";
-            detail::add_log(s, "L3 retain_workers personnel commitment");
-        }
-    } else if (sid == "L5") {
-        if (choice == "guarded_removal") {
-            PersonnelCommitment pc;
-            pc.id = "pc_" + letter->id;
-            pc.army_id = "continental_militia";
-            pc.unit_class = "militia";
-            pc.count = 2;
-            pc.reason = "boat_guard_crews";
-            pc.release_on_hour = s.now.hour_index + 48;
-            s.progress.personnel_commitments.push_back(pc);
-            ProvinceStores& st = province_ledger(s, default_depot_province(s, s.player_faction));
-            const int prov_before = st.provisions;
-            st.provisions = std::max(0, st.provisions - 4);
-            {
-                ResourceChange ch;
-                ch.reason = "L5 guarded removal: provisions " + std::to_string(st.provisions - prov_before);
-                ch.provisions = st.provisions - prov_before;
-                ch.province_id = default_depot_province(s, s.player_faction);
-                detail::record_resource_change(s, ch);
-            }
-            letter->status = "delivered";
-            letter->reason =
-                "Guarded removal underway: 2 militia committed 48h; −4 provisions if boats delayed "
-                "(gameplay tuning).";
-        } else if (choice == "negotiate_local") {
-            const int cost = 15;
-            if (s.player_gold < cost) {
-                letter->status = "refused";
-                letter->reason = "Not enough gold to negotiate local arrangements (gameplay tuning).";
-                if (s.pending_event_id == letter->id) s.pending_event_id.clear();
-                return s;
-            }
-            s.player_gold -= cost;
-            letter->gold_cost = cost;
-            letter->status = "approved";
-            letter->committed_provisions = 4;
-            letter->resolve_on_hour = s.now.hour_index + 8;
-            letter->reason = "Negotiation paid; provisions arrive in 8 hours if consent holds (gameplay tuning).";
-            {
-                ResourceChange ch;
-                ch.reason = "L5 negotiate local: -" + std::to_string(cost) + " gold (provisions in 8h)";
-                ch.gold = -cost;
-                detail::record_resource_change(s, ch);
-            }
-        } else if (choice == "evacuate_preserve_boats") {
-            ProvinceStores& st = province_ledger(s, default_depot_province(s, s.player_faction));
-            const int prov_before = st.provisions;
-            st.provisions = std::max(0, st.provisions - 6);
-            {
-                ResourceChange ch;
-                ch.reason = "L5 evacuate: provisions " + std::to_string(st.provisions - prov_before);
-                ch.provisions = st.provisions - prov_before;
-                ch.province_id = default_depot_province(s, s.player_faction);
-                detail::record_resource_change(s, ch);
-            }
-            letter->status = "delivered";
-            letter->reason =
-                "Evacuation covered; boats preserved; forage exposed (−6 provisions, gameplay tuning).";
-        }
-    } else if (sid == "L7") {
-        if (choice == "request_transfer") {
-            ensure_donor_reserve_defaults(s);
-            auto it = s.donor_reserves.find("ny_powder");
-            if (it == s.donor_reserves.end()) {
-                letter->status = "refused";
-                letter->reason = "No donor reserve on the books.";
-                if (s.pending_event_id == letter->id) s.pending_event_id.clear();
-                return s;
-            }
-            DonorReserve& donor = it->second;
-            const int want = 8;
-            const int take = std::min(want, std::max(0, donor.powder));
-            if (take <= 0) {
-                letter->status = "refused";
-                letter->reason =
-                    "New York powder reserve is empty (gameplay abstraction). Try procurement or conserve.";
-                if (s.pending_event_id == letter->id) s.pending_event_id.clear();
-                return s;
-            }
-            donor.powder -= take;
-            Shipment sh;
-            sh.id = "ship_" + letter->id;
-            sh.donor_reserve_id = "ny_powder";
-            sh.dest_faction = s.player_faction;
-            sh.dest_province = default_depot_province(s, s.player_faction);
-            sh.powder = take;
-            sh.commit_hour = s.now.hour_index;
-            sh.deliver_on_hour = s.now.hour_index + 12;
-            sh.status = "in_transit";
-            s.shipments.push_back(sh);
-            // Shipment alone credits powder — do not also commit on the letter (avoids double delivery).
-            letter->status = "delivered";
-            letter->committed_powder = 0;
-            letter->reason =
-                "Transfer committed from disclosed donor reserve \"" + donor.label +
-                "\". Donor −" + std::to_string(take) +
-                " powder now; continental stores credit only on shipment delivery in 12 hours "
-                "(gameplay tuning). Not drawn from your shared field stockpile as new supply.";
-            detail::add_log(s, "L7 transfer committed donor-" + std::to_string(take));
-        } else if (choice == "fund_procurement") {
-            const int cost = 35;
-            if (s.player_gold < cost) {
-                letter->status = "refused";
-                letter->reason = "Treasury cannot fund procurement (gameplay tuning).";
-                if (s.pending_event_id == letter->id) s.pending_event_id.clear();
-                return s;
-            }
-            s.player_gold -= cost;
-            letter->gold_cost = cost;
-            letter->status = "approved";
-            letter->committed_powder = 6;
-            letter->resolve_on_hour = s.now.hour_index + 16;
-            letter->reason =
-                "Merchant procurement paid separately from the donor reserve. "
-                "6 powder arrives in 16 hours if the wagon holds (gameplay tuning).";
-            {
-                ResourceChange ch;
-                ch.reason = "L7 fund procurement: -" + std::to_string(cost) + " gold (powder in 16h)";
-                ch.gold = -cost;
-                detail::record_resource_change(s, ch);
-            }
-        } else if (choice == "conserve_ammunition") {
-            s.progress.offensive_postponed = true;
-            letter->status = "delivered";
-            letter->reason =
-                "Ammunition conserved; offensive postponed. No powder added "
-                "(distinct from transfer or procurement; gameplay tuning).";
-            detail::add_log(s, "L7 conserve_ammunition");
-        }
-    }
-    if ((sid == "L3" || sid == "L5" || sid == "L7") && chosen && chosen->effects.any()) {
-        // These three keep their own mechanics above (personnel held, donor reserve, purchases); the
-        // catalog adds what each choice gains or costs besides, so no answer is without effect.
+    if (chosen && chosen->effects.any()) {
+        // Every consequence comes from the catalog (GAMEPLAY TUNING lives in the catalog JSON); no
+        // letter has a branch of its own here.
         const CorrespondenceChoiceEffects& fx = chosen->effects;
-        ResourceChange ch;
-        ch.reason = sid + " — " + chosen->label;
-        const int support_before = s.local_support;
-        s.local_support = detail::clamp_int(s.local_support + fx.local_support, 0, 100);
-        ch.local_support = s.local_support - support_before;
-        for (auto& kv : s.armies) {
-            if (kv.second.faction != s.player_faction) continue;
-            kv.second.morale = detail::clamp_int(kv.second.morale + fx.army_morale, 0, 100);
-            kv.second.readiness = detail::clamp_int(kv.second.readiness + fx.army_readiness, 0, 100);
-        }
-        s.pass.favors = std::max(0, s.pass.favors + fx.favors);
-        add_letter_factor(s, fx.factor_province, fx.factor_label, fx.factor_value, fx.factor_days, "Letter " + sid + ": " + chosen->label);
-        if (fx.delivery_hours > 0 && (fx.provisions > 0 || fx.powder > 0)) {
-            letter->committed_provisions += std::max(0, fx.provisions);
-            letter->committed_powder += std::max(0, fx.powder);
-            letter->resolve_on_hour = std::max(letter->resolve_on_hour, s.now.hour_index + fx.delivery_hours);
-            letter->status = "approved";
-        }
-        letter->reason += " " + chosen->effects_summary;
-        detail::record_resource_change(s, ch);
-    } else if (sid == "L3" || sid == "L5" || sid == "L7") {
-        // (handled above)
-    } else if (chosen && chosen->effects.any()) {
-        // Catalog-driven consequences (GAMEPLAY TUNING lives in the catalog JSON).
-        const CorrespondenceChoiceEffects& fx = chosen->effects;
-        if (fx.gold < 0 && s.player_gold < -fx.gold) {
+        auto refuse = [&](const std::string& why) {
             letter->status = "refused";
-            letter->reason = "The treasury cannot spare " + std::to_string(-fx.gold) + " gold for this.";
+            letter->reason = why;
             if (s.pending_event_id == letter->id) s.pending_event_id.clear();
+        };
+        // What cannot be carried out is refused before anything is spent.
+        if (fx.gold < 0 && s.player_gold < -fx.gold) {
+            refuse("The treasury cannot spare " + std::to_string(-fx.gold) + " gold for this.");
             return s;
+        }
+        int donor_take = 0;
+        if (fx.donor_powder > 0) {
+            ensure_donor_reserve_defaults(s);
+            const auto it = s.donor_reserves.find(fx.donor_reserve);
+            if (it == s.donor_reserves.end()) {
+                refuse("No donor reserve on the books.");
+                return s;
+            }
+            donor_take = std::min(fx.donor_powder, std::max(0, it->second.powder));
+            if (donor_take <= 0) {
+                refuse(it->second.label + " is empty. Try procurement, or conserve.");
+                return s;
+            }
         }
         ResourceChange ch;
         ch.reason = sid + " — " + chosen->label;
@@ -665,27 +497,61 @@ CampaignState apply_source_decision(const CampaignState& in, const std::string& 
         s.staff.letters_processed_today += std::max(0, fx.clerk_load);
         s.pass.favors = std::max(0, s.pass.favors + fx.favors);
         add_letter_factor(s, fx.factor_province, fx.factor_label, fx.factor_value, fx.factor_days, "Letter " + sid + ": " + chosen->label);
+        if (fx.hold_count > 0) {
+            // Kept from the field, not disarmed: build_battle_setup leaves them out until released.
+            PersonnelCommitment pc;
+            pc.id = "pc_" + letter->id;
+            pc.army_id = fx.hold_army;
+            pc.unit_class = fx.hold_class;
+            pc.count = fx.hold_count;
+            pc.reason = fx.hold_reason;
+            pc.release_on_hour = s.now.hour_index + fx.hold_hours;
+            s.progress.personnel_commitments.push_back(pc);
+        }
+        const std::string depot = default_depot_province(s, s.player_faction);
+        if (donor_take > 0) {
+            // The donor is short at once; the depot is credited only by the shipment, exactly once.
+            s.donor_reserves.at(fx.donor_reserve).powder -= donor_take;
+            Shipment sh;
+            sh.id = "ship_" + letter->id;
+            sh.donor_reserve_id = fx.donor_reserve;
+            sh.dest_faction = s.player_faction;
+            sh.dest_province = depot;
+            sh.powder = donor_take;
+            sh.commit_hour = s.now.hour_index;
+            sh.deliver_on_hour = s.now.hour_index + fx.donor_hours;
+            sh.status = "in_transit";
+            s.shipments.push_back(sh);
+        }
+        if (fx.postpone_offensive) s.progress.offensive_postponed = true;
+        // Stores: what moves now, and what is committed now and received later (resolve_due_letters
+        // credits the depot exactly once).
         const bool later = fx.delivery_hours > 0 && (fx.provisions > 0 || fx.powder > 0);
+        const int provisions_now = fx.provisions_now + (later ? 0 : fx.provisions);
+        const int powder_now = later ? 0 : fx.powder;
+        if (provisions_now != 0 || powder_now != 0) {
+            ProvinceStores& st = province_ledger(s, depot);
+            const int prov_before = st.provisions;
+            const int powder_before = st.powder;
+            st.provisions = std::max(0, st.provisions + provisions_now);
+            st.powder = std::max(0, st.powder + powder_now);
+            ch.provisions = st.provisions - prov_before;
+            ch.powder = st.powder - powder_before;
+            if (ch.provisions || ch.powder) ch.province_id = depot;
+        }
         if (later) {
-            // Commit now, receive later: resolve_due_letters credits the depot exactly once.
             letter->committed_provisions = std::max(0, fx.provisions);
             letter->committed_powder = std::max(0, fx.powder);
             letter->resolve_on_hour = s.now.hour_index + fx.delivery_hours;
             letter->status = "approved";
         } else {
-            const std::string depot = default_depot_province(s, s.player_faction);
-            ProvinceStores& st = province_ledger(s, depot);
-            const int prov_before = st.provisions;
-            const int powder_before = st.powder;
-            st.provisions = std::max(0, st.provisions + fx.provisions);
-            st.powder = std::max(0, st.powder + fx.powder);
-            ch.provisions = st.provisions - prov_before;
-            ch.powder = st.powder - powder_before;
-            if (ch.provisions || ch.powder) ch.province_id = depot;
             letter->status = "delivered";
         }
         letter->reason = chosen->label + ". " + chosen->effects_summary;
         if (later) letter->reason += " In transit: " + std::to_string(fx.delivery_hours) + "h.";
+        if (donor_take > 0 && donor_take < fx.donor_powder)
+            letter->reason += " The reserve could spare only " + std::to_string(donor_take) + " powder.";
+        if (donor_take > 0) letter->reason += " On the road: " + std::to_string(fx.donor_hours) + "h.";
         detail::record_resource_change(s, ch);
         detail::add_log(s, sid + " decision: " + choice);
     } else {

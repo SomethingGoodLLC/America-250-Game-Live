@@ -1,0 +1,23 @@
+{
+ "name": "reject_form_army_has_general",
+ "description": "the militia at Charlestown is still under Colonel Barrett: a second general cannot be given the same army",
+ "start_ymdh": {
+  "y": 1775,
+  "m": 4,
+  "d": 20,
+  "h": 0
+ },
+ "setup": {
+  "armies": {
+   "continental_militia": {
+    "province": "charlestown"
+   }
+  }
+ },
+ "order": {
+  "order": "form_army",
+  "person": "william_heath",
+  "province": "charlestown"
+ },
+ "expect_error": "army_has_general"
+}

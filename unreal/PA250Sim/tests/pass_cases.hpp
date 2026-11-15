@@ -36,6 +36,26 @@ static std::string order_json(std::initializer_list<std::pair<const char*, std::
     return j.dump();
 }
 
+// The opening militia has Colonel Barrett from the first hour (user decision 2026-11-15). A case
+// about a detachment relieves him first, as the player would: the order, not a poke at the state.
+static CampaignState relieved(const CampaignState& s, const std::string& person = "james_barrett") {
+    std::string error;
+    CampaignState after = apply_campaign_order(s, json{{"order", "relieve_person"}, {"person", person}}.dump(), error);
+    if (!error.empty()) g_reporter()->message("could not relieve " + person + ": " + error);
+    CHECK(error.empty());
+    return after;
+}
+
+// For a case that places its own generals while a battle is pending (when no one can be relieved by
+// order): the opening commanders stand down, by hand.
+static void stand_down_generals(CampaignState& s) {
+    for (auto& pk : s.pass.persons)
+        if (pk.second.role == "general") {
+            pk.second.role.clear();
+            pk.second.army_id.clear();
+        }
+}
+
 // A quiet campaign at a date, seeded (starting roles, leans, the dispatch at sea) by one hour's tick.
 static CampaignState pass_campaign(YMDH at) {
     CampaignState s = quiet_campaign();
@@ -128,6 +148,8 @@ static void test_pass_order_vectors() {
                     s.armies.at(it.key()).province = it.value().at("province").get<std::string>();
                     s.armies.at(it.key()).previous_province = s.armies.at(it.key()).province;
                 }
+            if (su.contains("relieved"))
+                for (const auto& who : su.at("relieved")) s = relieved(s, who.get<std::string>());
             if (su.contains("favors")) s.pass.favors = su.at("favors").get<int>();
             if (su.contains("gold")) s.player_gold = su.at("gold").get<int>();
             if (su.contains("pending_decision")) {
@@ -243,6 +265,8 @@ static void test_pass_commander_vectors() {
         const std::string name = v.at("name").get<std::string>();
         const json& b = v.at("battle");
         CampaignState s = battle_at(b.at("province").get<std::string>(), b.at("attacker").get<std::string>(), b.at("defender").get<std::string>());
+        // The vector says who commands: nobody else does.
+        stand_down_generals(s);
         for (auto it = v.at("generals").begin(); it != v.at("generals").end(); ++it) {
             PersonState& st = s.pass.persons[it.value().get<std::string>()];
             st.role = "general";
@@ -330,17 +354,63 @@ static BattleResult ended_with(const std::string& province, const std::string& w
 static void test_pass_people() {
     CampaignPassData data;
     ensure_battle_rules();
-    // 1) The opening: the British column and garrison have their commanders, the militia has none.
+    // 1) The opening: every army has its commander from the first hour, before the clock has run
+    //    (user decision 2026-11-15: Colonel Barrett, who commanded at Concord, has the militia).
+    {
+        const CampaignState start = fresh();
+        CHECK(start.pass.seeded);
+        CHECK(general_of(start, "continental_militia") == "james_barrett");
+        CHECK(general_of(start, "british_regulars") == "francis_smith" && general_of(start, "british_garrison") == "hugh_percy");
+        CHECK(person_name("james_barrett") == "Colonel James Barrett");
+        CHECK(army_unit_cap(start, "continental_militia") == 40);
+        CHECK(why_cannot_besiege(start, "continental_militia", "boston").empty());
+        // No army opens as a detachment, on either side.
+        for (const auto& ak : start.armies) {
+            if (general_of(start, ak.first).empty()) g_reporter()->message("opens with no commander: " + ak.first);
+            CHECK(!general_of(start, ak.first).empty());
+        }
+        // Heath, the only general officer on the field that day, is at hand from the 19th and holds nothing.
+        CHECK(start.pass.persons.count("william_heath") == 0 || start.pass.persons.at("william_heath").role.empty());
+        // Saved and loaded at the first hour, he still commands.
+        const CampaignState loaded = deserialize(serialize(start));
+        CHECK(general_of(loaded, "continental_militia") == "james_barrett" && state_hash(loaded) == state_hash(start));
+        // The first fight, at Concord: he is named on the card and his two traits are rows with him as
+        // their source (Defensive +8 morale standing to receive, Popular +4).
+        CampaignState fight = start;
+        fight.armies.at("british_regulars").province = "concord";
+        fight.armies.at("british_regulars").previous_province = "lincoln";
+        fight.pending_battle = {true, "concord", "british_regulars", "continental_militia"};
+        const BattleSetup setup = build_battle_setup(fight, "concord");
+        const SideSetup& militia = setup.sides.at(kContinental);
+        CHECK(militia.commander_id == "james_barrett" && militia.commander_name == "Colonel James Barrett" && militia.commander_traits.size() == 2);
+        int trait_morale = 0, trait_rows = 0;
+        for (const SideFactor& f : militia.factors)
+            if (f.source.find("Colonel James Barrett") != std::string::npos && f.label == "morale") {
+                trait_morale += f.value;
+                ++trait_rows;
+            }
+        CHECK(trait_rows == 2 && trait_morale == 12);
+        CampaignState plain = fight;
+        stand_down_generals(plain);
+        plain.pass.persons["francis_smith"].role = "general";  // the British keep theirs
+        plain.pass.persons["francis_smith"].army_id = "british_regulars";
+        const BattleSetup bare = build_battle_setup(plain, "concord");
+        CHECK(bare.sides.at(kContinental).commander_id.empty());
+        CHECK(militia.morale == std::min(100, bare.sides.at(kContinental).morale + 12));
+        // The men on the field are the same with or without him: he steadies them, he does not add any.
+        CHECK(militia.field_strength == bare.sides.at(kContinental).field_strength);
+        CHECK(setup.sides.at(kBritish).field_strength == bare.sides.at(kBritish).field_strength);
+    }
     {
         const CampaignState s = pass_campaign(YMDH{1775, 4, 19, 0});
         CHECK(general_of(s, "british_regulars") == "francis_smith");
         CHECK(general_of(s, "british_garrison") == "hugh_percy");
-        CHECK(general_of(s, "continental_militia").empty());
+        CHECK(general_of(s, "continental_militia") == "james_barrett");
         CHECK(s.pass.persons.at("thomas_gage").role == "envoy");
         CHECK(person_name("artemas_ward") == "General Artemas Ward");
         // The forces list reads people, not ids.
         const json people = json::parse(persons_json(s));
-        CHECK(people.at("persons").size() == 21);  // the Patriot roster
+        CHECK(people.at("persons").size() == 22);  // the Patriot roster
         int generals = 0, at_hand = 0;
         for (const auto& p : people.at("persons")) {
             CHECK(raw_ids_in(s, p.at("where").get<std::string>()).empty());
@@ -353,7 +423,7 @@ static void test_pass_people() {
             }
             if (p.at("present").get<bool>()) ++at_hand;
         }
-        CHECK(generals == 9);
+        CHECK(generals == 10);
         // On 19 April: Heath is on the field; Ward comes on the 20th; Washington not at all yet.
         auto present = [&](const std::string& id) {
             for (const auto& p : people.at("persons"))
@@ -368,6 +438,13 @@ static void test_pass_people() {
         CampaignState s = battle_at("charlestown", "continental_militia", "british_regulars");
         s.provinces.at("charlestown").owner = kBritish;  // Fort L1, held by the British for this case
         s.pass.seeded = true;
+        // Under Colonel Barrett the militia sits down to the fort it could not take in the playtest.
+        const CampaignState barrett = apply_battle_result(s, ended_with("charlestown", kContinental, "posts_swept"));
+        CHECK(barrett.provinces.at("charlestown").siege_by == kContinental);
+        // Relieved (a battle is pending, so by hand here: the order is refused until it is fought).
+        CHECK(validate_campaign_order(s, order_json({{"order", "relieve_person"}, {"person", "james_barrett"}})) == "battle_pending");
+        s.pass.persons["james_barrett"].role.clear();
+        s.pass.persons["james_barrett"].army_id.clear();
         const CampaignState none = apply_battle_result(s, ended_with("charlestown", kContinental, "posts_swept"));
         CHECK(none.provinces.at("charlestown").owner == kBritish);
         CHECK(none.provinces.at("charlestown").siege_by.empty());
@@ -385,7 +462,7 @@ static void test_pass_people() {
         tick_sieges(left);
         CHECK(left.provinces.at("charlestown").siege_by.empty());
         // Occupation: a detachment standing alone before a fort does not sit down to it at midnight.
-        CampaignState occ = pass_campaign(YMDH{1775, 4, 20, 12});
+        CampaignState occ = relieved(pass_campaign(YMDH{1775, 4, 20, 12}));
         occ.treaties.clear();
         occ.provinces.at("charlestown").owner = kBritish;
         occ.armies.at("continental_militia").province = "charlestown";
@@ -400,7 +477,7 @@ static void test_pass_people() {
     }
     // 3) The cap: a company raised where a detachment is full stands by itself; under a general it joins.
     {
-        CampaignState s = pass_campaign(YMDH{1775, 4, 21, 0});
+        CampaignState s = relieved(pass_campaign(YMDH{1775, 4, 21, 0}));
         s.player_gold = 500;
         s.armies.at("continental_militia").province = "charlestown";
         s.provinces.at("charlestown").militia_muster = true;
@@ -458,7 +535,52 @@ static void test_pass_people() {
         CHECK(rough.at("men_high").get<int>() > rough.at("men_low").get<int>());
         CHECK(rough.at("men_low").get<int>() % 20 == 0);  // estimates.step_men
         const int truth = pass_units(s.armies.at("british_regulars")) * battle_rules().soldiers_per_unit;
-        CHECK(rough.at("men_low").get<int>() <= truth * 135 / 100 && rough.at("men_high").get<int>() >= truth * 65 / 100);
+        // Unscouted range is centred on the truth (width_pct in data); never excludes it.
+        CHECK(rough.at("men_low").get<int>() <= truth && rough.at("men_high").get<int>() >= truth);
+        // Across seeds and days the true men count is always inside the band.
+        for (uint64_t seed = 1; seed <= 64; ++seed) {
+            for (int day = 0; day < 30; ++day) {
+                CampaignState t = s;
+                t.seed = seed;
+                t.now.hour_index = s.now.hour_index + day * 24;
+                t.pass.scouted_until.clear();
+                const json est = json::parse(army_intel_json(t, kContinental, "british_regulars"));
+                CHECK(!est.at("known").get<bool>());
+                CHECK(est.at("men_low").get<int>() <= truth);
+                CHECK(est.at("men_high").get<int>() >= truth);
+                CHECK(est.at("men_high").get<int>() - est.at("men_low").get<int>() >= 20);
+                const int seen = units_as_seen(t, kContinental, "british_regulars");
+                const int truth_units = pass_units(t.armies.at("british_regulars"));
+                CHECK(seen <= truth_units);
+                const int mid_units = ((est.at("men_low").get<int>() + est.at("men_high").get<int>()) / 2) / battle_rules().soldiers_per_unit;
+                CHECK(seen == std::min(truth_units, std::max(1, mid_units)));
+            }
+        }
+        // A column smaller than one step, and a zero width: the truth stays inside, and a zero
+        // width does not take the seed's extra. Targeting never counts more men than there are.
+        {
+            const MenBand wide = unscouted_men_band(4, 20, 30, 0);
+            const MenBand wider = unscouted_men_band(4, 20, 30, 15);
+            CHECK(wide.low <= 4 && wide.high >= 4 && wider.low <= 4 && wider.high >= 4);
+            CHECK(wider.high >= wide.high);
+            const MenBand none = unscouted_men_band(96, 20, 0, 0);
+            const MenBand none_extra = unscouted_men_band(96, 20, 0, 40);
+            CHECK(none.low == none_extra.low && none.high == none_extra.high);
+            CHECK(none.low <= 96 && none.high >= 96);
+            const MenBand empty = unscouted_men_band(0, 20, 30, 10);
+            CHECK(empty.low <= 0 && empty.high >= 0);
+            CampaignState tiny = s;
+            tiny.pass.scouted_until.clear();
+            tiny.armies.at("british_regulars").units = {{"line_infantry", 1}};
+            const int men = pass_units(tiny.armies.at("british_regulars")) * battle_rules().soldiers_per_unit;
+            CHECK(men > 0 && men < 20);
+            const json est = json::parse(army_intel_json(tiny, kContinental, "british_regulars"));
+            CHECK(!est.at("known").get<bool>());
+            CHECK(est.at("men_low").get<int>() <= men && est.at("men_high").get<int>() >= men);
+            CHECK(units_as_seen(tiny, kContinental, "british_regulars") == 1);
+            tiny.armies.at("british_regulars").units.clear();
+            CHECK(units_as_seen(tiny, kContinental, "british_regulars") == 0);
+        }
         CHECK(json::parse(army_intel_json(s, kContinental, "continental_militia")).at("known").get<bool>());  // one's own
         // The British know the Patriot numbers for free while Church holds a role...
         CHECK(!json::parse(army_intel_json(s, kBritish, "continental_militia")).at("known").get<bool>());
@@ -535,6 +657,7 @@ static void test_pass_people() {
     {
         CampaignState s = battle_at("lexington");
         s.pass.seeded = true;
+        stand_down_generals(s);  // each general below is measured against no general at all
         const BattleSetup plain = build_battle_setup(s, "lexington");
         CHECK(plain.sides.at(kContinental).fortification_level == 0 && plain.mode == "conquest");
         s.now = from_ymdh({1775, 4, 25, 6});
@@ -556,6 +679,7 @@ static void test_pass_people() {
         CHECK(build_battle_setup(pit, "lexington").sides.at(kBritish).morale == plain.sides.at(kBritish).morale + 12);
         CampaignState def = battle_at("lexington", "continental_militia", "british_regulars");
         def.pass.seeded = true;
+        stand_down_generals(def);
         const int base = build_battle_setup(def, "lexington").sides.at(kBritish).morale;
         def.pass.persons["john_pitcairn"].role = "general";
         def.pass.persons["john_pitcairn"].army_id = "british_regulars";
@@ -803,6 +927,9 @@ static void test_pass_politics() {
         CHECK(to_ymdh(s.now).m == 7 && to_ymdh(s.now).d <= 3);
         CHECK(s.pass.persons.at("george_washington").unlocked);
         s.armies.at("continental_militia").province = "charlestown";
+        // Colonel Barrett still has the militia: a second general is refused until he is relieved.
+        CHECK(validate_campaign_order(s, order_json({{"order", "form_army"}, {"person", "george_washington"}, {"province", "charlestown"}})) == "army_has_general");
+        s = relieved(s);
         s = pass_order(s, order_json({{"order", "form_army"}, {"person", "george_washington"}, {"province", "charlestown"}}));
         CHECK(general_of(s, "continental_militia") == "george_washington");
         // Bills of credit: +120 on 22 June, and prices a quarter higher 90 days on.
@@ -1481,4 +1608,168 @@ static void test_letters_have_consequences() {
     }
     g_reporter()->message("letters walked: " + std::to_string(letters_walked) + ", choices: " + std::to_string(choices_walked));
     CHECK(letters_walked == 10 && choices_walked == 29);
+}
+
+// Letters L3, L5 and L7 kept their numbers in the sim's code until 2026-11-15 (user decision). Now
+// each number is read from the catalog: the case takes every such choice as shipped and checks the
+// state against the catalog's own values, then loads a catalog with the numbers changed and checks
+// the sim follows the file, not a constant.
+static void test_letter_numbers_are_data() {
+    ensure_opening_war_catalog();
+    const std::string shipped = read_text_file(g_data_dir() + "/opening_war_correspondence.json");
+    load_correspondence_catalog(shipped);
+    CHECK(shipped.find("hardcoded") == std::string::npos);
+    // A campaign with one letter on the desk, as letters_have_consequences sets it.
+    auto desk = [](const std::string& source_id, std::string& letter_id) {
+        const CorrespondenceCatalogEntry* e = find_correspondence_entry(source_id);
+        CampaignState s = fresh();
+        s.ai_objective.clear();
+        s.treaties.push_back({"ceasefire", 24 * 400, "", ""});
+        s.progress.lexington_fought = true;
+        s.progress.chapter_continental = true;
+        s.progress.aftermath_pending = false;
+        s.progress.concord_followup_seeded = true;
+        s.player_gold = 200;
+        for (auto& ak : s.armies) ak.second.readiness = 70;
+        province_ledger(s, default_depot_province(s, kContinental)).provisions = 40;
+        for (const auto& other : correspondence_catalog_entries()) {
+            if (other.source_id != source_id) s.progress.received_source_ids.push_back(other.source_id);
+            if (other.event_id != e->event_id) s.progress.resolved_event_ids.push_back(other.event_id);
+        }
+        s.now = from_ymdh(e->eligible_from);
+        clear_staff_desk(s);
+        std::vector<Interrupt> ints;
+        tick_logistics(s, ints);
+        letter_id.clear();
+        for (const auto& c : s.staff.queue)
+            if (c.source_id == source_id) letter_id = c.id;
+        CHECK(!letter_id.empty());
+        return s;
+    };
+    auto letter_of = [](const CampaignState& s, const std::string& id) {
+        for (const auto& c : s.staff.queue)
+            if (c.id == id) return c;
+        return CorrespondenceItem{};
+    };
+    auto effects_of = [](const std::string& source_id, const std::string& choice) {
+        for (const auto& ch : find_correspondence_entry(source_id)->choices)
+            if (ch.id == choice) return ch.effects;
+        CHECK(false);
+        return CorrespondenceChoiceEffects{};
+    };
+    // One choice against the effects the catalog gives it: every field of the closed set that moves
+    // stores, gold, men, the donor reserve or the offensive.
+    int walked = 0;
+    auto follows_catalog = [&](const std::string& source_id, const std::string& choice) {
+        std::string id;
+        const CampaignState before = desk(source_id, id);
+        if (id.empty()) return;
+        const CorrespondenceChoiceEffects fx = effects_of(source_id, choice);
+        CHECK(fx.any());
+        const CampaignState after = choose_logistics(before, id, choice);
+        const CorrespondenceItem letter = letter_of(after, id);
+        const std::string depot = default_depot_province(before, kContinental);
+        const bool later = fx.delivery_hours > 0 && (fx.provisions > 0 || fx.powder > 0);
+        ++walked;
+        const std::string name = source_id + "." + choice;
+        auto say = [&](bool ok, const std::string& what) {
+            if (!ok) g_reporter()->message(name + ": " + what + " does not follow the catalog");
+            CHECK(ok);
+        };
+        say(after.player_gold == before.player_gold + fx.gold, "gold");
+        say(after.local_support == before.local_support + fx.local_support, "Support");
+        say(after.staff.letters_processed_today == before.staff.letters_processed_today + fx.clerk_load, "clerk slots");
+        say(province_ledger(after, depot).provisions == province_ledger(before, depot).provisions + fx.provisions_now + (later ? 0 : fx.provisions),
+            "provisions now");
+        say(province_ledger(after, depot).powder == province_ledger(before, depot).powder + (later ? 0 : fx.powder), "powder now");
+        say(letter.committed_provisions == (later ? fx.provisions : 0) && letter.committed_powder == (later ? fx.powder : 0), "what is committed");
+        if (later) say(letter.resolve_on_hour == before.now.hour_index + fx.delivery_hours && letter.status == "approved", "the delivery hour");
+        say(static_cast<int>(after.progress.personnel_commitments.size()) == (fx.hold_count > 0 ? 1 : 0), "units held");
+        if (fx.hold_count > 0 && !after.progress.personnel_commitments.empty()) {
+            const PersonnelCommitment& pc = after.progress.personnel_commitments[0];
+            say(pc.army_id == fx.hold_army && pc.unit_class == fx.hold_class && pc.count == fx.hold_count && pc.reason == fx.hold_reason &&
+                    pc.release_on_hour == before.now.hour_index + fx.hold_hours,
+                "the units held and for how long");
+        }
+        if (fx.donor_powder > 0) {
+            say(after.donor_reserves.at(fx.donor_reserve).powder == before.donor_reserves.at(fx.donor_reserve).powder - fx.donor_powder, "the donor reserve");
+            say(after.shipments.size() == before.shipments.size() + 1 && after.shipments.back().powder == fx.donor_powder &&
+                    after.shipments.back().deliver_on_hour == before.now.hour_index + fx.donor_hours && after.shipments.back().dest_province == depot,
+                "the shipment");
+        } else {
+            say(after.shipments.size() == before.shipments.size(), "no shipment");
+        }
+        say(after.progress.offensive_postponed == fx.postpone_offensive, "the offensive");
+        for (const auto& ak : before.armies) {
+            if (ak.second.faction != kContinental) continue;
+            say(after.armies.at(ak.first).morale == ak.second.morale + fx.army_morale && after.armies.at(ak.first).readiness == ak.second.readiness + fx.army_readiness,
+                "army morale and readiness");
+        }
+    };
+    const std::pair<const char*, const char*> moved[] = {
+        {"L3", "purchase_provisions"}, {"L3", "shared_lodging"}, {"L3", "retain_workers"},
+        {"L5", "guarded_removal"},     {"L5", "negotiate_local"}, {"L5", "evacuate_preserve_boats"},
+        {"L7", "request_transfer"},    {"L7", "fund_procurement"}, {"L7", "conserve_ammunition"}};
+    for (const auto& m : moved) follows_catalog(m.first, m.second);
+    CHECK(walked == 9);
+    // The numbers as shipped are the ones the code used to hold.
+    CHECK(effects_of("L3", "purchase_provisions").gold == -25 && effects_of("L3", "retain_workers").hold_count == 3 && effects_of("L3", "retain_workers").hold_hours == 72);
+    CHECK(effects_of("L5", "guarded_removal").provisions_now == -4 && effects_of("L5", "guarded_removal").hold_count == 2 && effects_of("L5", "guarded_removal").hold_hours == 48);
+    CHECK(effects_of("L7", "request_transfer").donor_powder == 8 && effects_of("L7", "request_transfer").donor_hours == 12 && effects_of("L7", "fund_procurement").gold == -35);
+
+    // The same catalog with other numbers: the sim does what the file says.
+    {
+        json cat = json::parse(shipped);
+        for (auto& e : cat.at("entries")) {
+            if (!e.contains("choices")) continue;
+            for (auto& ch : e.at("choices")) {
+                const std::string id = ch.at("id").get<std::string>();
+                if (id == "purchase_provisions") ch["effects"] = {{"gold", -40}, {"provisions", 11}, {"delivery_hours", 5}};
+                if (id == "retain_workers") ch["effects"]["hold_units"]["count"] = 2, ch["effects"]["hold_units"]["hours"] = 30;
+                if (id == "guarded_removal") ch["effects"]["provisions_now"] = -7;
+                if (id == "request_transfer") ch["effects"]["donor_transfer"] = {{"reserve", "ny_powder"}, {"powder", 5}, {"hours", 20}};
+                if (id == "fund_procurement") ch["effects"] = {{"gold", -50}, {"powder", 9}, {"delivery_hours", 3}};
+            }
+        }
+        load_correspondence_catalog(cat.dump());
+        std::string id;
+        CampaignState s = desk("L3", id);
+        const std::string depot = default_depot_province(s, kContinental);
+        const int gold0 = s.player_gold, prov0 = province_ledger(s, depot).provisions;
+        CampaignState buy = choose_logistics(s, id, "purchase_provisions");
+        CHECK(buy.player_gold == gold0 - 40 && province_ledger(buy, depot).provisions == prov0);
+        for (int i = 0; i < 4; ++i) buy = advance_hour(buy).state;
+        CHECK(province_ledger(buy, depot).provisions == prov0);  // four hours: not yet
+        for (int i = 0; i < 2; ++i) buy = advance_hour(buy).state;
+        CHECK(province_ledger(buy, depot).provisions >= prov0 + 11 - 2);  // delivered (the army eats meanwhile)
+        const CampaignState held = choose_logistics(s, id, "retain_workers");
+        CHECK(held.progress.personnel_commitments.size() == 1 && held.progress.personnel_commitments[0].count == 2 &&
+              held.progress.personnel_commitments[0].release_on_hour == s.now.hour_index + 30);
+        CampaignState l5 = desk("L5", id);
+        const int prov5 = province_ledger(l5, depot).provisions;
+        CHECK(province_ledger(choose_logistics(l5, id, "guarded_removal"), depot).provisions == prov5 - 7);
+        CampaignState l7 = desk("L7", id);
+        const int donor0 = l7.donor_reserves.at("ny_powder").powder;
+        const CampaignState sent = choose_logistics(l7, id, "request_transfer");
+        CHECK(sent.donor_reserves.at("ny_powder").powder == donor0 - 5 && sent.shipments.back().powder == 5 &&
+              sent.shipments.back().deliver_on_hour == l7.now.hour_index + 20);
+        CHECK(choose_logistics(l7, id, "fund_procurement").player_gold == l7.player_gold - 50);
+        // A reserve that holds less sends what it has and says so; an empty one refuses and takes nothing.
+        CampaignState thin = l7;
+        thin.donor_reserves.at("ny_powder").powder = 3;
+        const CampaignState part = choose_logistics(thin, id, "request_transfer");
+        CHECK(part.donor_reserves.at("ny_powder").powder == 0 && part.shipments.back().powder == 3);
+        CHECK(letter_of(part, id).reason.find("could spare only 3 powder") != std::string::npos);
+        CampaignState empty = l7;
+        empty.donor_reserves.at("ny_powder").powder = 0;
+        const CampaignState refused = choose_logistics(empty, id, "request_transfer");
+        CHECK(letter_of(refused, id).status == "refused" && refused.shipments.size() == empty.shipments.size());
+        // And a purchase the treasury cannot meet is refused before anything is spent.
+        CampaignState poor = l7;
+        poor.player_gold = 49;
+        const CampaignState no = choose_logistics(poor, id, "fund_procurement");
+        CHECK(no.player_gold == 49 && letter_of(no, id).status == "refused" && letter_of(no, id).committed_powder == 0);
+    }
+    load_correspondence_catalog(shipped);  // as shipped again, for the cases that follow
+    CHECK(effects_of("L3", "purchase_provisions").gold == -25);
 }

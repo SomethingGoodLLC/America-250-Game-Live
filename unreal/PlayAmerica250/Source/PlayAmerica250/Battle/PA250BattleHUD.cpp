@@ -119,11 +119,11 @@ void DrawCenteredText(FSlateWindowElementList& Out, int32 Layer, const FGeometry
 	FSlateDrawElement::MakeText(Out, Layer + 1, G.ToPaintGeometry(FVector2f(Size), FSlateLayoutTransform(FVector2f(Pos))),
 		Text, Font, ESlateDrawEffect::None, C);
 }
-/** Controls legend opacity: full for 25 s, gone by 30 s, back while F1 is held. */
-float LegendAlpha(const APlayerController* PC, double Born)
+/** Controls legend opacity: only while F1 is held (the list no longer auto-shows at battle start). */
+float LegendAlpha(const APlayerController* PC, double /*Born*/)
 {
 	if (PC && PC->IsInputKeyDown(EKeys::F1)) return 0.6f;
-	return 0.6f * UPA250BattleHUD::LegendFade(static_cast<float>(FPlatformTime::Seconds() - Born));
+	return 0.f;
 }
 } // namespace
 
@@ -148,7 +148,7 @@ int32 UPA250BattleHUD::NativePaint(const FPaintArgs& Args, const FGeometry& G, c
 	int32 Layer = Super::NativePaint(Args, G, MyCullingRect, Out, LayerId, InWidgetStyle, bParentEnabled);
 	const APA250BattleGameMode* GM = GameMode.Get();
 	APlayerController* PC = GetOwningPlayer();
-	if (!GM || !PC) return Layer;
+	if (!GM || !PC || ChromeSuppressed(GM->IsClassPickerOpen())) return Layer;
 	const ARFCharacter* Me = Cast<ARFCharacter>(PC->GetPawn());
 	const FName MyFaction = Me && !Me->FactionId.IsNone() ? Me->FactionId : GM->GetPlayerFaction();
 	const FVector2D View = G.GetLocalSize();
@@ -276,10 +276,10 @@ void UPA250BattleHUD::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 	DamageDirTimer = FMath::Max(0.f, DamageDirTimer - InDeltaTime);
 }
 
-float UPA250BattleHUD::LegendFade(float AgeSeconds)
+float UPA250BattleHUD::LegendFade(float /*AgeSeconds*/)
 {
-	if (AgeSeconds <= 25.f) return 1.f;
-	return FMath::Clamp(1.f - (AgeSeconds - 25.f) / 5.f, 0.f, 1.f);
+	// Kept for callers/tests: the list is behind F1 only (no timed auto-show).
+	return 0.f;
 }
 
 TSharedRef<SWidget> UPA250BattleHUD::RebuildWidget()
@@ -599,10 +599,13 @@ TSharedRef<SWidget> UPA250BattleHUD::RebuildWidget()
 			[SNew(STextBlock).Font(FCoreStyle::GetDefaultFontStyle("Regular", 11)).ColorAndOpacity(FLinearColor(0.85f, 0.85f, 0.85f, 0.85f)).Text_Lambda(ReloadHint)]
 			+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center).Padding(0, 2, 0, 0)
 			[SNew(STextBlock).Font(Font).ShadowOffset(FVector2D(1, 1)).ColorAndOpacity_Lambda(ReloadFlashColor).Text_Lambda(ReloadFlash)]]
-		// Controls legend: shown for the first half-minute, then only while F1 is held.
+		// Controls legend: F1 (hold) only. Hint stays visible so the key is discoverable.
 		+ SOverlay::Slot().VAlign(VAlign_Bottom).HAlign(HAlign_Left).Padding(20, 0, 0, 20)
 		[SNew(STextBlock).Font(FCoreStyle::GetDefaultFontStyle("Regular", 10)).ShadowOffset(FVector2D(1, 1))
-			.ColorAndOpacity_Lambda([WeakThis, LegendBorn]() { return FSlateColor(FLinearColor(1.f, 1.f, 1.f, WeakThis.IsValid() ? 0.45f * (1.f - LegendAlpha(WeakThis->GetOwningPlayer(), LegendBorn) / 0.6f) : 0.f)); })
+			.ColorAndOpacity_Lambda([WeakThis, LegendBorn]() {
+				const float A = WeakThis.IsValid() ? LegendAlpha(WeakThis->GetOwningPlayer(), LegendBorn) : 0.f;
+				return FSlateColor(FLinearColor(1.f, 1.f, 1.f, A > 0.f ? 0.f : 0.45f));
+			})
 			.Text(FText::FromString(TEXT("F1 (hold)  controls")))]
 		+ SOverlay::Slot().VAlign(VAlign_Bottom).HAlign(HAlign_Left).Padding(20, 0, 0, 20)
 		[SNew(STextBlock).Font(FCoreStyle::GetDefaultFontStyle("Regular", 11)).ShadowOffset(FVector2D(1, 1))

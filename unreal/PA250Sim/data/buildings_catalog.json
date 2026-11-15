@@ -124,7 +124,7 @@
     }
   ],
   "recruit_note": "GAME INVENTION. One company musters per town at a time; men come from the town's monthly manpower (base below at Support 50, scaled by Support 25-100). Militia and riflemen bring their own firelocks; regulars are armed from the town magazine. 'faction' limits who may raise a company (empty = anyone); 'requires_chapter' holds it back until that campaign chapter (continental = Congress adopts the army, 14 June 1775, the day it voted the first rifle companies). 'role' is the battlefield summary shown to the player; the battle values themselves live in the Unreal class kits.",
-  "economy_note": "GAME INVENTION. Settled on the 1st of each month: levies, depot trade and workshop muskets in; army pay, building upkeep and loan interest out. A shortfall is borrowed up to credit_per_town x towns held; past that the army goes unpaid. Retuned in Phase 4 so that a level-1 building costs about two months of the opening net income (levy 15 -> 4 a supply point, regular pay 2 -> 3; the sea subsidy rose 80 -> 135, which leaves the British accounts where they stood: +3 gold a month at the opening). 2026-11-14: the Boston garrison opens with 4 gun crews (regular pay 12), so the subsidy rose 135 -> 147 to keep that +3.",
+  "economy_note": "GAME INVENTION. Settled on the 1st of each month: levies, depot trade and workshop muskets in; army pay, building upkeep and loan interest out. A shortfall is borrowed up to credit_per_town x towns held; past that the army goes unpaid. Retuned in Phase 4 so that a level-1 building costs about two months of the opening net income (levy 15 -> 4 a supply point, regular pay 2 -> 3; the sea subsidy rose 80 -> 135, which leaves the British accounts where they stood: +3 gold a month at the opening). 2026-11-14: the Boston garrison opens with 4 gun crews (regular pay 12), so the subsidy rose 135 -> 147 to keep that +3. 2026-11-15: Boston opens with a Militia Muster (upkeep 2) so colour/drums can be raised; the subsidy rose 147 -> 149 to keep that +3.",
   "economy": {
     "levy_per_supply": 4,
     "pay_militia": 1,
@@ -136,7 +136,7 @@
     "credit_per_town": 60,
     "unpaid_morale": 8,
     "unpaid_support": 3,
-    "sea_subsidy_gold": 147,
+    "sea_subsidy_gold": 149,
     "sea_provisions": 12,
     "enemy_reserve_gold": 30
   },
@@ -311,7 +311,7 @@
       "muskets": 0,
       "provisions": 2,
       "days": 3,
-      "requires_building": "fort",
+      "requires_building": "militia_muster",
       "role": "Carries the colours in battle: squads near them rally in half the time; if they fall the whole side feels it, and colours taken raise or lower Support.",
       "description": "An ensign and his guard with the regiment's colour."
     },
@@ -325,7 +325,7 @@
       "muskets": 0,
       "provisions": 2,
       "days": 3,
-      "requires_building": "fort",
+      "requires_building": "militia_muster",
       "role": "Signals in battle: an order carries on through them, and line infantry near them load in cadence.",
       "description": "A fifer and a drummer."
     },
@@ -353,7 +353,7 @@
       "muskets": 0,
       "provisions": 2,
       "days": 3,
-      "requires_building": "fort",
+      "requires_building": "militia_muster",
       "role": "Carries the colours in battle: squads near them rally in half the time; if they fall the whole side feels it.",
       "description": "An ensign and sergeants with the King's colour."
     },
@@ -367,7 +367,7 @@
       "muskets": 0,
       "provisions": 2,
       "days": 3,
-      "requires_building": "fort",
+      "requires_building": "militia_muster",
       "role": "Signals in battle: an order carries on through them, and line infantry near them load in cadence.",
       "description": "The regiment's drummers."
     },

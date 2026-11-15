@@ -84,6 +84,27 @@ void RunMarch(FLog& Log)
 	const pa250::Army& A = Halted.armies.at("continental_militia");
 	Log.Check(Err.empty() && A.path.empty() && A.province == "lincoln" && A.returning_hours == 1 && A.returning_edge == "lincoln-lexington",
 		FString::Printf(TEXT("march: halted on the road it turns about for Lincoln (%s, %d h back)"), UTF8_TO_TCHAR(A.province.c_str()), A.returning_hours));
+	// That one hour of turn-about is spent by the next march hour, so a probe that advances once
+	// never sees it. Two hours into a three-hour edge still owes an hour after that tick.
+	{
+		pa250::CampaignState Live = pa250::load_scenario(pa250::read_text_file(TCHAR_TO_UTF8(*UPA250Subsystem::ScenarioPath())));
+		Live.now = pa250::from_ymdh(pa250::YMDH{1775, 4, 19, 8});
+		Live.ai_objective.clear();
+		Live.treaties.push_back({"ceasefire", 24 * 30, "", ""});
+		pa250::Army& Col = Live.armies.at("british_regulars");
+		Col.province = "boston";
+		Col.previous_province = "boston";
+		Col.path = {"boston-cambridge"};
+		Col.hours_into_edge = 2;
+		const pa250::CampaignState Turned = pa250::halt_army(Live, "british_regulars", Err);
+		const pa250::Army& Back = Turned.armies.at("british_regulars");
+		Log.Check(Err.empty() && Back.path.empty() && Back.province == "boston" && Back.returning_hours == 2,
+			FString::Printf(TEXT("march: two hours into a three-hour edge turns about for 2 h (%d)"), Back.returning_hours));
+		const pa250::CampaignState Hour = pa250::advance_hour(Turned).state;
+		const pa250::Army& Still = Hour.armies.at("british_regulars");
+		Log.Check(Still.returning_hours == 1 && Still.province == "boston" && Still.path.empty(),
+			FString::Printf(TEXT("march: after one march hour the turn-about is still live (%d h back to Boston)"), Still.returning_hours));
+	}
 	Log.Check(UPA250MapWidget::HaltMessage(TEXT("Massachusetts Militia"), TEXT("Lincoln"), 1) == TEXT("Massachusetts Militia turns about: 1 march hour back to Lincoln.") &&
 				  UPA250MapWidget::HaltMessage(TEXT("Massachusetts Militia"), TEXT("Concord"), 0) == TEXT("Massachusetts Militia halts at Concord."),
 		TEXT("march: the status line says which kind of halt it was"));
@@ -127,13 +148,41 @@ void RunPeople(FLog& Log)
 	using namespace PA250PassPanels;
 	pa250::CampaignState St = PassStateAt(pa250::YMDH{1775, 4, 21, 6}, true);
 
-	// The forces list: who commands, and the men.
-	Log.Check(ForceLine(St, St.armies.at("continental_militia")) == TEXT("No general: a detachment · 88 men"),
-		FString::Printf(TEXT("people: an army with no general reads as a detachment with its men (%s)"), *ForceLine(St, St.armies.at("continental_militia"))));
+	// The forces list: who commands, and the men. The militia opens under Colonel Barrett (user
+	// decision 2026-11-15), before the clock has run an hour.
+	{
+		const pa250::CampaignState Opening = pa250::load_scenario(pa250::read_text_file(TCHAR_TO_UTF8(*UPA250Subsystem::ScenarioPath())));
+		Log.Check(ForceLine(Opening, Opening.armies.at("continental_militia")) == TEXT("Colonel James Barrett · 88 men"),
+			FString::Printf(TEXT("people: at the first hour the militia reads as Colonel Barrett's (%s)"), *ForceLine(Opening, Opening.armies.at("continental_militia"))));
+		bool bAllLed = true;
+		for (const auto& Kv : Opening.armies) bAllLed &= !pa250::general_of(Opening, Kv.first).empty();
+		Log.Check(bAllLed && pa250::army_unit_cap(Opening, "continental_militia") == 40, TEXT("people: no army opens as a detachment, and the militia may take in 40 units"));
+	}
+	Log.Check(ForceLine(St, St.armies.at("continental_militia")) == TEXT("Colonel James Barrett · 88 men"),
+		FString::Printf(TEXT("people: the militia under its colonel names him and its men (%s)"), *ForceLine(St, St.armies.at("continental_militia"))));
+	// Relieved through the panel's own button, the militia reads as a detachment.
+	pa250::CampaignState Leaderless = St;
+	{
+		const TArray<FPersonRow> Start = People(St, FString(), FString());
+		const FPersonRow* Barrett = Start.FindByPredicate([](const FPersonRow& R) { return R.Id == TEXT("james_barrett"); });
+		Log.Check(Barrett && Barrett->bPresent && Barrett->Name.Contains(TEXT("James Barrett")) && Barrett->Where == TEXT("Commands Massachusetts Militia") &&
+					  Barrett->Traits == TEXT("Defensive, Popular (traits invented)") && Barrett->Note.EndsWith(TEXT("(documented)")) && Barrett->Actions.Num() == 1 &&
+					  Barrett->Actions[0].Label == TEXT("Relieve"),
+			FString::Printf(TEXT("people: Colonel Barrett commands the militia, with his traits marked invented and his note documented, and can be relieved (%s)"),
+				Barrett ? *Barrett->Where : TEXT("missing")));
+		if (Barrett && Barrett->Actions.Num() == 1)
+		{
+			std::string Err;
+			Leaderless = pa250::apply_campaign_order(St, TCHAR_TO_UTF8(*Barrett->Actions[0].OrderJson), Err);
+			Log.Check(Err.empty() && pa250::general_of(Leaderless, "continental_militia").empty(), TEXT("people: the Relieve button's order is the sim's relieve_person"));
+		}
+	}
+	Log.Check(ForceLine(Leaderless, Leaderless.armies.at("continental_militia")) == TEXT("No general: a detachment · 88 men"),
+		FString::Printf(TEXT("people: an army with no general reads as a detachment with its men (%s)"), *ForceLine(Leaderless, Leaderless.armies.at("continental_militia"))));
 	Log.Check(ForceLine(St, St.armies.at("british_regulars")) == TEXT("Lieutenant Colonel Francis Smith · 96 men"),
 		FString::Printf(TEXT("people: an army under a general names him and its men (%s)"), *ForceLine(St, St.armies.at("british_regulars"))));
 
-	// The people panel: 21 Patriots in three groups; what a general can do depends on the town selected.
+	// The people panel: 22 Patriots in three groups; what a general can do depends on the town selected.
 	TArray<FPersonRow> Rows = People(St, FString(), FString());
 	int32 Generals = 0, Agents = 0;
 	const FPersonRow* Heath = nullptr;
@@ -143,7 +192,7 @@ void RunPeople(FLog& Log)
 		Agents += R.Group == TEXT("Agents") ? 1 : 0;
 		if (R.Id == TEXT("william_heath")) Heath = &R;
 	}
-	Log.Check(Rows.Num() == 21 && Generals == 9 && Agents == 7, FString::Printf(TEXT("people: the panel lists 21 people, 9 generals and 7 agents (%d, %d, %d)"), Rows.Num(), Generals, Agents));
+	Log.Check(Rows.Num() == 22 && Generals == 10 && Agents == 7, FString::Printf(TEXT("people: the panel lists 22 people, 10 generals and 7 agents (%d, %d, %d)"), Rows.Num(), Generals, Agents));
 	Log.Check(Heath && Heath->bPresent && Heath->Where == TEXT("At hand") && Heath->Traits == TEXT("Defensive, Adroit (traits invented)") && Heath->Actions.Num() == 0 &&
 				  Heath->Hint.Contains(TEXT("Select a town")) && Heath->Note.EndsWith(TEXT("(documented)")),
 		TEXT("people: Heath is at hand with his two traits marked invented, his note marked documented, and a hint until a town is selected"));
@@ -155,7 +204,16 @@ void RunPeople(FLog& Log)
 		const TArray<FPersonRow> AtConcord = People(St, TEXT("continental_militia"), TEXT("concord"));
 		const FPersonRow* H = AtConcord.FindByPredicate([](const FPersonRow& R) { return R.Id == TEXT("william_heath"); });
 		Log.Check(H && H->Actions.Num() == 0 && H->Hint.Contains(TEXT("Militia Muster or a Fort")), TEXT("people: no army can be formed at Concord, and the panel says a muster is wanted"));
-		pa250::CampaignState Moved = St;
+		// While Barrett has the militia a second general is not offered it, and the panel says why.
+		{
+			pa250::CampaignState Led = St;
+			Led.armies.at("continental_militia").province = "charlestown";
+			const TArray<FPersonRow> Taken = People(Led, TEXT("continental_militia"), TEXT("charlestown"));
+			const FPersonRow* T = Taken.FindByPredicate([](const FPersonRow& R) { return R.Id == TEXT("william_heath"); });
+			Log.Check(T && T->Actions.Num() == 0 && T->Hint == TEXT("The army there already has a general."),
+				FString::Printf(TEXT("people: Heath is not offered an army that has its colonel (%s)"), T ? *T->Hint : TEXT("missing")));
+		}
+		pa250::CampaignState Moved = Leaderless;
 		Moved.armies.at("continental_militia").province = "charlestown";
 		const TArray<FPersonRow> AtFort = People(Moved, TEXT("continental_militia"), TEXT("charlestown"));
 		const FPersonRow* F = AtFort.FindByPredicate([](const FPersonRow& R) { return R.Id == TEXT("william_heath"); });
@@ -183,7 +241,17 @@ void RunPeople(FLog& Log)
 		TEXT("people: a refusal is told in words, an unknown code without its underscores"));
 
 	// The floor.
-	Log.Check(FloorButton(St) == TEXT("Congress") && UnityChip(St) == TEXT("Unity 70 · 1 favor"), FString::Printf(TEXT("floor: the top bar has Congress and '%s'"), *UnityChip(St)));
+	Log.Check(FloorButton(St) == TEXT("Congress") && UnityChip(St) == TEXT("Unity 70 · 1 favor") && FloorChip(St) == TEXT("Congress · Unity 70 · 1 favor"),
+		FString::Printf(TEXT("floor: the top bar has Congress and '%s'"), *FloorChip(St)));
+	// The top bar itself (user decision 2026-11-15): Congress and People are in it; what gives way is
+	// the title plaque on a narrow screen and the count of shipments when none is on the road.
+	Log.Check(!TopBarShowsTitle(1660.f) && TopBarShowsTitle(1920.f) && TopBarShowsTitle(0.f),
+		TEXT("top bar: the title plaque shows at 1920 units (16:9) and gives way at 1660 (1710x1112); an unmeasured bar keeps it"));
+	Log.Check(StoresChip(8, 60, 10, 45, 0) == TEXT("Powder 8 · Cart 60 · Musk 10 · Prov 45") && StoresChip(8, 60, 10, 45, 2) == TEXT("Powder 8 · Cart 60 · Musk 10 · Prov 45 · in transit 2"),
+		FString::Printf(TEXT("top bar: shipments are counted only when some are on the road (%s)"), *StoresChip(8, 60, 10, 45, 0)));
+	Log.Check(FMath::IsNearlyEqual(FloorPanelWidth(1920.f, true), 700.f) && FloorPanelWidth(1660.f, true) < 700.f && FloorPanelWidth(1660.f, true) >= 560.f &&
+				  1660.f - 16.f - FloorPanelWidth(1660.f, true) >= 1660.f * 0.5f + 175.f && FMath::IsNearlyEqual(FloorPanelWidth(1660.f, false), 700.f),
+		FString::Printf(TEXT("top bar: the floor panel narrows to clear the mission tracker at 1660 units (%.0f), and is 700 when the tracker is folded"), FloorPanelWidth(1660.f, true)));
 	Log.Check(ChanceBar(62) == TEXT("######....  62 in 100") && ChanceBar(5) == TEXT("#.........  5 in 100") && LeanWords(20) == TEXT("warm (+20)") && LeanWords(-10) == TEXT("cool (-10)"),
 		TEXT("floor: a bloc's chance is ten marks and the figure; its lean is a word and the number"));
 	const FFloor Fl = Floor(St);
@@ -207,8 +275,8 @@ void RunPeople(FLog& Log)
 		Br.player_faction = "british";
 		const FFloor Wh = Floor(Br);
 		Log.Check(FloorButton(Br) == TEXT("Whitehall") && Wh.Heading == TEXT("The King's ministers") && Wh.Summary.StartsWith(TEXT("The ministry's confidence 60")) &&
-					  UnityChip(Br).EndsWith(TEXT("Confidence 60")),
-			FString::Printf(TEXT("floor: the British player has Whitehall and the ministry's confidence (%s)"), *UnityChip(Br)));
+					  UnityChip(Br).EndsWith(TEXT("Confidence 60")) && FloorChip(Br).StartsWith(TEXT("Whitehall · Confidence 60 · ")) && !FloorChip(Br).Contains(TEXT("Unity")),
+			FString::Printf(TEXT("floor: the British player has Whitehall and the ministry's confidence, and no Unity in the bar (%s)"), *FloorChip(Br)));
 		bool bReinforcement = false, bSend = false;
 		for (const FString& L : Wh.AtSea) bReinforcement |= L.StartsWith(TEXT("Reinforcement with three generals: ")) && L.Contains(TEXT("25 May 1775"));
 		for (const FMeasure& M : Wh.Open) bSend |= M.Id == TEXT("provision_convoy") && M.Actions.Num() == 1 && M.Actions[0].Label == TEXT("Send the dispatch") && M.When.Contains(TEXT("76 days"));
@@ -277,6 +345,55 @@ void RunPeople(FLog& Log)
 		Log.Check(Est.Num() >= 5 && Est[0].Label == TEXT("Men") && Est[0].Value == FString::Printf(TEXT("%d-%d"), Enemy.intel_men_low, Enemy.intel_men_high) &&
 					  Est[3].Label == TEXT("Morale") && Est[3].Value == TEXT("?") && Est[3].Source.Contains(TEXT("scout")),
 			FString::Printf(TEXT("card: uncounted, the enemy shows a rough count of men (%s) and question marks"), Est.Num() > 0 ? *Est[0].Value : TEXT("")));
+		// Concord, counted: an organizer (and a scout) make the British Men row the bridge company,
+		// not the whole column and not the old cap of 24.
+		auto MenHeadline = [](const pa250::SideSetup& Side) {
+			for (const PA250BattleCards::FRow& R : PA250BattleCards::SideRows(Side))
+			{
+				if (R.Label == TEXT("Men") && !R.bChange) return R.Value;
+			}
+			return FString(TEXT("none"));
+		};
+		auto FieldedMen = [](const pa250::SideSetup& Side) {
+			int32 N = 0;
+			for (const pa250::SideFactor& F : Side.factors)
+			{
+				if (F.label == "men") N += F.value;
+			}
+			return N;
+		};
+		auto Concord = [](bool bScout) {
+			pa250::CampaignState C = pa250::load_scenario(pa250::read_text_file(TCHAR_TO_UTF8(*UPA250Subsystem::ScenarioPath())));
+			C.ai_objective.clear();
+			C.armies.at("continental_militia").province = "concord";
+			C.armies.at("british_regulars").province = "concord";
+			C.armies.at("british_regulars").previous_province = "lincoln";
+			C.pending_battle = {true, "concord", "british_regulars", "continental_militia"};
+			C.pass.seeded = true;
+			if (bScout)
+			{
+				C.pass.scouted_until[std::string("continental") + ":british_regulars"] = C.now.hour_index + 24;
+			}
+			else
+			{
+				C.pass.persons["samuel_adams"].role = "organizer";
+				C.pass.persons["samuel_adams"].province = "concord";
+			}
+			return pa250::build_battle_setup(C, "concord");
+		};
+		for (const bool bScout : {false, true})
+		{
+			const pa250::BattleSetup ConcordSetup = Concord(bScout);
+			const pa250::SideSetup& Brit = ConcordSetup.sides.at("british");
+			const int32 Fielded = FieldedMen(Brit);
+			const FString Headline = MenHeadline(Brit);
+			const FString How = bScout ? TEXT("scout") : TEXT("organizer");
+			Log.Check(Brit.intel == "exact" && Headline == FString::FromInt(Fielded) && Fielded == 88 && Headline != TEXT("96") && Headline != TEXT("24"),
+				FString::Printf(TEXT("card: Concord %s shows British Men %s (fielded %d, not the column 96, not the old company 24)"), *How, *Headline, Fielded));
+			const FString Sit = PA250BattleStory::SituationLine(ConcordSetup);
+			Log.Check(Sit.Contains(TEXT("The enemy has 88")) && !Sit.Contains(TEXT("thought to be")),
+				FString::Printf(TEXT("card: Concord %s situation names 88 men (%s)"), *How, *Sit));
+		}
 		// The agents offered under the card: Revere's alarm (the player defends).
 		const TArray<FAction> Offered = CardAgents(B);
 		bool bAlarm = false;

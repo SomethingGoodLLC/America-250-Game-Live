@@ -1972,6 +1972,7 @@ void APA250BattleGameMode::MaybeStartFpsSample()
 				SpawnScreen->RemoveFromParent();
 				PC->SetInputMode(FInputModeGameOnly());
 				PC->bShowMouseCursor = false;
+				if (Hud) Hud->SetVisibility(ESlateVisibility::Visible);
 			}
 		}), 8.f + DeathCamSeconds + 1.f, false);
 		FTimerHandle Report;
@@ -2253,6 +2254,19 @@ void APA250BattleGameMode::MaybeOpenClassPick(APlayerController* PC)
 	}), 30.f, false);
 	ShowSpawnScreen(PC);
 	UE_LOG(LogTemp, Display, TEXT("PA250 class: opening class pick shown (%d classes)"), Open);
+	if (bForce)
+	{
+		// Still of the picker with HUD chrome hidden; quit after the shot.
+		FTimerHandle Still, QuitHandle;
+		GetWorldTimerManager().SetTimer(Still, FTimerDelegate::CreateWeakLambda(this, [this]() {
+			if (APlayerController* P = GetWorld()->GetFirstPlayerController()) P->ConsoleCommand(TEXT("Shot showui"));
+			UE_LOG(LogTemp, Display, TEXT("PA250 class: shot class_picker; hud_visible=%d picker=%d"),
+				   (Hud && Hud->GetVisibility() != ESlateVisibility::Collapsed) ? 1 : 0, IsClassPickerOpen() ? 1 : 0);
+		}), 3.f, false);
+		GetWorldTimerManager().SetTimer(QuitHandle, FTimerDelegate::CreateWeakLambda(this, [this]() {
+			UKismetSystemLibrary::QuitGame(this, nullptr, EQuitPreference::Quit, false);
+		}), 5.f, false);
+	}
 }
 
 void APA250BattleGameMode::EndOpeningClassPick()
@@ -2754,6 +2768,11 @@ bool APA250BattleGameMode::RequestSpawn(AController* Controller, FName UnitClass
 	return true;
 }
 
+bool APA250BattleGameMode::IsClassPickerOpen() const
+{
+	return SpawnScreen && SpawnScreen->IsInViewport();
+}
+
 void APA250BattleGameMode::ShowSpawnScreen(APlayerController* PC)
 {
 	if (!PC || bAutoplayBots)
@@ -2772,6 +2791,7 @@ void APA250BattleGameMode::ShowSpawnScreen(APlayerController* PC)
 	if (SpawnScreen)
 	{
 		SpawnScreen->OpenFor(PC, this);
+		if (Hud) Hud->SetVisibility(ESlateVisibility::Collapsed);
 	}
 }
 
@@ -2781,6 +2801,7 @@ void APA250BattleGameMode::CloseSpawnScreenToSpectate(APlayerController* PC)
 	{
 		SpawnScreen->RemoveFromParent();
 	}
+	if (Hud) Hud->SetVisibility(ESlateVisibility::Visible);
 	if (!PC) return;
 	PC->SetInputMode(FInputModeGameOnly());
 	PC->bShowMouseCursor = false;

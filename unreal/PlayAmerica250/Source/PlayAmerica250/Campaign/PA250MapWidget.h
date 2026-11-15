@@ -86,6 +86,12 @@ public:
 	/** Mission tracker: fold it down to its one-line heading (so it stops covering what is under it), or open it again. */
 	void PressTrackerToggle();
 	bool IsTrackerMinimized() const { return bTrackerMinimized; }
+	/** The HUD's width in Slate units (the UI is scaled by the window's height, so a 16:10 window
+	 *  is narrower in units than a 16:9 one of any size). */
+	float HudWidthUnits() const;
+	/** For the probes: each piece of the top bar and the strip under it with the width it was given
+	 *  against the width it wants; bOutFits is false if any shown piece is squeezed or off the screen. */
+	FString TopBarReport(bool& bOutFits) const;
 	void PressEnterBattleAtSelection();
 
 	/** True when a screen point falls on a HUD strip/panel (clicks there must not reach the map). */
@@ -208,6 +214,8 @@ private:
 	int32 PaintedHudEpoch = -1;
 	/** The pre-battle and after-battle cards (UI/PA250BattleCards): rebuilt when what they show changes. */
 	TSharedPtr<class SBox> ArmyPanelBox;
+	/** The top bar's pieces, kept so a probe can measure them (TopBarReport). */
+	TArray<TPair<FString, TSharedPtr<class SWidget>>> BarPieces;
 	bool bShowPeople = false;
 	bool bShowFloor = false;
 	TSharedPtr<class SBox> PeopleBox;

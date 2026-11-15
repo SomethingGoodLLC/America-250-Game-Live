@@ -1,6 +1,6 @@
 {
  "name": "order_form_army",
- "description": "a free general takes command of the army standing in a town with a muster (Charlestown's fort); the detachment becomes an army",
+ "description": "Colonel Barrett, who commanded the militia from the first hour, has been relieved; a free general takes command of the army standing in a town with a muster (Charlestown's fort), and the detachment is an army again",
  "start_ymdh": {
   "y": 1775,
   "m": 4,
@@ -12,7 +12,10 @@
    "continental_militia": {
     "province": "charlestown"
    }
-  }
+  },
+  "relieved": [
+   "james_barrett"
+  ]
  },
  "order": {
   "order": "form_army",

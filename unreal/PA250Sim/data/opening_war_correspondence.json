@@ -130,21 +130,22 @@
           "id": "purchase_provisions",
           "label": "Purchase household provisions",
           "effects_summary": "Gameplay tuning: spend 25 gold now; +8 provisions after 8 hours (commit ≠ receive). No automatic local-support or recruitment bonus.",
-          "hardcoded": "25 gold now, 8 provisions after 8 hours (sim: apply_source_decision)"
+          "effects": {"gold": -25, "provisions": 8, "delivery_hours": 8}
         },
         {
           "id": "shared_lodging",
           "label": "Arrange shared lodging and rotating escorts",
           "effects_summary": "Gameplay tuning: uses one clerk slot today; +2 local support (the households are seen to). No gold spent; serving soldiers' readiness unchanged.",
-          "effects": {"local_support": 2},
-          "hardcoded": "one clerk slot (sim: apply_source_decision)"
+          "effects": {"clerk_load": 1, "local_support": 2}
         },
         {
           "id": "retain_workers",
           "label": "Retain workers locally; limit immediate mobilization",
           "effects_summary": "Gameplay tuning: 3 militia units are held at household labor for 72 hours (not fielded); +6 provisions when the work is done. Arms, readiness, and morale of serving soldiers unchanged.",
-          "effects": {"provisions": 6, "delivery_hours": 72},
-          "hardcoded": "3 militia units held 72 hours (sim: apply_source_decision)"
+          "effects": {
+            "hold_units": {"army_id": "continental_militia", "unit_class": "militia", "count": 3, "hours": 72, "reason": "local_household_labor"},
+            "provisions": 6, "delivery_hours": 72
+          }
         }
       ]
     },
@@ -216,21 +217,22 @@
           "id": "guarded_removal",
           "label": "Attempt guarded removal of forage",
           "effects_summary": "Gameplay tuning: 2 militia units are held 48 hours as boat and guard crews, and 4 provisions go with them now; +10 provisions when the forage is brought off. Civilian consent assumed contested.",
-          "effects": {"provisions": 10, "delivery_hours": 48},
-          "hardcoded": "2 militia units held 48 hours, -4 provisions now (sim: apply_source_decision)"
+          "effects": {
+            "hold_units": {"army_id": "continental_militia", "unit_class": "militia", "count": 2, "hours": 48, "reason": "boat_guard_crews"},
+            "provisions_now": -4, "provisions": 10, "delivery_hours": 48
+          }
         },
         {
           "id": "negotiate_local",
           "label": "Negotiate local denial or removal",
           "effects_summary": "Gameplay tuning: spend 15 gold and 8 hours waiting; on delivery gain +4 provisions if consent holds. No automatic loyalty bonus.",
-          "hardcoded": "15 gold now, 4 provisions after 8 hours (sim: apply_source_decision)"
+          "effects": {"gold": -15, "provisions": 4, "delivery_hours": 8}
         },
         {
           "id": "evacuate_preserve_boats",
           "label": "Cover evacuation; preserve boats",
           "effects_summary": "Gameplay tuning: −6 provisions (forage left exposed and lost); +3 local support (the families are covered); the boats kept on the shore give your men +5 readiness in a battle at Chelsea for 30 days.",
-          "effects": {"local_support": 3, "factor": {"province": "chelsea", "label": "readiness", "value": 5, "days": 30}},
-          "hardcoded": "-6 provisions now (sim: apply_source_decision)"
+          "effects": {"provisions": -6, "local_support": 3, "factor": {"province": "chelsea", "label": "readiness", "value": 5, "days": 30}}
         }
       ]
     },
@@ -344,20 +346,19 @@
           "id": "request_transfer",
           "label": "Request transfer from donor reserve",
           "effects_summary": "Gameplay tuning: if ny_powder has ≥8 powder, subtract 8 from the donor immediately, ship 12 hours, credit continental stores only on delivery. Insufficient reserve → partial or refusal with explanation.",
-          "hardcoded": "donor reserve -8 powder now, +8 powder after 12 hours (sim: apply_source_decision)"
+          "effects": {"donor_transfer": {"reserve": "ny_powder", "powder": 8, "hours": 12}}
         },
         {
           "id": "fund_procurement",
           "label": "Fund procurement",
           "effects_summary": "Gameplay tuning: spend 35 gold; separate merchant shipment (not the donor reserve) for 6 powder after 16 hours—may delay. Never silently equals a transfer.",
-          "hardcoded": "35 gold now, 6 powder after 16 hours (sim: apply_source_decision)"
+          "effects": {"gold": -35, "powder": 6, "delivery_hours": 16}
         },
         {
           "id": "conserve_ammunition",
           "label": "Conserve ammunition; postpone offensive",
           "effects_summary": "Gameplay tuning: no powder added and the offensive is put off: army morale −3; army readiness +5 (the time goes to drill without powder). Distinct from transfer or procurement.",
-          "effects": {"army_morale": -3, "army_readiness": 5},
-          "hardcoded": "offensive marked postponed (sim: apply_source_decision)"
+          "effects": {"postpone_offensive": true, "army_morale": -3, "army_readiness": 5}
         }
       ]
     }

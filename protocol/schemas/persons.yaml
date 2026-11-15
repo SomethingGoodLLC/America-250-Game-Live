@@ -60,10 +60,10 @@ properties:
       estimates:
         type: object
         additionalProperties: false
-        required: [step_men, error_pct]
+        required: [step_men, width_pct]
         properties:
-          step_men: {type: integer, minimum: 1}
-          error_pct: {type: integer, minimum: 0, maximum: 90}
+          step_men: {type: integer, minimum: 1, description: "Men counts on the card are rounded to this step."}
+          width_pct: {type: integer, minimum: 0, maximum: 90, description: "Half-width of an unscouted range as a percent of the true men count. The range is centred on the truth (never shifted past it); a seed may only widen it."}
       informer:
         type: object
         additionalProperties: false

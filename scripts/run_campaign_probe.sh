@@ -4,6 +4,7 @@
 # e.g. scripts/run_campaign_probe.sh PA250MarchProbe march_route march_halted
 # The probe (PA250CampaignGameMode.cpp) takes its own "Shot showui" stills, in order, and quits; the
 # stills are copied to docs/cards/<shot-name>.png and the probe's log lines are printed.
+# RESX / RESY set the window (default 1280x720); OUT_DIR sends the stills somewhere other than docs/cards.
 set -u
 FLAG="${1:?probe flag}"; shift
 NAMES=()
@@ -16,11 +17,13 @@ GAME="$UE/Engine/Binaries/Mac/UnrealEditor.app/Contents/MacOS/UnrealEditor"
 SHOTS="$ROOT/unreal/PlayAmerica250/Saved/Screenshots/MacEditor"
 LOG="$ROOT/unreal/PlayAmerica250/Saved/Logs/probe_${FLAG}.log"
 TIMEOUT="${TIMEOUT:-150}"
+RESX="${RESX:-1280}"; RESY="${RESY:-720}"
+OUT_DIR="${OUT_DIR:-$ROOT/docs/cards}"
 if pgrep -fl "UnrealEditor.* -game" >/dev/null; then echo "another Unreal game instance is running"; exit 2; fi
 if pgrep -fl "UnrealBuildTool.dll" >/dev/null; then echo "a build is running"; exit 2; fi
-mkdir -p "$SHOTS" "$ROOT/docs/cards"
+mkdir -p "$SHOTS" "$OUT_DIR"
 STAMP="$SHOTS/.probe_stamp_$$"; touch "$STAMP"
-"$GAME" "$PROJECT" /Game/PA250/Maps/L_Campaign -game -windowed -ResX=1280 -ResY=720 -nosound -nosplash "-$FLAG" "$@" -log "-abslog=$LOG" >/dev/null 2>&1 &
+"$GAME" "$PROJECT" /Game/PA250/Maps/L_Campaign -game -windowed "-ResX=$RESX" "-ResY=$RESY" -nosound -nosplash "-$FLAG" "$@" -log "-abslog=$LOG" >/dev/null 2>&1 &
 PID=$!
 waited=0
 while kill -0 "$PID" 2>/dev/null; do
@@ -29,7 +32,7 @@ while kill -0 "$PID" 2>/dev/null; do
 done
 i=0
 for f in $(find "$SHOTS" -name '*.png' -newer "$STAMP" | sort); do
-  if [ "$i" -lt "${#NAMES[@]}" ]; then cp "$f" "$ROOT/docs/cards/${NAMES[$i]}.png"; echo "shot: docs/cards/${NAMES[$i]}.png"; fi
+  if [ "$i" -lt "${#NAMES[@]}" ]; then cp "$f" "$OUT_DIR/${NAMES[$i]}.png"; echo "shot: $OUT_DIR/${NAMES[$i]}.png"; fi
   i=$((i + 1))
 done
 rm -f "$STAMP"

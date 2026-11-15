@@ -2,8 +2,11 @@
 # unreal/PA250Sim/data/opening_war_correspondence.json, and the `commander_letter` block.
 # The letters' writing lives in the catalog; this is only what a choice costs and gains. A CLOSED
 # set: gold, Support, the envoy's attitude, stores (now, or later with delivery_hours), army morale
-# and readiness, desk time, favors, and one battle factor at a named town for a set number of days
-# (shown on the pre-battle card with the letter as its source). Every number is GAMEPLAY TUNING.
+# and readiness, desk time, favors, one battle factor at a named town for a set number of days
+# (shown on the pre-battle card with the letter as its source), units held from the field for a
+# time, a transfer from a donor reserve, and the offensive put off. Every number is GAMEPLAY
+# TUNING and every number is here: since 2026-11-15 no letter keeps a number in the sim's code
+# (L3, L5 and L7 did until then).
 # Every choice except "set aside" must cost or gain something: the sim case
 # `letters_have_consequences` walks every letter and fails on a choice that changes nothing.
 $schema: "http://json-schema.org/draft-07/schema#"
@@ -24,6 +27,30 @@ definitions:
       army_readiness: {type: integer}
       clerk_load: {type: integer, minimum: 0}
       favors: {type: integer, description: "Favors owed to the player in his Congress (never below 0)."}
+      provisions_now:
+        type: integer
+        description: "Provisions added to (or, negative, taken from) the player's depot at once, beside whatever `provisions` delivers later."
+      hold_units:
+        type: object
+        additionalProperties: false
+        required: [army_id, unit_class, count, hours, reason]
+        description: "Units of one class of one army kept from the field (not fielded in a battle) for a number of hours, then released."
+        properties:
+          army_id: {type: string}
+          unit_class: {type: string}
+          count: {type: integer, minimum: 1}
+          hours: {type: integer, minimum: 1}
+          reason: {type: string, pattern: "^[a-z_]+$"}
+      donor_transfer:
+        type: object
+        additionalProperties: false
+        required: [reserve, powder, hours]
+        description: "Powder taken from a donor reserve (catalog donor_reserve_defaults) at once and credited to the player's depot when its shipment arrives. Less is sent if the reserve holds less; refused if it is empty."
+        properties:
+          reserve: {type: string}
+          powder: {type: integer, minimum: 1}
+          hours: {type: integer, minimum: 1}
+      postpone_offensive: {type: boolean, description: "The offensive is marked as put off."}
       factor:
         type: object
         additionalProperties: false
@@ -42,7 +69,6 @@ definitions:
       label: {type: string, minLength: 1}
       effects_summary: {type: string, minLength: 1, description: "Printed on the button: what the choice costs and gains."}
       effects: {$ref: "#/definitions/effects"}
-      hardcoded: {type: string, description: "What the sim itself does for this choice besides `effects` (personnel held, a donor reserve, a purchase), in words."}
   commander_letter:
     type: object
     additionalProperties: false

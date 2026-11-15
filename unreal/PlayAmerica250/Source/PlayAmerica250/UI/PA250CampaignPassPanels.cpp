@@ -129,6 +129,36 @@ FString PA250PassPanels::FloorButton(const pa250::CampaignState& State)
 	return Root->GetObjectField(TEXT("body"))->GetStringField(TEXT("button"));
 }
 
+FString PA250PassPanels::FloorChip(const pa250::CampaignState& State)
+{
+	const TSharedPtr<FJsonObject> Root = PassParse(pa250::politics_json(State));
+	if (!Root.IsValid() || !Root->GetBoolField(TEXT("loaded"))) return FString();
+	const int32 Favors = Root->GetIntegerField(TEXT("favors"));
+	const FString Standing = Root->HasField(TEXT("ministry_confidence")) ? FString::Printf(TEXT("Confidence %d"), Root->GetIntegerField(TEXT("ministry_confidence")))
+																		   : FString::Printf(TEXT("Unity %d"), Root->GetIntegerField(TEXT("unity")));
+	return FString::Printf(TEXT("%s · %s · %d %s"), *Root->GetObjectField(TEXT("body"))->GetStringField(TEXT("button")), *Standing, Favors,
+						   Favors == 1 ? TEXT("favor") : TEXT("favors"));
+}
+
+FString PA250PassPanels::StoresChip(int32 Powder, int32 Cartridges, int32 Muskets, int32 Provisions, int32 InTransit)
+{
+	FString Out = FString::Printf(TEXT("Powder %d · Cart %d · Musk %d · Prov %d"), Powder, Cartridges, Muskets, Provisions);
+	if (InTransit > 0) Out += FString::Printf(TEXT(" · in transit %d"), InTransit);
+	return Out;
+}
+
+bool PA250PassPanels::TopBarShowsTitle(float BarWidthUnits)
+{
+	return BarWidthUnits <= 0.f || BarWidthUnits >= TopBarTitleMinWidth;
+}
+
+float PA250PassPanels::FloorPanelWidth(float ScreenWidthUnits, bool bTrackerOpen)
+{
+	const float Full = 700.f, Least = 560.f, RightMargin = 16.f, TrackerHalf = 175.f, Gap = 12.f;
+	if (!bTrackerOpen || ScreenWidthUnits <= 0.f) return Full;
+	return FMath::Clamp(ScreenWidthUnits - RightMargin - (ScreenWidthUnits * 0.5f + TrackerHalf + Gap), Least, Full);
+}
+
 TArray<PA250PassPanels::FPersonRow> PA250PassPanels::People(const pa250::CampaignState& State, const FString& SelArmy, const FString& SelProvince)
 {
 	TArray<FPersonRow> Rows;
@@ -433,7 +463,9 @@ namespace
 {
 TSharedRef<SWidget> PText(const FString& S, const TCHAR* Face, int32 Size, const FLinearColor& Color, float WrapAt = 0.f)
 {
-	return SNew(STextBlock).Text(FText::FromString(S)).Font(FPA250HudStyle::Font(Face, Size)).ColorAndOpacity(Color).WrapTextAt(WrapAt);
+	// A wrapped line also wraps to the width it is given, when that is less (the floor panel narrows
+	// on a 16:10 window): Slate takes the smaller of the two.
+	return SNew(STextBlock).Text(FText::FromString(S)).Font(FPA250HudStyle::Font(Face, Size)).ColorAndOpacity(Color).WrapTextAt(WrapAt).AutoWrapText(WrapAt > 0.f);
 }
 
 TSharedRef<SWidget> PButton(const PA250PassPanels::FAction& A, const PA250PassPanels::FIssue& Issue, int32 Size = 11)

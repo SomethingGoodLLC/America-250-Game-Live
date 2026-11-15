@@ -33,6 +33,7 @@
 #include "Engine/StaticMeshSocket.h"
 #include "PA250FlagArt.h"
 #include "PA250BattleHUD.h"
+#include "PA250SpawnScreen.h"
 #include "PA250FactionVisuals.h"
 #include "PA250MeleeComponent.h"
 #include "PA250MeleeTuning.h"
@@ -658,8 +659,8 @@ void RunConquest(FLog& Log)
 	Log.Check(ARFCharacter::ViewStress(1.f, true, 0.f) > 0.2f && ARFCharacter::ViewStress(0.15f, false, 0.f) > ARFCharacter::ViewStress(0.6f, false, 0.f)
 		&& ARFCharacter::ViewStress(1.f, false, 1.f) >= 0.6f && ARFCharacter::ViewStress(0.f, true, 1.f) == 1.f,
 		TEXT("look: the view closes in under fire, more when badly hurt, most on a fresh hit, never past 1"));
-	Log.Check(UPA250BattleHUD::LegendFade(0.f) == 1.f && UPA250BattleHUD::LegendFade(25.f) == 1.f && FMath::IsNearlyEqual(UPA250BattleHUD::LegendFade(27.5f), 0.5f)
-		&& UPA250BattleHUD::LegendFade(40.f) == 0.f, TEXT("look: the controls legend steps back after the first half-minute"));
+	Log.Check(UPA250BattleHUD::LegendFade(0.f) == 0.f && UPA250BattleHUD::LegendFade(25.f) == 0.f && UPA250BattleHUD::LegendFade(40.f) == 0.f,
+		TEXT("look: the controls legend stays behind F1 (no timed auto-show)"));
 	Log.Check(FPA250BattleAudio::Pick(TEXT("footstep_grass")) != nullptr
 		&& LoadObject<USoundBase>(nullptr, TEXT("/Game/PA250/Audio/SFX/ambience_dawn.ambience_dawn")) != nullptr, TEXT("look: footsteps and the dawn ambience are imported"));
 
@@ -2257,9 +2258,9 @@ void RunCampaignArc(FLog& Log)
 	{
 		const pa250::WindowScore W = pa250::window_score_snapshot(St);
 		const FString Board = PA250ArcPanels::LiveScoreboard(St);
-		Log.Check(Board.Contains(TEXT("You ")) && Board.Contains(TEXT("Crown ")) && Board.Contains(TEXT(" left")) &&
+		Log.Check(Board.Contains(TEXT("Towns ")) && Board.Contains(TEXT("Score ")) && Board.Contains(TEXT(" left")) &&
 					  Board.Contains(FString::FromInt(W.patriot_towns)) && Board.Contains(FString::FromInt(W.patriot_points)),
-			FString::Printf(TEXT("arc: live scoreboard shows towns and points (%s)"), *Board));
+			FString::Printf(TEXT("arc: live scoreboard shows towns and points in plain words (%s)"), *Board));
 		pa250::CampaignState Done = St;
 		Done.progress.outcome.decided = true;
 		Log.Check(PA250ArcPanels::LiveScoreboard(Done).IsEmpty(), TEXT("arc: the scoreboard hides once the campaign is decided"));
@@ -2688,6 +2689,35 @@ void RunPlaytest(FLog& Log)
 		pa250::load_persons(pa250::read_text_file(TCHAR_TO_UTF8(*UPA250Subsystem::SimDataPath(TEXT("persons_boston_1775.json")))));
 		pa250::CampaignState St = pa250::load_scenario(pa250::read_text_file(TCHAR_TO_UTF8(*UPA250Subsystem::ScenarioPath())));
 		Log.Check(PA250ArcPanels::SiegeNotices(St).Num() == 0, TEXT("playtest: no notice while no army stands before, or marches on, an enemy fort"));
+		// Since that playtest the militia opens under Colonel Barrett (user decision 2026-11-15): the
+		// same march and the same victory now sit down to a siege, and nothing warns of a missing general.
+		{
+			pa250::CampaignState Led = St;
+			Led.provinces.at("charlestown").owner = "british";
+			Led.armies.at("continental_militia").province = "charlestown";
+			Log.Check(pa250::general_of(Led, "continental_militia") == "james_barrett" && PA250ArcPanels::SiegeNotices(Led).Num() == 0,
+				TEXT("playtest: under Colonel Barrett the militia before British Charlestown is told nothing about a missing general"));
+			Led.armies.at("continental_militia").province = "boston";
+			Led.armies.at("continental_militia").previous_province = "roxbury";
+			Led.armies.at("british_regulars").province = "chelsea";
+			Led.pending_battle = {true, "boston", "continental_militia", "british_garrison"};
+			const pa250::BattleSetup LedSetup = pa250::build_battle_setup(Led, "boston");
+			pa250::BattleResult Won;
+			Won.province_id = "boston";
+			Won.winner = "continental";
+			Won.end_reason = "posts_swept";
+			Won.objective_holder = "continental";
+			const pa250::CampaignState Sat = pa250::apply_battle_result(Led, Won);
+			Log.Check(!PA250BattleCards::ModeLine(LedSetup).Contains(TEXT("NO GENERAL")) && PA250BattleCards::Commander(LedSetup.sides.at("continental")).Name == TEXT("Colonel James Barrett") &&
+						  Sat.provinces.at("boston").owner == "british" && Sat.provinces.at("boston").siege_by == "continental",
+				FString::Printf(TEXT("playtest: under Colonel Barrett a victory at Boston begins the siege (besieged by '%s')"), UTF8_TO_TCHAR(Sat.provinces.at("boston").siege_by.c_str())));
+		}
+		// What a detachment is told: the colonel relieved, by the order the People panel sends.
+		{
+			std::string Err;
+			St = pa250::apply_campaign_order(St, "{\"order\":\"relieve_person\",\"person\":\"james_barrett\"}", Err);
+			Log.Check(Err.empty() && pa250::general_of(St, "continental_militia").empty(), TEXT("playtest: with Barrett relieved the militia is a detachment"));
+		}
 		St.provinces.at("charlestown").owner = "british";
 		St.armies.at("continental_militia").province = "charlestown";
 		const TArray<FString> Standing = PA250ArcPanels::SiegeNotices(St);
@@ -3199,6 +3229,38 @@ void RunClasses(FLog& Log)
 		IFileManager::Get().Delete(*Broken);
 	}
 	Log.Check(PA250UnitClasses::LoadFromFile(Path) && PA250UnitClasses::LoadedFromData(), TEXT("classes data: the real file loads again"));
+	// An open class picker collapses battle chrome, and every class it can offer keeps a portrait slot.
+	Log.Check(UPA250BattleHUD::ChromeSuppressed(true) && !UPA250BattleHUD::ChromeSuppressed(false),
+		TEXT("class picker: HUD chrome is suppressed while the picker is open, and painted when it is not"));
+	{
+		int32 Slots = 0, Missing = 0, Present = 0;
+		FString MissingNames;
+		for (const TCHAR* Faction : {TEXT("continental"), TEXT("british")})
+		{
+			for (const FName& Class : PA250UnitClasses::RequiredClasses(Faction))
+			{
+				bool bMissing = false;
+				const bool bSlot = UPA250SpawnScreen::PortraitSlotFor(Faction, Class.ToString(), bMissing);
+				++Slots;
+				Log.Check(bSlot, FString::Printf(TEXT("class picker: %s %s has a portrait slot"), Faction, *Class.ToString()));
+				const bool bExpectMissing = Class == TEXT("dragoon");
+				Log.Check(bMissing == bExpectMissing,
+					FString::Printf(TEXT("class picker: %s %s portrait %s"), Faction, *Class.ToString(), bMissing ? TEXT("MISSING") : TEXT("loaded")));
+				if (bMissing)
+				{
+					++Missing;
+					MissingNames += FString::Printf(TEXT("%s%s_%s"), MissingNames.IsEmpty() ? TEXT("") : TEXT(", "), Faction, *Class.ToString());
+				}
+				else
+				{
+					++Present;
+				}
+			}
+		}
+		UE_LOG(LogTemp, Display, TEXT("PA250 class portrait audit: %d slots, %d loaded, MISSING %s"), Slots, Present, MissingNames.IsEmpty() ? TEXT("(none)") : *MissingNames);
+		Log.Check(Slots == 20 && Present == 18 && Missing == 2, FString::Printf(TEXT("class picker: 18 portraits load and both dragoons are the only MISSING (%d slots, %d loaded, missing %s)"),
+			Slots, Present, *MissingNames));
+	}
 	PA250UnitClasses::ResetFallbackUses();
 
 	// Engagement bands (metres).

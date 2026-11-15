@@ -2,6 +2,117 @@
 
 **Vertical slice M0–M8 complete. Battle Feel B1–B4 complete.** Nothing committed or stashed; all changes are uncommitted in the working tree.
 
+## 2026-11-15 — The three answers: Congress in the top bar, letter numbers in data, a colonel for the militia
+The user answered the campaign pass's three open questions: (1) yes, make room in the top bar, or anywhere along the top or bottom; (2) yes; (3) yes, or at least a colonel in charge, someone with leadership like in real life. Nothing committed.
+
+### 1. Congress and People are in the top bar
+- **What was wrong, found on the way:** the UI is scaled by the window's height, so a 16:10 window is narrower in Slate units than a 16:9 one of any size. At 1280x720 the bar is 1920 units wide; at the usual play size, 1710x1112, it is 1661. There the old bar was already over-full and the **Support box was squeezed to nothing** (still `scratchpad/base1710/floor.png` of that session; not kept). The Congress floor also ran under the mission tracker at that size.
+- **The bar now** (one row): Treasury, stores, Support, `Congress · Unity 70 · 1 favor`, People, the date. The towns/score line and the Ledger button gave up their place and sit on a strip under the date. The Crown's player reads `Whitehall · Confidence 60 · 1 favor` (Unity only sends the Patriots' allies home).
+- **What gives way:** the `PLAY AMERICA 250` plaque shows only on a bar at least 1800 units wide (`PA250PassPanels::TopBarTitleMinWidth`): shown at 16:9, hidden at 1710x1112. Shipments are counted in the stores chip only when some are on the road. Support takes what is left of the row and ends in an ellipsis if a treaty makes it longer; its tooltip has the whole line.
+- **Also:** the floor panel narrows to clear the open mission tracker (`FloorPanelWidth`, 700 down to 560) and its lines wrap to the width it is given. The pre-battle card's label column is wider (`Reinforcement` and `Rounds a man` were cut).
+- **Measured in a real window** (`-PA250PassProbe`, `UPA250MapWidget::TopBarReport`: each piece's given width against the width it wants):
+  - 1710x1112: `top bar FITS: width 1661 units; title hidden; treasury 255 of 255; stores 293 of 293; support 199 of 199; floor 224 of 224; people 70 of 70; date 348 of 348; score 310 of 310; ledger 73 of 73`.
+  - 1280x720: `top bar FITS: width 1922 units; title 222 of 222; …` (every piece whole).
+- `scripts/run_campaign_probe.sh` takes `RESX`, `RESY` and `OUT_DIR`. Stills re-shot at 1280x720: `people_panel`, `congress_floor`, `pre_battle_commander`, `decision_heights`, `march_route`, `march_halted`. The other stills in `docs/cards` still show the old bar.
+- **NOT verified:** the bar with a treaty in force, a shipment on the road, or as the British (their chip is longer); any other window size; the buttons clicked by hand.
+
+### 2. Letters L3, L5 and L7 take every number from the catalog
+- The three `if (sid == "L3")` branches in `apply_source_decision` are gone. Every letter goes through one path that reads `effects`.
+- New effect fields (closed set, `protocol/schemas/correspondence_effects.yaml`): `provisions_now`, `hold_units` (army, class, count, hours, reason), `donor_transfer` (reserve, powder, hours), `postpone_offensive`. The `hardcoded` note is removed from the schema and the data; the contract test refuses it.
+- **Numbers moved, unchanged:** L3 purchase 25 gold, 8 provisions in 8 h; shared lodging one clerk slot; retain workers 3 militia for 72 h. L5 guarded removal 2 militia for 48 h and 4 provisions now; negotiate 15 gold, 4 provisions in 8 h; evacuate 6 provisions lost. L7 transfer 8 powder from the New York reserve in 12 h; procurement 35 gold, 6 powder in 16 h; conserve marks the offensive put off.
+- **Proof it changed nothing:** the 29-line table `letters_have_consequences` prints is identical before and after, and the idle campaign's hash is the same before and after this step (`ebfddc898bf68400`).
+- **Proof the numbers are data:** new sim case `letter_numbers_are_data` checks all nine choices against the catalog's own values, then loads a catalog with other numbers (40 gold, 2 militia for 30 h, 5 powder in 20 h, …) and checks the sim follows the file. It also covers a thin reserve (sends what it has and says so), an empty one and an empty treasury (refused, nothing spent).
+- **Changed on purpose:** the wording of these letters' filed reason and ledger line now comes from the catalog's label and summary, like every other letter. Guarded removal writes one ledger line where it wrote two.
+
+### 3. The militia opens under Colonel James Barrett
+- **Who:** not Heath. Barrett was in overall command of the minute men and militia at Concord that morning (NPS; his own deposition); Heath took over on the road back in the afternoon. So Barrett has `continental_militia` from the first hour (`starts_as`), and Heath stays at hand from 19 April as before. Barrett's note is marked `documented`; his traits (Defensive, Popular) are invented like every trait.
+- **What it changes in play:** the militia is an army, not a detachment: it may take in 40 units and may besiege. The playtest's attack on Boston now sits down to a siege. At Concord he is on the card and gives +8 and +4 morale (82, was 70); the men on the field are the same 88 against 88.
+- **From the first hour, literally:** starting roles used to be put in place by the first hour's tick, so the map read "No general" until the clock ran. `load_scenario` now seeds them (`detail::pass_seed`). No army on either side opens as a detachment (sim and contract tests).
+- A second general cannot be given an army that has one (`army_has_general`); relieve Barrett first. With him relieved everything a detachment was told is still told (the old playtest checks run that way).
+- New vectors `order_relieve_person`, `reject_form_army_has_general`; `order_form_army` relieves Barrett first.
+- **In a battle:** the slice autoplay's first fight logged `Colonel James Barrett commands the continental side from his post` and later `Colonel James Barrett falls (wounded); morale check on the continental side`. The probe no longer stamps a general on for the card's picture.
+- **Idle campaign:** same end (British win 18 May 1775, `hq_lost`, 7 battles); hash `2b7c2d1f2fba4548` → `ebfddc898bf68400` because the state now holds Barrett.
+- **NOT verified:** balance. The opening fight is 12 morale kinder to the Patriots, and an army that can besiege from the first day changes what the player can do in April. Barrett seen on the field in a window.
+
+### Verified (this Mac)
+| Check | Result |
+|---|---|
+| SIM | **26655 checks, 0 failed** (was 26468) |
+| Clock golden | unchanged by this work (`c399cce6b219068f`), not regenerated |
+| CONTRACT | **248 passed** (was 234); ruff and mypy clean |
+| Editor build | **Succeeded** (editor closed, `-NoHotReloadFromIDE`) |
+| `-run=PA250Battle` | **checks=859 fails=0** (was 847) |
+| `-run=PA250Combat` | **fails=0** |
+| `scripts/run_slice_autoplay.sh` | **PASSED** |
+| `scripts/check_idle_determinism.sh` | **PASSED**, hash `ebfddc898bf68400` |
+| Top bar, 1710x1112 and 1280x720 | **FITS** at both |
+
+## 2026-11-15 — Review of the screenshot fixes
+
+The six fixes stood. These are the holes the first pass left, and what closed them.
+
+- **Concord card.** An unscouted enemy is still a range. With a scout or an organizer in the town, the British **Men** row is the bridge company: **88**, with **−8** stood down (“the column waits in the town”). Not 96 (the whole column) and not 24 (the old cap). Commandlet: `card: Concord organizer` and `card: Concord scout`. Real window: `CARD_PROBE: concord exact organizer loaded=1 intel=exact Men=88 fielded=88 PASS`. Still `docs/cards/pre_battle_exact.png`. The situation line is `The enemy has 88`. Both sides then share the field **20 and 20** (budget 40 over 176 men).
+- **Halt while still turning back.** A 1 h turn-about is finished by the hour that applies the halt, so the old probe never saw `returning_hours > 0`. The probe now applies the halt and snaps the token **before** that hour. Log: `halt mid-leg: … returning=1 dist_to_slot=0.0 path_empty=1 live_turnabout=1`, status `turns about: 1 march hour back to Lincoln`. A 2 h turn-about on the 3 h Boston–Cambridge edge is still live after one march hour (`returning_hours` 2 → 1). Still `docs/cards/march_halted.png`.
+- **Class picker, without a screenshot.** `-run=PA250Battle` builds a portrait slot for every class either side can be offered (20). `LoadObject` loads **18**. The only `MISSING` lines are `continental_dragoon` and `british_dragoon`. `ChromeSuppressed(true)` is what the HUD paint uses when `IsClassPickerOpen()`, so an open picker paints no chrome. A real-window `-PA250ClassPick` on `L_Lexington` still dies in `FMacCursor` → ImageIO `SIGBUS` (`0xbad4007`) before the level, twice, with no other Unreal running. `docs/cards/class_picker.png` was not retaken.
+- **Boston Muster side effects.** No live check still says `standing == 8`, `brit <= 6`, “100 to 140”, or “24 British”. `standing == 9` is the four Boston buildings including the Muster. `net == 3` stays, and dropping the Muster raises it by the 2 gold of upkeep. A funded British year raises, in order: line, sapper, line, musician, sapper, ensign, surgeon, line, musician, line, ensign, surgeon. The line is first and is raised four times; colour and drums do not take the year.
+- **Intel edges.** A 4-man column (under `step_men` 20) stays inside its band, and `units_as_seen` is 1, not the band’s midpoint in units. An empty army is seen as 0. `width_pct` 0 ignores the seed’s extra width. Across the 64×30 seed walk, the seen unit count is the midpoint clamped so it never exceeds the true strength. Named AI targets in the existing cases did not move.
+
+### Verified (this Mac)
+| Check | Result |
+|---|---|
+| SIM | **26468 checks, 0 failed** (was 22609) |
+| Editor build | **Succeeded** |
+| `-run=PA250Battle` | **checks=847 fails=0** (was 799) |
+| `-run=PA250Combat` | **fails=0** |
+| `scripts/run_slice_autoplay.sh` | **PASSED** (British winner at Menotomy; casualty lines match deaths) |
+| Concord exact card | **PASS**, Men 88 |
+| Halt live turn-about | **returning=1, dist_to_slot=0** |
+| `-PA250ClassPick` window | **SIGBUS** in `FMacCursor`, same as before |
+
+## 2026-11-15 — Fixes from the campaign-pass screenshots
+Source: the six screenshot issues named in the task (unscouted estimate, Concord 24 vs 88, halt icon, Colour/Fifes muster, class picker HUD, top-bar scoreboard). Nothing committed.
+
+### 1. Scouting estimate — range always contains the truth
+- **Cause:** `cp_intel` shifted the point estimate by seeded `±error_pct`, then drew a narrow band `est ± step_men`. Truth could fall outside.
+- **Fix:** `persons_boston_1775.json` / `persons.yaml`: `error_pct` → **`width_pct`: 30** (half-width as % of true men); keep **`step_men`: 20**. Band is centred on the true count; a seed may only widen it. Never moves a bound past the truth.
+- **Test:** `pass_people` walks 64 seeds × 30 days; every unscouted band has `men_low ≤ truth ≤ men_high`.
+
+### 2. British column at Concord — cause and parity
+- **Cause (not attrition):** Opening `british_regulars` is still **24 units / 96 men** in `boston1775.json` (officer included; “92” was combat-class-only). The Concord card’s **24 vs 88** was the North Bridge rule: `limit_bridge_company` fielded only **6 British units (24 men)** while the full militia (**22 / 88**) contested the bridge; the rest stood down in the town.
+- **Fix:** `battle_rules.json` `modes.bridge_company`: **`match_defender_units`: true**, **`fallback_units`: 6**. Company = `min(column, defender)` when the defender has units (parity when the column is large enough; never outnumbers). Opening Concord → British **88** fielded vs Continental **88** (card line “88 of 176 men on the field”).
+- **Tests:** updated `concord_bridge_company`; new `concord_opening_parity` on the shipped scenario.
+
+### 3. Halted army icon at the labeled town
+- **Cause:** After halt, `path` is cleared but the token could ease from mid-road; `LastTokenSig` ignored `returning_hours`.
+- **Fix:** Signature includes return state; when `path` is empty the token **snaps** to the town slot for `Army.province` (the town the label names).
+- **Probe:** `MARCH_PROBE: halt mid-leg … dist_to_town_slot=170.6 path_empty=1`; `halt at rest … dist_to_town_slot=96.0`. Re-shot **`docs/cards/march_halted.png`**, **`docs/cards/march_route.png`**.
+
+### 4. Colour party / Fifes → Militia Muster; AI in April
+- **Data:** `colour_party`, `fifes_and_drums`, `kings_colour`, `drums` → `requires_building: "militia_muster"`. Sappers stay on **Fort**. Surgeons unchanged (Fort).
+- **Boston** opens with **`militia_muster`: true** (GAME INVENTION) so the Crown can raise colour/drums; Fort L2 stays. Sea subsidy **147 → 149** so enemy monthly net stays **+3** (muster upkeep 2).
+- **Test:** April 1775 Crown can start `kings_colour` / `drums` / `pioneer_party` at Boston; without muster colour is `needs_building`; Continental colour/fifes at Concord need a Muster. AI `settle_enemy_budget` raises ensign or musician. Re-shot **`docs/cards/town_forces_muster.png`** (Colour party / Fifes: “needs a Militia Muster”).
+
+### 5. Class picker HUD + portrait slots
+- While the picker is open the battle HUD is collapsed (`ShowSpawnScreen` / Confirm restore). Controls list no longer auto-shows for 25 s; **F1 (hold)** only (`LegendFade` always 0). Each class card always keeps a portrait slot (empty plate if missing).
+- **Portraits on disk:** all **18** pipeline `T_Class_<faction>_<class>` assets present. Intentionally absent: British militia/rifleman; Continental grenadier/light_infantry; **dragoon** (in display order, not in portrait pipeline).
+- **Commandlet:** `look: the controls legend stays behind F1`. **NOT verified:** `docs/cards/class_picker.png` — repeated `-game -PA250ClassPick` launches hit macOS ImageIO `SIGBUS` in `FMacCursor` before the level ran (environment; campaign probes earlier in the same session succeeded).
+
+### 6. Top bar plain words + tooltip
+- `LiveScoreboard`: **`Towns A–B · Score C–D · … left`**. Tooltip explains provinces held vs Crown, window score (towns × `score_per_town` + Support / 100−Support), and window close. Seen on **`town_forces_muster.png`** and **`march_halted.png`** (`Towns 12–1 · Score 175–55`).
+
+### Verified (this Mac)
+| Check | Result |
+|---|---|
+| SIM | **22609 checks, 0 failed** (new `concord_opening_parity`; intel-across-seeds; muster April) |
+| Clock golden | regenerated on purpose: `e6140f709799b588` → **`c399cce6b219068f`** (Boston Militia Muster + subsidy 149; logged) |
+| CONTRACT | **234 passed** |
+| Idle determinism | **PASSED**, hash **`2b7c2d1f2fba4548`** (was `a473622baefeff3b` with pass: Concord parity + Boston muster) |
+| UE build | **Succeeded** (editor closed, `-NoHotReloadFromIDE`) |
+| `-run=PA250Battle` | **checks=799 fails=0** (scoreboard plain words; F1 legend) |
+| Cards re-shot | `march_route`, `march_halted`, `town_forces_muster`, `pre_battle_commander` (British estimate **40–160** contains truth; field “88 of 176”), `people_panel`, `congress_floor`, `decision_heights` |
+
+- **NOT verified:** class_picker still in a real window (ImageIO SIGBUS); F1 held by hand; halt mid-leg with `returning_hours > 0` still visible after a full hour (same hour completes the 1 h turn-about).
+
 ## 2026-11-15 — Playtest report: Boston won but not taken, orders not obeyed, Charlestown, no word when a mission ends (user report)
 Source: the user's Play-in-Editor session of 14 Nov, 20:56 to 21:07 (editor log `~/Library/Logs/Unreal Engine/PlayAmerica250Editor/PlayAmerica250.log`; no campaign save was made, so each point was replayed in the sim).
 
@@ -163,7 +274,7 @@ Milestones M1 to M6, one entry each below, oldest first. Nothing committed. Base
 - **Pictures still needed** (public domain; import as `/Game/PA250/Stories/T_Story_<key>`; credits in `battle_stories.json` `images`): `lexington_common`, `concord_bridge`, `battle_road` (Doolittle's plates I, III, IV, 1775) · `bunker_hill` (Trumbull, 1786) · `heights_1775` and `town_burning` (Lodge after Millar, about 1783) · `dorchester_heights` (Stuart, 1806) · `boston_harbour` and `harbour_fleet` (Revere, 1770) · `council_of_war` (Currier & Ives, 1876) · `country_1775` (the De Costa plan) · `wilderness_march` and `winter_camp` (no work chosen yet). Also wanted: portraits of the 31 people (the card shows initials on a plate), and a look for the general in battle.
 - **Narration:** all 16 rendered and imported; none heard.
 - **For a person to play (none of this has been played by hand):** halting an army on the road and waiting for it to come back; forming an army (it needs a Fort or a Militia Muster: is that too hard at the opening?); whether 12 units is the right size for a detachment; spending the alarm and seeing the militia already on the field; reading the enemy as `100-140` and then scouting him; a general falling and what the men do; the floor through a whole summer: do the measures pass too easily at these leans, is Unity ever at risk, are favors too scarce; the British side at Whitehall; each decision, and whether stopping the clock full screen is welcome seven times a campaign; the Concord letter's three answers in a fought battle; the story screen's length and whether Continue comes too soon (the level was ready in under a second here); the narration's voice and pace.
-- **Open questions for you:**
+- **Open questions for you** (all three answered and done on 2026-11-15: see the entry at the top):
   1. The Congress and People buttons sit on a second row under the top bar because the bar is full. Would you rather I made room in the bar itself (the stores box is the widest thing in it)?
   2. L3, L5 and L7 still keep their own numbers in C++ (older code, tested as it is). Move them to the data as well?
   3. Should the opening militia have a general from the first hour (Heath was on the field on 19 April), instead of needing a muster town first?

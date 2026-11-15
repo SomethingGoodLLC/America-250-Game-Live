@@ -331,10 +331,11 @@ TSharedRef<SWidget> SideColumn(const pa250::BattleSetup& Setup, const std::strin
 	{
 		Col->AddSlot().AutoHeight().Padding(0.f, R.bChange ? 0.f : 5.f, 0.f, 0.f)
 			[SNew(SHorizontalBox)
-			 + SHorizontalBox::Slot().AutoWidth()[SNew(SBox).WidthOverride(bEstimate ? 104.f : 112.f)[Text(R.Label, TEXT("Bold"), 13, Ink)]]
+			 // Wide enough for "Reinforcement" and "Rounds a man" at any UI scale (they were cut at 112 and 104).
+			 + SHorizontalBox::Slot().AutoWidth()[SNew(SBox).WidthOverride(bEstimate ? 116.f : 122.f)[Text(R.Label, TEXT("Bold"), 13, Ink)]]
 			 + SHorizontalBox::Slot().AutoWidth().Padding(0.f, 0.f, 10.f, 0.f)
 				   [SNew(SBox).WidthOverride(bEstimate ? 62.f : 46.f).HAlign(HAlign_Right)[Text(R.Value, R.bChange ? TEXT("Regular") : TEXT("Bold"), R.bChange ? 12 : 15, R.bChange ? InkDim : Ink)]]
-			 + SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Center)[Text(R.Source, TEXT("Regular"), 12, InkDim, 250.f)]];
+			 + SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Center)[Text(R.Source, TEXT("Regular"), 12, InkDim, bEstimate ? 230.f : 240.f)]];
 	}
 	return Col;
 }

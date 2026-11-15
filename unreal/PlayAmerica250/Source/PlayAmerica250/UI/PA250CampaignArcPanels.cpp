@@ -41,7 +41,7 @@ FString PA250ArcPanels::LiveScoreboard(const pa250::CampaignState& State)
 	const int32 CrownTowns = bYouPatriot ? W.british_towns : W.patriot_towns;
 	const int32 YouPoints = bYouPatriot ? W.patriot_points : W.british_points;
 	const int32 CrownPoints = bYouPatriot ? W.british_points : W.patriot_points;
-	return FString::Printf(TEXT("You %d · Crown %d · %d–%d · %s left"), YouTowns, CrownTowns, YouPoints, CrownPoints,
+	return FString::Printf(TEXT("Towns %d–%d · Score %d–%d · %s left"), YouTowns, CrownTowns, YouPoints, CrownPoints,
 						   *TimeLeft(W.hours_remaining));
 }
 

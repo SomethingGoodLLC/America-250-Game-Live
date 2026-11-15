@@ -16,7 +16,7 @@
       "wounded_days": 21,
       "army_morale_on_fall": -8
     },
-    "estimates": {"step_men": 20, "error_pct": 30},
+    "estimates": {"step_men": 20, "width_pct": 30},
     "informer": {"exposed_local_support": 2}
   },
   "abilities": {
@@ -95,6 +95,14 @@
       "available_from": {"y": 1775, "m": 4, "d": 19},
       "traits": ["defensive", "adroit"],
       "note": "The only general officer on the field on 19 April 1775: he directed the militia along the road back from Lexington.",
+      "basis": "documented"
+    },
+    {
+      "id": "james_barrett", "name": "James Barrett", "rank": "Colonel", "side": "continental", "roles": ["general"],
+      "available_from": {"y": 1775, "m": 4, "d": 18},
+      "starts_as": {"role": "general", "army_id": "continental_militia"},
+      "traits": ["defensive", "popular"],
+      "note": "Colonel of the Middlesex regiment, in overall command of the minute men and militia at Concord on 19 April 1775: he ordered the march on the North Bridge, and that no man fire unless fired upon.",
       "basis": "documented"
     },
     {

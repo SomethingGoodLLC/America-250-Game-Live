@@ -114,13 +114,20 @@ std::map<std::string, int> allocate_spend(const std::map<std::string, int>& raw,
 }
 
 // North Bridge is one British detachment, not the column on the road. It does not outnumber the
-// provincials who actually reached the crossing. The cap is shared across the column's classes in
-// proportion (largest remainder, class order breaks ties), so a mixed column sends a mixed company.
+// provincials who actually reached the crossing. With match_defender_units (battle_rules) the
+// company matches the provincials when the column is large enough (parity). The cap is shared
+// across the column's classes in proportion (largest remainder, class order breaks ties).
 void limit_bridge_company(std::map<std::string, int>& british, int provincial_units) {
     int total = 0;
     for (const auto& kv : british) total += std::max(0, kv.second);
-    int company = std::min(total, 6);
-    if (provincial_units > 0 && company > provincial_units) company = provincial_units;
+    const BattleRules& R = battle_rules();
+    int company = total;
+    if (R.bridge_match_defender && provincial_units > 0)
+        company = std::min(total, provincial_units);
+    else if (provincial_units > 0)
+        company = std::min(total, std::min(std::max(1, R.bridge_fallback_units), provincial_units));
+    else
+        company = std::min(total, std::max(1, R.bridge_fallback_units));
     if (total <= company) return;
     std::map<std::string, int> out;
     std::vector<std::pair<int, std::string>> rest;  // (-remainder, class)
@@ -220,6 +227,11 @@ void load_battle_rules(const std::string& json_text) {
             r.mode_landing_town_tag = f.value("landing_town_tag", r.mode_landing_town_tag);
             r.mode_assault_min_fort = std::max(1, f.value("assault_min_fort_level", r.mode_assault_min_fort));
             r.mode_conquest_presets = f.value("conquest_presets", r.mode_conquest_presets);
+            if (f.contains("bridge_company")) {
+                const json& b = f.at("bridge_company");
+                r.bridge_match_defender = b.value("match_defender_units", r.bridge_match_defender);
+                r.bridge_fallback_units = std::max(1, b.value("fallback_units", r.bridge_fallback_units));
+            }
             if (f.contains("assault")) {
                 const json& a = f.at("assault");
                 r.assault_seconds_per_post = a.value("seconds_per_post_carried", r.assault_seconds_per_post);

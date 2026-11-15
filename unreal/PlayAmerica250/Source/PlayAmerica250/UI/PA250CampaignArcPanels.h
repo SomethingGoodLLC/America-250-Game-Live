@@ -63,7 +63,7 @@ PLAYAMERICA250_API FEnd EndScreen(const pa250::CampaignState& State);
 /** "3 days", "1 day", "5 hours". */
 PLAYAMERICA250_API FString TimeLeft(int64 Hours);
 
-/** Top-bar line while the campaign runs: towns you hold against the Crown, both scores, time left.
+/** Top-bar line while the campaign runs: "Towns A–B · Score C–D · … left".
  *  Empty once the campaign is decided or the rules are not loaded. */
 PLAYAMERICA250_API FString LiveScoreboard(const pa250::CampaignState& State);
 }

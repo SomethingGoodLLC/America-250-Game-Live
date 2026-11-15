@@ -393,7 +393,7 @@
     755,
     550
    ],
-   "workshop_level": 1, "depot_level": 1, "fort_level": 2, "supply_value": 1
+   "workshop_level": 1, "depot_level": 1, "fort_level": 2, "militia_muster": true, "supply_value": 1
   },
   {
    "id": "dorchester",

@@ -626,9 +626,24 @@ struct CorrespondenceChoiceEffects {
     std::string factor_label;
     int factor_value = 0;
     int factor_days = 0;
+    // Since 2026-11-15 the three letters that kept their numbers in the sim's code (L3, L5, L7)
+    // carry them here like every other letter.
+    int provisions_now = 0;    // to (negative: from) the depot at once, beside a later delivery
+    // Units of one class of one army kept from the field for a time (a PersonnelCommitment).
+    std::string hold_army;
+    std::string hold_class;
+    std::string hold_reason;
+    int hold_count = 0;
+    int hold_hours = 0;
+    // Powder out of a donor reserve now, credited to the depot when its shipment arrives.
+    std::string donor_reserve;
+    int donor_powder = 0;
+    int donor_hours = 0;
+    bool postpone_offensive = false;
     bool any() const {
         return gold || local_support || british_attitude || provisions || powder || army_morale ||
-               army_readiness || clerk_load || favors || (factor_value != 0 && !factor_province.empty());
+               army_readiness || clerk_load || favors || (factor_value != 0 && !factor_province.empty()) ||
+               provisions_now || hold_count > 0 || donor_powder > 0 || postpone_offensive;
     }
 };
 
@@ -812,6 +827,8 @@ struct BattleRules {
     std::string mode_landing_town_tag = "harbor";                          // ...into a town with this tag is a landing
     int mode_assault_min_fort = 1;                                         // a defender behind works of this level or more is assaulted
     std::vector<std::string> mode_conquest_presets = {"concord_bridge", "battle_road"};  // scripted fights keep the open fight
+    bool bridge_match_defender = true;         // North Bridge company matches provincial units (battle_rules modes.bridge_company)
+    int bridge_fallback_units = 6;             // used only when the defender has no units
     float assault_seconds_per_post = 120.f;    // the clock gains this when the attacker carries a post
     int assault_garrison_share_pct = 67;       // share of the defender's squads that stand at the post under attack
     int landing_boats = 4;                     // most boats in the first wave

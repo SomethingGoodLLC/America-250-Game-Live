@@ -31,6 +31,7 @@
 #include "Engine/Engine.h"
 #include "Engine/GameInstance.h"
 #include "Engine/GameViewportClient.h"
+#include "Engine/UserInterfaceSettings.h"
 #include "Layout/SlateRect.h"
 #include "Dom/JsonObject.h"
 #include "Serialization/JsonReader.h"
@@ -255,8 +256,43 @@ FText UPA250MapWidget::StoresText() const
 	{
 		if (Sh.status == "in_transit" || Sh.status == "committed") ++InTransit;
 	}
-	return FText::FromString(FString::Printf(TEXT("Powder %d · Cart %d · Musk %d · Prov %d · in transit %d"), Powder, Cart,
-											 Muskets, Prov, InTransit));
+	return FText::FromString(PA250PassPanels::StoresChip(Powder, Cart, Muskets, Prov, InTransit));
+}
+
+float UPA250MapWidget::HudWidthUnits() const
+{
+	const float Cached = GetCachedGeometry().GetLocalSize().X;
+	if (Cached > 1.f) return Cached;
+	// Not laid out yet: the viewport over the UI scale (which follows the window's shorter side).
+	FVector2D Size(1920.f, 1080.f);
+	if (GEngine && GEngine->GameViewport) GEngine->GameViewport->GetViewportSize(Size);
+	const float Scale = GetDefault<UUserInterfaceSettings>()->GetDPIScaleBasedOnSize(FIntPoint(FMath::RoundToInt(Size.X), FMath::RoundToInt(Size.Y)));
+	return Scale > KINDA_SMALL_NUMBER ? Size.X / Scale : Size.X;
+}
+
+FString UPA250MapWidget::TopBarReport(bool& bOutFits) const
+{
+	bOutFits = true;
+	const FGeometry Root = GetCachedGeometry();
+	const float Width = Root.GetLocalSize().X;
+	FString Out = FString::Printf(TEXT("width %.0f units"), Width);
+	for (const TPair<FString, TSharedPtr<SWidget>>& Piece : BarPieces)
+	{
+		if (!Piece.Value.IsValid()) continue;
+		if (!Piece.Value->GetVisibility().IsVisible())
+		{
+			Out += FString::Printf(TEXT("; %s hidden"), *Piece.Key);
+			continue;
+		}
+		const FGeometry G = Piece.Value->GetTickSpaceGeometry();
+		const float Have = G.GetLocalSize().X, Want = Piece.Value->GetDesiredSize().X;
+		const float Left = Root.AbsoluteToLocal(G.GetAbsolutePosition()).X;
+		const float Right = Left + Have;
+		const bool bOk = Have + 0.5f >= Want && Left >= -0.5f && Right <= Width + 0.5f;
+		bOutFits &= bOk;
+		Out += FString::Printf(TEXT("; %s %.0f of %.0f at %.0f%s"), *Piece.Key, Have, Want, Left, bOk ? TEXT("") : TEXT(" SQUEEZED"));
+	}
+	return Out;
 }
 
 bool UPA250MapWidget::GetPlayerArmyId(int32 Index, FString& OutId) const
@@ -1635,6 +1671,12 @@ TSharedRef<SWidget> UPA250MapWidget::RebuildWidget()
 			.ToolTipText(FText::FromString(Tip))
 			[SNew(STextBlock).Font(BodyFont).ColorAndOpacity(Cream).Text_Lambda(MoveTemp(Fn))];
 	};
+	// A piece of the top bar, remembered by name so a probe can measure it (TopBarReport).
+	BarPieces.Reset();
+	auto Piece = [this](const TCHAR* Name, TSharedRef<SWidget> W) {
+		BarPieces.Emplace(FString(Name), W);
+		return W;
+	};
 	auto SectionHeader = [&Hud](const TCHAR* Label) {
 		return SNew(SBorder)
 			.BorderImage(&Hud.Header)
@@ -1783,11 +1825,15 @@ TSharedRef<SWidget> UPA250MapWidget::RebuildWidget()
 						.BorderImage(&Hud.Bar)
 						.Padding(FMargin(12.f, 6.f))
 							[SNew(SHorizontalBox) +
-							 SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 12, 0).VAlign(VAlign_Center)
-								 [SNew(SBorder).BorderImage(&Hud.Header).Padding(FMargin(12.f, 2.f))
-								  [SNew(STextBlock).Font(HeaderFont).ColorAndOpacity(Gold).Text(FText::FromString(TEXT("PLAY AMERICA 250")))]] +
+							 // The title plaque gives way first: at the usual play size the row is full without it.
+							 SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+								 [Piece(TEXT("title"), SNew(SBox)
+									  .Padding(FMargin(0.f, 0.f, 12.f, 0.f))
+									  .Visibility_Lambda([this]() { return PA250PassPanels::TopBarShowsTitle(HudWidthUnits()) ? EVisibility::Visible : EVisibility::Collapsed; })
+									  [SNew(SBorder).BorderImage(&Hud.Header).Padding(FMargin(12.f, 2.f))
+									   [SNew(STextBlock).Font(HeaderFont).ColorAndOpacity(Gold).Text(FText::FromString(TEXT("PLAY AMERICA 250")))]])] +
 							 SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 8, 0).VAlign(VAlign_Center)
-								 [SNew(SButton)
+								 [Piece(TEXT("treasury"), SNew(SButton)
 									  .ButtonStyle(&Hud.Button)
 									  .IsFocusable(false)
 									  .ContentPadding(FMargin(10.f, 2.f))
@@ -1796,21 +1842,50 @@ TSharedRef<SWidget> UPA250MapWidget::RebuildWidget()
 										  PressTreasuryToggle();
 										  return FReply::Handled();
 									  })
-									  [SNew(STextBlock).Font(BodyFont).ColorAndOpacity(Cream).Text_Lambda([this]() { return TreasuryText(); })]] +
+									  [SNew(STextBlock).Font(BodyFont).ColorAndOpacity(Cream).Text_Lambda([this]() { return TreasuryText(); })])] +
 							 SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 8, 0).VAlign(VAlign_Center)
-								 [MakeGroup([this]() { return StoresText(); }, TEXT("Selected province stores and shipments in transit."))] +
+								 [Piece(TEXT("stores"), MakeGroup([this]() { return StoresText(); }, TEXT("Powder, cartridges, muskets and provisions in the towns you hold, and shipments on the road when there are any.")))] +
+							 // Support takes what is left of the row; if a treaty makes it longer than that, it ends in an ellipsis and the tooltip has the whole line.
 							 SHorizontalBox::Slot().FillWidth(1.f).HAlign(HAlign_Left).VAlign(VAlign_Center)
-								 [MakeGroup([this]() { return SupportText(); }, TEXT("Local support, British attitude, treaties."))] +
-							 SHorizontalBox::Slot().AutoWidth().Padding(8, 0).VAlign(VAlign_Center)
-								 [SNew(SBox)
-									  .Visibility_Lambda([this]() {
-										  return ScoreboardText().IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible;
+								 [Piece(TEXT("support"), SNew(SBorder)
+									  .BorderImage(&Hud.Chip)
+									  .Padding(FMargin(9.f, 2.f))
+									  .ToolTipText_Lambda([this]() {
+										  return FText::FromString(SupportText().ToString() + TEXT("\nLocal support, the British envoy's attitude, and the treaties in force."));
 									  })
-									  [MakeGroup([this]() { return ScoreboardText(); },
-												 TEXT("Towns you hold against the Crown, the window score, and days left before the campaign is decided on points."))]] +
-							 SHorizontalBox::Slot().AutoWidth().Padding(8, 0).VAlign(VAlign_Center)
-								 [MakeButton(TEXT("Ledger"), [this]() { PressLedgerToggle(); })] +
-							 SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)[DatePlaque]]] +
+									  [SNew(STextBlock).Font(BodyFont).ColorAndOpacity(Cream).OverflowPolicy(ETextOverflowPolicy::Ellipsis).Text_Lambda([this]() { return SupportText(); })])] +
+							 // Campaign pass, in the bar itself (user decision 2026-11-15): the body the player answers to, with Unity and favors, and People.
+							 SHorizontalBox::Slot().AutoWidth().Padding(8, 0, 6, 0).VAlign(VAlign_Center)
+								 [Piece(TEXT("floor"), SNew(SButton)
+									  .ButtonStyle(&Hud.Button)
+									  .IsFocusable(false)
+									  .ContentPadding(FMargin(11.f, 3.f))
+									  .ToolTipText(FText::FromString(TEXT("The body you answer to: its blocs, the measures before it, and what you can do about them. Unity is how close the three blocs of Congress stand: under its floor the troops of other colonies begin to go home. Confidence is the ministry's in its commander. Favors are spent on the floor.")))
+									  .Visibility_Lambda([this]() {
+										  UPA250Subsystem* S2 = Sub();
+										  return S2 && S2->GetController().has_campaign() && !S2->IsBattlePending() && !S2->IsCampaignOver() &&
+														 !PA250PassPanels::FloorButton(S2->GetState()).IsEmpty()
+													 ? EVisibility::Visible
+													 : EVisibility::Collapsed;
+									  })
+									  .OnClicked_Lambda([this]() {
+										  PressFloorToggle();
+										  return FReply::Handled();
+									  })
+									  [SNew(STextBlock).Font(BodyFont).ColorAndOpacity(FPA250HudStyle::Cream).Text_Lambda([this]() {
+										  UPA250Subsystem* S2 = Sub();
+										  if (!S2 || !S2->GetController().has_campaign()) return FText::GetEmpty();
+										  return FText::FromString(PA250PassPanels::FloorChip(S2->GetState()));
+									  })])] +
+							 SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 8, 0).VAlign(VAlign_Center)
+								 [Piece(TEXT("people"), MakeButton(TEXT("People"), [this]() { PressPeopleToggle(); },
+																  TAttribute<EVisibility>::CreateLambda([this]() {
+																	  UPA250Subsystem* S2 = Sub();
+																	  return S2 && S2->GetController().has_campaign() && !S2->IsBattlePending() && !S2->IsCampaignOver() ? EVisibility::Visible
+																																										  : EVisibility::Collapsed;
+																  }),
+																  FText::FromString(TEXT("Your generals, delegates, organizers and agents, and what each can do."))))] +
+							 SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)[Piece(TEXT("date"), DatePlaque)]]] +
 			   SVerticalBox::Slot().AutoHeight()[SNew(SBox).HeightOverride(2.f)[SNew(SImage).Image(&Hud.Rule)]]]
 		+ SOverlay::Slot()
 			  .VAlign(VAlign_Center)
@@ -1851,39 +1926,22 @@ TSharedRef<SWidget> UPA250MapWidget::RebuildWidget()
 								[SNew(SVerticalBox) +
 								 SVerticalBox::Slot().AutoHeight()[SectionHeader(TEXT("YOUR TOWNS"))] +
 								 SVerticalBox::Slot().AutoHeight()[TownsList]]]]
-		// Campaign pass: a second row of the top bar, at its right end (the bar itself is full at
-		// the sizes the game is played at): the body's button with Unity and favors, and People.
+		// Under the bar's right end, below the date: how the war stands (towns, score, days left) and
+		// the Ledger. They gave their place in the bar to Congress and People (user decision 2026-11-15).
 		+ SOverlay::Slot()
 			  .VAlign(VAlign_Top)
 			  .HAlign(HAlign_Right)
 			  .Padding(FMargin(0.f, 49.f, 16.f, 0.f))
-				  [SNew(SHorizontalBox).Visibility_Lambda([this]() {
-					  UPA250Subsystem* S2 = Sub();
-					  return S2 && S2->GetController().has_campaign() && !S2->IsBattlePending() && !S2->IsCampaignOver() ? EVisibility::Visible : EVisibility::Collapsed;
-				  }) +
-				   SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 6, 0)
-					   [SNew(SButton)
-							.ButtonStyle(&Hud.Button)
-							.IsFocusable(false)
-							.ContentPadding(FMargin(11.f, 3.f))
-							.ToolTipText(FText::FromString(TEXT("The body you answer to: its blocs, the measures before it, and what you can do about them. Unity is how close its three blocs stand: under its floor the troops of other colonies begin to go home. Favors are spent on the floor.")))
-							.Visibility_Lambda([this]() {
-								UPA250Subsystem* S2 = Sub();
-								return S2 && S2->GetController().has_campaign() && !PA250PassPanels::FloorButton(S2->GetState()).IsEmpty() ? EVisibility::Visible : EVisibility::Collapsed;
-							})
-							.OnClicked_Lambda([this]() {
-								PressFloorToggle();
-								return FReply::Handled();
-							})
-								[SNew(STextBlock).Font(BodyFont).ColorAndOpacity(FPA250HudStyle::Cream).Text_Lambda([this]() {
-									UPA250Subsystem* S2 = Sub();
-									if (!S2 || !S2->GetController().has_campaign()) return FText::GetEmpty();
-									return FText::FromString(PA250PassPanels::FloorButton(S2->GetState()) + TEXT(" · ") + PA250PassPanels::UnityChip(S2->GetState()));
-								})]] +
-				   SHorizontalBox::Slot().AutoWidth()
-					   [MakeButton(TEXT("People"), [this]() { PressPeopleToggle(); }, EVisibility::Visible,
-								   FText::FromString(TEXT("Your generals, delegates, organizers and agents, and what each can do.")))]]
-		// The people panel and the floor, docked right under that row.
+				  [SNew(SHorizontalBox) +
+				   SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 6, 0).VAlign(VAlign_Center)
+					   [Piece(TEXT("score"), SNew(SBox)
+							.Visibility_Lambda([this]() { return ScoreboardText().IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible; })
+							[MakeGroup([this]() { return ScoreboardText(); },
+									   TEXT("Provinces you hold vs the Crown, then the end-of-campaign window score (each held town plus Support; the Crown's score uses 100 minus Support). When the window closes the higher score wins, unless Boston, headquarters, support or vassalage already decided the war."))])] +
+				   SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+					   [Piece(TEXT("ledger"), MakeButton(TEXT("Ledger"), [this]() { PressLedgerToggle(); }))]]
+		// The people panel and the floor, docked right under that strip. The floor narrows where it
+		// would run under the open mission tracker (a 16:10 window).
 		+ SOverlay::Slot()
 			  .VAlign(VAlign_Fill)
 			  .HAlign(HAlign_Right)
@@ -1896,7 +1954,11 @@ TSharedRef<SWidget> UPA250MapWidget::RebuildWidget()
 			  .VAlign(VAlign_Fill)
 			  .HAlign(HAlign_Right)
 			  .Padding(FMargin(0.f, 88.f, 16.f, BottomStripHeightPx + 64.f))
-				  [SAssignNew(FloorBox, SBox).WidthOverride(700.f).Visibility_Lambda([this]() {
+				  [SAssignNew(FloorBox, SBox)
+					   .WidthOverride(TAttribute<FOptionalSize>::CreateLambda([this]() {
+						   return FOptionalSize(PA250PassPanels::FloorPanelWidth(HudWidthUnits(), IsTrackerShown() && !bTrackerMinimized));
+					   }))
+					   .Visibility_Lambda([this]() {
 					  UPA250Subsystem* S2 = Sub();
 					  return bShowFloor && S2 && !S2->IsBattlePending() ? EVisibility::Visible : EVisibility::Collapsed;
 				  })]

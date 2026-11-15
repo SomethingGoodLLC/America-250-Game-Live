@@ -66,6 +66,10 @@ public:
 	void SetView(FVector2D CenterUV, float Zoom);
 	/** World location of the army's token actor (its ground anchor), if one is spawned. */
 	bool GetArmyTokenLocation(const FString& ArmyId, FVector& OutWorld) const;
+	/** Where a halted token is snapped (the town slot), once RefreshArmyTokens has run. */
+	bool GetArmyTargetAnchor(const FString& ArmyId, FVector& OutWorld) const;
+	/** Probe: place tokens from the sim now, and snap a halted army onto its town slot. */
+	void SnapArmyTokens();
 	/** One line per army token: id, anchor, representation (for probe logs). */
 	FString DescribeArmyTokens() const;
 	/**

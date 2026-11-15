@@ -172,6 +172,17 @@ std::string politics_json(const CampaignState& state);  // the floor: blocs, mea
 std::string decision_json(const CampaignState& state);  // the pending decision, or {"pending":false}
 // What `viewer` knows of an army: {"known":bool,"men_low":n,"men_high":n,"source":text}.
 std::string army_intel_json(const CampaignState& state, const std::string& viewer_faction, const std::string& army_id);
+// Unscouted band around a true count of men. extra_half is the seed's added width; width_pct 0
+// ignores it. The band always contains truth_men. mid is the centre the AI reads.
+struct MenBand {
+    int low = 0;
+    int high = 0;
+    int mid = 0;
+};
+MenBand unscouted_men_band(int truth_men, int step_men, int width_pct, int extra_half);
+// Units `viewer` counts `army_id` as. Exact when known; otherwise the band midpoint in units,
+// and never more than the army's true strength.
+int units_as_seen(const CampaignState& state, const std::string& viewer_faction, const std::string& army_id);
 // Gold a purchase costs now (purchase_cost and the rise in prices paper money brought).
 int purchase_cost_now(const CampaignState& state, int powder, int cartridges, int muskets, int bayonets,
                       int provisions, int lead, int paper);
