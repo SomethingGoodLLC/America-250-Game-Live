@@ -9,6 +9,17 @@ class UAnimSequence;
 class UAnimMontage;
 class UStaticMeshComponent;
 
+USTRUCT()
+struct FMBCourseContact {
+    GENERATED_BODY()
+
+    UPROPERTY() FName Bone;
+    UPROPERTY() FVector BoneLocalPoint = FVector::ZeroVector;
+    UPROPERTY() FVector CourseAnchor = FVector::ZeroVector;
+    UPROPERTY() int32 FirstFrame = 0;
+    UPROPERTY() int32 LastFrame = 0;
+};
+
 UCLASS(BlueprintType)
 class MOTIONBRICKSTRAVERSAL_API UMBGeneratedClip : public UDataAsset {
     GENERATED_BODY()
@@ -20,6 +31,7 @@ public:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="MotionBricks Evaluation") float WallHeight = 68.f;
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="MotionBricks Evaluation") FString Provenance;
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="MotionBricks Evaluation") bool bEvaluationOnly = true;
+    UPROPERTY() TArray<FMBCourseContact> Contacts;
     float Duration() const { return RootOffsets.Num() > 1 ? (RootOffsets.Num()-1)/FPS : 0.f; }
     FVector Sample(float Time) const;
 };
@@ -41,6 +53,7 @@ class MOTIONBRICKSTRAVERSAL_API AMBTestCharacter : public ACharacter {
 public:
     AMBTestCharacter();
     virtual void BeginPlay() override;
+    virtual void EndPlay(const EEndPlayReason::Type Reason) override;
     virtual void Tick(float DeltaSeconds) override;
     virtual void SetupPlayerInputComponent(UInputComponent* Input) override;
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="MotionBricks Evaluation") TObjectPtr<UMBGeneratedClip> Clip;
@@ -55,8 +68,10 @@ private:
     bool ClearAt(const FVector& Position, float HalfHeight) const;
     void SetResult(const FString& Message);
     void TickVerification(float DeltaSeconds);
+    void SampleVerificationContacts(UWorld* World, ELevelTick TickType, float DeltaSeconds);
     FVector Origin;
     FRotator TraversalRotation;
+    TWeakObjectPtr<AMBTestCourse> ActiveCourse;
     float Elapsed = 0.f;
     float NormalHalfHeight = 88.f;
     TSubclassOf<UAnimInstance> LocomotionClass;
@@ -70,6 +85,13 @@ private:
     FVector VerificationStart;
     FVector VerificationLanding;
     int32 VerificationCapture = 0;
+    struct FObservedContact {
+        int32 Samples = 0;
+        double HeightError = 0.0;
+        double PlanarError = 0.0;
+    };
+    TArray<FObservedContact> ObservedContacts;
+    FDelegateHandle ContactVerificationTick;
 };
 
 UCLASS()

@@ -69,6 +69,8 @@ AMBTestCharacter::AMBTestCharacter() {
     static ConstructorHelpers::FObjectFinder<USkeletalMesh> Quinn(TEXT("/Game/Characters/Mannequins/Meshes/SKM_Quinn_Simple.SKM_Quinn_Simple"));
     GetMesh()->SetSkeletalMesh(Quinn.Object);
     GetMesh()->SetRelativeLocationAndRotation(FVector(0,0,-88), FRotator(0,-90,0));
+    // Evaluate the visible pose after Tick sets the capsule and paused montage positions.
+    GetMesh()->AddTickPrerequisiteActor(this);
     static ConstructorHelpers::FClassFinder<UAnimInstance> AnimBP(TEXT("/Game/Characters/Mannequins/Anims/Unarmed/ABP_Unarmed"));
     LocomotionClass = AnimBP.Class;
     GetMesh()->SetAnimInstanceClass(LocomotionClass);
@@ -86,12 +88,22 @@ void AMBTestCharacter::BeginPlay() {
     Super::BeginPlay();
     if (!Clip) Clip = LoadObject<UMBGeneratedClip>(nullptr, TEXT("/Game/Developers/MotionBricksEvaluation/DA_GeneratedTraversal.DA_GeneratedTraversal"));
     bVerify = FParse::Param(FCommandLine::Get(),TEXT("MBVerify"));
+    if (bVerify && Clip) {
+        ObservedContacts.SetNum(Clip->Contacts.Num());
+        ContactVerificationTick = FWorldDelegates::OnWorldPostActorTick.AddUObject(
+            this,&AMBTestCharacter::SampleVerificationContacts);
+    }
     NormalHalfHeight = GetCapsuleComponent()->GetUnscaledCapsuleHalfHeight();
     if (APlayerController* PC = Cast<APlayerController>(Controller)) {
         PC->SetInputMode(FInputModeGameOnly());
         PC->bShowMouseCursor = false;
     }
     SetResult(Clip ? TEXT("Ready - WASD move, arrows turn, E traverse, R reset, B block landing, V debug") : TEXT("Missing generated clip: run build_test_map.py"));
+}
+
+void AMBTestCharacter::EndPlay(const EEndPlayReason::Type Reason) {
+    if (ContactVerificationTick.IsValid()) FWorldDelegates::OnWorldPostActorTick.Remove(ContactVerificationTick);
+    Super::EndPlay(Reason);
 }
 
 void AMBTestCharacter::SetupPlayerInputComponent(UInputComponent* Input) {
@@ -122,10 +134,13 @@ bool AMBTestCharacter::TryTraversal() {
     const FVector Local = Course->GetActorTransform().InverseTransformPosition(GetActorLocation());
     const FVector Forward = Course->GetActorForwardVector();
     if (FVector::DotProduct(GetActorForwardVector(),Forward) < 0.95f || FMath::Abs(Local.Y) > 12.f || FMath::Abs(Local.X + Clip->WallDistance) > 20.f) {
+        UE_LOG(LogTemp, Verbose, TEXT("MotionBricks approach: location %s, facing %.3f"),*Local.ToCompactString(),
+            FVector::DotProduct(GetActorForwardVector(),Forward));
         SetResult(TEXT("Rejected: approach the marked region facing the wall")); return false;
     }
     Origin = Course->GetActorTransform().TransformPosition(FVector(-Clip->WallDistance,0,Local.Z));
     TraversalRotation = Course->GetActorRotation();
+    ActiveCourse = Course;
     FVector Landing = Origin + TraversalRotation.RotateVector(Clip->RootOffsets.Last());
     FHitResult Ground;
     FCollisionQueryParams Params(SCENE_QUERY_STAT(MBPath), false, this);
@@ -212,7 +227,8 @@ void AMBTestCharacter::ResetAttempt() {
     const float Distance = Clip ? Clip->WallDistance : 167.f;
     FVector Start = Course->GetActorTransform().TransformPosition(FVector(-Distance,0,NormalHalfHeight+2));
     if (!ClearAt(Start,NormalHalfHeight)) { SetResult(TEXT("Reset rejected: approach occupied")); return; }
-    SetActorLocationAndRotation(Start, Course->GetActorRotation());
+    SetActorLocationAndRotation(Start,Course->GetActorRotation(),false,nullptr,ETeleportType::TeleportPhysics);
+    ConsumeMovementInputVector();
     GetCharacterMovement()->StopMovementImmediately();
     SetResult(TEXT("Reset: press E to traverse"));
 }
@@ -244,7 +260,7 @@ void AMBTestCharacter::Tick(float Dt) {
             }
         }
         if (bTraversing && Elapsed >= Clip->Duration()-KINDA_SMALL_NUMBER) Finish(true);
-    } else if (PC) {
+    } else if (PC && !bVerify) {
         const float Forward = float(PC->IsInputKeyDown(EKeys::W))-float(PC->IsInputKeyDown(EKeys::S));
         const float Right = float(PC->IsInputKeyDown(EKeys::D))-float(PC->IsInputKeyDown(EKeys::A));
         AddMovementInput(GetActorForwardVector(),Forward);

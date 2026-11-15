@@ -98,3 +98,9 @@ $importLog = Join-Path (Resolve-Path $target).Path 'MBImport_final.log'
 & "$tools\launch_test.ps1" -Verify -FPS 30
 & "$tools\launch_test.ps1" -Verify -FPS 60
 ```
+
+## 2026-11-14 — palm and landing foot polish
+
+Reused `VaultBenchmark/generated_traversal.json` and the 5.8.4 test host. Added import-time two-bone IK for the wall palm and both landing steps, a small exit height correction, and rendered contact measurements. The first runtime measurements found that Quinn's proportions were being retargeted twice. The importer now sets Quinn as the sequence's retarget source mesh. The previous generated packages are backed up in the workspace beside the host under `BeforeContactPolish` and `ContactBakeBeforeSourceFix`.
+
+Ran the refresh, build, import, and 30/60 FPS commands above with `MBImport_contacts.log` for the final import. Both rendered verification logs end in `MB_VERIFY RESULT PASS`. See the contact retest table in TEST_RESULTS.md and the evidence folders named `Contacts_30fps` and `Contacts_60fps`.

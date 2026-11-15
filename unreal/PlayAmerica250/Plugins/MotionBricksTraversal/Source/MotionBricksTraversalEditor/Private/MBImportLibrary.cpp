@@ -1,4 +1,5 @@
 #include "MBImportLibrary.h"
+#include "MBContactBake.h"
 #include "MBTraversal.h"
 #include "Animation/AnimSequence.h"
 #include "Animation/AnimData/IAnimationDataController.h"
@@ -129,6 +130,10 @@ UMBGeneratedClip* UMBImportLibrary::ImportGeneratedMotion(const FString& Filenam
     UAnimSequence* Animation = NewObject<UAnimSequence>(CreatePackage(*AnimPath),TEXT("A_GeneratedTraversal"),RF_Public|RF_Standalone);
     Animation->SetSkeleton(Mesh->GetSkeleton());
     Animation->SetPreviewMesh(Mesh);
+    // The tracks already use this mesh's proportions. The shared skeleton's
+    // default reference would apply another translation retarget at playback.
+    Animation->SetRetargetSourceAsset(Mesh);
+    Animation->UpdateRetargetSourceAssetData();
     Animation->bEnableRootMotion = false; // Capsule consumes the separately stored root curve.
     IAnimationDataController& Controller = Animation->GetController();
     Controller.InitializeModel();
@@ -170,9 +175,29 @@ UMBGeneratedClip* UMBImportLibrary::ImportGeneratedMotion(const FString& Filenam
                     Bone.SetLocation(Position);
                 }
             }
-            // Target bone lengths are retained. This is a rotation retarget, not IK contact solving.
+            // The rotation retarget retains target bone lengths before contact correction.
             Local.Add(Bone);
             Global.Add(Parent<0 ? Bone : Bone*Global[Parent]);
+        }
+        LocalFrames.Add(MoveTemp(Local));
+    }
+    UMBGeneratedClip* Clip = NewObject<UMBGeneratedClip>(CreatePackage(*ClipPath),TEXT("DA_GeneratedTraversal"),RF_Public|RF_Standalone);
+    Clip->Animation = Animation;
+    Clip->FPS = 30.f;
+    for (const auto& Frame : Motion) Clip->RootOffsets.Add((Frame[Hips].GetLocation()-First)*Scale);
+    Clip->WallDistance = -First.X*Scale;
+    const FString Primitive = Json->GetStringField(TEXT("primitive"));
+    const FString Sequence = Json->GetStringField(TEXT("sequence"));
+    Clip->WallHeight = (Primitive == TEXT("jump_0_75m") ? 78.f : 50.f) * Scale;
+    if (Primitive == TEXT("jump_0_75m") && Sequence == TEXT("OneHandedJump0") && LocalFrames.Num() == 41) {
+        if (!BakeVaultContacts(Ref,RefGlobal,LocalFrames,*Clip)) return Fail(TEXT("Contact bake failed on the evaluation vault"));
+    }
+
+    for (auto& Local : LocalFrames) {
+        TArray<FTransform> Global;
+        for (int32 Bone=0; Bone<Local.Num(); ++Bone) {
+            const int32 Parent = Ref.GetParentIndex(Bone);
+            Global.Add(Parent<0 ? Local[Bone] : Local[Bone]*Global[Parent]);
         }
         // The locomotion graph consumes these IK goals even while playing a
         // slot montage. Keep them with the authored feet through the vault.
@@ -186,7 +211,6 @@ UMBGeneratedClip* UMBImportLibrary::ImportGeneratedMotion(const FString& Filenam
             Local[Goal] = GoalGlobal.GetRelativeTransform(Global[GoalParent]);
             Local[Goal].NormalizeRotation();
         }
-        LocalFrames.Add(MoveTemp(Local));
     }
     for (int32 B=0; B<Ref.GetNum(); ++B) {
         const FName Name = Ref.GetBoneName(B);
@@ -202,14 +226,8 @@ UMBGeneratedClip* UMBImportLibrary::ImportGeneratedMotion(const FString& Filenam
     Controller.NotifyPopulated();
     Controller.CloseBracket(false);
     Animation->PostEditChange();
-    UMBGeneratedClip* Clip = NewObject<UMBGeneratedClip>(CreatePackage(*ClipPath),TEXT("DA_GeneratedTraversal"),RF_Public|RF_Standalone);
-    Clip->Animation = Animation;
-    Clip->FPS = 30.f;
-    for (const auto& Frame : Motion) Clip->RootOffsets.Add((Frame[Hips].GetLocation()-First)*Scale);
-    Clip->WallDistance = -First.X*Scale;
-    Clip->WallHeight = (Json->GetStringField(TEXT("primitive")) == TEXT("jump_0_75m") ? 78.f : 50.f) * Scale;
     Clip->Provenance = FString::Printf(TEXT("MotionBricks %s; %s/%s; evaluation-only sample targets; source %s"),
-        *Json->GetStringField(TEXT("motionbricks_commit")),*Json->GetStringField(TEXT("primitive")),*Json->GetStringField(TEXT("sequence")),*Filename);
+        *Json->GetStringField(TEXT("motionbricks_commit")),*Primitive,*Sequence,*Filename);
     if (!SaveAsset(Animation) || !SaveAsset(Clip)) return Fail(TEXT("Could not save assets"));
     UE_LOG(LogTemp,Display,TEXT("MotionBricks import: %d frames, %d bones, scale %.5f, wall %.2f cm, duration %.3f s"),Motion.Num(),Ref.GetNum(),Scale,Clip->WallDistance,Clip->Duration());
     return Clip;

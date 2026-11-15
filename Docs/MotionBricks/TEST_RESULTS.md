@@ -47,3 +47,21 @@ These frame deltas include the engine's frame cap and do not isolate animation C
 Local evidence lives in the workspace's `MotionBricksEvaluation` folder. See `VaultTestHost/MBImport_final.log`, `VaultTestHost/MBVerify_30.log`, `VaultTestHost/MBVerify_60.log`, `VaultBenchmark/metrics.json` and `Evidence/VaultFinal_30fps` or `Evidence/VaultFinal_60fps`.
 
 Run the manual walkthrough in SETUP.md for the real keys and observe hands and feet from the side. Weapon grip, coat and bayonet clipping require the licensed soldier and kit. The normal game's campaign map and combat rules were outside the test host.
+
+## Contact polish retest
+
+The updated vault keeps the generated 41-frame sequence and planar trajectory. It adds a left-palm plant during frames 16–19, a left-foot touchdown during frames 32–34, and a planted right foot during frames 38–40. The corrected shoulders and legs preserve bone lengths. The capsule settles vertically before walking resumes.
+
+The importer originally hit the hand anchor in the animation data while rendered playback lifted the hand 4–5 cm. Comparing the same sequence with Quinn selected as the evaluation mesh traced this to the shared skeleton's reference proportions. Setting the retarget source mesh to Quinn restored the contact during playback.
+
+Both Unreal 5.8.4 Direct3D 12 runs passed. The samples below come from the evaluated skeletal mesh after the actor and animation ticks. The maximum errors compare a palm or sole marker with the actual wall or floor height and its anchored point. The final frame is the walking handoff, so the right-foot measurements cover the samples before release.
+
+| Contact | 30 FPS max height / planar error | 60 FPS max height / planar error |
+| --- | ---: | ---: |
+| Left palm | 0.151 / 0.004 cm, 4 samples | 0.151 / 0.168 cm, 7 samples |
+| Left sole | 0.497 / 0.815 cm, 3 samples | 0.497 / 0.815 cm, 5 samples |
+| Right sole | 0.500 / 0.813 cm, 2 samples | 0.500 / 0.813 cm, 4 samples |
+
+Both caps passed the existing trigger, rejection, repeat, synchronization, and walking checks. Planar root drift stayed at 0.000 cm. Median frame deltas were 33.333 ms at the 30 FPS cap and 16.667 ms at the 60 FPS cap.
+
+The screenshots show the palm on the top of the wall and a planted left boot during touchdown, followed by the right step. Find all six screenshots and the rendered log for each cap in `MotionBricksEvaluation/Evidence/Contacts_30fps` and `MotionBricksEvaluation/Evidence/Contacts_60fps`. The markers approximate contact surfaces on Quinn. This does not measure every mesh vertex or cover arbitrary obstacles.

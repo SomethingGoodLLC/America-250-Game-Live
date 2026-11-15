@@ -19,8 +19,14 @@ if ($Verify) {
     $logPath = Join-Path (Split-Path $descriptor -Parent) "MBVerify_${FPS}.log"
     $argsList += @('-MBVerify', ('-abslog="{0}"' -f $logPath))
     Write-Output "Verification log: $logPath"
+    $started = [DateTime]::UtcNow
     $process = Start-Process -FilePath $editor -ArgumentList $argsList -PassThru
     $process.WaitForExit()
-    exit $process.ExitCode
+    if ($null -ne $process.ExitCode -and $process.ExitCode -ne 0) { exit $process.ExitCode }
+    if (!(Test-Path -LiteralPath $logPath) -or (Get-Item -LiteralPath $logPath).LastWriteTimeUtc -lt $started -or
+        !(Select-String -LiteralPath $logPath -SimpleMatch -Quiet 'MB_VERIFY RESULT PASS')) {
+        throw "Traversal verification did not pass. See $logPath"
+    }
+    exit 0
 }
 Start-Process -FilePath $editor -ArgumentList $argsList

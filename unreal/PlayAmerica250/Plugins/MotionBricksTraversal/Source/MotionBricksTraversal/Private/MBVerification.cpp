@@ -3,6 +3,7 @@
 #include "Animation/AnimMontage.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Components/StaticMeshComponent.h"
 #include "Engine/Engine.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PlayerController.h"
@@ -10,6 +11,27 @@
 #include "InputKeyEventArgs.h"
 #include "Misc/Paths.h"
 #include "UnrealClient.h"
+
+void AMBTestCharacter::SampleVerificationContacts(UWorld* World, ELevelTick TickType, float DeltaSeconds) {
+    const AMBTestCourse* Course = ActiveCourse.Get();
+    if (World != GetWorld() || !Clip || !Course || VerificationPhase != 2 || !bTraversing) return;
+    const float Frame = Elapsed*Clip->FPS;
+    for (int32 Index=0; Index<Clip->Contacts.Num(); ++Index) {
+        const FMBCourseContact& Contact = Clip->Contacts[Index];
+        if (Frame < Contact.FirstFrame-0.02f || Frame > Contact.LastFrame+0.02f) continue;
+        if (GetMesh()->GetBoneIndex(Contact.Bone) == INDEX_NONE) continue;
+        const FVector Point = GetMesh()->GetSocketTransform(Contact.Bone).TransformPosition(Contact.BoneLocalPoint);
+        const FVector Anchor = Course->GetActorTransform().TransformPosition(Contact.CourseAnchor);
+        const UStaticMeshComponent* Surface = Contact.Bone == TEXT("hand_l") ? Course->Wall.Get() : Course->Floor.Get();
+        const double SurfaceZ = Surface->Bounds.Origin.Z+Surface->Bounds.BoxExtent.Z;
+        FObservedContact& Observed = ObservedContacts[Index];
+        ++Observed.Samples;
+        Observed.HeightError = FMath::Max(Observed.HeightError,FMath::Abs(Point.Z-SurfaceZ));
+        Observed.PlanarError = FMath::Max(Observed.PlanarError,FVector::Dist2D(Point,Anchor));
+        UE_LOG(LogTemp, Display, TEXT("MB_VERIFY contact sample %s frame %.2f point %s anchor %s"),
+            *Contact.Bone.ToString(),Frame,*Point.ToCompactString(),*Anchor.ToCompactString());
+    }
+}
 
 void AMBTestCharacter::TickVerification(float DeltaSeconds) {
     auto Check = [this](const TCHAR* Label, bool bPassed) {
@@ -78,16 +100,21 @@ void AMBTestCharacter::TickVerification(float DeltaSeconds) {
                 const float SlotWeight = Anim ? Anim->GetSlotMontageGlobalWeight(TEXT("DefaultSlot")) : 0.f;
                 UE_LOG(LogTemp, Display, TEXT("MB_VERIFY slot weight %.3f at %.3f s"),SlotWeight,Elapsed);
                 Check(TEXT("montage blended and synchronized"), bSynchronized && SlotWeight > 0.9f);
-                Capture(TEXT("hand"));
-                ++VerificationCapture;
-            } else if (VerificationCapture == 1 && Fraction > 0.59f) {
-                Capture(TEXT("clearance"));
                 ++VerificationCapture;
             }
             return;
         }
         Check(TEXT("first traversal complete"), LastResult.StartsWith(TEXT("Complete")));
         Check(TEXT("normal capsule restored"), FMath::IsNearlyEqual(GetCapsuleComponent()->GetUnscaledCapsuleHalfHeight(),NormalHalfHeight));
+        Check(TEXT("three baked contacts available"), Clip->Contacts.Num() == 3);
+        for (int32 Index=0; Index<ObservedContacts.Num(); ++Index) {
+            const FObservedContact& Observed = ObservedContacts[Index];
+            const FName Bone = Clip->Contacts[Index].Bone;
+            UE_LOG(LogTemp, Display, TEXT("MB_VERIFY contact %s max height error %.3f cm planar error %.3f cm (%d samples)"),
+                *Bone.ToString(),Observed.HeightError,Observed.PlanarError,Observed.Samples);
+            const FString Label = FString::Printf(TEXT("%s contact within 1.5 cm of surface and anchor"),*Bone.ToString());
+            Check(*Label,Observed.Samples >= 2 && Observed.HeightError < 1.5 && Observed.PlanarError < 1.5);
+        }
         VerificationLanding = GetActorLocation();
         {
             const FVector Expected = VerificationStart+TraversalRotation.RotateVector(Clip->RootOffsets.Last());
@@ -95,13 +122,14 @@ void AMBTestCharacter::TickVerification(float DeltaSeconds) {
             UE_LOG(LogTemp, Display, TEXT("MB_VERIFY planar root drift %.3f cm"), Drift);
             Check(TEXT("planar root drift below 1 cm"), Drift < 1.0);
         }
-        Capture(TEXT("landing"));
         VerificationTime = 0.f;
         VerificationPhase = 3;
         return;
     case 3:
-        AddMovementInput(GetActorForwardVector(), 1.f);
-        if (VerificationTime < 0.55f) return;
+        if (VerificationTime < 0.55f) {
+            AddMovementInput(GetActorForwardVector(),1.f);
+            return;
+        }
         Check(TEXT("walking controlled after landing"), GetCharacterMovement()->IsMovingOnGround() &&
             FVector::Dist2D(VerificationLanding, GetActorLocation()) > 40.0);
         ResetAttempt();
@@ -112,6 +140,7 @@ void AMBTestCharacter::TickVerification(float DeltaSeconds) {
         if (VerificationTime < 0.15f) return;
         if (TryTraversal()) {
             Check(TEXT("second attempt accepted"), true);
+            VerificationCapture = 0;
             VerificationPhase = 5;
         } else {
             Check(TEXT("second attempt accepted"), false);
@@ -119,7 +148,17 @@ void AMBTestCharacter::TickVerification(float DeltaSeconds) {
         }
         return;
     case 5:
-        if (bTraversing) return;
+        if (bTraversing) {
+            // Recording is separate from the first attempt's contact samples.
+            static const float CaptureFrames[] = {17.0f, 24.0f, 33.0f, 39.0f};
+            static const TCHAR* const CaptureLabels[] = {TEXT("hand"),TEXT("clearance"),TEXT("left_foot"),TEXT("right_foot")};
+            if (VerificationCapture < UE_ARRAY_COUNT(CaptureFrames) &&
+                Elapsed*Clip->FPS >= CaptureFrames[VerificationCapture]-0.05f) {
+                Capture(CaptureLabels[VerificationCapture++]);
+            }
+            return;
+        }
+        Capture(TEXT("landing"));
         Check(TEXT("second traversal complete"), LastResult.StartsWith(TEXT("Complete")));
         VerificationPhase = 6;
         return;
