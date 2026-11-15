@@ -1,0 +1,35 @@
+{
+  "name": "reject_transfer_allied",
+  "description": "Stockbridge (allied_company) cannot transfer companies into another army",
+  "start_ymdh": {
+    "y": 1775,
+    "m": 4,
+    "d": 20,
+    "h": 0
+  },
+  "setup": {
+    "add_armies": [
+      {
+        "id": "stockbridge_company",
+        "name": "Stockbridge Company",
+        "province": "concord",
+        "role": "allied_company",
+        "units": {
+          "militia": 2
+        },
+        "allied": {
+          "militia": 2
+        }
+      }
+    ]
+  },
+  "order": {
+    "order": "transfer_units",
+    "from_army": "stockbridge_company",
+    "to_army": "continental_militia",
+    "units": {
+      "militia": 1
+    }
+  },
+  "expect_error": "allied_company"
+}

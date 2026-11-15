@@ -1568,21 +1568,40 @@ void RunAudio(FLog& Log)
 		for (int32 i = 0; i < 64; ++i) if (USoundBase* S = FPA250BattleAudio::Pick(B.Name)) Seen.Add(S);
 		Log.Check(Seen.Num() >= B.MinVariants, FString::Printf(TEXT("audio: %s has %d variant(s) (want >= %d)"), B.Name, Seen.Num(), B.MinVariants));
 	}
-	// Every shouted line exists for both sides and is a real recording.
+	// Every shouted line exists for both sides and is a real recording (16 keys × 2 sides = 32; +6 general-fall = 44).
 	int32 Missing = 0;
 	float Shortest = 100.f;
+	int32 Present = 0;
 	for (const TCHAR* Side : {TEXT("british"), TEXT("continental")})
 	{
 		for (const TCHAR* Key : {TEXT("make_ready"), TEXT("present"), TEXT("fire"), TEXT("forward"), TEXT("enemy_advancing"),
 			TEXT("steady"), TEXT("fall_back"), TEXT("enemy_falling_back"), TEXT("breaking"), TEXT("enemy_running"),
-			TEXT("rally"), TEXT("reformed"), TEXT("charge"), TEXT("charge_b"), TEXT("follow_me"), TEXT("charge_bayonets")})
+			TEXT("rally"), TEXT("reformed"), TEXT("charge"), TEXT("charge_b"), TEXT("follow_me"), TEXT("charge_bayonets"),
+			TEXT("general_wounded"), TEXT("general_killed"), TEXT("general_captured"),
+			TEXT("enemy_general_wounded"), TEXT("enemy_general_killed"), TEXT("enemy_general_captured")})
 		{
 			const USoundWave* W = Cast<USoundWave>(FPA250BattleAudio::Voice(FName(Side), Key));
 			if (!W) { ++Missing; continue; }
+			++Present;
 			Shortest = FMath::Min(Shortest, W->Duration);
 		}
 	}
-	Log.Check(Missing == 0 && Shortest >= 0.3f, FString::Printf(TEXT("audio: 32 shouted lines present, the leader's orders among them (missing %d, shortest %.2f s)"), Missing, Shortest));
+	Log.Check(Missing == 0 && Shortest >= 0.3f, FString::Printf(TEXT("audio: %d shouted lines present, general-fall among them (missing %d, shortest %.2f s)"), Present, Missing, Shortest));
+
+	// A fallen general is named, in two wordings, and the voice key is the fallen side's or the player's.
+	{
+		FString Key;
+		const FString A = APA250BattleGameMode::GeneralFallWords(true, TEXT("Colonel James Barrett"), TEXT("wounded"), 0, Key);
+		const bool bFriendlyA = A == TEXT("Colonel James Barrett is wounded!") && Key == TEXT("general_wounded");
+		const FString B = APA250BattleGameMode::GeneralFallWords(true, TEXT("Colonel James Barrett"), TEXT("wounded"), 1, Key);
+		const bool bFriendlyB = B == TEXT("Barrett! Colonel James Barrett is wounded!") && Key == TEXT("general_wounded");
+		const FString Enemy = APA250BattleGameMode::GeneralFallWords(false, TEXT("Lieutenant Colonel Francis Smith"), TEXT("killed"), 0, Key);
+		const bool bEnemy = Enemy == TEXT("Lieutenant Colonel Francis Smith is killed!") && Key == TEXT("enemy_general_killed");
+		const int32 V0 = APA250BattleGameMode::GeneralFallVariant(7, 1);
+		const int32 V1 = APA250BattleGameMode::GeneralFallVariant(8, 1);
+		Log.Check(bFriendlyA && bFriendlyB && bEnemy && V0 != V1 && (V0 == 0 || V0 == 1),
+			TEXT("audio: a general's fall names him, two ways, and the enemy key is the player's shout"));
+	}
 
 	// Gameplay actions make sound (counted at the hook; no audio device needed headless).
 	FScopedTestWorld W;
@@ -1592,6 +1611,12 @@ void RunAudio(FLog& Log)
 	Musket->WeaponTuning = UPA250WeaponTuning::MakeRuntimeDefaults();
 	Musket->SetReloadPreset(EPA250ReloadPreset::Arcade);
 	Log.Check(Musket->Fire(FVector::ForwardVector) && FPA250BattleAudio::GetPlayCount(TEXT("musket_shot")) == 1, TEXT("audio: a shot is heard"));
+	FPA250BattleAudio::PlayVoice(W.World, TEXT("continental"), TEXT("general_wounded"), FVector::ZeroVector);
+	FPA250BattleAudio::PlayVoice(W.World, TEXT("british"), TEXT("enemy_general_killed"), FVector::ZeroVector);
+	Log.Check(FPA250BattleAudio::GetPlayCount(TEXT("vo:continental/general_wounded")) == 1
+		&& FPA250BattleAudio::GetPlayCount(TEXT("vo:british/enemy_general_killed")) == 1
+		&& FPA250BattleAudio::GetPlayCount(TEXT("vo:british/general_wounded")) == 0,
+		TEXT("audio: a friendly fall uses the continental voice and an enemy fall uses the british voice"));
 	FRandomStream Rng(5);
 	const FPA250AIReloadParams Vet = UPA250CombatProfiles::MakeRuntimeDefaults()->TrainingNamed(TEXT("Veteran")).ToReloadParams();
 	for (float T = 0.f; !Musket->CanFire() && T < 20.f; T += 0.01f)
@@ -2184,10 +2209,33 @@ void RunCampaignArc(FLog& Log)
 		FString::Printf(TEXT("arc: it shows the goal and where it stands (%s)"), *T.Progress));
 	Log.Check(!T.bCanSendForGuns && !T.bCanHaulGuns && !T.bCanReenlist, TEXT("arc: no guns and no enlistment buttons in April"));
 	{
+		const TArray<PA250ArcPanels::FMissionNode> Tree = PA250ArcPanels::MissionTree(St);
+		Log.Check(Tree.Num() == 6 && Tree[0].Title == TEXT("Save the stores") && Tree[0].Status == TEXT("active") && Tree[1].Status == TEXT("locked") &&
+					  Tree[5].Title == TEXT("The heights"),
+			FString::Printf(TEXT("arc: the mission tree has the six Patriot missions in order (%d, first '%s' %s)"), Tree.Num(),
+				Tree.Num() > 0 ? *Tree[0].Title : TEXT("?"), Tree.Num() > 0 ? *Tree[0].Status : TEXT("?")));
+	}
+	{
 		UPA250Subsystem* Probe = nullptr; // target towns come from the same definitions the subsystem reads
 		(void)Probe;
 		const pa250::MissionDef& First = pa250::mission_defs().front();
 		Log.Check(First.target_provinces.size() == 1 && First.target_provinces[0] == "concord", TEXT("arc: the first mission marks Concord on the map"));
+		const FString ConcordTip = PA250ArcPanels::MissionTargetHoverLine(St, TEXT("concord"));
+		Log.Check(ConcordTip.Contains(TEXT("Save the stores")) && ConcordTip.Contains(TEXT("Mission:")),
+			FString::Printf(TEXT("arc: hovering Concord names the active mission (%s)"), *ConcordTip));
+		Log.Check(PA250ArcPanels::MissionTargetHoverLine(St, TEXT("roxbury")).IsEmpty(),
+			TEXT("arc: a non-target town has no mission hover line"));
+	}
+	{
+		// Status only: apply_mission_effect pays the reward and does not flip mission status.
+		pa250::CampaignState P2 = St;
+		P2.progress.missions["p1_save_the_stores"].status = "complete";
+		P2.progress.missions["p2_shut_them_in"].status = "active";
+		const FString RoxburyTip = PA250ArcPanels::MissionTargetHoverLine(P2, TEXT("roxbury"));
+		Log.Check(RoxburyTip.Contains(TEXT("Shut them in")) && RoxburyTip.Contains(TEXT("Hold Roxbury")),
+			FString::Printf(TEXT("arc: after mission 1, Roxbury's hover names Shut them in (%s)"), *RoxburyTip));
+		Log.Check(PA250ArcPanels::MissionTargetHoverLine(P2, TEXT("concord")).IsEmpty(),
+			TEXT("arc: Concord is no longer a mission hover target once Shut them in is active"));
 	}
 
 	// Enlistments: the warning, and the button for a selected army.
@@ -3056,8 +3104,10 @@ void RunGunnery(FLog& Log)
 	pa250::load_battle_rules(RulesText);
 	const pa250::BattleRules& R = pa250::battle_rules();
 	Log.Check(R.guns_crew_class == "artilleryman" && R.guns_crew_units_per_gun == 1 && R.cannon_crew_men == 4 && R.cannon_min_crew == 2
-		&& FMath::IsNearlyEqual(R.cannon_length_cm, 333.f) && R.cannon_round_range_m > R.cannon_canister_range_m && R.cannon_works_damage > 0.f,
-		TEXT("guns: the values are the file's (crew of 4, 2 can still work it, the mesh's own 333 cm)"));
+		&& FMath::IsNearlyEqual(R.cannon_length_cm, 333.f) && R.cannon_round_range_m > R.cannon_grape_range_m && R.cannon_works_damage > 0.f
+		&& R.cannon_shell_range_m > R.cannon_shell_fuse_min_m && R.cannon_shell_blast_radius_cm > 0.f
+		&& R.cannon_elevation_max_deg > R.cannon_elevation_min_deg,
+		TEXT("guns: the values are the file's (crew of 4, 2 can still work it, the mesh's own 333 cm, grape/shell/elevation)"));
 	for (const TCHAR* F : {TEXT("british"), TEXT("continental")})
 	{
 		const FPA250UnitClassKit& G = PA250UnitClasses::KitFor(F, TEXT("artilleryman"));
@@ -3066,13 +3116,40 @@ void RunGunnery(FLog& Log)
 		Log.Check(!PA250UnitClasses::KitFor(F, TEXT("line_infantry")).bServesGuns, FString::Printf(TEXT("guns: %s line infantry are not gunners"), F));
 	}
 
-	// Which shot: canister close, round shot beyond, nothing past its range.
+	// Which shot: grape close, round shot beyond, nothing past the round while shell does not outrange it.
 	{
 		EPA250Shot Shot = EPA250Shot::RoundShot;
-		const bool bClose = PA250Gunnery::ChooseShot(R.cannon_canister_range_m * 100.f - 100.f, R, Shot) && Shot == EPA250Shot::Canister;
-		const bool bFar = PA250Gunnery::ChooseShot(R.cannon_canister_range_m * 100.f + 100.f, R, Shot) && Shot == EPA250Shot::RoundShot;
+		const bool bClose = PA250Gunnery::ChooseShot(R.cannon_grape_range_m * 100.f - 100.f, R, Shot) && Shot == EPA250Shot::Grape;
+		const bool bFar = PA250Gunnery::ChooseShot(R.cannon_grape_range_m * 100.f + 100.f, R, Shot) && Shot == EPA250Shot::RoundShot;
+		const float Mid = (R.cannon_grape_range_m + R.cannon_round_range_m) * 0.5f * 100.f;
+		const bool bMidRound = PA250Gunnery::ChooseShot(Mid, R, Shot) && Shot == EPA250Shot::RoundShot;
 		const bool bEnd = PA250Gunnery::ChooseShot(R.cannon_round_range_m * 100.f, R, Shot) && !PA250Gunnery::ChooseShot(R.cannon_round_range_m * 100.f + 100.f, R, Shot);
-		Log.Check(bClose && bFar && bEnd, FString::Printf(TEXT("guns: canister inside %.0f m, round shot to %.0f m, no shot beyond"), R.cannon_canister_range_m, R.cannon_round_range_m));
+		Log.Check(bClose && bFar && bMidRound && bEnd, FString::Printf(TEXT("guns: grape inside %.0f m, round shot to %.0f m, shell not chosen inside the round"), R.cannon_grape_range_m, R.cannon_round_range_m));
+		pa250::BattleRules Howitzer = R;
+		Howitzer.cannon_shell_range_m = R.cannon_round_range_m + 80.f;
+		const float PastRound = (R.cannon_round_range_m + 40.f) * 100.f;
+		const bool bShellBand = PA250Gunnery::ChooseShot(PastRound, Howitzer, Shot) && Shot == EPA250Shot::Shell;
+		Log.Check(bShellBand && R.cannon_shell_range_m <= R.cannon_round_range_m,
+			TEXT("guns: the crew loads shell only when it outranges round shot; the shipped piece does not"));
+		const float GrapeEdge = R.cannon_grape_range_m * 100.f;
+		const float GrapeFar = R.cannon_grape_range_m * 100.f * 1.25f + 50.f;
+		Log.Check(PA250Gunnery::RefuseShot(EPA250Shot::Grape, GrapeEdge, R) == nullptr
+			&& FString(PA250Gunnery::RefuseShot(EPA250Shot::Grape, GrapeFar, R)) == TEXT("grape too far — switch load")
+			&& FString(PA250Gunnery::RefuseShot(EPA250Shot::Shell, R.cannon_shell_range_m * 100.f + 100.f, R)) == TEXT("shell too far — switch load"),
+			TEXT("guns: a chosen load past its range says to switch"));
+		const float Drop = PA250Gunnery::RoundShotDrop(10000.f, R.cannon_round_speed_m * 100.f);
+		const float Elev = PA250Gunnery::BallisticElevationDeg(10000.f, Drop, 0.f);
+		Log.Check(Elev > 0.f && Elev < R.cannon_elevation_max_deg,
+			FString::Printf(TEXT("guns: a level mark is laid %.2f deg above it (the mesh stays level)"), Elev));
+		Log.Check(FString::Printf(TEXT("LOAD: %s"), *FString(PA250Gunnery::ShotWords(EPA250Shot::Grape)).ToUpper()) == TEXT("LOAD: GRAPE"),
+			TEXT("guns: the load chip reads LOAD: GRAPE"));
+		Log.Check(FString(PA250Gunnery::ShotWords(EPA250Shot::Grape)) == TEXT("grape")
+			&& FString(PA250Gunnery::ShotWords(EPA250Shot::Shell)) == TEXT("shell")
+			&& FString(PA250Gunnery::ShotWords(EPA250Shot::RoundShot)) == TEXT("round shot"),
+			TEXT("guns: the three loads have HUD words"));
+		const float Fuse = FMath::Clamp(R.cannon_shell_range_m * 50.f, R.cannon_shell_fuse_min_m, R.cannon_shell_range_m);
+		Log.Check(Fuse >= R.cannon_shell_fuse_min_m && Fuse <= R.cannon_shell_range_m && R.cannon_shell_damage > 0.f,
+			FString::Printf(TEXT("guns: shell fuse clamps to %.0f–%.0f m with blast damage"), R.cannon_shell_fuse_min_m, R.cannon_shell_range_m));
 	}
 
 	// The drill: a full crew of gunners at full speed, a short crew slower, untrained men slower still, too few not at all.
@@ -3173,6 +3250,50 @@ void RunGunnery(FLog& Log)
 		for (const FString& L : Done.MapChanges) bLine |= L.Contains(TEXT("gun"));
 		Log.Check(After.armies.at("continental_militia").guns == 1 && After.armies.at("british_regulars").guns == 1 && After.progress.last_battle_report.guns_taken.count("continental") == 1 && bLine,
 			TEXT("guns: a gun the player overran is his after the battle, on the report and on the card"));
+	}
+
+	// One man cannot fire. Two can. Grape past its range is refused; grape inside it fires. The mesh stays level.
+	{
+		FScopedTestWorld W;
+		Log.Check(W.World != nullptr, TEXT("guns: a world for the serve check"));
+		if (W.World)
+		{
+			APA250FieldGun* Gun = W.World->SpawnActor<APA250FieldGun>(FVector::ZeroVector, FRotator::ZeroRotator);
+			ARFCharacter* Server = W.World->SpawnActor<ARFCharacter>(FVector(80.f, 0.f, 0.f), FRotator::ZeroRotator);
+			ARFCharacter* Mate = W.World->SpawnActor<ARFCharacter>(FVector(8000.f, 0.f, 0.f), FRotator::ZeroRotator);
+			Log.Check(Gun && Server && Mate, TEXT("guns: the piece and two men spawn"));
+			if (Gun && Server && Mate)
+			{
+				Gun->Place(TEXT("continental"));
+				Server->FactionId = Mate->FactionId = TEXT("continental");
+				Server->UnitClass = Mate->UnitClass = TEXT("artilleryman");
+				Gun->SetActorRotation(FRotator::ZeroRotator);
+				Gun->ClaimPost(Server);
+				Gun->SetPlayerGunner(Server);
+				const FVector Muzzle = Gun->GetMuzzle();
+				const FVector Fwd = Gun->GetActorForwardVector().GetSafeNormal2D();
+				const FVector Forward = Fwd.IsNearlyZero() ? FVector::ForwardVector : Fwd;
+				const FVector Close = Muzzle + Forward * (R.cannon_grape_range_m * 0.5f * 100.f);
+				const float Lay = Gun->LayTo(Close);
+				Log.Check(Lay > 0.05f && FMath::Abs(Gun->GetActorRotation().Pitch) < 1.f,
+					FString::Printf(TEXT("guns: lay %.2f deg, actor pitch %.2f (mesh stays level)"), Lay, Gun->GetActorRotation().Pitch));
+				Log.Check(!Gun->DischargeAt(Close, Server) && Gun->GetShotsFired() == 0 && Gun->GetCrew() < R.cannon_min_crew,
+					FString::Printf(TEXT("guns: one man at the piece (crew %d) cannot fire"), Gun->GetCrew()));
+				Mate->SetActorLocation(Gun->GetActorLocation() + FVector(100.f, 40.f, 0.f));
+				Gun->ClaimPost(Mate);
+				Gun->CycleShot(1);
+				Gun->CycleShot(1);
+				Gun->CycleShot(1);
+				Gun->CycleShot(1);
+				Log.Check(Gun->GetSelectedShot() == EPA250Shot::Grape && Gun->LoadChip() == TEXT("LOAD: GRAPE"),
+					TEXT("guns: [ ] cycles back to LOAD: GRAPE"));
+				const FVector Far = Muzzle + Forward * (R.cannon_grape_range_m * 2.5f * 100.f);
+				Log.Check(!Gun->DischargeAt(Far, Server) && Gun->GetShotsFired() == 0, TEXT("guns: grape too far is refused"));
+				Gun->ForceLoaded();
+				Log.Check(Gun->DischargeAt(Close, Server) && Gun->GetShotsFired() == 1 && Gun->GetCrew() >= R.cannon_min_crew,
+					FString::Printf(TEXT("guns: two men (crew %d) fire grape inside range"), Gun->GetCrew()));
+			}
+		}
 	}
 }
 

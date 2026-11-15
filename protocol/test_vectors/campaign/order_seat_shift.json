@@ -1,0 +1,27 @@
+{
+  "name": "order_seat_shift",
+  "description": "seating a delegate shifts the bloc at once by seat_shift (+3); lean starts at the body's 20",
+  "start_ymdh": {
+    "y": 1775,
+    "m": 4,
+    "d": 20,
+    "h": 0
+  },
+  "order": {
+    "order": "assign_person",
+    "person": "joseph_warren",
+    "role": "delegate",
+    "bloc": "committee_men"
+  },
+  "expect": {
+    "persons": {
+      "joseph_warren": {
+        "role": "delegate",
+        "bloc": "committee_men"
+      }
+    },
+    "bloc_lean": {
+      "committee_men": 23
+    }
+  }
+}

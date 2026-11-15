@@ -6,17 +6,19 @@ description: >
   enqueue_command (CommandKind::HaltArmy for halt, CommandKind::CampaignOrder for the rest) and
   applied by advance_hour on the next hour, never at the moment it is given. While the clock is
   stopped for a pending battle or a pending decision no later hour comes, so the controller applies
-  an order at that hour boundary instead, as it does a battle result. The sim refuses an order it
-  cannot carry out and writes the reason to its log; the controller checks the same rules before
-  queuing (validate_campaign_order), so the UI can say why at once.
-  Every field is a string. Vectors: protocol/test_vectors/campaign.
+  an order at that hour boundary instead, as it does a battle result. The Unreal layer also applies
+  at once when the player has paused the clock. The sim refuses an order it cannot carry out and
+  writes the reason to its log; the controller checks the same rules before queuing
+  (validate_campaign_order), so the UI can say why at once.
+  String fields are strings; transfer_units carries a units object of class -> count.
+  Vectors: protocol/test_vectors/campaign.
 type: object
 required: [order]
 additionalProperties: false
 properties:
   order:
     type: string
-    enum: [halt, form_army, assign_person, relieve_person, use_agent, lobby, vote_now, send_dispatch, decide]
+    enum: [halt, form_army, assign_person, relieve_person, use_agent, lobby, vote_now, send_dispatch, decide, transfer_units]
     description: >
       halt: the army gives up its march. Standing in a town (no hour of its current leg marched) it
       simply stays: the order and the progress are cleared. Part-way along a leg it turns about and
@@ -30,9 +32,11 @@ properties:
 
       assign_person (person, role, and province for an organizer or bloc for a delegate): gives a
       person at hand one role: organizer (Support each month and faster musters in that town),
-      delegate (a steady shift of that bloc while he stays), envoy (the parley).
+      delegate (an immediate seat_shift of that bloc, then a weekly shift while he stays; reseat is
+      gated by reseat_hours), envoy (the parley).
 
-      relieve_person (person): he gives up his role and is at hand again.
+      relieve_person (person): he gives up his role and is at hand again. A delegate seated within
+      reseat_hours is refused (recently_seated).
 
       use_agent (person, and army_id or province by ability): spends one use of an agent's ability.
       alarm: only while a battle is pending in which the player defends; the defenders muster at
@@ -50,6 +54,11 @@ properties:
 
       decide (decision, option, and person when the option commits one): answers the pending
       decision.
+
+      transfer_units (from_army, to_army, units): move named companies between two of the player's
+      idle armies in the same town. An army still turning back from a halt is not idle. Allied
+      companies (Stockbridge) are refused. An empty source army is removed and its general freed.
+      Guns move with artillerymen.
   army_id: {type: string}
   province: {type: string}
   person: {type: string}
@@ -59,3 +68,9 @@ properties:
   measure: {type: string}
   decision: {type: string}
   option: {type: string}
+  from_army: {type: string}
+  to_army: {type: string}
+  units:
+    type: object
+    additionalProperties: {type: integer, minimum: 1}
+    description: "transfer_units only: class id to count of companies to move."

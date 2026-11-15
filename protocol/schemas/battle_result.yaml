@@ -75,7 +75,10 @@ properties:
       captured. Absent for a side whose general came through, or that had none (the sim ignores an
       event for a side without a general). Wounded: he is out for persons rules
       commander.wounded_days. Killed: he is gone. Captured: he joins the other side's prisoner pool.
-      In each case his army is a detachment again and loses commander.army_morale_on_fall morale.
+      In each case his army is a detachment again. The morale hit is
+      commander.army_morale_on_fall when his side lost, and commander.army_morale_on_fall_victory
+      when it won (0: a win does not go negative from the fall alone). Victory and defeat bumps
+      for the armies that fought are battle_rules.json morale.victory and morale.defeat.
     properties:
       british: {enum: [wounded, killed, captured]}
       continental: {enum: [wounded, killed, captured]}

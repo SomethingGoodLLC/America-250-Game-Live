@@ -148,6 +148,23 @@ static void test_pass_order_vectors() {
                     s.armies.at(it.key()).province = it.value().at("province").get<std::string>();
                     s.armies.at(it.key()).previous_province = s.armies.at(it.key()).province;
                 }
+            // Optional new stacks for transfer_units (id, province, units, optional role).
+            if (su.contains("add_armies"))
+                for (const auto& row : su.at("add_armies")) {
+                    Army a;
+                    a.id = row.at("id").get<std::string>();
+                    a.name = row.value("name", a.id);
+                    a.faction = row.value("faction", std::string(kContinental));
+                    a.province = row.at("province").get<std::string>();
+                    a.previous_province = a.province;
+                    a.role = row.value("role", std::string());
+                    a.morale = row.value("morale", 60);
+                    if (row.contains("units"))
+                        a.units = row.at("units").get<std::map<std::string, int>>();
+                    if (row.contains("allied"))
+                        a.allied = row.at("allied").get<std::map<std::string, int>>();
+                    s.armies[a.id] = a;
+                }
             if (su.contains("relieved"))
                 for (const auto& who : su.at("relieved")) s = relieved(s, who.get<std::string>());
             if (su.contains("favors")) s.pass.favors = su.at("favors").get<int>();
@@ -226,6 +243,14 @@ static void test_pass_order_vectors() {
         if (ex.contains("away_days"))
             for (auto it = ex.at("away_days").begin(); it != ex.at("away_days").end(); ++it)
                 CHECK(after.pass.persons.at(it.key()).away_until_hour == after.now.hour_index + 24LL * it.value().get<int>());
+        if (ex.contains("army_gone"))
+            for (const auto& id : ex.at("army_gone")) CHECK(after.armies.count(id.get<std::string>()) == 0);
+        if (ex.contains("army_units"))
+            for (auto it = ex.at("army_units").begin(); it != ex.at("army_units").end(); ++it) {
+                int n = 0;
+                for (const auto& u : after.armies.at(it.key()).units) n += u.second;
+                CHECK(n == it.value().get<int>());
+            }
         // The same order as a command: queued now, applied on the next hour (or, with the clock
         // stopped for a decision, at this boundary), and the result is the pure function's.
         {
@@ -335,6 +360,22 @@ static void test_pass_commander_vectors() {
                 told = told || (line.find("General") != std::string::npos || line.find("Colonel") != std::string::npos);
             CHECK(told);
             for (const std::string& line : after.progress.last_battle_report.map_changes) CHECK(raw_ids_in(after, line).empty());
+        }
+        // Winning with a fallen general: detachment, but no fall morale hit (army_morale_on_fall_victory).
+        if (ex.value("winner_fall_morale_zero", false)) {
+            const std::string win_fac = v.at("result").at("winner").get<std::string>();
+            for (const auto& kv : after.progress.last_battle_report.morale_delta) {
+                if (after.armies.count(kv.first) && after.armies.at(kv.first).faction == win_fac) {
+                    // Victory bump (+5) and personal kills may raise morale; the fall itself adds 0.
+                    CHECK(kv.second >= 0);
+                }
+            }
+            bool detach_told = false, morale_paren = false;
+            for (const std::string& line : after.progress.last_battle_report.map_changes) {
+                if (line.find("detachment again") != std::string::npos) detach_told = true;
+                if (line.find("detachment again (morale") != std::string::npos) morale_paren = true;
+            }
+            CHECK(detach_told && !morale_paren);
         }
         const CampaignState loaded = deserialize(serialize(after));
         CHECK(state_hash(loaded) == state_hash(after));
@@ -856,15 +897,83 @@ static void test_pass_politics() {
         pass_order(s, order_json({{"order", "vote_now"}, {"measure", "raise_the_army"}}), &err);
         CHECK(err == (st == "passed" ? "already_passed" : "not_before_it_returns"));
     }
-    // 6) A delegate shifts his bloc week by week while he stays.
+    // 6) A delegate shifts the bloc at once on seating, then week by week while he stays.
     {
         CampaignState s = pass_campaign(YMDH{1775, 4, 20, 0});
         s = pass_order(s, order_json({{"order", "assign_person"}, {"person", "john_hancock"}, {"role", "delegate"}, {"bloc", "seaport_merchants"}}));
         const int lean0 = -10;
+        CHECK(s.pass.bloc_lean.at("seaport_merchants") == lean0 + 3);  // seat_shift
+        std::string err;
+        pass_order(s, order_json({{"order", "relieve_person"}, {"person", "john_hancock"}}), &err);
+        CHECK(err == "recently_seated");
+        pass_order(s, order_json({{"order", "assign_person"}, {"person", "john_adams"}, {"role", "delegate"}, {"bloc", "seaport_merchants"}}), &err);
+        CHECK(err == "bloc_taken");
         for (int i = 0; i < 24 * 14; ++i) s = advance_hour(s).state;
-        const int with = s.pass.bloc_lean.count("seaport_merchants") ? s.pass.bloc_lean.at("seaport_merchants") : lean0;
-        CHECK(with == lean0 + 6);  // two weeks at +3
+        const int with = s.pass.bloc_lean.at("seaport_merchants");
+        CHECK(with == lean0 + 3 + 6);  // seat + two Mondays at +3
         CHECK(json::parse(politics_json(s)).at("blocs")[2].at("delegate").get<std::string>() == "John Hancock");
+        err.clear();
+        s = pass_order(s, order_json({{"order", "relieve_person"}, {"person", "john_hancock"}}), &err);
+        CHECK(err.empty());  // reseat_hours (168) have passed
+    }
+    // 6b) transfer_units: companies move between idle armies; allied companies are refused.
+    {
+        CampaignState s = pass_campaign(YMDH{1775, 4, 20, 0});
+        Army raised;
+        raised.id = "raised_concord_1";
+        raised.name = "Concord Company";
+        raised.faction = kContinental;
+        raised.province = "concord";
+        raised.previous_province = "concord";
+        raised.units["militia"] = 1;
+        raised.morale = 60;
+        s.armies[raised.id] = raised;
+        const int before = pass_units(s.armies.at("continental_militia"));
+        s = pass_order(s, json{{"order", "transfer_units"},
+                               {"from_army", "raised_concord_1"},
+                               {"to_army", "continental_militia"},
+                               {"units", {{"militia", 1}}}}
+                               .dump());
+        CHECK(!s.armies.count("raised_concord_1"));
+        CHECK(pass_units(s.armies.at("continental_militia")) == before + 1);
+        Army allied;
+        allied.id = "stockbridge_company";
+        allied.name = "Stockbridge Company";
+        allied.faction = kContinental;
+        allied.province = "concord";
+        allied.previous_province = "concord";
+        allied.role = "allied_company";
+        allied.units["militia"] = 2;
+        allied.allied["militia"] = 2;
+        allied.morale = 60;
+        s.armies[allied.id] = allied;
+        std::string err;
+        pass_order(s, json{{"order", "transfer_units"},
+                           {"from_army", "stockbridge_company"},
+                           {"to_army", "continental_militia"},
+                           {"units", {{"militia", 1}}}}
+                           .dump(),
+                   &err);
+        CHECK(err == "allied_company");
+        Army turning;
+        turning.id = "turning_back";
+        turning.name = "Turning Back";
+        turning.faction = kContinental;
+        turning.province = "concord";
+        turning.previous_province = "concord";
+        turning.units["militia"] = 1;
+        turning.returning_hours = 2;
+        turning.returning_edge = "concord-lincoln";
+        s.armies[turning.id] = turning;
+        err.clear();
+        pass_order(s, json{{"order", "transfer_units"},
+                           {"from_army", "turning_back"},
+                           {"to_army", "continental_militia"},
+                           {"units", {{"militia", 1}}}}
+                           .dump(),
+                   &err);
+        CHECK(err == "army_on_the_march");
+        CHECK(s.armies.at("turning_back").units.at("militia") == 1);
     }
     // 7) 10 May: the Continental Congress sits; what the Provincial Congress left unvoted lapses.
     {

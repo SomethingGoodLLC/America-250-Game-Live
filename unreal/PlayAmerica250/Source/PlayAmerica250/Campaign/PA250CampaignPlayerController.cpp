@@ -1,6 +1,7 @@
 #include "PA250CampaignPlayerController.h"
 #include "PA250CampaignGameMode.h"
 #include "PA250MapWidget.h"
+#include "UI/PA250CityViewWidget.h"
 #include "PA250ProvinceMapActor.h"
 #include "PA250MapTooltip.h"
 #include "PA250Subsystem.h"
@@ -208,8 +209,8 @@ void APA250CampaignPlayerController::PlayerTick(float DeltaTime)
 		LastCursorUV = CurUV;
 	}
 
-	// Hover tooltip: army under the cursor (what is drawn), else the town; never while a button is
-	// held or over the HUD, and only after the cursor rests briefly on the same thing.
+	// Hover tooltip: army under the cursor (what is drawn), else the mission mark, else the town;
+	// never while a button is held or over the HUD, and only after the cursor rests briefly.
 	FString HoverArmy;
 	FString HoverTown;
 	if (!bPanning && !bLmbDown && !bMmbDown && bHasUV && !OverHud(this, CurScreen))
@@ -218,7 +219,11 @@ void APA250CampaignPlayerController::PlayerTick(float DeltaTime)
 		HoverArmy = Map->ArmyAtWorld(W);
 		if (HoverArmy.IsEmpty())
 		{
-			HoverTown = Map->ProvinceAtWorld(W);
+			HoverTown = Map->MissionTargetAtWorld(W);
+			if (HoverTown.IsEmpty())
+			{
+				HoverTown = Map->ProvinceAtWorld(W);
+			}
 		}
 	}
 	const double Now = FPlatformTime::Seconds();
@@ -399,6 +404,15 @@ void APA250CampaignPlayerController::OnWheelAxis(float Value)
 	GetMousePosition(MX, MY);
 	if (OverHud(this, FVector2D(MX, MY)))
 	{
+		// The town list is a Slate scroll box, but this axis is what the viewport receives when the
+		// box does not take the notch. Scrolling here is what lets the raise-troops list move.
+		if (UPA250MapWidget* Hud = CampaignWidget(this))
+		{
+			if (UPA250CityViewWidget* City = Hud->GetCityView(); City && City->IsViewportPointOverPanel(FVector2D(MX, MY)))
+			{
+				City->ScrollListBy(Value);
+			}
+		}
 		return;
 	}
 	if (APA250ProvinceMapActor* Map = FindMap())

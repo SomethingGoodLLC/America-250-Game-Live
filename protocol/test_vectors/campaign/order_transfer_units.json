@@ -1,0 +1,33 @@
+{
+  "name": "order_transfer_units",
+  "description": "move one militia company from a raised stack into the Concord militia; source army is removed",
+  "start_ymdh": {
+    "y": 1775,
+    "m": 4,
+    "d": 20,
+    "h": 0
+  },
+  "setup": {
+    "add_armies": [
+      {
+        "id": "raised_concord_1",
+        "name": "Concord Company",
+        "province": "concord",
+        "units": {
+          "militia": 1
+        }
+      }
+    ]
+  },
+  "order": {
+    "order": "transfer_units",
+    "from_army": "raised_concord_1",
+    "to_army": "continental_militia",
+    "units": {
+      "militia": 1
+    }
+  },
+  "expect": {
+    "army_gone": ["raised_concord_1"]
+  }
+}

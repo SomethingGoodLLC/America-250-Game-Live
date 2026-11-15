@@ -1063,6 +1063,28 @@ FString APA250ProvinceMapActor::ArmyAtWorld(const FVector& World) const
 	return Hit;
 }
 
+FString APA250ProvinceMapActor::MissionTargetAtWorld(const FVector& World) const
+{
+	// ~half the glyph: WorldSize 30 for "(!)" is about 50 uu wide.
+	constexpr float HitR = 22.f;
+	FString Best;
+	float BestD2 = HitR * HitR;
+	const int32 N = FMath::Min(MissionMarkers.Num(), MissionMarkerTowns.Num());
+	for (int32 i = 0; i < N; ++i)
+	{
+		const UTextRenderComponent* M = MissionMarkers[i];
+		if (!M || !M->IsVisible() || MissionMarkerTowns[i].IsEmpty()) continue;
+		const FVector L = M->GetComponentLocation();
+		const float D2 = FVector::DistSquared2D(World, L);
+		if (D2 <= BestD2)
+		{
+			BestD2 = D2;
+			Best = MissionMarkerTowns[i];
+		}
+	}
+	return Best;
+}
+
 FString APA250ProvinceMapActor::ProvinceForArmy(const FString& ArmyId) const
 {
 	UPA250Subsystem* S = Sub();
@@ -1493,6 +1515,7 @@ void APA250ProvinceMapActor::RefreshMissionMarkers()
 		M->SetText(FText::FromString(TEXT("(!)")));
 		MissionMarkers.Add(M);
 	}
+	MissionMarkerTowns.SetNum(MissionMarkers.Num());
 	for (int32 i = 0; i < MissionMarkers.Num(); ++i)
 	{
 		UTextRenderComponent* M = MissionMarkers[i];
@@ -1501,11 +1524,14 @@ void APA250ProvinceMapActor::RefreshMissionMarkers()
 		if (!Token)
 		{
 			M->SetVisibility(false);
+			MissionMarkerTowns[i] = FString();
 			continue;
 		}
 		// Above the town mark, on the side away from the battle marker's place.
+		// Hover (MissionTargetAtWorld / DescribeHover) names the active mission for this mark.
 		M->SetWorldLocation(UVToWorld(*Token + FVector2D(-0.012f, -0.020f), 10.f));
 		M->SetVisibility(true);
+		MissionMarkerTowns[i] = Targets[i];
 	}
 }
 
@@ -2130,6 +2156,11 @@ FString APA250ProvinceMapActor::DescribeHover(const FString& ArmyId, const FStri
 		{
 			Lines.Add(TEXT("A battle is pending here"));
 		}
+		const FString MissionLine = PA250ArcPanels::MissionTargetHoverLine(St, ProvinceId);
+		if (!MissionLine.IsEmpty())
+		{
+			Lines.Add(MissionLine);
+		}
 		return FString::Join(Lines, TEXT("\n"));
 	}
 	return FString();
@@ -2165,6 +2196,18 @@ FBox2D APA250ProvinceMapActor::HoverWorldBox(const FString& ArmyId, const FStrin
 				Box += FBox2D(FVector2D(L.X - 2.f, L.Y - H * 0.6f), FVector2D(L.X + W + 2.f, L.Y + H * 0.6f));
 			}
 		}
+	}
+	const int32 N = FMath::Min(MissionMarkers.Num(), MissionMarkerTowns.Num());
+	for (int32 i = 0; i < N; ++i)
+	{
+		if (MissionMarkerTowns[i] != ProvinceId) continue;
+		const UTextRenderComponent* M = MissionMarkers[i];
+		if (!M || !M->IsVisible()) continue;
+		const FVector L = M->GetComponentLocation();
+		const float HalfW = 28.f;
+		const float HalfH = 18.f;
+		Box += FBox2D(FVector2D(L.X - HalfW, L.Y - HalfH), FVector2D(L.X + HalfW, L.Y + HalfH));
+		break;
 	}
 	return Box;
 }

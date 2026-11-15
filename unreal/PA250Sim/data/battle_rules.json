@@ -27,12 +27,17 @@
     "hours_per_fort_level": 72
   },
   "army_broke": {
-    "note": "End condition: this share of a side's squads withdrawing or routing for this long. Never before min_elapsed_seconds, never against a side that fielded fewer than min_squads squads. The loser retreats with its survivors and loses morale_penalty campaign morale (an ordinary defeat costs 20).",
+    "note": "End condition: this share of a side's squads withdrawing or routing for this long. Never before min_elapsed_seconds, never against a side that fielded fewer than min_squads squads. The loser retreats with its survivors and loses morale_penalty campaign morale (an ordinary defeat costs morale.defeat).",
     "squad_fraction": 0.6,
     "seconds": 25,
     "min_elapsed_seconds": 120,
     "min_squads": 3,
     "morale_penalty": 25
+  },
+  "morale": {
+    "note": "Campaign morale after a battle, for each army that fought in the town. victory is added to a winner. defeat is taken from a loser, unless the fight ended army_broke, which uses army_broke.morale_penalty instead. A fallen general's own hit is not here: persons rules.commander army_morale_on_fall on a loss, army_morale_on_fall_victory on a win (0, so a win does not go negative from the fall alone). Locked 2026-11-15.",
+    "victory": 5,
+    "defeat": 20
   },
   "posts_swept": {
     "note": "End condition: one side holds every post for this long. Never before min_elapsed_seconds, and only when the enemy has held at least one post in this fight: a sweep is posts taken from, or taken back from, the enemy. A garrison that starts with every post cannot win by standing still, and a defender cannot win by raising a flag on a neutral post before the attacker arrives.",
@@ -127,7 +132,7 @@
     "crew_class": "artilleryman"
   },
   "cannon": {
-    "note": "The field gun in a battle (a light 3- or 6-pounder). GAME INVENTION throughout: times and ranges are shortened to the size of the field. crew_men serve one gun; with fewer than min_crew at it, it can be neither worked nor moved. The drill (sponge and load, ram home, prime and lay) takes the three *_seconds with a full crew of gunners; a short crew is slower in proportion and men who are not gunners are slower by untrained_drill_scale. Round shot flies round_shot_range_m at round_shot_speed_m a second, scatters within round_shot_spread_degrees of where the piece was laid (about 1 m at 100 m, 2.6 m at 300 m), goes through round_shot_pierce_men men (round_shot_damage each), throws off their feet the men within knockdown_radius_cm of its path (a loose body pushed away at knockdown_push_cm a second, who gets up as a thrown rider does, his aim shaken for knockdown_seconds), throws up dirt_burst_scale times a musket ball's dirt where it strikes, takes works_damage off a field work it strikes, and puts morale_pressure for morale_seconds on a squad it ploughs through (and on a side that loses a gun). Inside canister_range_m the gun fires canister: canister_balls musket balls in a cone of canister_cone_degrees. An idle crew pushes its gun at push_speed_cm a second once its own men are follow_gap_m ahead. Enemies within capture_radius_cm with none of the gun's side by it take it after capture_seconds. A man within crew_radius_cm of a gun of his side is serving it. length_cm is the piece from trail to muzzle (the purchased mesh is fitted to it; 333 is its own length).",
+    "note": "The field gun in a battle (a light 3- or 6-pounder). GAME INVENTION throughout: times and ranges are shortened to the size of the field. crew_men serve one gun; with fewer than min_crew at it, it can be neither worked nor moved. The drill (sponge and load, ram home, prime and lay) takes the three *_seconds with a full crew of gunners; a short crew is slower in proportion and men who are not gunners are slower by untrained_drill_scale. Round shot flies round_shot_range_m at round_shot_speed_m a second, scatters within round_shot_spread_degrees of where the piece was laid, goes through round_shot_pierce_men men, knocks down men within knockdown_radius_cm, batters works, and puts morale_pressure for morale_seconds. Inside grape_range_m the crew fires grape: grape_balls musket balls in a cone of grape_cone_degrees. Past that, round shot out to round_shot_range_m. Shell is a timed fuse to the mark (shell_*). The crew loads shell only past round shot, and only when shell_range_m is longer than round_shot_range_m (a howitzer's reach). These numbers keep shell inside the round, so the crew never loads shell; the player still can. A chosen load past its range is refused (grape still fires a little past grape_range_m, 1.25 times). The mesh is one piece, so it stays level: elevation_* is the ballistic lay onto the aim mark, not a pitched carriage. An idle crew pushes at push_speed_cm once own men are follow_gap_m ahead. Capture and crew_radius as before. length_cm fits the purchased mesh (333 is its own length).",
     "crew_men": 4,
     "min_crew": 2,
     "sponge_load_seconds": 6.0,
@@ -135,6 +140,9 @@
     "prime_lay_seconds": 5.0,
     "untrained_drill_scale": 1.6,
     "traverse_deg_per_second": 8.0,
+    "elevation_min_deg": -5.0,
+    "elevation_max_deg": 15.0,
+    "elevation_deg_per_second": 6.0,
     "round_shot_range_m": 350.0,
     "round_shot_speed_m": 160.0,
     "round_shot_damage": 400.0,
@@ -145,9 +153,16 @@
     "works_damage": 160.0,
     "morale_pressure": 0.5,
     "morale_seconds": 8.0,
-    "canister_range_m": 70.0,
-    "canister_balls": 20,
-    "canister_cone_degrees": 6.0,
+    "grape_range_m": 70.0,
+    "grape_balls": 20,
+    "grape_cone_degrees": 6.0,
+    "shell_range_m": 300.0,
+    "shell_speed_m": 120.0,
+    "shell_fuse_min_m": 40.0,
+    "shell_blast_radius_cm": 400.0,
+    "shell_damage": 120.0,
+    "shell_works_damage": 80.0,
+    "shell_spread_degrees": 1.0,
     "push_speed_cm": 70.0,
     "follow_gap_m": 80.0,
     "capture_radius_cm": 500.0,

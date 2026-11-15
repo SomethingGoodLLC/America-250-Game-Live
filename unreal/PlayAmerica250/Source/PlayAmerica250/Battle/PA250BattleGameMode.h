@@ -14,6 +14,7 @@ class APA250Colours;
 class APA250FieldGun;
 class APA250RowBoat;
 enum class EActiveReloadHit : uint8;
+enum class EPA250Shot : uint8;
 class ARFCharacter;
 class UMusketTuning;
 class UPA250BattleHUD;
@@ -135,6 +136,11 @@ public:
 	/** The battle banner, or a timed notice to the player while one is up. */
 	FString GetBannerText() const { return (GetWorld() && GetWorld()->GetTimeSeconds() < NoticeUntil) ? Notice : Banner; }
 	void ShowNotice(const FString& Text, float Seconds);
+	/** Words shouted when a general falls. Variant 0 and 1 both name him. OutKey is the voice line
+	 *  (general_* when he is ours, enemy_general_* when he is theirs). The recording stays the short
+	 *  bark; the words on screen carry the rank and name. */
+	static FString GeneralFallWords(bool bOurs, const FString& RankName, const FString& Fate, int32 Variant, FString& OutKey);
+	static int32 GeneralFallVariant(uint64 Seed, uint32 FactionSalt);
 	/** Pure: has a side lost on tickets? Never while the human player is alive on it; otherwise at 0
 	 *  tickets (a side that started with none only once it has fielded men and been wiped). */
 	static bool SideIsOut(int32 Pool, int32 InitialUnits, bool bEverFielded, int32 Alive, bool bHumanAliveOnSide);
@@ -186,7 +192,11 @@ public:
 	/** His reload key at a gun he serves works its drill: true when the key belonged to the gun. */
 	bool PlayerWorksGun(ARFCharacter* Soldier, EActiveReloadHit& OutHit);
 	void NotifyGunTaken(APA250FieldGun* Gun, FName From);
-	void NotifyGunFired(APA250FieldGun* Gun, bool bCanister);
+	void NotifyGunFired(APA250FieldGun* Gun, EPA250Shot Shot);
+	/** Deploy as gunner: place the player at a crew post and serve that gun. */
+	bool PlacePlayerAtGun(ARFCharacter* Soldier);
+	/** While serving: [ ] cycle grape / round / shell. */
+	bool PlayerCycleGunShot(ARFCharacter* Soldier, int32 Delta);
 	void NotifyRoundShot(ARFCharacter* Man, bool bStruck);
 	void NotifyShove(ARFCharacter* By, ARFCharacter* Victim);
 	int32 GetShoves() const { return Shoves; }
@@ -364,6 +374,8 @@ private:
 	void MaybeStartClassPortraits();
 	/** -PA250GunStill: two stills of the first field gun with a soldier beside it, for scale. */
 	void MaybeStartGunStill();
+	/** -PA250GunServe: teleport onto a gun, keep a crew, cycle the load, fire once, quit. */
+	void MaybeStartGunServe();
 	/** -PA250LandingStill: stills of a landing: the boats on the way in (12 s) and the men ashore. */
 	void MaybeStartLandingStill();
 	void GatherPosts();
@@ -384,10 +396,14 @@ private:
 	/** The opening: a crew of the gun class comes on at each of the side's guns, as far as the army
 	 *  has gunners. Returns the men put on the field (they count in the side's field strength). */
 	int32 SpawnGunCrews(FName Faction, int32 MostMen);
+	/** Men already at the piece stay on a post. If that is still under min_crew, a mate is sent
+	 *  (from the reserve when the army has a gunner, otherwise a hand who is not a ticket). */
+	int32 EnsureGunCrew(APA250FieldGun* Gun, ARFCharacter* Player);
+	ARFCharacter* SummonGunMate(APA250FieldGun* Gun, int32 Post);
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<APA250FieldGun>> Guns;
 	TMap<FName, int32> GunShots;        // discharges by side (battle trace)
-	TMap<FName, int32> CanisterShots;
+	TMap<FName, int32> CanisterShots; // grape shots (kept name for log continuity)
 	int32 RoundShotStruck = 0;          // men a round shot went through
 	int32 RoundShotKnockedDown = 0;     // men knocked off their feet beside its path
 	TMap<FName, int32> WorksBroken;     // works battered below cover, by the side whose shot did it
@@ -406,6 +422,7 @@ private:
 	TMap<FName, TWeakObjectPtr<ARFCharacter>> Generals;
 	TMap<FName, FVector> GeneralStations;
 	TMap<FName, FString> GeneralFate;  // faction -> wounded | killed | captured, once he has fallen
+	double GeneralCalloutUntil = -1.0; // a second fall inside this does not stack another shout
 	int32 GeneralAuraChecks = 0;       // times a man was steadied by a general's aura (trace)
 	int32 AlarmMusteredAtOnce = 0;     // militia on the field at the start who would otherwise have come later (trace)
 	void SpawnGenerals();

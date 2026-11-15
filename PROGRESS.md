@@ -2,6 +2,57 @@
 
 **Vertical slice M0–M8 complete. Battle Feel B1–B4 complete.** Nothing committed or stashed; all changes are uncommitted in the working tree.
 
+## 2026-11-15 — Gun crew, load chip, general's name, morale in the rules
+
+Follow-up on the artillery serve pass. The piece still needs two men. Deploy now keeps whoever is already at the posts and, if that is still short of `min_crew`, sends a mate (a gunner from the reserve when the army has one, otherwise a hand who is not a ticket and does not count as a man of the army). The cannon mesh is one piece, so the actor stays level: look picks the ground mark, and the shot is lofted onto it. Log: `one-piece mesh stays level (actor pitch 0.0); elevation 0.2 deg is ballistic compensation`.
+
+The serving line leads with `LOAD: GRAPE`. A chosen load past its range is refused in those words (`grape too far — switch load`, and the same for shell). The crew still loads grape inside 70 m and round shot out to 350 m. Shell is loaded by the crew only past the round shot, and only when `shell_range_m` is longer than `round_shot_range_m`. The shipped shell (300 m) does not outrange the round, so the crew never loads it. That is the right call for this gun: shell is the player's load until the numbers say it reaches farther.
+
+A fallen general is named, two ways, from the battle seed (`Colonel James Barrett is wounded!` / `Barrett! Colonel James Barrett is wounded!`). The voice key is his side's when he is ours (`general_*`) and the player's when he is theirs (`enemy_general_*`). A second fall inside 6 seconds still goes on the kill feed and is logged `held (callout still up)`; it does not stack another shout. The recordings stay the short barks. The name is the line on screen.
+
+Victory and defeat morale are `battle_rules.json` `morale.victory` / `morale.defeat` (+5 / −20). An `army_broke` loss still uses `army_broke.morale_penalty`. **Locked:** a fallen general still detaches his army; the morale hit is `army_morale_on_fall` when his side lost and `army_morale_on_fall_victory` (0) when it won, so a victory does not go negative from the fall alone.
+
+### Verified (this Mac)
+| Check | Result |
+|---|---|
+| SIM | **26774 checks, 0 failed** (new `battle_morale_is_data`: the file's 5 and 20, then a file with 11 and 7, and the sim follows it) |
+| Clock golden | unchanged, not regenerated: **`c399cce6b219068f`** (old and new). The bumps moved into data; the numbers did not |
+| Editor build | **Succeeded** (editor was not running) |
+| `-run=PA250Battle` | **checks=875 fails=0** (was 868). Log: `one man at the piece (crew 1) cannot fire`; `LOAD: GRAPE`; `refused grape at 175 m — grape too far — switch load`; `continental gun fires grape at 35 m (crew 2, 2 gunners)`; `lay 0.19 deg, actor pitch 0.00`; shell band only when it outranges round shot; both fall wordings; `vo:continental/general_wounded` and `vo:british/enemy_general_killed` |
+
+**Not run:** `-PA250GunServe` on `L_Lexington`. Twice, `-game` died in `FMacCursor` (`SIGBUS` `0xbad4007`) before the map, the same crash as `-PA250ClassPick`. The deploy that keeps or summons a mate, and a second general's held shout, were not seen in a battle. The serve, the cycle, the refuse and the shot were.
+
+## 2026-11-15 — Campaign UX: Congress, missions, reorganize, on-date levy, F-find
+Playability pass from the Congress flash. Locked: on-date levy (held on the morning of the 1st only; no pro-rata), warn the player, town-by-town breakdown on click.
+
+### Economy feedback (why May looked like “no gold”)
+- Opening holdings settle **+21** on 1 May (120→141), not +40: levies +48, trade +16, pay −32, upkeep −11 (`pa250sim_tool income-report`).
+- Status/dispatch: `Month settled: treasury +21 gold (now 141): … Held on the 1st only — open Treasury or the Ledger for each town.`
+- Ledger: per-town `Town levy, Concord: +N gold` lines (plus trade/pay/upkeep); Treasury panel lists every town that would pay under current holdings and an **ON-DATE LEVY** note (lost in April → nothing in May).
+- `treasury_json` gains `levy_towns[]` and `on_date_levy`.
+
+### Other UX in this pass
+- Congress/People rebuild on content fingerprint, not every `HudEpoch` (stops the hourly flash).
+- Campaign orders apply at once while paused (`issue_order(..., apply_now)` / `IsPaused()`); delegate `seat_shift` (+3) on seat; `reseat_hours` 168 before relieve.
+- Mission **Tree** panel (linear chain of all player missions). **Reorganize** + `transfer_units` (Stockbridge/`allied_company` refused). **F** find towns/armies → FocusSelected.
+
+### Review (same day)
+The floor fingerprint, pause-time apply, seat shift, 7-day reseat, six-mission tree, Stockbridge refusal and the May `Month settled` line were already right. Three holes in the new UI:
+- Find rebuilt the text field on every letter, so focus died after the first key and "Lex" could not be typed. The field now stays up; only the hit list changes. Match is case-insensitive. Enter jumps to the top hit. Esc closes on the next tick (not under the field's own key handler).
+- Reorganize was keyed on `HudEpoch`, so an open panel rebuilt every hour and could drop a Move click, the same failure as the floor. It now rebuilds when who is idle, or the companies, change.
+- An army still walking back from a halt has an empty path. Transfer treated it as idle. It is refused (`army_on_the_march`). The floor and the People panel say why a just-seated delegate cannot be relieved.
+- Concord's Forces tab grew past the window, so Troop of light horse was clipped and the wheel did nothing (over the panel it only skips the map zoom). The tab list is now capped to the screen and scrolls. Editor module rebuilt; relaunch to load it.
+
+### Verified
+| Check | Result |
+|---|---|
+| SIM | **26766 checks, 0 failed** (`pa250sim_tests`, after the turning-back refusal). Golden hash unchanged. |
+| Vectors | `order_seat_shift`, `order_transfer_units`, `reject_transfer_allied` |
+| UE editor build | **Succeeded** again after the review (editor was not running). `libUnrealEditor-PlayAmerica250.dylib` relinked. |
+| Real-window probes | **NOT verified** — Congress-while-running, Seat, Tree, Reorganize, May toast, F→Lex, both HUD sizes. Launch the editor after this build so it loads the new dylib. |
+
+**On-date levy (locked):** a town pays only if held on the morning of the 1st — no pro-rata for days held earlier in the month. Treasury warns; Ledger lists each town that paid.
+
 ## 2026-11-15 — The three answers: Congress in the top bar, letter numbers in data, a colonel for the militia
 The user answered the campaign pass's three open questions: (1) yes, make room in the top bar, or anywhere along the top or bottom; (2) yes; (3) yes, or at least a colonel in charge, someone with leadership like in real life. Nothing committed.
 

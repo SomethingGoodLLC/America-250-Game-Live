@@ -37,7 +37,8 @@ public:
     // code and nothing is queued. An accepted order is a CampaignOrder command, applied on the next
     // hour; while the clock is stopped for a pending battle or decision it is applied at this hour
     // boundary instead (as a battle result is), because no later hour will come until it is.
-    std::vector<std::string> issue_order(const std::string& order_json);
+    // apply_now: also apply at once (the UE layer sets this when the player has paused the clock).
+    std::vector<std::string> issue_order(const std::string& order_json, bool apply_now = false);
     TickOutput advance_one_hour();
     // Advance up to n hours or until an interrupt; returns last TickOutput.
     TickOutput advance_hours(int n, bool stop_on_interrupt = true);

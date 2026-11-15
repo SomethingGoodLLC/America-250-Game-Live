@@ -981,8 +981,23 @@ void ARFCharacter::Look(const FInputActionValue& Value)
 	}
 }
 
-void ARFCharacter::OnSensitivityUp() { AdjustLookSensitivity(1.15f); }
-void ARFCharacter::OnSensitivityDown() { AdjustLookSensitivity(1.f / 1.15f); }
+void ARFCharacter::OnSensitivityUp()
+{
+	// While serving a field gun, [ ] cycle the load instead of look sensitivity.
+	if (APA250BattleGameMode* GM = GetWorld() ? GetWorld()->GetAuthGameMode<APA250BattleGameMode>() : nullptr)
+	{
+		if (GM->PlayerCycleGunShot(this, +1)) return;
+	}
+	AdjustLookSensitivity(1.15f);
+}
+void ARFCharacter::OnSensitivityDown()
+{
+	if (APA250BattleGameMode* GM = GetWorld() ? GetWorld()->GetAuthGameMode<APA250BattleGameMode>() : nullptr)
+	{
+		if (GM->PlayerCycleGunShot(this, -1)) return;
+	}
+	AdjustLookSensitivity(1.f / 1.15f);
+}
 
 void ARFCharacter::StartSprint() { if (MountedVisual) { MountedGaitUp(); return; } bSprinting = true; GetCharacterMovement()->MaxWalkSpeed = SprintSpeed; }
 void ARFCharacter::StopSprint() { bSprinting = false; if (MountedVisual) ApplyMountedGaitSpeed(); else GetCharacterMovement()->MaxWalkSpeed = WalkSpeed; }

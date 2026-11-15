@@ -84,8 +84,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "PA250")
 	bool QueueMove(const FString& ArmyId, const FString& ToProvince, FString& OutError);
 	// ---- Campaign pass: people, lobbying, decisions ----
-	/** Issue a campaign order (protocol/schemas/campaign_orders.yaml). OutError is the sim's refusal code. */
-	bool IssueOrderJson(const FString& OrderJson, FString& OutError);
+	/** Issue a campaign order (protocol/schemas/campaign_orders.yaml). OutError is the sim's refusal code.
+	 *  ApplyNow: carry it out at this hour (paused clock, pending battle or decision); else queue for the next hour. */
+	bool IssueOrderJson(const FString& OrderJson, FString& OutError, bool ApplyNow = false);
 	bool IsDecisionPending() const { return !Controller.state().pass.pending_decision.empty(); }
 	/** Halt one army (an order command, applied on the next hour). Part-way along a leg it turns
 	 *  about and marches back to where the leg began (sim: halt_army). */
@@ -282,6 +283,8 @@ private:
 	void MaybeAutosave(const pa250::CampaignState& Before, const pa250::CampaignState& After);
 	void RouteInterrupt(const pa250::TickOutput& Out);
 	void NoteDispatches(const pa250::CampaignState& Before, const pa250::CampaignState& After);
+	/** On the morning of the 1st: put the Month settled ledger line on the status strip. */
+	void NoteMonthSettlement(const pa250::CampaignState& Before, const pa250::CampaignState& After);
 	void AfterLetterAnswered();
 
 	pa250::CampaignController Controller;

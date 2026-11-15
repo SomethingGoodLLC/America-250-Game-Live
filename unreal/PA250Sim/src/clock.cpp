@@ -240,13 +240,20 @@ void monthly_supply(CampaignState& s) {
         // Farms feed the province magazine (development effect; 3 per farm level by default in tuning).
         if (pk.second.farm_level > 0) province_ledger(s, pk.first).provisions += pk.second.farm_level * 3;
     }
-    // Treasury income: uncapped, grows with the provinces the player holds.
+    // Treasury income: on-date control — a town pays only if held on the morning of the 1st.
     int gold_gain = 0;
+    int towns = 0;
     for (const auto& pk : s.provinces) {
         if (pk.second.owner != s.player_faction) continue;
         const int add = town_levy_gold(pk.second);
         s.player_gold += add;
         gold_gain += add;
+        ++towns;
+        ResourceChange levy;
+        levy.reason = "Town levy, " + pk.second.name + ": +" + std::to_string(add) + " gold";
+        levy.gold = add;
+        levy.province_id = pk.first;
+        detail::record_resource_change(s, levy);
         if (pk.second.farm_level > 0) {
             ResourceChange ch;
             ch.reason = "Farm harvest, " + pk.second.name + ": +" +
@@ -256,13 +263,15 @@ void monthly_supply(CampaignState& s) {
             detail::record_resource_change(s, ch);
         }
     }
-    if (gold_gain > 0) {
-        ResourceChange ch;
-        ch.reason = "Monthly supply accrual: +" + std::to_string(gold_gain) + " gold";
-        ch.gold = gold_gain;
-        detail::record_resource_change(s, ch);
-    } else {
+    if (gold_gain <= 0) {
         detail::add_log(s, "monthly supply accrual");
+    } else if (towns > 1) {
+        // One roll-up so the ledger can show both the total and each town if opened.
+        ResourceChange ch;
+        ch.reason = "Town levies (" + std::to_string(towns) + " towns held on the 1st): +" +
+                    std::to_string(gold_gain) + " gold";
+        ch.gold = 0;  // purse already moved per town; display roll-up only
+        detail::record_resource_change(s, ch);
     }
     buildings_monthly_tick(s);
 }

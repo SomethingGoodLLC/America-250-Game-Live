@@ -169,7 +169,7 @@ const FLinearColor KGoldDim = FPA250HudStyle::SRGB(0.50f, 0.38f, 0.16f, 1.f);
 const FLinearColor KRed = FPA250HudStyle::SRGB(0.80f, 0.36f, 0.28f, 1.f);
 const FLinearColor KGreen = FPA250HudStyle::SRGB(0.47f, 0.62f, 0.33f, 1.f);
 
-constexpr float KPanelWidth = 472.f;
+constexpr float KPanelWidth = 560.f;
 constexpr float KPlotSize = 102.f;
 // Panel width less its frame and padding. The plot grid wraps at this fixed width: a wrap box told
 // to use its allotted size reports one plot per row on the first layout pass and the panel grows
@@ -180,6 +180,9 @@ constexpr float KContentWidth = KPanelWidth - 28.f;
 constexpr float KDetailTextWidth = KContentWidth - 36.f;
 constexpr float KListTextWidth = KDetailTextWidth - 54.f - 108.f;
 constexpr float KBottomStripPx = 48.f; // PA250MapWidget::BottomStripHeightPx
+// Same inset as the forces list: under the top bar, in Slate units. A pixel-height cap
+// overshoots this (the viewport size is in backing pixels) and the panel then covers the bar.
+constexpr float KTopClearance = 84.f;
 
 FSlateFontInfo Font(const TCHAR* Face, int32 Size) { return FPA250HudStyle::Font(Face, Size); }
 
@@ -322,6 +325,7 @@ void UPA250CityViewWidget::ReleaseSlateResources(bool bReleaseChildren)
 	}
 	PanelWidget.Reset();
 	BodyBox.Reset();
+	ListScroll.Reset();
 }
 
 TSharedRef<SWidget> UPA250CityViewWidget::RebuildWidget()
@@ -410,7 +414,8 @@ TSharedRef<SWidget> UPA250CityViewWidget::RebuildWidget()
 				 [Stat(TEXT("MANPOWER"), [S]() { return FString::Printf(TEXT("%d"), FMath::Max(0, S->ManpowerCap - S->ManpowerUsed)); },
 					   TEXT("Men this town can still raise this month. Grows with the town's size and with Support."))]] +
 		// Tabs and their content, or the short view of a town held by someone else.
-		SVerticalBox::Slot().AutoHeight()[SAssignNew(BodyBox, SBox)] +
+		// Fills whatever the panel has left, so the list below can scroll instead of growing the panel.
+		SVerticalBox::Slot().FillHeight(1.f)[SAssignNew(BodyBox, SBox)] +
 		// Footer: last action and the treasury
 		SVerticalBox::Slot().AutoHeight().Padding(0.f, 8.f, 0.f, 0.f)
 			[SNew(SHorizontalBox) +
@@ -425,12 +430,14 @@ TSharedRef<SWidget> UPA250CityViewWidget::RebuildWidget()
 					 return FText::FromString(FString::Printf(TEXT("Treasury %d gold"), S->Gold));
 				 })]];
 
-	// Lower left, clear of the Your-forces list above and the control strip below. Everything outside
-	// the panel is not hit-testable, so the map stays clickable and another town can be picked.
+	// Fills the band under the top bar and above the control strip. Everything outside the panel is
+	// not hit-testable, so the map stays clickable and another town can be picked.
 	TSharedRef<SWidget> Root =
 		SNew(SOverlay).Visibility(EVisibility::SelfHitTestInvisible) +
-		SOverlay::Slot().HAlign(HAlign_Left).VAlign(VAlign_Bottom).Padding(FMargin(10.f, 0.f, 0.f, KBottomStripPx + 10.f))
-			[SAssignNew(PanelWidget, SBox).WidthOverride(KPanelWidth).Visibility_Lambda([Weak]() {
+		SOverlay::Slot().HAlign(HAlign_Left).VAlign(VAlign_Fill).Padding(FMargin(10.f, KTopClearance, 0.f, KBottomStripPx + 10.f))
+			[SAssignNew(PanelWidget, SBox)
+				 .WidthOverride(KPanelWidth)
+				 .Visibility_Lambda([Weak]() {
 				UPA250Subsystem* Sub = Weak.IsValid() ? UPA250Subsystem::Get(Weak.Get()) : nullptr;
 				// An open staff letter sits on the left; the panel steps aside for it.
 				return Sub && Sub->IsStaffPanelOpen() ? EVisibility::Collapsed : EVisibility::Visible;
@@ -438,7 +445,7 @@ TSharedRef<SWidget> UPA250CityViewWidget::RebuildWidget()
 			 [SNew(SBorder).BorderImage(&St->Panel).Padding(FMargin(2.f))
 			  [SNew(SVerticalBox) +
 			   SVerticalBox::Slot().AutoHeight()[Header] +
-			   SVerticalBox::Slot().AutoHeight().Padding(FMargin(12.f, 10.f, 12.f, 10.f))[Body]]]];
+			   SVerticalBox::Slot().FillHeight(1.f).Padding(FMargin(12.f, 10.f, 12.f, 10.f))[Body]]]];
 
 	if (!RefreshTicker.IsValid())
 	{
@@ -460,6 +467,13 @@ bool UPA250CityViewWidget::IsViewportPointOverPanel(FVector2D ViewportPx) const
 	const FGeometry& VG = Viewport->GetTickSpaceGeometry();
 	const FVector2D Abs = VG.LocalToAbsolute(ViewportPx / FMath::Max(VG.Scale, KINDA_SMALL_NUMBER));
 	return PanelWidget->GetTickSpaceGeometry().IsUnderLocation(Abs);
+}
+
+void UPA250CityViewWidget::ScrollListBy(float WheelDelta)
+{
+	if (!ListScroll.IsValid() || FMath::IsNearlyZero(WheelDelta)) return;
+	// A notch toward the user (negative) moves down the list.
+	ListScroll->SetScrollOffset(FMath::Max(0.f, ListScroll->GetScrollOffset() - WheelDelta * 64.f));
 }
 
 void UPA250CityViewWidget::OpenForProvince(const FString& InProvinceId)
@@ -783,7 +797,9 @@ TSharedRef<SWidget> UPA250CityViewWidget::BuildBody()
 	}
 	if (!S->bYours)
 	{
-		Box->AddSlot().AutoHeight()[BuildEnemyView()];
+		Box->AddSlot().FillHeight(1.f)
+			[SAssignNew(ListScroll, SScrollBox).ConsumeMouseWheel(EConsumeMouseWheel::Always).ScrollBarAlwaysVisible(true) +
+			 SScrollBox::Slot()[BuildEnemyView()]];
 		return Box;
 	}
 
@@ -805,8 +821,14 @@ TSharedRef<SWidget> UPA250CityViewWidget::BuildBody()
 				 [SNew(STextBlock).Font(Font(TEXT("Bold"), 12)).ColorAndOpacity(bActive ? KGold : KCreamDim).Text(FText::FromString(Tabs[i]))]];
 	}
 	Box->AddSlot().AutoHeight().Padding(0.f, 0.f, 0.f, 10.f)[Strip];
-	Box->AddSlot().AutoHeight()
-		[ActiveTab == 1 ? BuildForcesTab() : ActiveTab == 2 ? BuildMagazineTab() : BuildBuildingsTab()];
+	// The raise-troops list is longer than the band under the top bar. This slot is the leftover
+	// height, so the last companies (the light horse) scroll instead of being clipped.
+	Box->AddSlot().FillHeight(1.f)
+		[SAssignNew(ListScroll, SScrollBox)
+			 .ConsumeMouseWheel(EConsumeMouseWheel::Always)
+			 .ScrollBarAlwaysVisible(true)
+		 + SScrollBox::Slot()
+			 [ActiveTab == 1 ? BuildForcesTab() : ActiveTab == 2 ? BuildMagazineTab() : BuildBuildingsTab()]];
 	return Box;
 }
 
@@ -913,13 +935,13 @@ TSharedRef<SWidget> UPA250CityViewWidget::BuildBuildingsTab()
 			[SectionTitle(St, TEXT("BUILDINGS"), FString::Printf(TEXT("%d of %d plots used"), S->Occupied, S->Slots))] +
 		SVerticalBox::Slot().AutoHeight()[BuildPlots()] +
 		SVerticalBox::Slot().AutoHeight().Padding(0.f, 10.f, 0.f, 0.f)
-			[SNew(SBorder).BorderImage(&St->Card).Padding(FMargin(10.f, 8.f))
-			 [SNew(SBox).MaxDesiredHeight(236.f)[SAssignNew(DetailScroll, SScrollBox) + SScrollBox::Slot()[BuildDetail()]]]];
+			[SNew(SBorder).BorderImage(&St->Card).Padding(FMargin(10.f, 8.f))[BuildDetail()]];
 }
 
 void UPA250CityViewWidget::ScrollDetailToEnd()
 {
-	if (DetailScroll.IsValid()) DetailScroll->ScrollToEnd();
+	// The build list shares the tab's scroll, the same one the raise-troops list uses.
+	if (ListScroll.IsValid()) ListScroll->ScrollToEnd();
 }
 
 TSharedRef<SWidget> UPA250CityViewWidget::BuildForcesTab()

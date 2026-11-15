@@ -166,6 +166,7 @@ void UPA250Subsystem::Tick(float DeltaTime)
 		BumpHudEpoch();
 		MaybeAutosave(Before, Out.state);
 		NoteDispatches(Before, Out.state);
+		NoteMonthSettlement(Before, Out.state);
 		// A mission of his has ended: the clock waits while he reads what it paid or cost.
 		if (HasUnseenMissionResult() && Out.interrupts.empty())
 		{
@@ -202,6 +203,24 @@ void UPA250Subsystem::RouteInterrupt(const pa250::TickOutput& Out)
 		{
 			// A letter that needs an answer now: the panel opens, and answering it resumes the clock.
 			break;
+		}
+	}
+}
+
+void UPA250Subsystem::NoteMonthSettlement(const pa250::CampaignState& Before, const pa250::CampaignState& After)
+{
+	const pa250::YMDH Now = pa250::to_ymdh(After.now);
+	const pa250::YMDH Was = pa250::to_ymdh(Before.now);
+	if (!(Now.d == 1 && Now.h == 0) || (Was.d == 1 && Was.h == 0)) return;
+	for (auto It = After.resource_changes.rbegin(); It != After.resource_changes.rend(); ++It)
+	{
+		if (It->hour_index != After.now.hour_index) break;
+		const FString Reason = ToFStr(It->reason);
+		if (Reason.StartsWith(TEXT("Month settled:")))
+		{
+			LastDispatch = Reason;
+			++DispatchSerial;
+			return;
 		}
 	}
 }
@@ -500,10 +519,11 @@ bool UPA250Subsystem::QueueMove(const FString& ArmyId, const FString& ToProvince
 	return true;
 }
 
-bool UPA250Subsystem::IssueOrderJson(const FString& OrderJson, FString& OutError)
+bool UPA250Subsystem::IssueOrderJson(const FString& OrderJson, FString& OutError, bool ApplyNow)
 {
 	const bool bWasDecision = IsDecisionPending();
-	const auto Errs = Controller.issue_order(ToStd(OrderJson));
+	const bool bNow = ApplyNow || IsPaused() || Controller.battle_pending() || IsDecisionPending();
+	const auto Errs = Controller.issue_order(ToStd(OrderJson), bNow);
 	if (!Errs.empty())
 	{
 		OutError = ToFStr(Errs.front());
