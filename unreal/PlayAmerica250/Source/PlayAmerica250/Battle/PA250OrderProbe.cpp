@@ -3,7 +3,7 @@
 // The player's own soldier is walked across the field and the keys 1 (follow), 3 (hold) and 1 again
 // are pressed through the real input path (APlayerController::InputKey), so a key that never reaches
 // the soldier shows up as an order that did not change. The enemy is held still and silent so only
-// obedience is measured. Results: log lines "PA250 order probe:" and Saved/PA250/order_probe.json.
+// obedience is measured (-PA250OrderProbeLive leaves the fight on). Results: log lines "PA250 order probe:" and Saved/PA250/order_probe.json.
 // Run in a window: -game -windowed -PA250OrderProbe (no autoplay: it needs the player's soldier).
 #include "PA250BattleGameMode.h"
 #include "EngineUtils.h"
@@ -63,13 +63,23 @@ void APA250BattleGameMode::TickOrderProbe(float DeltaSeconds)
 	case -1:
 		// Once his file exists: the enemy stands still and silent, he cannot be hurt, and he faces open ground.
 		if (OrderProbeTime < 3.f || Volleys->GetFileMembers(Me).Num() == 0) return;
-		for (TActorIterator<ARFCharacter> It(GetWorld()); It; ++It)
+		// -PA250OrderProbeLive: the enemy fights and men fall as in any battle (only he cannot be hurt),
+		// to see whether a file under fire still obeys.
+		if (FParse::Param(FCommandLine::Get(), TEXT("PA250OrderProbeLive")))
 		{
-			if (It->FactionId != Me->FactionId)
+			Me->SetCanBeDamaged(false);
+			Note(TEXT("live"), TEXT("true"));
+		}
+		else
+		{
+			for (TActorIterator<ARFCharacter> It(GetWorld()); It; ++It)
 			{
-				if (APA250BotController* Bot = Cast<APA250BotController>(It->GetController())) Bot->bScriptedHold = true;
+				if (It->FactionId != Me->FactionId)
+				{
+					if (APA250BotController* Bot = Cast<APA250BotController>(It->GetController())) Bot->bScriptedHold = true;
+				}
+				It->SetCanBeDamaged(false);
 			}
-			It->SetCanBeDamaged(false);
 		}
 		OrderProbeLeaderStart = Me->GetActorLocation();
 		Status(Men, With);

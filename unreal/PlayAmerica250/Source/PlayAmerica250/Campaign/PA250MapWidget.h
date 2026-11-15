@@ -75,6 +75,10 @@ public:
 	/** Pure: what the status line says when a halt is ordered. HoursIntoLeg > 0: the army turns about. */
 	static FString HaltMessage(const FString& ArmyName, const FString& TownName, int32 HoursIntoLeg);
 	bool CanHaltSelected() const;
+	/** The mission card: shown once when a mission of the player's ends (after any battle report), until Continue. */
+	bool IsMissionCardShown() const;
+	PA250ArcPanels::FMissionCard MissionCardNow() const;
+	void PressMissionCardContinue();
 	void PressSelectArmy(const FString& ArmyId);
 	void PressSelectArmyAtSelection();
 	void PressAboutToggle();
@@ -240,10 +244,6 @@ private:
 	mutable FString TrackerArmy;
 	/** Folded to one line by the player (Hide / Show). Kept for the session, not in the save. */
 	bool bTrackerMinimized = false;
-	/** The mission card: shown once when a mission of the player's ends (after any battle report), until Continue. */
-	bool IsMissionCardShown() const;
-	PA250ArcPanels::FMissionCard MissionCardNow() const;
-	void PressMissionCardContinue();
 	/** The tracker is on screen: a mission or notice to show, no battle pending, no report up, campaign not over. */
 	bool IsTrackerShown() const;
 	TWeakObjectPtr<APA250ProvinceMapActor> MapActor;

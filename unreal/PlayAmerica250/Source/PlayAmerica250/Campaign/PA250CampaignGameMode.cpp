@@ -159,6 +159,57 @@ void APA250CampaignGameMode::BeginPlay()
 			12.f, false);
 	}
 
+	if (FParse::Param(FCommandLine::Get(), TEXT("PA250MissionCardProbe")))
+	{
+		// The mission card in a real window (playtest 2026-11-15): the player's own act ends mission 1
+		// (Concord's stores sent away), the clock runs until the result arrives, the card is captured
+		// ("Shot showui"), Continue is pressed and the clock is seen to run on. Never saves.
+		Sub->SetPaused(true);
+		FTimerHandle Begin;
+		GetWorldTimerManager().SetTimer(Begin, FTimerDelegate::CreateLambda([this]() {
+			UPA250Subsystem* PS = UPA250Subsystem::Get(this);
+			if (!PS) return;
+			FString Err;
+			const bool bSent = PS->SendStoresToDepot(TEXT("concord"), Err);
+			UE_LOG(LogTemp, Display, TEXT("MISSION_CARD_PROBE: stores sent from Concord ok=%d %s; gold %d; clock started"), bSent ? 1 : 0, *Err, PS->GetState().player_gold);
+			PS->SetPaused(false);
+		}), 10.f, false);
+		TSharedRef<int32> Stage = MakeShared<int32>(0);
+		TSharedRef<float> At = MakeShared<float>(0.f);
+		FTimerHandle Poll;
+		GetWorldTimerManager().SetTimer(Poll, FTimerDelegate::CreateLambda([this, Stage, At]() {
+			UPA250Subsystem* PS = UPA250Subsystem::Get(this);
+			if (!PS || !MapWidget) return;
+			const float Now = GetWorld()->GetTimeSeconds();
+			if (*Stage == 0 && PS->HasUnseenMissionResult())
+			{
+				const PA250ArcPanels::FMissionCard Card = MapWidget->MissionCardNow();
+				UE_LOG(LogTemp, Display, TEXT("MISSION_CARD_PROBE: card shown=%d paused=%d | %s | %s | %s | %s | %s"), MapWidget->IsMissionCardShown() ? 1 : 0, PS->IsPaused() ? 1 : 0,
+					*Card.Heading, *Card.Title, *Card.Summary, *FString::Join(Card.Lines, TEXT("; ")), *Card.Next);
+				*Stage = 1;
+				*At = Now;
+			}
+			else if (*Stage == 1 && Now >= *At + 1.5f)
+			{
+				if (APlayerController* PC = GetWorld()->GetFirstPlayerController()) PC->ConsoleCommand(TEXT("Shot showui"));
+				*Stage = 2;
+				*At = Now;
+			}
+			else if (*Stage == 2 && Now >= *At + 1.5f)
+			{
+				MapWidget->PressMissionCardContinue();
+				UE_LOG(LogTemp, Display, TEXT("MISSION_CARD_PROBE: Continue pressed -> card shown=%d paused=%d gold %d"), MapWidget->IsMissionCardShown() ? 1 : 0, PS->IsPaused() ? 1 : 0, PS->GetState().player_gold);
+				*Stage = 3;
+				*At = Now;
+			}
+			else if (*Stage == 3 && Now >= *At + 2.f)
+			{
+				*Stage = 4;
+				UKismetSystemLibrary::QuitGame(this, nullptr, EQuitPreference::Quit, false);
+			}
+		}), 0.25f, true);
+	}
+
 	if (FParse::Param(FCommandLine::Get(), TEXT("PA250RouteProbe")))
 	{
 		// The routes out of Boston in a real window (the Boston-Dorchester boats were added
