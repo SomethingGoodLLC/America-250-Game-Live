@@ -1,0 +1,14 @@
+{
+  "FileVersion": 3,
+  "Version": 1,
+  "VersionName": "0.1-evaluation",
+  "FriendlyName": "MotionBricks Traversal Evaluation",
+  "Description": "Isolated offline generated-motion evaluation. No inference service or combat integration.",
+  "Category": "Animation",
+  "EnabledByDefault": false,
+  "CanContainContent": false,
+  "Modules": [
+    {"Name": "MotionBricksTraversal", "Type": "Runtime", "LoadingPhase": "Default"},
+    {"Name": "MotionBricksTraversalEditor", "Type": "Editor", "LoadingPhase": "Default"}
+  ]
+}
