@@ -1,0 +1,47 @@
+{
+ "name": "gait_pick_bands",
+ "description": "speed chooses the clip set: idle, walk, run, sprint; a band's upper edge belongs to it",
+ "bands": {
+  "idle_max": 5,
+  "walk_max": 300,
+  "run_max": 560
+ },
+ "cases": [
+  {
+   "speed_cm_s": 0,
+   "gait": "idle"
+  },
+  {
+   "speed_cm_s": 5,
+   "gait": "idle"
+  },
+  {
+   "speed_cm_s": 5.1,
+   "gait": "walk"
+  },
+  {
+   "speed_cm_s": 220,
+   "gait": "walk"
+  },
+  {
+   "speed_cm_s": 300,
+   "gait": "walk"
+  },
+  {
+   "speed_cm_s": 301,
+   "gait": "run"
+  },
+  {
+   "speed_cm_s": 450,
+   "gait": "run"
+  },
+  {
+   "speed_cm_s": 560,
+   "gait": "run"
+  },
+  {
+   "speed_cm_s": 650,
+   "gait": "sprint"
+  }
+ ]
+}

@@ -1,0 +1,45 @@
+{
+ "name": "battle_result_hero_enemy_general_ignored",
+ "description": "the other side's general is never played: a hero report for him is ignored",
+ "start_ymdh": {
+  "y": 1775,
+  "m": 4,
+  "d": 20,
+  "h": 0
+ },
+ "battle": {
+  "province": "lexington",
+  "attacker": "british_regulars",
+  "defender": "continental_militia"
+ },
+ "generals": {
+  "continental_militia": "artemas_ward",
+  "british_regulars": "francis_smith"
+ },
+ "result": {
+  "province_id": "lexington",
+  "winner": "continental",
+  "end_reason": "army_broke",
+  "hero": {
+   "faction": "british",
+   "person_id": "francis_smith",
+   "takeovers": 1,
+   "seconds_played": 20,
+   "fell_while_played": false
+  }
+ },
+ "expect": {
+  "schema_valid": true,
+  "applied": true,
+  "persons": {
+   "francis_smith": {
+    "status": "",
+    "role": "general"
+   }
+  },
+  "report_commander_events": {},
+  "report_line_absent": [
+   "You fought as"
+  ]
+ }
+}

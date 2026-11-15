@@ -1,0 +1,35 @@
+{
+ "name": "battle_result_reject_hero_no_takeover",
+ "description": "a hero report with no takeover is outside the contract",
+ "start_ymdh": {
+  "y": 1775,
+  "m": 4,
+  "d": 20,
+  "h": 0
+ },
+ "battle": {
+  "province": "lexington",
+  "attacker": "british_regulars",
+  "defender": "continental_militia"
+ },
+ "generals": {
+  "continental_militia": "artemas_ward",
+  "british_regulars": "francis_smith"
+ },
+ "result": {
+  "province_id": "lexington",
+  "winner": "british",
+  "end_reason": "army_broke",
+  "hero": {
+   "faction": "continental",
+   "person_id": "artemas_ward",
+   "takeovers": 0,
+   "seconds_played": 0,
+   "fell_while_played": false
+  }
+ },
+ "expect": {
+  "schema_valid": false,
+  "applied": false
+ }
+}

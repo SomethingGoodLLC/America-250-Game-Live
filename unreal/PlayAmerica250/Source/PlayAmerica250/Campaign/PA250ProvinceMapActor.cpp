@@ -926,12 +926,12 @@ void APA250ProvinceMapActor::RebuildStateTexture()
 
 	TArray<FColor> Pixels;
 	Pixels.SetNumZeroed(W * 2);
-	auto OwnerColor = [](const std::string& Owner) -> FColor {
-		if (Owner == "british")
+	auto OwnerColor = [](const std::string& OwnerId) -> FColor {
+		if (OwnerId == "british")
 		{
 			return FColor(200, 48, 48, 255);
 		}
-		if (Owner == "continental")
+		if (OwnerId == "continental")
 		{
 			return FColor(48, 72, 180, 255);
 		}
@@ -2096,10 +2096,10 @@ FString APA250ProvinceMapActor::DescribeHover(const FString& ArmyId, const FStri
 		}
 		TArray<FString> Lines;
 		Lines.Add(ToFStr(P->second.name));
-		const std::string& Owner = P->second.owner;
-		Lines.Add(Owner.empty() ? FString(TEXT("Not held"))
-								: Owner == St.player_faction ? FString(TEXT("Held by the Continentals (yours)"))
-															 : (Owner == "british" ? FString(TEXT("Held by the British")) : TEXT("Held by ") + ToFStr(Owner)));
+		const std::string& OwnerId = P->second.owner;
+		Lines.Add(OwnerId.empty() ? FString(TEXT("Not held"))
+								: OwnerId == St.player_faction ? FString(TEXT("Held by the Continentals (yours)"))
+															 : (OwnerId == "british" ? FString(TEXT("Held by the British")) : TEXT("Held by ") + ToFStr(OwnerId)));
 		TArray<FString> Here;
 		for (const auto& Kv : St.armies)
 		{
@@ -2356,13 +2356,13 @@ void APA250ProvinceMapActor::SpawnHotspotMarkers()
 
 		// Town edge: a faction-coloured diamond ring. The inner diamond is parchment
 		// so the marker reads as an outline, not as a solid army flag.
-		std::string Owner;
+		std::string OwnerId;
 		if (St)
 		{
 			auto It = St->provinces.find(TCHAR_TO_UTF8(*Kv.Key));
 			if (It != St->provinces.end())
 			{
-				Owner = It->second.owner;
+				OwnerId = It->second.owner;
 			}
 		}
 		UStaticMeshComponent* Ring = NewObject<UStaticMeshComponent>(this);
@@ -2378,7 +2378,7 @@ void APA250ProvinceMapActor::SpawnHotspotMarkers()
 		Ring->ComponentTags.Add(TEXT("town_ring"));
 		Ring->ComponentTags.Add(FName(*Kv.Key));
 		UseInkMaterial(Ring, InkMat, WhiteTex, 1);
-		ApplyShapeColor(Ring, TownOwnerColor(Owner));
+		ApplyShapeColor(Ring, TownOwnerColor(OwnerId));
 		HotspotMarkers.Add(Ring);
 		RingById.Add(Kv.Key, Ring);
 
@@ -2393,7 +2393,7 @@ void APA250ProvinceMapActor::SpawnHotspotMarkers()
 		Fill->SetWorldScale3D(FVector(0.13f, 0.13f, 1.f));
 		Fill->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 		UseInkMaterial(Fill, InkMat, WhiteTex, 2);
-		ApplyShapeColor(Fill, TownFillColor(Owner));
+		ApplyShapeColor(Fill, TownFillColor(OwnerId));
 		HotspotMarkers.Add(Fill);
 		FillById.Add(Kv.Key, Fill);
 
@@ -2410,7 +2410,7 @@ void APA250ProvinceMapActor::SpawnHotspotMarkers()
 		Cap->SetHorizontalAlignment(EHTA_Left);
 		Cap->SetVerticalAlignment(EVRTA_TextCenter);
 		Cap->SetWorldSize(GCaptionSizeUU);
-		Cap->SetTextRenderColor(TownOwnerInk(Owner));
+		Cap->SetTextRenderColor(TownOwnerInk(OwnerId));
 		if (MapTextMaterial)
 		{
 			Cap->SetTextMaterial(MapTextMaterial);
@@ -2550,7 +2550,7 @@ float APA250ProvinceMapActor::TownWashRadiusPx(const FString& Id, const TMap<FSt
 	return R;
 }
 
-void APA250ProvinceMapActor::ApplyTownWash(UStaticMeshComponent* Wash, const std::string& Owner) const
+void APA250ProvinceMapActor::ApplyTownWash(UStaticMeshComponent* Wash, const std::string& OwnerId) const
 {
 	if (!Wash)
 	{
@@ -2558,8 +2558,8 @@ void APA250ProvinceMapActor::ApplyTownWash(UStaticMeshComponent* Wash, const std
 	}
 	// Unowned towns stay bare paper. Tints are linear values of muted ink colours:
 	// Continental blue sRGB (40,70,150), British red sRGB (170,40,30).
-	const bool bBrit = Owner == "british";
-	const bool bCont = Owner == "continental";
+	const bool bBrit = OwnerId == "british";
+	const bool bCont = OwnerId == "continental";
 	Wash->SetVisibility(bBrit || bCont);
 	if (UMaterialInstanceDynamic* MID = Cast<UMaterialInstanceDynamic>(Wash->GetMaterial(0)))
 	{
@@ -2590,29 +2590,29 @@ void APA250ProvinceMapActor::RefreshTownOwnership()
 				break;
 			}
 		}
-		std::string Owner;
+		std::string OwnerId;
 		if (St && !ProvinceId.IsEmpty())
 		{
 			auto It = St->provinces.find(TCHAR_TO_UTF8(*ProvinceId));
 			if (It != St->provinces.end())
 			{
-				Owner = It->second.owner;
+				OwnerId = It->second.owner;
 			}
 		}
-		ApplyShapeColor(Ring, TownOwnerColor(Owner));
+		ApplyShapeColor(Ring, TownOwnerColor(OwnerId));
 		if (UStaticMeshComponent** Fill = FillById.Find(ProvinceId))
 		{
-			ApplyShapeColor(*Fill, TownFillColor(Owner));
+			ApplyShapeColor(*Fill, TownFillColor(OwnerId));
 		}
 		if (UStaticMeshComponent** Wash = WashById.Find(ProvinceId))
 		{
-			ApplyTownWash(*Wash, Owner);
+			ApplyTownWash(*Wash, OwnerId);
 		}
 		if (UTextRenderComponent** Cap = CaptionById.Find(ProvinceId))
 		{
 			if (*Cap)
 			{
-				(*Cap)->SetTextRenderColor(TownOwnerInk(Owner));
+				(*Cap)->SetTextRenderColor(TownOwnerInk(OwnerId));
 			}
 		}
 	}

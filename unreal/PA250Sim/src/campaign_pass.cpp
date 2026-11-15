@@ -201,6 +201,8 @@ struct CpPerson {
     bool has_from = false, cic = false, has_exposed = false;
     YMDH from{}, exposed{};
     int uses = 0;
+    // His own hero kit numbers (0 = the shared kit's).
+    float hero_health_scale = 0.f, hero_aura_radius_m = 0.f, hero_rally_radius_m = 0.f;
 };
 struct CpPersonRules {
     int detachment_unit_cap = 12, army_unit_cap = 40;
@@ -215,6 +217,7 @@ struct CpPersonRules {
     int exposed_support = 2;
 };
 CpPersonRules g_cp_prules;
+HeroRules g_cp_hero;
 std::vector<CpPerson> g_cp_persons;
 std::map<std::string, CpTrait> g_cp_traits;
 std::map<std::string, CpAbility> g_cp_abilities;
@@ -1261,6 +1264,7 @@ std::vector<std::string> load_persons(const std::string& json_text) {
     std::vector<CpPerson> persons;
     std::map<std::string, CpTrait> traits;
     std::map<std::string, CpAbility> abilities;
+    HeroRules hero;
     try {
         const cp_json j = cp_json::parse(json_text);
         const cp_json& r = j.at("rules");
@@ -1316,6 +1320,51 @@ std::vector<std::string> load_persons(const std::string& json_text) {
             a.muster_at_once = it.value().value("muster_at_once", false);
             abilities[it.key()] = a;
         }
+        // GAME INVENTION: the hero rules. A file without the block has no hero.
+        if (j.contains("hero")) {
+            const cp_json& h = j.at("hero");
+            if (h.at("basis").get<std::string>() != "invented") errors.push_back(detail::err("hero_not_marked_invented", "hero"));
+            hero.loaded = true;
+            hero.score_threshold = h.at("score").at("threshold").get<int>();
+            hero.score_kill = h.at("score").at("kill").get<int>();
+            hero.score_capture = h.at("score").at("capture").get<int>();
+            hero.score_rally = h.at("score").at("rally").get<int>();
+            hero.meter_seconds = h.at("meter").at("seconds").get<float>();
+            hero.refill_kill_seconds = h.at("meter").at("refill_kill_seconds").get<float>();
+            hero.refill_capture_seconds = h.at("meter").at("refill_capture_seconds").get<float>();
+            hero.refill_rally_seconds = h.at("meter").at("refill_rally_seconds").get<float>();
+            const cp_json& k = h.at("kit");
+            hero.health_scale = k.at("health_scale").get<float>();
+            hero.aura_radius_m = k.at("aura_radius_m").get<float>();
+            hero.rally_radius_m = k.at("rally_radius_m").get<float>();
+            hero.rally_cooldown_seconds = k.at("rally_cooldown_seconds").get<float>();
+            hero.sword_damage = k.at("sword").at("damage").get<float>();
+            hero.sword_reach_cm = k.at("sword").at("reach_cm").get<float>();
+            hero.sword_recover_seconds = k.at("sword").at("recover_seconds").get<float>();
+            hero.pistol_damage = k.at("pistol").at("damage").get<float>();
+            hero.pistol_range_m = k.at("pistol").at("range_m").get<float>();
+            hero.pistol_reload_seconds = k.at("pistol").at("reload_seconds").get<float>();
+            if (hero.score_threshold < 1 || hero.meter_seconds <= 0.f || hero.health_scale < 1.f)
+                errors.push_back(detail::err("bad_hero_rules", "threshold, meter seconds or health scale"));
+            for (auto it = h.at("trait_abilities").begin(); it != h.at("trait_abilities").end(); ++it) {
+                if (!traits.count(it.key())) errors.push_back(detail::err("unknown_trait", "hero ability " + it.key()));
+                HeroAbility a;
+                a.trait = it.key();
+                a.kind = it.value().at("kind").get<std::string>();
+                a.label = it.value().at("label").get<std::string>();
+                a.text = it.value().at("text").get<std::string>();
+                a.radius_m = it.value().at("radius_m").get<float>();
+                a.seconds = it.value().at("seconds").get<float>();
+                a.value = it.value().at("value").get<float>();
+                a.cooldown_seconds = it.value().at("cooldown_seconds").get<float>();
+                if (!cp_known(a.kind, {"hold_fast", "charge", "steady", "quick_step", "throw_up_works", "huzza"}))
+                    errors.push_back(detail::err("unknown_hero_ability", it.key() + " " + a.kind));
+                hero.trait_abilities[it.key()] = a;
+            }
+            // A general's first trait gives his ability, so every trait must have one.
+            for (const auto& tk : traits)
+                if (!hero.trait_abilities.count(tk.first)) errors.push_back(detail::err("trait_without_hero_ability", tk.first));
+        }
         for (const auto& pj : j.at("persons")) {
             CpPerson p;
             p.id = pj.at("id").get<std::string>();
@@ -1349,6 +1398,14 @@ std::vector<std::string> load_persons(const std::string& json_text) {
                 if (!detail::contains(p.roles, p.starts_role)) errors.push_back(detail::err("starts_in_a_role_he_cannot_hold", p.id));
             }
             p.cic = pj.value("commander_in_chief", false);
+            if (pj.contains("hero")) {
+                const cp_json& ph = pj.at("hero");
+                if (ph.at("basis").get<std::string>() != "invented") errors.push_back(detail::err("hero_not_marked_invented", p.id));
+                if (!detail::contains(p.roles, "general")) errors.push_back(detail::err("hero_kit_on_one_who_is_no_general", p.id));
+                p.hero_health_scale = ph.value("health_scale", 0.f);
+                p.hero_aura_radius_m = ph.value("aura_radius_m", 0.f);
+                p.hero_rally_radius_m = ph.value("rally_radius_m", 0.f);
+            }
             if (pj.contains("informer")) {
                 p.informer_for = pj.at("informer").at("for").get<std::string>();
                 if (pj.at("informer").contains("exposed")) {
@@ -1366,6 +1423,7 @@ std::vector<std::string> load_persons(const std::string& json_text) {
     if (!errors.empty()) return errors;
     g_cp_prules = rules;
     g_cp_persons = persons;
+    g_cp_hero = hero;
     g_cp_traits = traits;
     g_cp_abilities = abilities;
     g_cp_persons_loaded = true;
@@ -1377,6 +1435,7 @@ void unload_persons() {
     g_cp_abilities.clear();
     g_cp_prules = CpPersonRules{};
     g_cp_persons_loaded = false;
+    g_cp_hero = HeroRules{};
 }
 bool persons_loaded() { return g_cp_persons_loaded; }
 
@@ -1670,6 +1729,8 @@ CommanderRules commander_rules() {
     return r;
 }
 
+HeroRules hero_rules() { return g_cp_hero; }
+
 std::string commander_fate(uint64_t battle_seed, const std::string& faction) {
     const int total = std::max(1, g_cp_prules.fate_wounded + g_cp_prules.fate_killed + g_cp_prules.fate_captured);
     const int roll = static_cast<int>(detail::mix64(battle_seed ^ detail::fnv1a("general:" + faction)) % static_cast<uint64_t>(total));
@@ -1765,6 +1826,19 @@ void pass_side_setup(const CampaignState& s, const Province& ground, const Army&
             side.commander_traits = p->traits;
             side.commander_aura_radius_m = g_cp_prules.aura_radius_m;
             factor("commander", 1, who + " commands " + army.name);
+            // GAME INVENTION: the player's own general may be played. Never the other side's.
+            if (g_cp_hero.loaded && army.faction == s.player_faction && !p->traits.empty()) {
+                auto ab = g_cp_hero.trait_abilities.find(p->traits.front());
+                if (ab != g_cp_hero.trait_abilities.end()) {
+                    side.has_hero = true;
+                    side.hero_health_scale = p->hero_health_scale > 0.f ? p->hero_health_scale : g_cp_hero.health_scale;
+                    side.hero_aura_radius_m = p->hero_aura_radius_m > 0.f ? p->hero_aura_radius_m : g_cp_hero.aura_radius_m;
+                    side.hero_rally_radius_m = p->hero_rally_radius_m > 0.f ? p->hero_rally_radius_m : g_cp_hero.rally_radius_m;
+                    side.hero_rally_cooldown_seconds = g_cp_hero.rally_cooldown_seconds;
+                    side.hero_ability = ab->second;
+                    side.hero_ability.trait = p->traits.front();
+                }
+            }
             for (const std::string& tid : p->traits) {
                 auto tit = g_cp_traits.find(tid);
                 if (tit == g_cp_traits.end()) continue;
@@ -1853,6 +1927,22 @@ void pass_after_battle(CampaignState& s, const CampaignState& before, const Batt
             report.change_reasons.push_back(line);
             report.map_changes.push_back(line);
             cp_note(s, line, 0, 0, r.province_id);
+        }
+    }
+    // The player fought as his general (GAME INVENTION): one line for the report, and nothing else.
+    // What became of the general is commander_events' to say, above. A report for the other side's
+    // general, or for someone who does not command, is ignored.
+    if (g_cp_persons_loaded && !r.hero_faction.empty() && r.hero_faction == before.player_faction) {
+        for (const std::string& aid : {pb.attacker_army, pb.defender_army}) {
+            auto bit = before.armies.find(aid);
+            if (bit == before.armies.end() || bit->second.faction != r.hero_faction) continue;
+            const CpPerson* p = cp_person(general_of(before, aid));
+            if (!p || p->id != r.hero_person_id) continue;
+            std::string line = "You fought as " + p->rank + " " + p->name + " for " +
+                               std::to_string(static_cast<int>(r.hero_seconds_played + 0.5f)) + " seconds";
+            if (r.hero_takeovers > 1) line += " (" + std::to_string(r.hero_takeovers) + " times)";
+            if (r.hero_fell_while_played) line += "; he fell while you led him";
+            report.change_reasons.push_back(line);
         }
     }
     // "Preserve the company": part of the magazine was carried off before the town fell.

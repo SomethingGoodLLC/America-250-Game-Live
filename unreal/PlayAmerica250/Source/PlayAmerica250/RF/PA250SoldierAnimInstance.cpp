@@ -1,7 +1,9 @@
 #include "PA250SoldierAnimInstance.h"
+#include "Battle/PA250BattleFeel.h"
 
 #include "Animation/AnimNodeBase.h"
 #include "Animation/AnimSequence.h"
+#include "PoseSearch/PoseSearchDatabase.h"
 #include "BonePose.h"
 #include "TwoBoneIK.h"
 
@@ -126,6 +128,66 @@ void CurlFingers(FCSPose<FCompactPose>& Pose, const TCHAR* Side, const FVector& 
 }
 }
 
+void UPA250SoldierAnimInstance::SetFullQuality(bool bInFull, const TArray<UPoseSearchDatabase*>& InDatabases, float InSearchThrottleSeconds)
+{
+	bFullQuality = bInFull && !InDatabases.IsEmpty();
+	SearchThrottleSeconds = InSearchThrottleSeconds;
+	if (LocomotionDatabases.Num() != InDatabases.Num() || !bFullQuality)
+	{
+		LocomotionDatabases.Reset();
+	}
+	if (bFullQuality)
+	{
+		LocomotionDatabases.SetNum(InDatabases.Num());
+		for (int32 i = 0; i < InDatabases.Num(); ++i) LocomotionDatabases[i] = InDatabases[i];
+	}
+}
+
+float FPA250SoldierAnimProxy::StepTierAlpha(float Alpha, bool bWantFull, float DeltaSeconds, float BlendSeconds)
+{
+	if (!bWantFull) return 0.f;
+	if (BlendSeconds <= UE_KINDA_SMALL_NUMBER) return 1.f;
+	return FMath::Clamp(Alpha + DeltaSeconds / BlendSeconds, 0.f, 1.f);
+}
+
+void FPA250SoldierAnimProxy::Initialize(UAnimInstance* InAnimInstance)
+{
+	// The search reads the pose history through the graph message this node publishes, so the
+	// motion-matched player sits under it. The collector makes the trajectory from the character.
+	History.Source.SetLinkNode(&Locomotion);
+	History.PoseCount = 2;
+	History.SamplingInterval = 0.04f;
+	History.bGenerateTrajectory = true;
+	if (History.CollectedBones.IsEmpty())
+	{
+		for (const TCHAR* Bone : {TEXT("pelvis"), TEXT("foot_l"), TEXT("foot_r"), TEXT("ball_l"), TEXT("ball_r"), TEXT("hand_l"), TEXT("hand_r"), TEXT("head")})
+		{
+			History.CollectedBones.Add(FBoneReference(Bone));
+		}
+	}
+	FAnimInstanceProxy::Initialize(InAnimInstance);
+}
+
+void FPA250SoldierAnimProxy::UpdateAnimationNode(const FAnimationUpdateContext& InContext)
+{
+	// Only a soldier at full quality pays for the pose history and the search.
+	if (bFull)
+	{
+		FAnimInstanceProxy::UpdateAnimationNode(InContext);
+	}
+}
+
+void FPA250SoldierAnimProxy::PostUpdate(UAnimInstance* InAnimInstance) const
+{
+	FAnimInstanceProxy::PostUpdate(InAnimInstance);
+	UPA250SoldierAnimInstance::FLocomotionReport Report;
+	Report.bShowingFull = bFull && TierAlpha > 0.f;
+	Report.bHadHistory = Locomotion.bHadHistory;
+	Report.Searches = Locomotion.Searches;
+	Report.Jumps = Locomotion.Jumps;
+	CastChecked<UPA250SoldierAnimInstance>(InAnimInstance)->SetLocomotionReport(Report);
+}
+
 void FPA250SoldierAnimProxy::PreUpdate(UAnimInstance* InAnimInstance, float DeltaSeconds)
 {
 	FAnimInstanceProxy::PreUpdate(InAnimInstance, DeltaSeconds);
@@ -133,10 +195,43 @@ void FPA250SoldierAnimProxy::PreUpdate(UAnimInstance* InAnimInstance, float Delt
 	const UAnimSequence* Wanted = Inst->GetLocomotion();
 	if (Wanted != Sequence)
 	{
+		// Cross-fade out of the clip being left, and enter the new one at the same share of its
+		// length: walk and run then change on the same foot, where they used to cut to frame 0.
+		FadeSeconds = PA250BattleFeel::Get().CheapCrossfadeSeconds;
+		const double OldLength = Sequence ? Sequence->GetPlayLength() : 0.0;
+		const double Phase = OldLength > UE_KINDA_SMALL_NUMBER ? Time / OldLength : 0.0;
+		if (Sequence && Wanted && FadeSeconds > 0.f)
+		{
+			FadeFrom = Sequence;
+			FadeFromTime = Time;
+			FadeFromRate = Rate;
+			FadeElapsed = 0.f;
+		}
+		else
+		{
+			FadeFrom = nullptr;
+		}
 		Sequence = Wanted;
-		Time = 0.0;
+		Time = Wanted ? Phase * Wanted->GetPlayLength() : 0.0;
 	}
 	Rate = Inst->GetPlayRate();
+	// Full quality (TRIAL): what to search this frame, and the numbers from battle_feel.json.
+	const FPA250BattleFeel& Feel = PA250BattleFeel::Get();
+	const bool bWasFull = bFull;
+	bFull = Inst->WantsFullQuality();
+	Locomotion.Databases.Reset();
+	if (bFull)
+	{
+		for (const TObjectPtr<UPoseSearchDatabase>& Database : Inst->GetLocomotionDatabases()) Locomotion.Databases.Add(Database.Get());
+		Locomotion.BlendSeconds = Feel.MMBlendSeconds;
+		Locomotion.SearchThrottleSeconds = Inst->GetSearchThrottleSeconds();
+		Locomotion.PlayRate = FFloatInterval(Feel.PlayRateMin, Feel.PlayRateMax);
+	}
+	else if (bWasFull)
+	{
+		Locomotion.ResetLocomotion();
+	}
+	TierBlendSeconds = Feel.TierBlendSeconds;
 	Hand = Inst->GetSupportHandTarget();
 	Melee = Inst->GetMeleePose();
 	MountedAim = Inst->GetMountedAim();
@@ -144,17 +239,77 @@ void FPA250SoldierAnimProxy::PreUpdate(UAnimInstance* InAnimInstance, float Delt
 
 void FPA250SoldierAnimProxy::Update(float DeltaSeconds)
 {
+	// The cheap path shows until the motion-matched player has a clip; then it blends in.
+	TierAlpha = StepTierAlpha(TierAlpha, bFull && Locomotion.HasPose(), DeltaSeconds, TierBlendSeconds);
 	if (!Sequence) return;
 	const double Length = Sequence->GetPlayLength();
 	Time = Length > UE_KINDA_SMALL_NUMBER ? FMath::Fmod(Time + DeltaSeconds * Rate, Length) : 0.0;
+	if (FadeFrom)
+	{
+		const double FromLength = FadeFrom->GetPlayLength();
+		FadeFromTime = FromLength > UE_KINDA_SMALL_NUMBER ? FMath::Fmod(FadeFromTime + DeltaSeconds * FadeFromRate, FromLength) : 0.0;
+		FadeElapsed += DeltaSeconds;
+		if (FadeElapsed >= FadeSeconds) FadeFrom = nullptr;
+	}
+}
+
+float FPA250SoldierAnimProxy::CrossfadeAlpha(float Elapsed, float Seconds)
+{
+	if (Seconds <= UE_KINDA_SMALL_NUMBER) return 1.f;
+	const float T = FMath::Clamp(Elapsed / Seconds, 0.f, 1.f);
+	return T * T * (3.f - 2.f * T);
+}
+
+FTransform FPA250SoldierAnimProxy::BlendBone(const FTransform& Old, const FTransform& New, float Alpha)
+{
+	const float A = FMath::Clamp(Alpha, 0.f, 1.f);
+	const FQuat From = Old.GetRotation();
+	FQuat To = New.GetRotation();
+	if ((From | To) < 0.0) To = FQuat(-To.X, -To.Y, -To.Z, -To.W);
+	FTransform Out;
+	Out.SetRotation(FQuat::FastLerp(From, To, A).GetNormalized());
+	Out.SetTranslation(FMath::Lerp(Old.GetTranslation(), New.GetTranslation(), static_cast<double>(A)));
+	Out.SetScale3D(FMath::Lerp(Old.GetScale3D(), New.GetScale3D(), static_cast<double>(A)));
+	return Out;
 }
 
 bool FPA250SoldierAnimProxy::Evaluate(FPoseContext& Output)
 {
-	if (Sequence)
+	if (TierAlpha >= 1.f)
+	{
+		// Full quality: the motion-matched pose. The body passes below still run on top of it.
+		History.Evaluate_AnyThread(Output);
+	}
+	else if (Sequence)
 	{
 		FAnimationPoseData PoseData(Output);
 		Sequence->GetAnimationPose(PoseData, FAnimExtractContext(Time, false, {}, true));
+		if (FadeFrom)
+		{
+			// The clip being left, sampled into a pose of its own and blended bone by bone.
+			FCompactPose OldPose;
+			OldPose.SetBoneContainer(&Output.Pose.GetBoneContainer());
+			FBlendedCurve OldCurve;
+			OldCurve.InitFrom(Output.Curve);
+			UE::Anim::FStackAttributeContainer OldAttributes;
+			FAnimationPoseData OldData(OldPose, OldCurve, OldAttributes);
+			FadeFrom->GetAnimationPose(OldData, FAnimExtractContext(FadeFromTime, false, {}, true));
+			const float Alpha = CrossfadeAlpha(FadeElapsed, FadeSeconds);
+			for (const FCompactPoseBoneIndex Bone : Output.Pose.ForEachBoneIndex())
+			{
+				Output.Pose[Bone] = BlendBone(OldPose[Bone], Output.Pose[Bone], Alpha);
+			}
+		}
+		if (TierAlpha > 0.f)
+		{
+			// Coming up to full quality: the motion-matched pose over the cheap one, bone by bone.
+			FPoseContext Full(Output);
+			History.Evaluate_AnyThread(Full);
+			for (const FCompactPoseBoneIndex Bone : Output.Pose.ForEachBoneIndex())
+			{
+				Output.Pose[Bone] = BlendBone(Output.Pose[Bone], Full.Pose[Bone], TierAlpha);
+			}
+		}
 	}
 	else
 	{
@@ -199,6 +354,11 @@ bool FPA250SoldierAnimProxy::ApplyMeleePose(FCSPose<FCompactPose>& Pose, const F
 	auto Unit = [](float V) { return FMath::IsFinite(V) ? FMath::Clamp(V, 0.f, 1.f) : 0.f; };
 	const float Coil = Unit(Melee.Coil), Lunge = Unit(Melee.Lunge), Butt = Unit(Melee.Butt), Level = Unit(Melee.Level), Guard = Unit(Melee.Guard), Raise = Unit(Melee.Raise), Chop = Unit(Melee.Chop), Shouldering = Unit(Melee.Shoulder);
 	const float Reloading = Finite(Melee.ReloadRightHandCS) ? Unit(Melee.Reload) : 0.f;
+	// Down behind cover. The numbers are the data's, kept inside what the legs can reach.
+	const float Kneel = Unit(Melee.Kneel);
+	const float KneelDrop = Kneel * (FMath::IsFinite(Melee.KneelDropCm) ? FMath::Clamp(Melee.KneelDropCm, 0.f, 70.f) : 0.f);
+	const float KneelBack = Kneel * (FMath::IsFinite(Melee.KneelRearFootBackCm) ? FMath::Clamp(Melee.KneelRearFootBackCm, 0.f, 80.f) : 0.f);
+	const float KneelLean = Kneel * (FMath::IsFinite(Melee.KneelLeanDeg) ? FMath::Clamp(Melee.KneelLeanDeg, -30.f, 45.f) : 0.f);
 	const float Lag = FMath::IsFinite(Melee.RearFootLagCm) ? FMath::Clamp(Melee.RearFootLagCm, 0.f, 60.f) : 0.f;
 	const FVector FlinchFlat(Melee.FlinchCS.X, Melee.FlinchCS.Y, 0.0);
 	const float Flinch = FMath::Min(1.f, static_cast<float>(FlinchFlat.Size()));
@@ -226,9 +386,9 @@ bool FPA250SoldierAnimProxy::ApplyMeleePose(FCSPose<FCompactPose>& Pose, const F
 
 	// Hips: back and up on the coil, forward and low on the lunge, shoved by a blow.
 	const FVector Shift = F * (-10.f * Coil + 20.f * Lunge + 8.f * Butt + 6.f * Level - 5.f * Guard - 6.f * Raise + 14.f * Chop) + FlinchDir * (14.f * Flinch)
-		- U * (4.f * Coil + 15.f * Lunge + 4.f * Butt + 9.f * Level + 6.f * Flinch + 7.f * Guard + 9.f * Chop);
+		- U * (4.f * Coil + 15.f * Lunge + 4.f * Butt + 9.f * Level + 6.f * Flinch + 7.f * Guard + 9.f * Chop + KneelDrop);
 	const float Turn = 20.f * Coil - 26.f * Lunge - 8.f * Butt + 12.f * Guard + 24.f * Raise - 22.f * Chop + 16.f * Shouldering;   // + = right shoulder drawn back
-	const float Lean = -5.f * Coil + 28.f * Lunge + 10.f * Butt + 20.f * Level + 4.f * Guard - 8.f * Raise + 24.f * Chop; // forward
+	const float Lean = -5.f * Coil + 28.f * Lunge + 10.f * Butt + 20.f * Level + 4.f * Guard - 8.f * Raise + 24.f * Chop + KneelLean; // forward
 	{
 		FTransform T = Pose.GetComponentSpaceTransform(Pelvis);
 		T.AddToTranslation(Shift);
@@ -255,7 +415,7 @@ bool FPA250SoldierAnimProxy::ApplyMeleePose(FCSPose<FCompactPose>& Pose, const F
 
 	// Legs: the front foot steps out (and lifts mid-step), the rear foot trails and stays down.
 	// A plain carry moves neither hips nor feet: the clip's legs are left exactly as they are.
-	const bool bLegs = !Shift.IsNearlyZero(0.01) || Lunge > 0.f || Coil > 0.f || Chop > 0.f || Lag > 0.f;
+	const bool bLegs = !Shift.IsNearlyZero(0.01) || Lunge > 0.f || Coil > 0.f || Chop > 0.f || Lag > 0.f || Kneel > 0.f;
 	if (bLegs && Front.bOK)
 	{
 		const FVector Step = F * (42.f * Lunge - 4.f * Coil + 26.f * Chop) + U * (7.f * FMath::Sin(UE_PI * FMath::Max(Lunge, Chop)));
@@ -265,7 +425,8 @@ bool FPA250SoldierAnimProxy::ApplyMeleePose(FCSPose<FCompactPose>& Pose, const F
 	if (bLegs && Rear.bOK)
 	{
 		const FQuat Flat = Rear.Foot0.GetRotation();
-		SolveLimb(Pose, Rear.Thigh, Rear.Calf, Rear.Foot, Rear.Foot0.GetLocation() - F * Lag, Rear.Knee0 + Shift + F * 50.f + R * 15.f, &Flat, true);
+		// Kneeling, the right foot goes back and its knee points down and forward toward the ground.
+		SolveLimb(Pose, Rear.Thigh, Rear.Calf, Rear.Foot, Rear.Foot0.GetLocation() - F * (Lag + KneelBack), Rear.Knee0 + Shift + F * 50.f + R * 15.f - U * (0.6f * KneelDrop), &Flat, true);
 	}
 
 	// Right hand drives the musket (it is attached to hand_r); the left is solved onto it afterwards.
@@ -279,7 +440,7 @@ bool FPA250SoldierAnimProxy::ApplyMeleePose(FCSPose<FCompactPose>& Pose, const F
 		{
 			// Carried: the unarmed clips swing the hand at the thigh, which leaves the left hand nothing to reach.
 			const float CarryW = FMath::IsFinite(Melee.CarryWeight()) ? Melee.CarryWeight() : 0.f;
-			const FVector Carried = Pose.GetComponentSpaceTransform(Chest).GetLocation() + R * 15.f - U * 27.f + F * 9.f;
+			const FVector Carried = Pose.GetComponentSpaceTransform(Chest).GetLocation() + R * Melee.CarryRightCm + U * Melee.CarryUpCm + F * Melee.CarryForwardCm;
 			Base = FMath::Lerp(Base, Carried, CarryW);
 			// Charging, the hand is pinned at the right hip instead of swinging with the run clip.
 			const FVector Tucked = Pose.GetComponentSpaceTransform(Chest).GetLocation() + R * 24.f - U * 26.f + F * 10.f;

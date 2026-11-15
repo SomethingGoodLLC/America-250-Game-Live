@@ -1,0 +1,47 @@
+{
+  "note": "Battle feel: movement, handling and intensity. Every number is GAMEPLAY TUNING (GAME INVENTION). Read by the Unreal battle only; the sim core never reads it and nothing here reaches the campaign. Contract: protocol/schemas/battle_feel.yaml. Budgets are per platform: 'measured' null means that platform has not been measured and holds the lowest setting.",
+  "animation": {
+    "motion_matching": true,
+    "platforms": {
+      "win64": {"full_quality_max": 12, "switch_distance_m": 35, "measured": "2026-11-15"},
+      "mac": {"full_quality_max": 1, "switch_distance_m": 0, "measured": null}
+    },
+    "switch_hysteresis_m": 5,
+    "tier_blend_seconds": 0.25,
+    "cheap_crossfade_seconds": 0.2,
+    "mm_blend_seconds": 0.2,
+    "bot_search_throttle_seconds": 0.1,
+    "play_rate_min": 0.8,
+    "play_rate_max": 1.2,
+    "upper_body_sway": 0.35,
+    "gait_speed_cm_s": {"idle_max": 5, "walk_max": 300, "run_max": 560}
+  },
+  "carry": {
+    "blend_seconds": 0.3,
+    "shoulder_at_walk": false,
+    "clear": {
+      "note": "A man at the trail whose muzzle would be in a friend raises it. A friend counts when he stands within distance_cm ahead along the line the trailed musket points and within half_width_cm of that line; the piece then goes up to pitch_deg at yaw_deg (the hand stays where the trail has it). Checked every check_seconds.",
+      "distance_cm": 190,
+      "half_width_cm": 60,
+      "pitch_deg": 64,
+      "yaw_deg": -6,
+      "check_seconds": 0.2
+    },
+    "trail": {"pitch_deg": 22, "yaw_deg": -20, "hand_forward_cm": 9, "hand_right_cm": 15, "hand_up_cm": -27},
+    "shoulder": {"pitch_deg": 55, "yaw_deg": -12, "hand_forward_cm": 6, "hand_right_cm": 16, "hand_up_cm": -24},
+    "charge": {"pitch_deg": 4, "yaw_deg": -8, "hand_forward_cm": 10, "hand_right_cm": 24, "hand_up_cm": -26}
+  },
+  "kneel": {
+    "note": "A man down behind cover (ducked) kneels: hips lowered, the right foot drawn back so the right knee goes toward the ground, the body leant a little forward. A procedural pose until a kneeling clip is dropped in.",
+    "drop_cm": 46,
+    "rear_foot_back_cm": 38,
+    "lean_deg": 8,
+    "blend_seconds": 0.25
+  },
+  "reload": {
+    "note": "The loading drill's left hand. With the butt on the ground to ram, the musket's own left-hand spot (by the lock) is down at the knee, out of a standing man's reach, and the hand hung at his thigh. It now holds the barrel higher: the spot is slid toward the muzzle until it is ram_left_hand_height_cm above his feet, by no more than ram_left_hand_max_slide_cm.",
+    "ram_left_hand_height_cm": 108,
+    "ram_left_hand_max_slide_cm": 85
+  },
+  "verify": {"frame_time_margin_pct": 10}
+}

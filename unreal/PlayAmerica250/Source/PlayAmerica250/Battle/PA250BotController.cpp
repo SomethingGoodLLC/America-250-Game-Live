@@ -434,7 +434,12 @@ void APA250BotController::Tick(float DeltaSeconds)
 		{
 			const float ArriveForDuck = Form.ArriveCm > 0.f ? Form.ArriveCm : T.FormationArriveCm;
 			const bool bAtSpotNow = FVector::Dist2D(Me->GetActorLocation(), Form.Target) <= ArriveForDuck;
-			Me->SetDucking(PA250ShouldDuck(Form.bInCover, bAtSpotNow, bLoaded, Enemy != nullptr && Dist <= FireMaxCm, Form.bRout, Form.bCharge));
+			const bool bDuckNow = PA250ShouldDuck(Form.bInCover, bAtSpotNow, bLoaded, Enemy != nullptr && Dist <= FireMaxCm, Form.bRout, Form.bCharge);
+			Me->SetDucking(bDuckNow);
+			if (APA250BattleGameMode* GM = GetWorld()->GetAuthGameMode<APA250BattleGameMode>())
+			{
+				GM->NoteCoverThink(Me, Form.bInCover && bAtSpotNow, bDuckNow);
+			}
 		}
 		if (Form.bRout)
 		{
@@ -516,6 +521,7 @@ void APA250BotController::Tick(float DeltaSeconds)
 					if (APA250BattleGameMode* GM = GetWorld()->GetAuthGameMode<APA250BattleGameMode>())
 					{
 						if (UPA250VolleyCoordinator* V = GM->GetVolleys()) V->RecordEngagement(Dist);
+						GM->NoteBotShot(Me->FactionId, Form.bInCover);
 					}
 				}
 				bReactionRolled = false;

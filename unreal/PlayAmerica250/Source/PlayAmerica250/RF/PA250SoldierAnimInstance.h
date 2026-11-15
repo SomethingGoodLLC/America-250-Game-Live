@@ -4,9 +4,12 @@
 #include "Animation/AnimInstance.h"
 #include "Animation/AnimInstanceProxy.h"
 #include "BonePose.h"
+#include "PA250AnimNode_Locomotion.h"
+#include "PoseSearch/AnimNode_PoseSearchHistoryCollector.h"
 #include "PA250SoldierAnimInstance.generated.h"
 
 class UAnimSequence;
+class UPoseSearchDatabase;
 struct FPA250MountedAim
 {
     bool bEnabled = false;
@@ -74,7 +77,18 @@ struct FPA250MeleePose
 	float Guard = 0.f;
 	/** 0..1 armed and on foot: the right hand holds the musket in front of the right hip, muzzle up and to the
 	 *  left, so the left hand reaches it without folding across the chest (the clips are unarmed). */
+	/** 0..1 down behind cover: hips lowered KneelDropCm (feet kept on the ground), the right foot
+	 *  drawn back KneelRearFootBackCm, the body leant forward KneelLeanDeg (battle_feel.json kneel). */
+	float Kneel = 0.f;
+	float KneelDropCm = 0.f;
+	float KneelRearFootBackCm = 0.f;
+	float KneelLeanDeg = 0.f;
 	float Carry = 0.f;
+	/** Where the right hand holds the carried musket, in cm from the chest (right, up, forward): the
+	 *  carry in force (trail, shoulder or charge; battle_feel.json carry), blended by the game thread. */
+	float CarryRightCm = 0.f;
+	float CarryUpCm = 0.f;
+	float CarryForwardCm = 0.f;
 	/** How much of the carry is left once every other hold has taken its share. */
 	float CarryWeight() const
 	{
@@ -87,7 +101,7 @@ struct FPA250MeleePose
 
 	bool IsActive() const
 	{
-		return Coil > 1.e-3f || Lunge > 1.e-3f || Butt > 1.e-3f || Level > 1.e-3f || Guard > 1.e-3f || Carry > 1.e-3f || Reload > 1.e-3f || Shoulder > 1.e-3f || Raise > 1.e-3f || Chop > 1.e-3f || RearFootLagCm > 0.1f || !FlinchCS.IsNearlyZero(1.e-3);
+		return Kneel > 1.e-3f || Coil > 1.e-3f || Lunge > 1.e-3f || Butt > 1.e-3f || Level > 1.e-3f || Guard > 1.e-3f || Carry > 1.e-3f || Reload > 1.e-3f || Shoulder > 1.e-3f || Raise > 1.e-3f || Chop > 1.e-3f || RearFootLagCm > 0.1f || !FlinchCS.IsNearlyZero(1.e-3);
 	}
 };
 
@@ -102,6 +116,10 @@ struct FPA250SoldierAnimProxy : public FAnimInstanceProxy
 	FPA250SoldierAnimProxy() = default;
 	explicit FPA250SoldierAnimProxy(UAnimInstance* Instance) : FAnimInstanceProxy(Instance) {}
 
+	/** Pure: the next share of the full-quality pose (0 = cheap path, 1 = motion matched), moving
+	 *  toward 1 over BlendSeconds while bWantFull and dropping to 0 at once when not. */
+	static float StepTierAlpha(float Alpha, bool bWantFull, float DeltaSeconds, float BlendSeconds);
+
 	/** Pure: two-bone solve onto the musket. Returns false (pose untouched) on any invalid input. */
 	static bool SolveSupportHand(FCSPose<FCompactPose>& Pose, const FPA250SupportHandTarget& Target);
 	/** Pure: turn the right hand onto the wrist of the stock (palm in, knuckles round it) and close its fingers. */
@@ -110,29 +128,58 @@ struct FPA250SoldierAnimProxy : public FAnimInstanceProxy
 	 *  Feet keep the clip's ground contact (leg IK). Returns false when the skeleton lacks a pelvis. */
 	static bool ApplyMountedAim(FCSPose<FCompactPose>& Pose, const FPA250MountedAim& Aim);
 	static bool ApplyMeleePose(FCSPose<FCompactPose>& Pose, const FPA250MeleePose& Melee);
+	/** Pure: how much of the new clip shows Elapsed seconds into a cross-fade of Seconds (0..1, eased;
+	 *  1 at once when Seconds is 0). */
+	static float CrossfadeAlpha(float Elapsed, float Seconds);
+	/** Pure: one bone between the old clip's pose and the new one's (shortest way round, normalized). */
+	static FTransform BlendBone(const FTransform& Old, const FTransform& New, float Alpha);
 
 protected:
+	virtual void Initialize(UAnimInstance* InAnimInstance) override;
 	virtual void PreUpdate(UAnimInstance* InAnimInstance, float DeltaSeconds) override;
 	virtual void Update(float DeltaSeconds) override;
+	virtual void UpdateAnimationNode(const FAnimationUpdateContext& InContext) override;
 	virtual bool Evaluate(FPoseContext& Output) override;
+	virtual void PostUpdate(UAnimInstance* InAnimInstance) const override;
+	// The motion-matching nodes, hosted natively (no Animation Blueprint): the engine initializes
+	// and updates them as the proxy's root.
+	virtual FAnimNode_Base* GetCustomRootNode() override { return &History; }
+	virtual void GetCustomNodes(TArray<FAnimNode_Base*>& OutNodes) override
+	{
+		OutNodes.Add(&History);
+		OutNodes.Add(&Locomotion);
+	}
 
 private:
 	const UAnimSequence* Sequence = nullptr;
 	double Time = 0.0;
 	float Rate = 1.f;
+	/** The clip being left, while the cheap path cross-fades (battle_feel.json cheap_crossfade_seconds). */
+	const UAnimSequence* FadeFrom = nullptr;
+	double FadeFromTime = 0.0;
+	float FadeFromRate = 1.f;
+	float FadeElapsed = 0.f;
+	float FadeSeconds = 0.f;
+	/** Full quality (TRIAL): the pose history the search reads, and the motion-matched player under it. */
+	FAnimNode_PoseSearchHistoryCollector History;
+	FPA250AnimNode_Locomotion Locomotion;
+	bool bFull = false;
+	/** 0 = the cheap path shows, 1 = the motion-matched pose shows. */
+	float TierAlpha = 0.f;
+	float TierBlendSeconds = 0.f;
 	FPA250SupportHandTarget Hand;
 	FPA250MeleePose Melee;
 	FPA250MountedAim MountedAim;
 };
 
-/** Native body anim for the period soldier: one looping locomotion clip, the melee pose layer and the support-hand IK. */
+/** Native body anim for the period soldier: one looping locomotion clip (cross-faded when it changes), the melee pose layer and the support-hand IK. */
 UCLASS(Transient, NotBlueprintable)
 class PLAYAMERICA250_API UPA250SoldierAnimInstance : public UAnimInstance
 {
 	GENERATED_BODY()
 
 public:
-	/** Game thread. Switching clips restarts the new one from 0 (same as PlayAnimation did). */
+	/** Game thread. Switching clips cross-fades to the new one, entered at the same share of its stride. */
 	void SetLocomotion(UAnimSequence* InSequence) { Locomotion = InSequence; }
 	UAnimSequence* GetLocomotion() const { return Locomotion; }
 	/** Game thread. Scales clip sampling speed from movement (walk/run). */
@@ -148,6 +195,24 @@ public:
 	void SetMeleePose(const FPA250MeleePose& InPose) { MeleePose = InPose; }
 	const FPA250MeleePose& GetMeleePose() const { return MeleePose; }
 
+	/** Game thread. Full quality: motion matching over these databases (what the gait asks for).
+	 *  An empty list, or bFull false, leaves the soldier on the cheap path. */
+	void SetFullQuality(bool bInFull, const TArray<UPoseSearchDatabase*>& InDatabases, float InSearchThrottleSeconds);
+	bool WantsFullQuality() const { return bFullQuality; }
+	const TArray<TObjectPtr<UPoseSearchDatabase>>& GetLocomotionDatabases() const { return LocomotionDatabases; }
+	float GetSearchThrottleSeconds() const { return SearchThrottleSeconds; }
+
+	/** What the anim thread did last update (copied back for the probe and the cases). */
+	struct FLocomotionReport
+	{
+		bool bShowingFull = false;   // the motion-matched pose is what is drawn
+		bool bHadHistory = false;    // the node found its pose history
+		int32 Searches = 0;
+		int32 Jumps = 0;
+	};
+	const FLocomotionReport& GetLocomotionReport() const { return LocomotionReport; }
+	void SetLocomotionReport(const FLocomotionReport& In) { LocomotionReport = In; }
+
 protected:
 	virtual FAnimInstanceProxy* CreateAnimInstanceProxy() override { return new FPA250SoldierAnimProxy(this); }
 	virtual void DestroyAnimInstanceProxy(FAnimInstanceProxy* InProxy) override { delete static_cast<FPA250SoldierAnimProxy*>(InProxy); }
@@ -155,6 +220,12 @@ protected:
 private:
 	UPROPERTY(Transient)
 	TObjectPtr<UAnimSequence> Locomotion;
+	/** Kept alive here while the anim thread searches them. */
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UPoseSearchDatabase>> LocomotionDatabases;
+	bool bFullQuality = false;
+	float SearchThrottleSeconds = 0.f;
+	FLocomotionReport LocomotionReport;
 	float PlayRate = 1.f;
 	FPA250SupportHandTarget SupportHand;
 	FPA250MeleePose MeleePose;

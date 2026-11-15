@@ -5,6 +5,13 @@
 #include <string>
 #include <vector>
 
+// Symbol visibility for a host that builds the core as a shared library and must name what it
+// exports (the Unreal module on Windows defines this). Everywhere else it is empty and the core is
+// plain C++: nothing here is specific to one compiler.
+#ifndef PA250_API
+#define PA250_API
+#endif
+
 namespace pa250 {
 
 inline constexpr const char* kBritish = "british";
@@ -703,6 +710,26 @@ struct CommanderRules {
     int fate_wounded = 60, fate_killed = 25, fate_captured = 15;  // what becomes of him, in 100
 };
 
+// GAME INVENTION (persons data `hero`): the player may fight part of a battle as the general who
+// commands his army. One ability, from the general's first trait.
+struct HeroAbility {
+    std::string trait;  // filled in the battle setup: the trait it came from
+    std::string kind;   // hold_fast | charge | steady | quick_step | throw_up_works | huzza
+    std::string label, text;
+    float radius_m = 0.f, seconds = 0.f, value = 0.f, cooldown_seconds = 0.f;
+};
+// The hero rules every battle shares. Every number is the data file's: `loaded` is false, and no
+// general can be played, when the persons file has no hero block.
+struct HeroRules {
+    bool loaded = false;
+    int score_threshold = 0, score_kill = 0, score_capture = 0, score_rally = 0;
+    float meter_seconds = 0.f, refill_kill_seconds = 0.f, refill_capture_seconds = 0.f, refill_rally_seconds = 0.f;
+    float health_scale = 1.f, aura_radius_m = 0.f, rally_radius_m = 0.f, rally_cooldown_seconds = 0.f;
+    float sword_damage = 0.f, sword_reach_cm = 0.f, sword_recover_seconds = 0.f;
+    float pistol_damage = 0.f, pistol_range_m = 0.f, pistol_reload_seconds = 0.f;
+    std::map<std::string, HeroAbility> trait_abilities;  // by trait
+};
+
 // ---- Campaign arc definitions (data files; GAMEPLAY TUNING) ---------------
 // data/campaign_rules_boston_1775.json. The campaign arc (occupation, missions, enlistments, the
 // scored AI, win and loss) runs only while these rules are loaded.
@@ -883,6 +910,14 @@ struct BattleRules {
     float cannon_length_cm = 260.f;            // the piece from trail to muzzle, for fitting the mesh
     // Cover and field works (battle_rules.json "cover", "works"). Read by the Unreal battle.
     float cover_snap_cm = 160.f;        // a man this close behind a wall, fence or work is "at" it
+    // Places along the walls (GAME INVENTION). The values here are the behaviour before 2026-11-15
+    // (no wall places, cover only once the enemy is seen, line troops in the open); the data file sets them.
+    float cover_slot_spacing_cm = 0.f;        // a place every this far along a wall; 0 = none (the old ring search only)
+    float cover_stand_off_cm = 0.f;           // a man stands this far back from the wall's face
+    float cover_search_cm = 0.f;              // a man takes a wall place within this of his place in the squad
+    float cover_max_angle_deg = 75.f;         // the enemy may be this far off the square of the wall, no more
+    bool cover_before_contact = false;        // squads that seek cover take it, fronting the enemy's side, before they see him
+    std::string cover_line_troops = "never";  // never | holding | always: do line (volley) squads use the walls
     float works_breastwork_length_cm = 420.f;
     float works_breastwork_height_cm = 120.f;
     float works_breastwork_thickness_cm = 90.f;
@@ -944,6 +979,11 @@ struct SideSetup {
     std::string commander_name;
     std::vector<std::string> commander_traits;
     float commander_aura_radius_m = 0.f;  // his officer's aura, larger than a company officer's
+    // The kit he fights with while the player controls him (persons data hero). Only on the player's
+    // side, and only when the side has a general: no general, no hero.
+    bool has_hero = false;
+    float hero_health_scale = 0.f, hero_aura_radius_m = 0.f, hero_rally_radius_m = 0.f, hero_rally_cooldown_seconds = 0.f;
+    HeroAbility hero_ability;
     bool alarmed = false;                 // an agent raised the alarm: every company is under arms at the start
     // What the other side knows of this side before the fight: its true numbers ("exact") or a
     // rough count ("estimate": men_low..men_high). The pre-battle card shows the enemy column from this.
@@ -960,6 +1000,7 @@ struct BattleSetup {
     std::string scenario_preset = "lexington_common";  // lexington_common | concord_bridge | battle_road
     std::string mode = "conquest";                     // conquest | assault | landing (choose_battle_mode)
     uint64_t seed = 0;
+    int hour_of_day = -1;  // 0..23 from the campaign clock when the battle was raised; -1 = not said (old documents). Display only.
     std::string attacker_faction;
     std::string defender_faction;
     std::string player_faction;
@@ -1007,6 +1048,12 @@ struct BattleResult {
     std::map<std::string, int> guns_taken;
     // What became of a side's general on the field: faction -> wounded | killed | captured.
     std::map<std::string, std::string> commander_events;
+    // Report only (GAME INVENTION): the player fought part of the battle as his side's general. An
+    // empty hero_faction means he did not. commander_events alone says what became of the general.
+    std::string hero_faction, hero_person_id;
+    int hero_takeovers = 0;
+    float hero_seconds_played = 0.f;
+    bool hero_fell_while_played = false;
 };
 
 struct TickOutput {

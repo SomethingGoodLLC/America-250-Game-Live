@@ -1,0 +1,49 @@
+{
+ "name": "battle_setup_hero_own_kit",
+ "description": "a general with numbers of his own fights with them; the ability is still his first trait's",
+ "start_ymdh": {
+  "y": 1775,
+  "m": 4,
+  "d": 20,
+  "h": 0
+ },
+ "battle": {
+  "province": "lexington",
+  "attacker": "british_regulars",
+  "defender": "continental_militia"
+ },
+ "generals": {
+  "continental_militia": "israel_putnam",
+  "british_regulars": "francis_smith"
+ },
+ "expect_setup": {
+  "commander": {
+   "continental": "israel_putnam",
+   "british": "francis_smith"
+  },
+  "factor_rows": [
+   {
+    "faction": "continental",
+    "label": "morale",
+    "value": 4,
+    "source_has": "Israel Putnam: Popular"
+   }
+  ],
+  "morale": {
+   "continental": 74,
+   "british": 80
+  },
+  "hero": {
+   "faction": "continental",
+   "trait": "aggressive",
+   "kind": "charge",
+   "health_scale": 2.4,
+   "aura_radius_m": 45,
+   "rally_radius_m": 60,
+   "rally_cooldown_seconds": 20
+  },
+  "no_hero": [
+   "british"
+  ]
+ }
+}

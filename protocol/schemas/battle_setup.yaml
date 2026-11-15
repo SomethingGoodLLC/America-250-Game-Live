@@ -33,6 +33,14 @@ properties:
       attacker must carry the posts in order. conquest: the open fight for the posts; the Concord and
       Battle Road presets are always conquest. Absent means conquest.
   seed: {type: integer, minimum: 0, description: "From CampaignState.seed, the hour and the province; never the wall clock."}
+  hour_of_day:
+    type: integer
+    minimum: 0
+    maximum: 23
+    description: >-
+      The hour of the day the battle is fought, from the campaign clock at the hour the battle was
+      raised (never the wall clock). Display only: the battle picks its light from it
+      (battle_look.json time_bands). Absent in documents written before 2026-11-15.
   attacker_faction: {$ref: "#/definitions/faction"}
   defender_faction: {$ref: "#/definitions/faction"}
   player_faction: {$ref: "#/definitions/faction"}
@@ -142,6 +150,35 @@ definitions:
             type: array
             items: {enum: [defensive, aggressive, steadfast, adroit, engineer, popular]}
           aura_radius_m: {type: number, minimum: 0}
+          hero:
+            type: object
+            additionalProperties: false
+            required: [health_scale, aura_radius_m, rally_radius_m, rally_cooldown_seconds, ability]
+            description: >-
+              GAME INVENTION, written on the player's side only (never on the other side's general, who
+              stays under his own judgement): the kit this general fights with while the player controls
+              him (persons data `hero.kit`, with the person's own numbers in place of it where he has
+              any), and the ability of the first of his traits (persons data `hero.trait_abilities`).
+              The score, the meter, the sword and the pistol are the same for every general and are
+              read from the persons data (PA250Sim `hero_rules`).
+            properties:
+              health_scale: {type: number, minimum: 1}
+              aura_radius_m: {type: number, minimum: 0}
+              rally_radius_m: {type: number, minimum: 0}
+              rally_cooldown_seconds: {type: number, minimum: 0}
+              ability:
+                type: object
+                additionalProperties: false
+                required: [trait, kind, label, text, radius_m, seconds, value, cooldown_seconds]
+                properties:
+                  trait: {enum: [defensive, aggressive, steadfast, adroit, engineer, popular]}
+                  kind: {enum: [hold_fast, charge, steady, quick_step, throw_up_works, huzza]}
+                  label: {type: string}
+                  text: {type: string}
+                  radius_m: {type: number, minimum: 0}
+                  seconds: {type: number, minimum: 0}
+                  value: {type: number}
+                  cooldown_seconds: {type: number, minimum: 0}
       alarmed:
         type: boolean
         description: >-

@@ -2,6 +2,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "PA250Cover.h"
 #include "FormationQuery.h"
 #include "PA250CombatProfiles.h"
 #include "PA250Morale.h"
@@ -278,6 +279,8 @@ private:
 		/** This squad defends a post from behind its field works: it keeps to them (no advance, no
 		 *  pursuit) and every man looks for a place behind a bank, whatever his drill. */
 		bool bAtWorks = false;
+		/** The post it is ordered to is its own side's: it is holding ground, not going to take it. */
+		bool bHoldsPost = false;
 		/** Following its leader at his shoulders (one rank, half to each side of him). */
 		bool bAbreast = false;
 		/** The post whose works it mans. While that post is its side's and a work still stands by it,
@@ -338,6 +341,29 @@ private:
 	TArray<FVector> WorkAnchors;           // standing field works (PA250FieldWork that give cover)
 	TMap<FName, FVector> ColoursFlying;    // a side's colours while they are carried
 	bool bCoverAnchorsBuilt = false;
+	/** Places along every tagged wall and standing work (battle_rules.json cover), and who has each. */
+	TArray<PA250Cover::FWallSlot> CoverSlots;
+	TMap<int32, TWeakObjectPtr<ARFCharacter>> CoverSlotOwner;
+public:
+	/** Trace only: what became of each man's search for a covered place. */
+	struct FCoverSearch
+	{
+		int32 Men = 0;            // men whose squad sought cover at a query
+		int32 Skipped = 0;        // not searched (no contact yet and before_contact off, or formation not kept)
+		int32 NoSlotNear = 0;     // no free wall place within search_cm on the side away from the threat
+		int32 SlotOffNav = 0;     // a place was near but not on walkable ground
+		int32 SlotNotCover = 0;   // a place was near but the trace said it gives no cover with a clear shot
+		int32 WallPlaces = 0;     // given a place along a wall
+		int32 RingPlaces = 0;     // given a place by the old ring search
+		int32 SquadQueries = 0;   // squad queries that sought cover
+		int32 SquadQueriesNot = 0; // squad queries of squads that do not seek cover
+	};
+	const FCoverSearch& GetCoverSearch() const { return CoverSearch; }
+	int32 NumCoverSlots() const { return CoverSlots.Num(); }
+private:
+	FCoverSearch CoverSearch;
+	/** Do this squad's men use the walls: skirmishers always; volley squads by cover.line_troops. */
+	bool SquadUsesWalls(const FSquad& Sq) const;
 	TArray<int32> EngagementHistogram = {0, 0, 0, 0, 0};
 
 	void RebuildSquads(int32 MinSize, int32 MaxSize);

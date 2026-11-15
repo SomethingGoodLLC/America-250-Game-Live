@@ -68,6 +68,61 @@ inline bool IsAtCover(const UWorld* World, const FVector& Feet, const FVector& F
 	return !World->LineTraceSingleByChannel(Hit2, Shoulder, Shoulder + Dir * FMath::Max(10.f, SnapCm) * 2.f, ECC_Visibility, Params);
 }
 
+/** One place a man can stand behind a wall. */
+struct FWallSlot
+{
+	FVector Pos = FVector::ZeroVector;   // at the wall's own height; the caller puts it on the ground
+	FVector Out = FVector::ForwardVector; // level unit vector from the wall's face toward this place
+};
+
+/** Pure: places along both faces of a wall block. Centre and AxisLong (level, along the wall) place
+ *  it; LengthCm along the axis, DepthCm through it. One place every SpacingCm (at least one),
+ *  StandOffCm back from each face. */
+inline void AddWallSlots(const FVector& Centre, const FVector& AxisLong, float LengthCm, float DepthCm, float SpacingCm, float StandOffCm,
+	TArray<FWallSlot>& Out)
+{
+	const FVector Along = AxisLong.GetSafeNormal2D();
+	if (Along.IsNearlyZero() || SpacingCm <= 0.f || LengthCm <= 0.f) return;
+	const FVector Side(-Along.Y, Along.X, 0.f);
+	const int32 N = FMath::Max(1, FMath::RoundToInt(LengthCm / SpacingCm));
+	const float Step = LengthCm / N;
+	for (int32 i = 0; i < N; ++i)
+	{
+		const float T = -0.5f * LengthCm + (i + 0.5f) * Step;
+		for (const float Sign : {1.f, -1.f})
+		{
+			FWallSlot S;
+			S.Out = Side * Sign;
+			S.Pos = Centre + Along * T + S.Out * (0.5f * DepthCm + StandOffCm);
+			Out.Add(S);
+		}
+	}
+}
+
+/** Pure: the wall place for a man whose place in the squad is Desired, against a threat at Threat:
+ *  the nearest place within RadiusCm that has the wall between it and the threat and that nobody
+ *  else has (Taken holds indices into Slots). INDEX_NONE when there is none. */
+inline int32 PickWallSlot(const TArray<FWallSlot>& Slots, const FVector& Desired, const FVector& Threat, float RadiusCm, const TSet<int32>& Taken,
+	float MaxAngleDeg = 75.f)
+{
+	// The wall is between him and the threat: the threat lies within MaxAngleDeg of straight across it.
+	const float MaxDot = -FMath::Cos(FMath::DegreesToRadians(FMath::Clamp(MaxAngleDeg, 0.f, 89.f)));
+	int32 Best = INDEX_NONE;
+	float BestD = RadiusCm * RadiusCm;
+	for (int32 i = 0; i < Slots.Num(); ++i)
+	{
+		if (Taken.Contains(i)) continue;
+		if (FVector::DotProduct(Slots[i].Out, (Threat - Slots[i].Pos).GetSafeNormal2D()) > MaxDot) continue;
+		const float D = FVector::DistSquared2D(Slots[i].Pos, Desired);
+		if (D <= BestD)
+		{
+			BestD = D;
+			Best = i;
+		}
+	}
+	return Best;
+}
+
 /** Pure: the fire-over stance. Behind cover a man is down while he loads and up while he presents;
  *  he does not kneel on the run. */
 inline bool FireOverDown(bool bAtCover, bool bLoading, bool bPresenting, bool bRunning)

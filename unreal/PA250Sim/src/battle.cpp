@@ -289,7 +289,18 @@ void load_battle_rules(const std::string& json_text) {
             r.cannon_knockdown_push_cm = f.value("knockdown_push_cm", r.cannon_knockdown_push_cm);
             r.cannon_dirt_burst_scale = f.value("dirt_burst_scale", r.cannon_dirt_burst_scale);
         }
-        if (j.contains("cover")) r.cover_snap_cm = j.at("cover").value("snap_cm", r.cover_snap_cm);
+        if (j.contains("cover")) {
+            const json& c = j.at("cover");
+            r.cover_snap_cm = c.value("snap_cm", r.cover_snap_cm);
+            r.cover_slot_spacing_cm = c.value("slot_spacing_cm", r.cover_slot_spacing_cm);
+            r.cover_stand_off_cm = c.value("stand_off_cm", r.cover_stand_off_cm);
+            r.cover_search_cm = c.value("search_cm", r.cover_search_cm);
+            r.cover_max_angle_deg = c.value("max_angle_deg", r.cover_max_angle_deg);
+            r.cover_before_contact = c.value("before_contact", r.cover_before_contact);
+            r.cover_line_troops = c.value("line_troops", r.cover_line_troops);
+            if (r.cover_line_troops != "never" && r.cover_line_troops != "holding" && r.cover_line_troops != "always")
+                throw std::runtime_error("battle rules: cover.line_troops must be never, holding or always");
+        }
         if (j.contains("works")) {
             const json& f = j.at("works");
             r.works_breastwork_length_cm = f.value("breastwork_length_cm", r.works_breastwork_length_cm);
@@ -560,6 +571,7 @@ BattleSetup build_battle_setup(const CampaignState& state, const std::string& pr
     b.defender_faction = dit->second.faction;
     b.seed = detail::mix64(state.seed ^ detail::mix64(static_cast<uint64_t>(state.now.hour_index)) ^
                            detail::fnv1a(province));
+    b.hour_of_day = static_cast<int>(to_ymdh(state.now).h);  // the light of the day; display only
     b.farm_level = pit->second.farm_level;
     b.workshop_level = pit->second.workshop_level;
     b.depot_level = pit->second.depot_level;

@@ -1,0 +1,49 @@
+{
+ "name": "battle_result_hero_survived",
+ "description": "the player fought as his general and the general came through: one line on the report, nothing else changes",
+ "start_ymdh": {
+  "y": 1775,
+  "m": 4,
+  "d": 20,
+  "h": 0
+ },
+ "battle": {
+  "province": "lexington",
+  "attacker": "british_regulars",
+  "defender": "continental_militia"
+ },
+ "generals": {
+  "continental_militia": "artemas_ward",
+  "british_regulars": "francis_smith"
+ },
+ "result": {
+  "province_id": "lexington",
+  "winner": "continental",
+  "end_reason": "army_broke",
+  "hero": {
+   "faction": "continental",
+   "person_id": "artemas_ward",
+   "takeovers": 2,
+   "seconds_played": 58.5,
+   "fell_while_played": false
+  }
+ },
+ "expect": {
+  "schema_valid": true,
+  "applied": true,
+  "persons": {
+   "artemas_ward": {
+    "status": "",
+    "role": "general"
+   },
+   "francis_smith": {
+    "status": "",
+    "role": "general"
+   }
+  },
+  "report_commander_events": {},
+  "report_line_has": [
+   "You fought as General Artemas Ward"
+  ]
+ }
+}

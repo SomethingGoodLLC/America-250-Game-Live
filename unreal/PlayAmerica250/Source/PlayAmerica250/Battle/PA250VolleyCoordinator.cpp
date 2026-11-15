@@ -465,10 +465,39 @@ void UPA250VolleyCoordinator::AssignSquadSlots()
 		bCoverAnchorsBuilt = true;
 		CoverAnchors.Reset();
 		WorkAnchors.Reset();
+		CoverSlots.Reset();
+		CoverSlotOwner.Reset();
+		const pa250::BattleRules& CoverRules = GameMode->GetRules();
 		for (TActorIterator<AActor> It(GameMode->GetWorld()); It; ++It)
 		{
 			if (!It->ActorHasTag(TEXT("PA250Cover"))) continue;
 			CoverAnchors.Add(It->GetActorLocation());
+			// Places along the wall itself: its long side from the mesh's own box, so a turned wall reads right.
+			if (CoverRules.cover_slot_spacing_cm > 0.f)
+			{
+				FVector Centre = It->GetActorLocation(), Axis = It->GetActorForwardVector();
+				float Length = 0.f, Depth = 0.f;
+				if (const UStaticMeshComponent* Mesh = Cast<UStaticMeshComponent>(It->GetRootComponent()); Mesh && Mesh->GetStaticMesh())
+				{
+					const FVector Size = Mesh->GetStaticMesh()->GetBoundingBox().GetSize() * Mesh->GetComponentScale().GetAbs();
+					const bool bAlongX = Size.X >= Size.Y;
+					Axis = bAlongX ? Mesh->GetComponentQuat().GetAxisX() : Mesh->GetComponentQuat().GetAxisY();
+					Length = bAlongX ? Size.X : Size.Y;
+					Depth = bAlongX ? Size.Y : Size.X;
+					Centre = Mesh->Bounds.Origin;
+				}
+				else
+				{
+					FVector Origin, Extent;
+					It->GetActorBounds(true, Origin, Extent);
+					const bool bAlongX = Extent.X >= Extent.Y;
+					Axis = bAlongX ? FVector::XAxisVector : FVector::YAxisVector;
+					Length = 2.f * (bAlongX ? Extent.X : Extent.Y);
+					Depth = 2.f * (bAlongX ? Extent.Y : Extent.X);
+					Centre = Origin;
+				}
+				PA250Cover::AddWallSlots(Centre, Axis, Length, Depth, CoverRules.cover_slot_spacing_cm, CoverRules.cover_stand_off_cm, CoverSlots);
+			}
 			if (It->ActorHasTag(TEXT("PA250FieldWork"))) WorkAnchors.Add(It->GetActorLocation());
 		}
 	}
@@ -613,6 +642,7 @@ void UPA250VolleyCoordinator::AssignSquadSlots()
 	{
 		FSquad& Sq = Squads[KV.Key];
 		Sq.bAtWorks = false;
+		Sq.bHoldsPost = KV.Value && KV.Value->GetHolder() == Sq.Faction;
 		if (!KV.Value) continue;
 		const FName Enemy = Sq.Faction == TEXT("british") ? FName(TEXT("continental")) : FName(TEXT("british"));
 		const FVector PostLoc = KV.Value->GetActorLocation();
@@ -630,7 +660,7 @@ void UPA250VolleyCoordinator::AssignSquadSlots()
 			Taken.Add(Pick);
 			continue;
 		}
-		if (!Sq.Role.bPrefersCover) continue;
+		if (!SquadUsesWalls(Sq)) continue;
 		if (!bHoldGround && PickCoverLine(PostLoc, EnemyRear, OwnRear, BT ? BT->Values.CoverLineSearchCm : 5000.f,
 			BT ? BT->Values.MinSquadCenterSeparationCm : 1500.f, Taken, Pick))
 		{
@@ -639,6 +669,14 @@ void UPA250VolleyCoordinator::AssignSquadSlots()
 			Taken.Add(Pick);
 		}
 	}
+}
+
+bool UPA250VolleyCoordinator::SquadUsesWalls(const FSquad& Sq) const
+{
+	if (Sq.Role.bPrefersCover) return true;
+	if (!GameMode.IsValid()) return false;
+	const std::string& Line = GameMode->GetRules().cover_line_troops;
+	return Line == "always" || (Line == "holding" && Sq.bHoldsPost);
 }
 
 bool UPA250VolleyCoordinator::PickCoverLine(const FVector& PostLoc, const FVector& EnemyRear, const FVector& OwnRear,
@@ -1323,10 +1361,12 @@ void UPA250VolleyCoordinator::TickFormation(FSquad& Sq, const TArray<ARFCharacte
 	Sq.bHasCover.SetNum(Sq.FileOrder.Num());
 	Sq.CoverQueryTimer -= DeltaSeconds;
 	const bool bOrderedCover = bObey && (Sq.Order == EPA250SquadOrder::TakeCover || (bLedAim && Ro.bIndividualFire));
-	const bool bSeekCover = Ro.bPrefersCover || bOrderedCover || Sq.bAtWorks;
+	const pa250::BattleRules& CoverRules = GameMode->GetRules();
+	const bool bSeekCover = SquadUsesWalls(Sq) || bOrderedCover || Sq.bAtWorks;
 	if (bSeekCover && Sq.CoverQueryTimer <= 0.f)
 	{
 		Sq.CoverQueryTimer = 2.f;
+		++CoverSearch.SquadQueries;
 		int32 Covered = 0;
 		// Cover is cover from somewhere: the contact, else where the leader aims, else the front of the line.
 		const FVector Threat = Sq.Contact.IsValid() ? Sq.Contact->GetActorLocation()
@@ -1335,7 +1375,20 @@ void UPA250VolleyCoordinator::TickFormation(FSquad& Sq, const TArray<ARFCharacte
 		{
 			Sq.bHasCover[i] = false;
 			const ARFCharacter* C = Sq.FileOrder[i].Get();
-			if (!C || (!Sq.Contact.IsValid() && !bOrderedCover) || !Orders.bKeepFormation) continue;
+			// Whatever place he had is free again until he is given one below.
+			for (auto SlotIt = CoverSlotOwner.CreateIterator(); SlotIt; ++SlotIt)
+			{
+				if (SlotIt.Value().Get() == C || !SlotIt.Value().IsValid() || SlotIt.Value()->IsDead()) SlotIt.RemoveCurrent();
+			}
+			if (C) ++CoverSearch.Men;
+			// Before the enemy is in sight only a squad that is holding ground takes cover (its own post,
+			// its works, or the order to): a squad that has somewhere to go must not sit behind a wall out of range.
+			const bool bHolding = Sq.bHoldsPost || Sq.bAtWorks || bOrderedCover;
+			if (!C || (!Sq.Contact.IsValid() && !(bHolding && (bOrderedCover || CoverRules.cover_before_contact))) || !Orders.bKeepFormation)
+			{
+				if (C) ++CoverSearch.Skipped;
+				continue;
+			}
 			TArray<const AActor*> Ignore = {C, C->Musket.Get()};
 			if (Sq.Contact.IsValid())
 			{
@@ -1343,7 +1396,63 @@ void UPA250VolleyCoordinator::TickFormation(FSquad& Sq, const TArray<ARFCharacte
 				Ignore.Add(Sq.Contact->Musket.Get());
 			}
 			FVector Pos;
-			if (PA250Cover::FindFiringPosition(World, SpotFor(i), FMath::Max(Ro.CoverSearchCm, (bOrderedCover || Sq.bAtWorks) ? 600.f : 0.f), Threat, Ignore, Pos))
+			// First a place along a wall itself (battle_rules.json cover): the nearest free one with the
+			// wall between him and the threat, checked by trace. A few tries, then the old ring search.
+			bool bWall = false;
+			if (CoverRules.cover_slot_spacing_cm > 0.f && CoverRules.cover_search_cm > 0.f)
+			{
+				TSet<int32> Skip;
+				for (const auto& Owned : CoverSlotOwner) Skip.Add(Owned.Key);
+				UNavigationSystemV1* Nav = FNavigationSystem::GetCurrent<UNavigationSystemV1>(World);
+				for (int32 Try = 0; Try < 4 && !bWall; ++Try)
+				{
+					const int32 Slot = PA250Cover::PickWallSlot(CoverSlots, SpotFor(i), Threat, CoverRules.cover_search_cm, Skip, CoverRules.cover_max_angle_deg);
+					if (Slot == INDEX_NONE)
+					{
+						if (Try == 0) ++CoverSearch.NoSlotNear;
+						break;
+					}
+					Skip.Add(Slot);
+					FVector P = CoverSlots[Slot].Pos;
+					FVector Feet = P;
+					FNavLocation OnNav;
+					if (Nav && Nav->GetDefaultNavDataInstance(FNavigationSystem::DontCreate))
+					{
+						if (!Nav->ProjectPointToNavigation(P, OnNav, FVector(60.f, 60.f, 300.f)))
+						{
+							++CoverSearch.SlotOffNav;
+							continue;
+						}
+						Feet = OnNav.Location;
+						P = OnNav.Location + FVector(0.f, 0.f, 90.f);
+					}
+					// The same test as the player's fire-over stance: the wall stops a ball at his chest
+					// and his shoulder is clear over it. Whether he can see a man to shoot at from there
+					// is his own business when he fires; a clear line all the way to the enemy (or to a
+					// point 60 m off when no enemy is in sight) refused nearly every place along a wall.
+					// ...and, with an enemy in contact, he can see that enemy over it from his shoulder.
+					const bool bSeesContact = !Sq.Contact.IsValid() || PA250Cover::HasLineOfSight(World,
+						Feet + FVector(0.f, 0.f, 90.f + PA250Cover::FiringOffsetCm), PA250Cover::EyePoint(Sq.Contact.Get()), Ignore);
+					// The test is made along the line to the threat, not square to the wall: a ball from
+					// where the enemy is must be stopped at his chest.
+					if (!bSeesContact || !PA250Cover::IsAtCover(World, Feet, Threat - Feet, Ignore, CoverRules.cover_snap_cm))
+					{
+						++CoverSearch.SlotNotCover;
+						continue;
+					}
+					Pos = P;
+					bWall = true;
+					CoverSlotOwner.Add(Slot, const_cast<ARFCharacter*>(C));
+				}
+			}
+			if (bWall)
+			{
+				Sq.CoverSpot[i] = Pos;
+				Sq.bHasCover[i] = true;
+				++Covered;
+				++CoverSearch.WallPlaces;
+			}
+			else if (PA250Cover::FindFiringPosition(World, SpotFor(i), FMath::Max(Ro.CoverSearchCm, (bOrderedCover || Sq.bAtWorks) ? 600.f : 0.f), Threat, Ignore, Pos))
 			{
 				Sq.CoverSpot[i] = Pos;
 				Sq.bHasCover[i] = true;
@@ -1354,6 +1463,11 @@ void UPA250VolleyCoordinator::TickFormation(FSquad& Sq, const TArray<ARFCharacte
 	}
 	else if (!bSeekCover)
 	{
+		if (Sq.CoverQueryTimer <= 0.f)
+		{
+			Sq.CoverQueryTimer = 2.f;
+			++CoverSearch.SquadQueriesNot;
+		}
 		for (int32 i = 0; i < Sq.bHasCover.Num(); ++i) Sq.bHasCover[i] = false;
 		Sq.CoveredFraction = 0.f;
 	}

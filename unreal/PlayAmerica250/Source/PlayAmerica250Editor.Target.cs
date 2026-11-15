@@ -13,5 +13,6 @@ public class PlayAmerica250EditorTarget : TargetRules
 		ExtraModuleNames.Add("PlayAmerica250");
 		ExtraModuleNames.Add("PA250Sim");
 		ExtraModuleNames.Add("PA250Shaders");
+		ExtraModuleNames.Add("PlayAmerica250Editor");
 	}
 }

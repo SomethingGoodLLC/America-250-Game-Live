@@ -46,7 +46,14 @@
   },
   "cover": {
     "note": "The fire-over stance. A man within snap_cm behind a wall, fence or field work that stops a ball at his chest and leaves his shoulder clear is down while he loads and up while he presents. Bots do it at the covered places their squad gives them; the player does it by himself when he reloads facing such cover.",
-    "snap_cm": 160
+    "snap_cm": 160,
+    "walls_note": "GAME INVENTION (2026-11-15). Men who seek cover take places along the walls themselves: one every slot_spacing_cm, stand_off_cm back from the wall's face, on the side away from the enemy, within search_cm of a man's place in his squad, and only where the wall stands between him and the enemy: the enemy no more than max_angle_deg off the square of the wall (a man beside the end of a wall that runs toward the enemy is not behind it). A place counts only if the wall stops a ball at the chest, the shoulder is clear over it, and (once the squad is in contact) the man can see that enemy from it. before_contact: a squad HOLDING ground (its own post, its works, or ordered to take cover) takes its places fronting the enemy's side before he is in sight; a squad with somewhere to go never does. line_troops: whether squads that fire by volley use the walls too (never, holding = only a squad whose post is its own side's, always). Skirmishers (light infantry, militia) always seek cover.",
+    "slot_spacing_cm": 90,
+    "stand_off_cm": 60,
+    "search_cm": 1200,
+    "max_angle_deg": 50,
+    "before_contact": true,
+    "line_troops": "holding"
   },
   "works": {
     "note": "Field works. A breastwork is one bank a man fires over (height between a man's chest, 90 cm, and his shoulder, 145 cm); a redoubt is three banks about a post, open to the rear. The defender's fortification_level stands breastworks_by_level[level] breastworks and redoubts_by_level[level] redoubts at the start (the last entry serves any higher level); the other places are empty and a sapper can build on them. Places are the level's PA250WorksSlot markers, or breastwork_slots places made up slot_ring_cm out from the defender's post when the level has none. A work is cover once it stands to cover_built_share of its height; health is what round shot has to batter away. Whoever defends a post mans the works within man_radius_cm of it.",

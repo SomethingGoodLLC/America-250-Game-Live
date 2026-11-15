@@ -1,0 +1,24 @@
+{
+ "name": "setup_hour_dusk",
+ "description": "a fight raised in the evening says so",
+ "scenario": {
+  "province": "lexington",
+  "attacker": "british_regulars",
+  "defender": "continental_militia",
+  "attacker_from": "menotomy",
+  "at_ymdh": {
+   "y": 1775,
+   "m": 6,
+   "d": 17,
+   "h": 19
+  }
+ },
+ "expect": {
+  "fortification_level": {
+   "british": 0,
+   "continental": 0
+  },
+  "mode": "conquest",
+  "hour_of_day": 19
+ }
+}

@@ -4,6 +4,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "PA250BattleFeel.h"
 #include "Components/ActorComponent.h"
 #include "PA250MeleeTuning.h"
 #include "PA250MeleeComponent.generated.h"
@@ -218,8 +219,18 @@ private:
 	/** Visual only: the drill pose is shown below this ground speed (cm/s); faster, the musket stays at the carry. */
 	static constexpr float ReloadDrillMaxSpeed = 60.f;
 	/** Visual only: how far the carried musket points up and to the left of the aim (degrees). */
-	static constexpr float CarryPitchDegrees = 22.f;
-	static constexpr float CarryYawDegrees = -20.f;
+public:
+	/** Pure: which carry a man is at. Charging: charge bayonet. A bot WALKING (never at a run) with no enemy in
+	 *  view: shouldered arms. Otherwise at the trail. */
+	static EPA250Carry ChooseCarry(bool bCharging, bool bBot, bool bHasEnemy, bool bWalking);
+	/** Pure: the carry pose Alpha of the way from one carry to another (0..1). */
+	static FPA250CarryPose BlendCarry(const FPA250CarryPose& From, const FPA250CarryPose& To, float Alpha);
+	EPA250Carry GetCarry() const { return Carry; }
+	/** Pure: would a musket trailed by a man at Me, pointing along MuzzleDir (level), be in a friend
+	 *  standing at Friend? He is within DistanceCm ahead along that line and HalfWidthCm of it. */
+	static bool MuzzleInFriend(const FVector& Me, const FVector& MuzzleDir, const FVector& Friend, float DistanceCm, float HalfWidthCm);
+	bool IsMuzzleRaised() const { return bMuzzleRaised; }
+private:
 	uint8 ReloadPhase = 0;
 	float ReloadProgress = 0.f;
 	void TickReloadPose(float DeltaTime);
@@ -227,6 +238,20 @@ private:
 	static FVector ReloadHandLocal(uint8 Phase, float Progress, const FVector& Root, const FVector& GunForward, float MuzzleCm, float RamrodCm = -1.f);
 	float PresentTimer = 0.f;
 	float ShoulderWeight = 0.f;
+	/** The carry in force and the pose being shown (blended toward it over carry.blend_seconds). */
+	EPA250Carry Carry = EPA250Carry::Trail;
+	FPA250CarryPose CarryPose;
+	bool bCarryPoseSet = false;
+	/** A friend stands where his trailed muzzle would be: it is carried raised (carry.clear). */
+	bool bMuzzleRaised = false;
+	float MuzzleCheckTimer = 0.f;
+	/** 0..1: how far down behind cover he is (he is ducked), blended over kneel.blend_seconds. */
+	float KneelWeight = 0.f;
+public:
+	/** Pure: the kneel weight a frame later, toward 1 while ducked and 0 while not. */
+	static float StepKneel(float Weight, bool bDucked, float DeltaSeconds, float BlendSeconds);
+private:
+	void UpdateCarry(const ARFCharacter& Me, float DeltaSeconds);
 	bool bMusketWasLoaded = false;
 	double SlowMoEndSeconds = 0.0;
 	int8 BayonetOverride = -1;

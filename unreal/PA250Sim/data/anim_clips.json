@@ -1,0 +1,32 @@
+{
+  "locomotion": {
+    "retargeted_from": "Game Animation Sample (Epic Games), UEFN mannequin, through RTG_UEFN_to_Soldier",
+    "rig": "/Game/PA250/Anim/Rig/IK_Soldier",
+    "retargeter": "/Game/PA250/Anim/Rig/RTG_UEFN_to_Soldier",
+    "clip_folder": "/Game/PA250/Anim/Loco",
+    "databases": {
+      "idle": {
+        "idles": "/Game/PA250/Anim/MM/PSD_Soldier_Idles",
+        "turn_in_place": "/Game/PA250/Anim/MM/PSD_Soldier_TurnInPlace"
+      },
+      "walk": {
+        "loops": "/Game/PA250/Anim/MM/PSD_Soldier_Walk_Loops",
+        "pivots": "/Game/PA250/Anim/MM/PSD_Soldier_Walk_Pivots",
+        "starts": "/Game/PA250/Anim/MM/PSD_Soldier_Walk_Starts",
+        "stops": "/Game/PA250/Anim/MM/PSD_Soldier_Walk_Stops"
+      },
+      "run": {
+        "loops": "/Game/PA250/Anim/MM/PSD_Soldier_Run_Loops",
+        "pivots": "/Game/PA250/Anim/MM/PSD_Soldier_Run_Pivots",
+        "starts": "/Game/PA250/Anim/MM/PSD_Soldier_Run_Starts",
+        "stops": "/Game/PA250/Anim/MM/PSD_Soldier_Run_Stops"
+      },
+      "sprint": {
+        "loops": "/Game/PA250/Anim/MM/PSD_Soldier_Sprint_Loops",
+        "pivots": "/Game/PA250/Anim/MM/PSD_Soldier_Sprint_Pivots",
+        "starts": "/Game/PA250/Anim/MM/PSD_Soldier_Sprint_Starts",
+        "stops": "/Game/PA250/Anim/MM/PSD_Soldier_Sprint_Stops"
+      }
+    }
+  }
+}

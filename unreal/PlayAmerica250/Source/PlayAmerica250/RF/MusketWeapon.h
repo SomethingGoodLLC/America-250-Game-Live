@@ -110,6 +110,11 @@ public:
 	UStaticMeshComponent* GetMusketMesh() const { return MusketMesh; }
 	/** Skeletal Horizon musket that plays the pack's Firing/Reloading animations (null if the pack is missing). */
 	USkeletalMeshComponent* GetAnimatedMesh() const { return AnimatedMesh; }
+	/** Pure: how far (cm) to slide the left hand's place along the musket toward the muzzle so that
+	 *  it is HeightCm above the feet. SpotZ is where the musket's own spot is; ForwardZ the upward
+	 *  share of the musket's butt-to-muzzle direction. Nothing for a musket that is not held steeply
+	 *  upright or whose spot is already that high; never more than MaxSlideCm. */
+	static float RamHandSlideCm(float SpotZ, float ForwardZ, float HeightCm, float MaxSlideCm);
 	UAnimSequence* GetFireAnim() const { return FireAnim; }
 	UAnimSequence* GetReloadAnim() const { return ReloadAnim; }
 	/** Visual only: aim the barrel along the owner's aim and pose the lock/ramrod. Called from Tick. */

@@ -1,0 +1,31 @@
+{
+ "name": "tier_pick_switched_off",
+ "description": "with motion matching off in the data everyone is on the cheap path, the player too",
+ "motion_matching": false,
+ "budget": {
+  "full_quality_max": 12,
+  "switch_distance_m": 35
+ },
+ "hysteresis_m": 5,
+ "soldiers": [
+  {
+   "id": "player",
+   "distance_m": 0,
+   "player": true,
+   "was_full": false
+  },
+  {
+   "id": "a",
+   "distance_m": 2,
+   "player": false,
+   "was_full": false
+  },
+  {
+   "id": "b",
+   "distance_m": 3,
+   "player": false,
+   "was_full": true
+  }
+ ],
+ "expect_full": []
+}

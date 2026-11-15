@@ -188,6 +188,25 @@ public:
 	void NotifyGunTaken(APA250FieldGun* Gun, FName From);
 	void NotifyGunFired(APA250FieldGun* Gun, bool bCanister);
 	void NotifyRoundShot(ARFCharacter* Man, bool bStruck);
+	/** Trace only: what a formed bot was doing at one of its thinks (was he at a covered place, was
+	 *  he down behind it), and whether a shot was fired from a covered place. */
+	struct FCoverUse
+	{
+		int32 Thinks = 0;          // thinks by formed bots
+		int32 AtCover = 0;         // of those, standing at the covered place his squad gave him
+		int32 Ducked = 0;          // of those, down behind it (loading)
+		int32 Shots = 0;           // shots by formed bots
+		int32 ShotsFromCover = 0;  // of those, fired from a covered place
+	};
+	void NoteCoverThink(const ARFCharacter* Man, bool bAtCover, bool bDucked);
+	/** Debug run -PA250CoverProbe: the view goes to a camera behind the first bot found at a wall;
+	 *  one still of him down behind it, one of him up to fire, then the run ends. */
+	TWeakObjectPtr<const ARFCharacter> CoverProbeMan;
+	int32 CoverProbeStage = 0;
+	float CoverProbeTimer = 0.f;
+	void TickCoverProbe(float DeltaSeconds);
+	void NoteBotShot(FName Faction, bool bFromCover);
+	const FCoverUse& GetCoverUse(FName Faction) const { return CoverUse.FindOrAdd(Faction); }
 	void NotifyShove(ARFCharacter* By, ARFCharacter* Victim);
 	int32 GetShoves() const { return Shoves; }
 	void NotifyWorkBattered(APA250FieldWork* Work, bool bBroken, FName ByFaction);
@@ -447,6 +466,13 @@ private:
 	int32 CountAlive(FName Faction, FName UnitClass) const;
 	int32 CountAlive(FName Faction) const;
 	void TickOfficers(float DeltaSeconds);
+	/** Twice a second: which soldiers are animated at full quality (battle_feel.json animation). */
+	void TickAnimTiers(float DeltaSeconds);
+	float AnimTierTimer = 0.f;
+	mutable TMap<FName, FCoverUse> CoverUse;
+	bool bMotionMatchingOn = false;
+	bool bAnimProbe = false;
+	float AnimProbeTimer = 0.f;
 	void MaybeOpenClassPick(APlayerController* PC);
 	float OfficerTimer = 0.f;
 	bool bOpeningClassPick = false;

@@ -1,4 +1,7 @@
 #include "PA250BattleGameMode.h"
+#include "Battle/PA250AnimClips.h"
+#include "Battle/PA250BattleFeel.h"
+#include "RF/PA250SoldierAnimInstance.h"
 #include "Camera/CameraActor.h"
 #include "Camera/CameraComponent.h"
 #include "Camera/PlayerCameraManager.h"
@@ -527,14 +530,14 @@ void APA250BattleGameMode::ApplyScenarioPreset()
 	{
 		UE_LOG(LogTemp, Display, TEXT("PA250 river: %d channel blocks stop men only"), Sealed);
 	}
-	TArray<FString> Tags;
-	Tags.Reserve(static_cast<int32>(Setup.terrain_tags.size()));
+	TArray<FString> TerrainTags;
+	TerrainTags.Reserve(static_cast<int32>(Setup.terrain_tags.size()));
 	for (const std::string& Tag : Setup.terrain_tags)
 	{
-		Tags.Add(UTF8_TO_TCHAR(Tag.c_str()));
+		TerrainTags.Add(UTF8_TO_TCHAR(Tag.c_str()));
 	}
 	const FString Preset = UTF8_TO_TCHAR(Setup.scenario_preset.c_str());
-	ScenarioFight = ResolveScenario(Preset, Tags, UTF8_TO_TCHAR(Setup.mode.c_str()));
+	ScenarioFight = ResolveScenario(Preset, TerrainTags, UTF8_TO_TCHAR(Setup.mode.c_str()));
 	for (const TWeakObjectPtr<APA250ControlPoint>& WP : Posts)
 	{
 		ConfigurePostForScenario(WP.Get(), ScenarioFight);
@@ -615,7 +618,7 @@ void APA250BattleGameMode::ApplyScenarioPreset()
 	}
 	UE_LOG(LogTemp, Display, TEXT("PA250 battle scenario_preset=%s province=%s crossing=%d preserve=%d tags=%d fort=%d"),
 		*Preset, UTF8_TO_TCHAR(Setup.province_id.c_str()), ScenarioFight.bContestSingleCrossing ? 1 : 0,
-		ScenarioFight.bRewardForcePreservation ? 1 : 0, Tags.Num(), Setup.fort_level);
+		ScenarioFight.bRewardForcePreservation ? 1 : 0, TerrainTags.Num(), Setup.fort_level);
 }
 
 float APA250BattleGameMode::GetCampaignConfidencePressure(FName Faction) const
@@ -785,8 +788,8 @@ void APA250BattleGameMode::SpawnFieldGuns()
 		TArray<FTransform> Slots;
 		for (TActorIterator<AActor> It(World); It; ++It)
 		{
-			const FName Role = Kv.first == Setup.attacker_faction ? FName(TEXT("PA250Attacker")) : FName(TEXT("PA250Defender"));
-			if (It->ActorHasTag(TEXT("PA250GunSlot")) && (It->ActorHasTag(F) || It->ActorHasTag(Role))) Slots.Add(It->GetActorTransform());
+			const FName RoleTag = Kv.first == Setup.attacker_faction ? FName(TEXT("PA250Attacker")) : FName(TEXT("PA250Defender"));
+			if (It->ActorHasTag(TEXT("PA250GunSlot")) && (It->ActorHasTag(F) || It->ActorHasTag(RoleTag))) Slots.Add(It->GetActorTransform());
 		}
 		const bool bMarked = Slots.Num() >= Count;
 		if (!bMarked)
@@ -2284,6 +2287,150 @@ int32 APA250BattleGameMode::CountAlive(FName Faction) const
 		if (!It->IsDead() && It->FactionId == Faction) ++N;
 	}
 	return N;
+}
+
+void APA250BattleGameMode::TickCoverProbe(float DeltaSeconds)
+{
+	if (CoverProbeStage == 0 || CoverProbeStage > 4) return;
+	const ARFCharacter* Man = CoverProbeMan.Get();
+	CoverProbeTimer += DeltaSeconds;
+	if (!Man || Man->IsDead())
+	{
+		// He fell before both stills were taken: start again with the next man at a wall.
+		CoverProbeStage = 0;
+		CoverProbeMan.Reset();
+		return;
+	}
+	FString Tag;
+	FParse::Value(FCommandLine::Get(), TEXT("PA250CoverProbeTag="), Tag);
+	auto Still = [&Tag](const TCHAR* Name)
+	{
+		const FString Path = FPaths::ConvertRelativePathToFull(FPaths::Combine(FPaths::ProjectDir(), TEXT("../../docs/preview"),
+			FString::Printf(TEXT("cover_%s_%s.png"), Tag.IsEmpty() ? TEXT("probe") : *Tag, Name)));
+		FScreenshotRequest::RequestScreenshot(Path, false, false);
+		UE_LOG(LogTemp, Display, TEXT("PA250 cover probe: still %s"), *Path);
+	};
+	const bool bDown = Man->GetCharacterMovement() && Man->GetCharacterMovement()->IsCrouching();
+	if (CoverProbeStage == 1 && CoverProbeTimer > 1.5f && bDown)
+	{
+		Still(TEXT("down"));
+		CoverProbeStage = 2;
+		CoverProbeTimer = 0.f;
+	}
+	else if (CoverProbeStage == 2 && CoverProbeTimer > 0.5f && !bDown)
+	{
+		Still(TEXT("up"));
+		CoverProbeStage = 3;
+		CoverProbeTimer = 0.f;
+	}
+	else if (CoverProbeStage == 3 && CoverProbeTimer > 1.5f)
+	{
+		UE_LOG(LogTemp, Display, TEXT("PA250 cover probe: done"));
+		CoverProbeStage = 5;
+		FPlatformMisc::RequestExit(false);
+	}
+	else if (CoverProbeTimer > 90.f)
+	{
+		UE_LOG(LogTemp, Display, TEXT("PA250 cover probe: gave up at stage %d (the man never %s)"), CoverProbeStage,
+			CoverProbeStage == 1 ? TEXT("went down") : TEXT("rose to fire"));
+		if (CoverProbeStage == 2) Still(TEXT("up_never"));
+		CoverProbeStage = 5;
+		FPlatformMisc::RequestExit(false);
+	}
+}
+
+void APA250BattleGameMode::NoteCoverThink(const ARFCharacter* Man, bool bAtCover, bool bDucked)
+{
+	if (!Man) return;
+	const FName Faction = Man->FactionId;
+	if (CoverProbeStage == 0 && bAtCover && FParse::Param(FCommandLine::Get(), TEXT("PA250CoverProbe")))
+	{
+		if (APlayerController* PC = GetWorld()->GetFirstPlayerController())
+		{
+			// A camera behind and to one side of him, looking along his wall.
+			const FVector Fwd = Man->GetActorForwardVector().GetSafeNormal2D();
+			const FVector Right(-Fwd.Y, Fwd.X, 0.f);
+			const FVector At = Man->GetActorLocation() - Fwd * 420.f + Right * 260.f + FVector(0.f, 0.f, 90.f);
+			const FRotator Look = (Man->GetActorLocation() + Fwd * 150.f + FVector(0.f, 0.f, 20.f) - At).Rotation();
+			if (ACameraActor* Cam = GetWorld()->SpawnActor<ACameraActor>(At, Look))
+			{
+				Cam->GetCameraComponent()->SetConstraintAspectRatio(false);
+				PC->SetViewTarget(Cam);
+				CoverProbeMan = Man;
+				CoverProbeStage = 1;
+				CoverProbeTimer = 0.f;
+				UE_LOG(LogTemp, Display, TEXT("PA250 cover probe: watching %s (%s) at his wall"), *Man->GetName(), *Faction.ToString());
+			}
+		}
+	}
+	FCoverUse& U = CoverUse.FindOrAdd(Faction);
+	++U.Thinks;
+	U.AtCover += bAtCover ? 1 : 0;
+	U.Ducked += bDucked ? 1 : 0;
+}
+
+void APA250BattleGameMode::NoteBotShot(FName Faction, bool bFromCover)
+{
+	FCoverUse& U = CoverUse.FindOrAdd(Faction);
+	++U.Shots;
+	U.ShotsFromCover += bFromCover ? 1 : 0;
+}
+
+void APA250BattleGameMode::TickAnimTiers(float DeltaSeconds)
+{
+	AnimTierTimer -= DeltaSeconds;
+	if (AnimTierTimer > 0.f) return;
+	AnimTierTimer = 0.5f;
+	const FPA250BattleFeel& Feel = PA250BattleFeel::Get();
+	// Debug runs: -PA250MotionMatching=1 (or 0) overrides the data flag, so the node can be tried
+	// while battle_feel.json still says false. -PA250AnimProbe logs what the tiers are doing.
+	int32 Override = -1;
+	bMotionMatchingOn = FParse::Value(FCommandLine::Get(), TEXT("PA250MotionMatching="), Override) ? Override != 0 : Feel.bMotionMatching;
+	bAnimProbe = FParse::Param(FCommandLine::Get(), TEXT("PA250AnimProbe"));
+	FPA250AnimBudget Budget = Feel.Budget;
+	FParse::Value(FCommandLine::Get(), TEXT("PA250AnimFullMax="), Budget.FullQualityMax);
+	FParse::Value(FCommandLine::Get(), TEXT("PA250AnimSwitchM="), Budget.SwitchDistanceM);
+	const APlayerController* PC = GetWorld()->GetFirstPlayerController();
+	const APawn* Viewer = PC ? PC->GetPawn() : nullptr;
+	TArray<ARFCharacter*> Men;
+	TArray<PA250BattleFeel::FTierInput> Inputs;
+	for (TActorIterator<ARFCharacter> It(GetWorld()); It; ++It)
+	{
+		if (It->IsDead() || !It->IsUsingPeriodSoldier()) continue;
+		PA250BattleFeel::FTierInput In;
+		In.Key = It->GetName();
+		In.bPlayer = *It == Viewer;
+		In.DistanceM = Viewer ? FVector::Dist(It->GetActorLocation(), Viewer->GetActorLocation()) / 100.f : 0.f;
+		In.bWasFull = It->IsAnimFullQuality();
+		Men.Add(*It);
+		Inputs.Add(In);
+	}
+	// With nobody to look from (a headless bot battle) there is no "near": everyone is cheap.
+	const bool bOn = bMotionMatchingOn && Viewer && PA250AnimClips::LocomotionReady();
+	const TArray<int32> Full = PA250BattleFeel::PickFullQuality(bOn, Budget, Feel.SwitchHysteresisM, Inputs);
+	TSet<int32> FullSet(Full);
+	int32 Showing = 0, Searches = 0, Jumps = 0, NoHistory = 0;
+	for (int32 i = 0; i < Men.Num(); ++i)
+	{
+		Men[i]->SetAnimFullQuality(FullSet.Contains(i));
+		if (!bAnimProbe) continue;
+		if (const UPA250SoldierAnimInstance* Inst = Cast<UPA250SoldierAnimInstance>(Men[i]->GetMesh()->GetAnimInstance()))
+		{
+			const UPA250SoldierAnimInstance::FLocomotionReport& R = Inst->GetLocomotionReport();
+			Showing += R.bShowingFull ? 1 : 0;
+			Searches += R.Searches;
+			Jumps += R.Jumps;
+			NoHistory += (FullSet.Contains(i) && !R.bHadHistory) ? 1 : 0;
+		}
+	}
+	AnimProbeTimer -= 0.5f;
+	if (bAnimProbe && AnimProbeTimer <= 0.f)
+	{
+		AnimProbeTimer = 2.f;
+		UE_LOG(LogTemp, Display, TEXT("PA250 anim: full=%d cheap=%d showing_full=%d searches=%d jumps=%d no_history=%d (motion matching %s, budget %d within %.0f m, %d databases)"),
+			Full.Num(), Men.Num() - Full.Num(), Showing, Searches, Jumps, NoHistory, bMotionMatchingOn ? TEXT("on") : TEXT("off"),
+			Budget.FullQualityMax, Budget.SwitchDistanceM, PA250AnimClips::LocomotionDatabaseCount());
+	}
 }
 
 void APA250BattleGameMode::TickOfficers(float DeltaSeconds)
@@ -4359,6 +4506,8 @@ void APA250BattleGameMode::Tick(float DeltaSeconds)
 	BleedTickets(DeltaSeconds);
 	TickMuster(DeltaSeconds);
 	TickOfficers(DeltaSeconds);
+	TickAnimTiers(DeltaSeconds);
+	TickCoverProbe(DeltaSeconds);
 	for (const FName F : {FName(TEXT("british")), FName(TEXT("continental"))})
 	{
 		if (CountAlive(F) > 0)
@@ -4610,6 +4759,21 @@ void APA250BattleGameMode::WriteBattleFile(const FString& Reason) const
 	}
 	{
 		const UPA250SmokeSubsystem* Smoke = GetWorld()->GetSubsystem<UPA250SmokeSubsystem>();
+		// How much each side used cover: shares of the formed bots' thinks, and of their shots.
+		auto CoverJson = [this](const TCHAR* Faction)
+		{
+			const FCoverUse& U = GetCoverUse(Faction);
+			return FString::Printf(TEXT("\"%s\":{\"thinks\":%d,\"at_cover\":%d,\"ducked\":%d,\"shots\":%d,\"shots_from_cover\":%d}"),
+				Faction, U.Thinks, U.AtCover, U.Ducked, U.Shots, U.ShotsFromCover);
+		};
+		FString Search;
+		if (Volleys)
+		{
+			const UPA250VolleyCoordinator::FCoverSearch& S = Volleys->GetCoverSearch();
+			Search = FString::Printf(TEXT(",\"search\":{\"wall_places_in_level\":%d,\"squad_queries\":%d,\"squad_queries_not_seeking\":%d,\"men\":%d,\"skipped\":%d,\"no_place_near\":%d,\"place_off_nav\":%d,\"place_not_cover\":%d,\"wall_places\":%d}"),
+				Volleys->NumCoverSlots(), S.SquadQueries, S.SquadQueriesNot, S.Men, S.Skipped, S.NoSlotNear, S.SlotOffNav, S.SlotNotCover, S.WallPlaces);
+		}
+		Json += FString::Printf(TEXT(",\"cover\":{%s,%s%s}"), *CoverJson(TEXT("british")), *CoverJson(TEXT("continental")), *Search);
 		Json += FString::Printf(TEXT(",\"feel\":{\"smoke_sight_checks\":%d,\"smoke_sight_blocked\":%d,\"puffs_at_end\":%d,\"shoves\":%d}"),
 			Smoke ? Smoke->GetSightChecks() : 0, Smoke ? Smoke->GetSightBlocks() : 0, Smoke ? Smoke->NumPuffs() : 0, Shoves);
 	}

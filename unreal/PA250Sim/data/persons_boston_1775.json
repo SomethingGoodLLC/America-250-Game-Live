@@ -61,6 +61,28 @@
     "engineer": {"label": "Engineer", "text": "Digs in on his own ground.", "effects": [{"when": "defending_own_ground", "label": "fortification", "value": 1}]},
     "popular": {"label": "Popular", "text": "The men follow him gladly.", "effects": [{"when": "always", "label": "morale", "value": 4}]}
   },
+  "hero": {
+    "basis": "invented",
+    "note": "GAME INVENTION. The player may fight part of a battle as the general who commands his army. Every rule and every number here is gameplay tuning. Contract: protocol/schemas/persons.yaml hero.",
+    "score": {"threshold": 100, "kill": 10, "capture": 40, "rally": 25},
+    "meter": {"seconds": 60, "refill_kill_seconds": 6, "refill_capture_seconds": 15, "refill_rally_seconds": 10},
+    "kit": {
+      "health_scale": 2.0,
+      "aura_radius_m": 45,
+      "rally_radius_m": 60,
+      "rally_cooldown_seconds": 20,
+      "sword": {"damage": 70, "reach_cm": 190, "recover_seconds": 0.7},
+      "pistol": {"damage": 60, "range_m": 25, "reload_seconds": 8}
+    },
+    "trait_abilities": {
+      "defensive": {"label": "Stand fast", "text": "The men near him hold their ground: fire and losses shake them half as much for a time.", "kind": "hold_fast", "radius_m": 45, "seconds": 25, "value": 0.5, "cooldown_seconds": 60},
+      "aggressive": {"label": "Follow me", "text": "Every squad near him charges, and the charge strikes harder for a time.", "kind": "charge", "radius_m": 45, "seconds": 20, "value": 1.5, "cooldown_seconds": 75},
+      "steadfast": {"label": "Steady", "text": "The men near him shake off what they have suffered and stand to their arms.", "kind": "steady", "radius_m": 45, "seconds": 0, "value": 0.6, "cooldown_seconds": 60},
+      "adroit": {"label": "Quick step", "text": "The men near him move at the quick step for a time.", "kind": "quick_step", "radius_m": 45, "seconds": 20, "value": 1.25, "cooldown_seconds": 60},
+      "engineer": {"label": "Throw up works", "text": "A breastwork is raised where he stands.", "kind": "throw_up_works", "radius_m": 12, "seconds": 0, "value": 1, "cooldown_seconds": 120},
+      "popular": {"label": "Huzza", "text": "Every broken squad near him comes back to its colours, and the reserve comes up faster for a time.", "kind": "huzza", "radius_m": 60, "seconds": 30, "value": 1.5, "cooldown_seconds": 90}
+    }
+  },
   "persons": [
     {
       "id": "artemas_ward", "name": "Artemas Ward", "rank": "General", "side": "continental", "roles": ["general"],
@@ -73,6 +95,7 @@
       "id": "israel_putnam", "name": "Israel Putnam", "rank": "General", "side": "continental", "roles": ["general"],
       "available_from": {"y": 1775, "m": 4, "d": 21},
       "traits": ["aggressive", "popular"],
+      "hero": {"basis": "invented", "health_scale": 2.4},
       "note": "Heard of Lexington on 20 April in Connecticut and rode for Cambridge, reaching it the next day.",
       "basis": "documented"
     },
@@ -130,6 +153,7 @@
       "id": "george_washington", "name": "George Washington", "rank": "General", "side": "continental", "roles": ["general"],
       "requires_measure": "commander_in_chief",
       "traits": ["steadfast", "popular"],
+      "hero": {"basis": "invented", "aura_radius_m": 60, "rally_radius_m": 80},
       "note": "Named commander in chief by Congress on 15 June 1775; reached Cambridge on 2 July. He serves here only if Congress names him.",
       "basis": "documented"
     },

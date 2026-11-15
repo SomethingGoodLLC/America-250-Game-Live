@@ -23,5 +23,12 @@ public class PA250Sim : ModuleRules
 		});
 
 		PublicDependencyModuleNames.Add("Core");
+		// Windows exports nothing from a DLL unless it is named: the core marks its public functions
+		// with PA250_API, which is empty everywhere else. (The Mac build exports the core through the
+		// visibility pragma in PA250SimCore.cpp.) Callers need no import attribute for functions.
+		if (Target.Platform == UnrealTargetPlatform.Win64)
+		{
+			PrivateDefinitions.Add("PA250_API=__declspec(dllexport)");
+		}
 	}
 }

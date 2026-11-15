@@ -92,12 +92,8 @@ static CampaignState pass_order(const CampaignState& s, const std::string& order
 static std::vector<std::string> campaign_vectors(const std::string& prefix) {
     const std::string dir = g_vector_dir() + "/../campaign";
     std::vector<std::string> files;
-    if (DIR* d = opendir(dir.c_str())) {
-        while (dirent* e = readdir(d)) {
-            const std::string n = e->d_name;
-            if (n.size() > 5 && n.substr(n.size() - 5) == ".json" && n.rfind(prefix, 0) == 0) files.push_back(dir + "/" + n);
-        }
-        closedir(d);
+    for (const std::string& n : dir_file_names(dir)) {
+        if (n.size() > 5 && n.substr(n.size() - 5) == ".json" && n.rfind(prefix, 0) == 0) files.push_back(dir + "/" + n);
     }
     std::sort(files.begin(), files.end());
     return files;
@@ -259,7 +255,7 @@ static void test_pass_commander_vectors() {
     CampaignPassData data;
     ensure_battle_rules();
     const std::vector<std::string> files = campaign_vectors("battle_");
-    CHECK(files.size() >= 6);
+    CHECK(files.size() >= 17);
     for (const std::string& path : files) {
         const json v = json::parse(read_text_file(path));
         const std::string name = v.at("name").get<std::string>();
@@ -273,6 +269,7 @@ static void test_pass_commander_vectors() {
             st.army_id = it.key();
         }
         s.pass.seeded = true;
+        if (v.contains("at_ymdh")) s.now = from_ymdh(ymdh_of(v.at("at_ymdh")));
         const BattleSetup setup = build_battle_setup(s, s.pending_battle.province);
         if (v.contains("expect_setup")) {
             const json& ex = v.at("expect_setup");
@@ -293,13 +290,38 @@ static void test_pass_commander_vectors() {
             }
             for (auto it = ex.at("morale").begin(); it != ex.at("morale").end(); ++it)
                 CHECK(setup.sides.at(it.key()).morale == it.value().get<int>());
+            // The hero kit (GAME INVENTION): on the player's general only, with his first trait's ability.
+            auto close = [](float a, double b) { return std::abs(static_cast<double>(a) - b) < 1e-4; };
+            if (ex.contains("hour_of_day")) CHECK(setup.hour_of_day == ex.at("hour_of_day").get<int>());
+            if (ex.contains("hero")) {
+                const json& h = ex.at("hero");
+                const SideSetup& side = setup.sides.at(h.at("faction").get<std::string>());
+                CHECK(side.has_hero);
+                CHECK(side.hero_ability.trait == h.at("trait").get<std::string>());
+                CHECK(side.hero_ability.trait == side.commander_traits.front());
+                CHECK(side.hero_ability.kind == h.at("kind").get<std::string>());
+                CHECK(!side.hero_ability.label.empty() && !side.hero_ability.text.empty());
+                CHECK(close(side.hero_health_scale, h.at("health_scale").get<double>()));
+                CHECK(close(side.hero_aura_radius_m, h.at("aura_radius_m").get<double>()));
+                CHECK(close(side.hero_rally_radius_m, h.at("rally_radius_m").get<double>()));
+                CHECK(close(side.hero_rally_cooldown_seconds, h.at("rally_cooldown_seconds").get<double>()));
+                CHECK(side.hero_aura_radius_m > side.commander_aura_radius_m);  // larger than any general's
+            }
+            if (ex.contains("no_hero"))
+                for (const auto& f : ex.at("no_hero")) CHECK(!setup.sides.at(f.get<std::string>()).has_hero);
             // The setup document reads back with the commander in it.
             const BattleSetup back = setup_from_json(setup_to_json(setup));
             for (const auto& sk : setup.sides) {
                 CHECK(back.sides.at(sk.first).commander_id == sk.second.commander_id);
                 CHECK(back.sides.at(sk.first).commander_traits == sk.second.commander_traits);
                 CHECK(back.sides.at(sk.first).intel == sk.second.intel);
+                CHECK(back.sides.at(sk.first).has_hero == sk.second.has_hero);
+                CHECK(back.sides.at(sk.first).hero_ability.kind == sk.second.hero_ability.kind);
+                CHECK(back.sides.at(sk.first).hero_ability.trait == sk.second.hero_ability.trait);
+                CHECK(back.sides.at(sk.first).hero_health_scale == sk.second.hero_health_scale);
+                CHECK(back.sides.at(sk.first).hero_aura_radius_m == sk.second.hero_aura_radius_m);
             }
+            CHECK(back.hour_of_day == setup.hour_of_day);
             continue;
         }
         const json& ex = v.at("expect");
@@ -336,8 +358,202 @@ static void test_pass_commander_vectors() {
             CHECK(told);
             for (const std::string& line : after.progress.last_battle_report.map_changes) CHECK(raw_ids_in(after, line).empty());
         }
+        // The hero report: one line on the card when it names the player's general, none otherwise.
+        auto reason_has = [&after](const std::string& text) {
+            for (const std::string& line : after.progress.last_battle_report.change_reasons)
+                if (line.find(text) != std::string::npos) return true;
+            return false;
+        };
+        if (ex.contains("report_line_has"))
+            for (const auto& t : ex.at("report_line_has")) {
+                if (!reason_has(t.get<std::string>())) g_reporter()->message(name + ": the report does not say \"" + t.get<std::string>() + "\"");
+                CHECK(reason_has(t.get<std::string>()));
+            }
+        if (ex.contains("report_line_absent"))
+            for (const auto& t : ex.at("report_line_absent")) CHECK(!reason_has(t.get<std::string>()));
+        // The result document reads back with the hero report in it.
+        {
+            const BattleResult back = result_from_json(result_to_json(r));
+            CHECK(back.hero_faction == r.hero_faction && back.hero_person_id == r.hero_person_id);
+            CHECK(back.hero_takeovers == r.hero_takeovers && back.hero_fell_while_played == r.hero_fell_while_played);
+            CHECK(back.hero_seconds_played == r.hero_seconds_played);
+        }
         const CampaignState loaded = deserialize(serialize(after));
         CHECK(state_hash(loaded) == state_hash(after));
+    }
+}
+
+// M5 (heroes, GAME INVENTION): the hero contract has its vectors, the hero's fall reaches the campaign
+// through commander_events and only through it, and only the player's general is ever a hero.
+static void test_pass_hero_vectors() {
+    CampaignPassData data;
+    ensure_battle_rules();
+    CHECK(campaign_vectors("battle_setup_hero").size() >= 3);
+    CHECK(campaign_vectors("battle_result_hero").size() >= 5);
+    CHECK(campaign_vectors("battle_result_reject_hero").size() >= 2);
+    CHECK(hero_rules().loaded);
+
+    auto with_ward = []() {
+        CampaignState s = battle_at("lexington", "british_regulars", "continental_militia");
+        stand_down_generals(s);
+        s.pass.persons["artemas_ward"].role = "general";
+        s.pass.persons["artemas_ward"].army_id = "continental_militia";
+        s.pass.persons["francis_smith"].role = "general";
+        s.pass.persons["francis_smith"].army_id = "british_regulars";
+        s.pass.seeded = true;
+        return s;
+    };
+    // The fall of a played general reaches the campaign exactly as any general's does.
+    {
+        const CampaignState s = with_ward();
+        BattleResult r = ended("lexington", kBritish, "army_broke");
+        r.commander_events[kContinental] = "wounded";
+        BattleResult played = r;
+        played.hero_faction = kContinental;
+        played.hero_person_id = "artemas_ward";
+        played.hero_takeovers = 1;
+        played.hero_seconds_played = 40.f;
+        played.hero_fell_while_played = true;
+        const CampaignState plain = apply_battle_result(s, r);
+        CampaignState hero = apply_battle_result(s, result_from_json(result_to_json(played)));
+        CHECK(hero.pass.persons.at("artemas_ward").status == "wounded");
+        CHECK(hero.pass.persons.at("artemas_ward").role.empty());
+        CHECK(general_of(hero, "continental_militia").empty());  // a detachment again
+        CHECK(hero.progress.last_battle_report.commander_events.at(kContinental) == "wounded");
+        CHECK(hero.armies.at("continental_militia").morale == plain.armies.at("continental_militia").morale);
+        CHECK(hero.armies.at("continental_militia").morale < s.armies.at("continental_militia").morale);
+        // The hero block is a report and nothing more: take its one line away and the two states are one.
+        CHECK(hero.progress.last_battle_report.change_reasons.size() == plain.progress.last_battle_report.change_reasons.size() + 1);
+        hero.progress.last_battle_report.change_reasons = plain.progress.last_battle_report.change_reasons;
+        CHECK(state_hash(hero) == state_hash(plain));
+    }
+    // The hero is the PLAYER's general, whichever side the player has.
+    {
+        CampaignState s = with_ward();
+        const BattleSetup mine = build_battle_setup(s, "lexington");
+        CHECK(mine.sides.at(kContinental).has_hero && !mine.sides.at(kBritish).has_hero);
+        s.player_faction = kBritish;
+        const BattleSetup theirs = build_battle_setup(s, "lexington");
+        CHECK(theirs.sides.at(kBritish).has_hero && !theirs.sides.at(kContinental).has_hero);
+        CHECK(theirs.sides.at(kBritish).hero_ability.trait == theirs.sides.at(kBritish).commander_traits.front());
+    }
+    // No general, no hero.
+    {
+        CampaignState s = with_ward();
+        s.pass.persons["artemas_ward"].role.clear();
+        s.pass.persons["artemas_ward"].army_id.clear();
+        const BattleSetup setup = build_battle_setup(s, "lexington");
+        CHECK(setup.sides.at(kContinental).commander_id.empty());
+        CHECK(!setup.sides.at(kContinental).has_hero);
+        CHECK(setup_to_json(setup).find("\"hero\"") == std::string::npos);
+    }
+    // Every general in the file has a first trait, and that trait has an ability.
+    {
+        const json persons = json::parse(read_text_file(g_data_dir() + "/persons_boston_1775.json"));
+        const HeroRules H = hero_rules();
+        int generals = 0;
+        for (const auto& p : persons.at("persons")) {
+            bool general = false;
+            for (const auto& role : p.at("roles")) general = general || role.get<std::string>() == "general";
+            if (!general) continue;
+            ++generals;
+            CHECK(H.trait_abilities.count(p.at("traits").at(0).get<std::string>()) == 1);
+        }
+        CHECK(generals >= 10);
+    }
+}
+
+// The hero's numbers are the data file's: a changed file changes the rules and the setup; a file with
+// no hero block has no hero; a hero block not marked invented, or short of an ability, is refused.
+static void test_hero_rules_are_data() {
+    CampaignPassData data;
+    ensure_battle_rules();
+    const json original = json::parse(read_text_file(g_data_dir() + "/persons_boston_1775.json"));
+    auto setup_with = [](const std::string& general) {
+        CampaignState s = battle_at("lexington", "british_regulars", "continental_militia");
+        stand_down_generals(s);
+        s.pass.persons[general].role = "general";
+        s.pass.persons[general].army_id = "continental_militia";
+        s.pass.seeded = true;
+        return build_battle_setup(s, "lexington");
+    };
+    {
+        json changed = original;
+        changed["hero"]["score"]["threshold"] = 250;
+        changed["hero"]["meter"]["seconds"] = 33;
+        changed["hero"]["kit"]["aura_radius_m"] = 77;
+        changed["hero"]["kit"]["sword"]["damage"] = 91;
+        changed["hero"]["trait_abilities"]["defensive"]["radius_m"] = 99;
+        for (auto& p : changed["persons"])
+            if (p.at("id").get<std::string>() == "israel_putnam") p["hero"]["health_scale"] = 3.5;
+        CHECK(load_persons(changed.dump()).empty());
+        const HeroRules H = hero_rules();
+        CHECK(H.loaded && H.score_threshold == 250 && H.meter_seconds == 33.f && H.aura_radius_m == 77.f && H.sword_damage == 91.f);
+        const BattleSetup ward = setup_with("artemas_ward");
+        CHECK(ward.sides.at(kContinental).has_hero);
+        CHECK(ward.sides.at(kContinental).hero_aura_radius_m == 77.f);
+        CHECK(ward.sides.at(kContinental).hero_ability.kind == "hold_fast" && ward.sides.at(kContinental).hero_ability.radius_m == 99.f);
+        const BattleSetup putnam = setup_with("israel_putnam");
+        CHECK(putnam.sides.at(kContinental).hero_health_scale == 3.5f);
+        CHECK(putnam.sides.at(kContinental).hero_aura_radius_m == 77.f);  // his own numbers only where he has them
+    }
+    {
+        json none = original;
+        none.erase("hero");
+        for (auto& p : none["persons"]) p.erase("hero");
+        CHECK(load_persons(none.dump()).empty());
+        CHECK(!hero_rules().loaded);
+        const BattleSetup ward = setup_with("artemas_ward");
+        CHECK(!ward.sides.at(kContinental).commander_id.empty() && !ward.sides.at(kContinental).has_hero);
+    }
+    CHECK(load_persons(original.dump()).empty());
+    {
+        json unmarked = original;
+        unmarked["hero"]["basis"] = "documented";
+        CHECK(!load_persons(unmarked.dump()).empty());
+        json short_one = original;
+        short_one["hero"]["trait_abilities"].erase("popular");
+        CHECK(!load_persons(short_one.dump()).empty());
+        json bad_kind = original;
+        bad_kind["hero"]["trait_abilities"]["popular"]["kind"] = "thunderbolt";
+        CHECK(!load_persons(bad_kind.dump()).empty());
+        json agent_hero = original;
+        for (auto& p : agent_hero["persons"])
+            if (p.at("id").get<std::string>() == "paul_revere") p["hero"] = {{"basis", "invented"}};
+        CHECK(!load_persons(agent_hero.dump()).empty());
+        // A refused file leaves the loaded rules as they were.
+        CHECK(hero_rules().loaded && hero_rules().score_threshold == original.at("hero").at("score").at("threshold").get<int>());
+    }
+}
+
+// M7 (time bands): the setup says the hour of the day, from the campaign clock; an old document that
+// does not say it reads as "not said" and is written back without it.
+static void test_setup_carries_the_hour() {
+    ensure_battle_rules();
+    for (int h : {0, 5, 12, 19, 23}) {
+        CampaignState s = battle_at("lexington");
+        YMDH at{1775, 6, 17, static_cast<uint8_t>(h)};
+        s.now = from_ymdh(at);
+        const BattleSetup setup = build_battle_setup(s, "lexington");
+        CHECK(setup.valid && setup.hour_of_day == h);
+        CHECK(setup_from_json(setup_to_json(setup)).hour_of_day == h);
+    }
+    const BattleSetup setup = build_battle_setup(battle_at("lexington"), "lexington");
+    json doc = json::parse(setup_to_json(setup));
+    CHECK(doc.contains("hour_of_day"));
+    doc.erase("hour_of_day");
+    const BattleSetup old = setup_from_json(doc.dump());
+    CHECK(old.hour_of_day == -1);
+    CHECK(!json::parse(setup_to_json(old)).contains("hour_of_day"));
+    for (int bad : {-1, 24}) {
+        doc["hour_of_day"] = bad;
+        bool threw = false;
+        try {
+            (void)setup_from_json(doc.dump());
+        } catch (const std::exception&) {
+            threw = true;
+        }
+        CHECK(threw);
     }
 }
 

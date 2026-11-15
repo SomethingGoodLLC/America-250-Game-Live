@@ -1,0 +1,47 @@
+{
+ "name": "tier_pick_ties_by_id",
+ "description": "equal distances are settled by id, so the choice does not flicker from frame to frame",
+ "motion_matching": true,
+ "budget": {
+  "full_quality_max": 3,
+  "switch_distance_m": 35
+ },
+ "hysteresis_m": 5,
+ "soldiers": [
+  {
+   "id": "player",
+   "distance_m": 0,
+   "player": true,
+   "was_full": false
+  },
+  {
+   "id": "d",
+   "distance_m": 10,
+   "player": false,
+   "was_full": false
+  },
+  {
+   "id": "b",
+   "distance_m": 10,
+   "player": false,
+   "was_full": false
+  },
+  {
+   "id": "c",
+   "distance_m": 10,
+   "player": false,
+   "was_full": false
+  },
+  {
+   "id": "a",
+   "distance_m": 10,
+   "player": false,
+   "was_full": false
+  }
+ ],
+ "expect_full": [
+  "player",
+  "a",
+  "b"
+ ]
+}

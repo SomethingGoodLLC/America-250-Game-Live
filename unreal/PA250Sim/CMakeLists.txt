@@ -9,7 +9,12 @@ add_library(pa250sim STATIC
   src/buildings.cpp src/correspondence.cpp src/serialize.cpp src/controller.cpp src/campaign.cpp
   src/campaign_pass.cpp)
 target_include_directories(pa250sim PUBLIC include third_party PRIVATE src)
-target_compile_options(pa250sim PRIVATE -Wall -Wextra -Wno-unused-parameter)
+if(MSVC)
+  # Windows (cl): /wd4100 mirrors -Wno-unused-parameter; the sources hold UTF-8 text.
+  target_compile_options(pa250sim PRIVATE /W4 /wd4100 /utf-8)
+else()
+  target_compile_options(pa250sim PRIVATE -Wall -Wextra -Wno-unused-parameter)
+endif()
 
 enable_testing()
 add_executable(pa250sim_tests tests/test_main.cpp)

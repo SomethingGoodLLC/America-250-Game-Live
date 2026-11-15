@@ -1,4 +1,5 @@
 #include "PA250MeleeComponent.h"
+#include "AIController.h"
 #include "PA250UnitClasses.h"
 #include "Components/CapsuleComponent.h"
 #include "Engine/World.h"
@@ -449,7 +450,95 @@ FPA250MeleePose UPA250MeleeComponent::GetBodyPose() const
 	P.Shoulder = ShoulderWeight;
 	P.Reload = ReloadWeight;
 	if (const ARFCharacter* Me = OwnerChar(); Me && Me->Musket && Me->IsUsingPeriodSoldier() && !Me->IsMounted()) P.Carry = 1.f;
+	{
+		const FPA250BattleFeel& Feel = PA250BattleFeel::Get();
+		P.Kneel = KneelWeight;
+		P.KneelDropCm = Feel.KneelDropCm;
+		P.KneelRearFootBackCm = Feel.KneelRearFootBackCm;
+		P.KneelLeanDeg = Feel.KneelLeanDeg;
+	}
+	P.CarryRightCm = CarryPose.HandRightCm;
+	P.CarryUpCm = CarryPose.HandUpCm;
+	P.CarryForwardCm = CarryPose.HandForwardCm;
 	return P;
+}
+
+bool UPA250MeleeComponent::MuzzleInFriend(const FVector& Me, const FVector& MuzzleDir, const FVector& Friend, float DistanceCm, float HalfWidthCm)
+{
+	const FVector Dir = MuzzleDir.GetSafeNormal2D();
+	if (Dir.IsNearlyZero()) return false;
+	const FVector To = (Friend - Me) * FVector(1.0, 1.0, 0.0);
+	const double Along = FVector::DotProduct(To, Dir);
+	if (Along <= 0.0 || Along > DistanceCm) return false;
+	return (To - Dir * Along).Size() <= HalfWidthCm;
+}
+
+EPA250Carry UPA250MeleeComponent::ChooseCarry(bool bCharging, bool bBot, bool bHasEnemy, bool bWalking)
+{
+	if (bCharging) return EPA250Carry::Charge;
+	// Only at a walk: a man running with his piece upright looked like he was carrying a pole.
+	if (bBot && !bHasEnemy && bWalking) return EPA250Carry::Shoulder;
+	return EPA250Carry::Trail;
+}
+
+FPA250CarryPose UPA250MeleeComponent::BlendCarry(const FPA250CarryPose& From, const FPA250CarryPose& To, float Alpha)
+{
+	const float A = FMath::Clamp(Alpha, 0.f, 1.f);
+	FPA250CarryPose Out;
+	Out.PitchDeg = FMath::Lerp(From.PitchDeg, To.PitchDeg, A);
+	Out.YawDeg = FMath::Lerp(From.YawDeg, To.YawDeg, A);
+	Out.HandForwardCm = FMath::Lerp(From.HandForwardCm, To.HandForwardCm, A);
+	Out.HandRightCm = FMath::Lerp(From.HandRightCm, To.HandRightCm, A);
+	Out.HandUpCm = FMath::Lerp(From.HandUpCm, To.HandUpCm, A);
+	return Out;
+}
+
+float UPA250MeleeComponent::StepKneel(float Weight, bool bDucked, float DeltaSeconds, float BlendSeconds)
+{
+	if (BlendSeconds <= UE_KINDA_SMALL_NUMBER) return bDucked ? 1.f : 0.f;
+	const float Step = DeltaSeconds / BlendSeconds;
+	return FMath::Clamp(Weight + (bDucked ? Step : -Step), 0.f, 1.f);
+}
+
+void UPA250MeleeComponent::UpdateCarry(const ARFCharacter& Me, float DeltaSeconds)
+{
+	const FPA250BattleFeel& Feel = PA250BattleFeel::Get();
+	// Down behind cover: he kneels (ducking alone only shrank his collision).
+	const bool bDucked = !Me.IsDead() && !Me.IsMounted() && Me.GetCharacterMovement() && Me.GetCharacterMovement()->IsCrouching();
+	KneelWeight = StepKneel(KneelWeight, bDucked, DeltaSeconds, Feel.KneelBlendSeconds);
+	const AController* C = Me.GetController();
+	const AAIController* AI = Cast<AAIController>(C);
+	Carry = ChooseCarry(IsCharging(), AI != nullptr, AI && AI->GetFocusActor() != nullptr,
+		Feel.bShoulderAtWalk && PA250BattleFeel::PickGait(Me.GetVelocity().Size2D(), Feel.IdleMaxCmS, Feel.WalkMaxCmS, Feel.RunMaxCmS) == EPA250FootGait::Walk);
+	// At the trail the muzzle points forward at chest height: with a friend standing there it is raised.
+	MuzzleCheckTimer -= DeltaSeconds;
+	if (MuzzleCheckTimer <= 0.f)
+	{
+		MuzzleCheckTimer = FMath::Max(0.05f, Feel.ClearCheckSeconds);
+		bMuzzleRaised = false;
+		if (Feel.ClearDistanceCm > 0.f && Me.GetWorld())
+		{
+			const FVector Dir = FRotator(0.f, Me.GetActorRotation().Yaw + Feel.Trail.YawDeg, 0.f).Vector();
+			for (TActorIterator<ARFCharacter> It(Me.GetWorld()); It && !bMuzzleRaised; ++It)
+			{
+				if (*It == &Me || It->IsDead() || It->FactionId != Me.FactionId) continue;
+				bMuzzleRaised = MuzzleInFriend(Me.GetActorLocation(), Dir, It->GetActorLocation(), Feel.ClearDistanceCm, Feel.ClearHalfWidthCm);
+			}
+		}
+	}
+	FPA250CarryPose Raised = Feel.Trail;
+	Raised.PitchDeg = Feel.ClearPitchDeg;
+	Raised.YawDeg = Feel.ClearYawDeg;
+	const FPA250CarryPose& Target = Carry == EPA250Carry::Charge ? Feel.Charge : Carry == EPA250Carry::Shoulder ? Feel.Shoulder
+		: bMuzzleRaised ? Raised : Feel.Trail;
+	if (!bCarryPoseSet || Feel.CarryBlendSeconds <= UE_KINDA_SMALL_NUMBER)
+	{
+		CarryPose = Target;
+		bCarryPoseSet = true;
+		return;
+	}
+	// A constant share of what is left each frame: quick at first, settling without a snap.
+	CarryPose = BlendCarry(CarryPose, Target, FMath::Clamp(3.f * DeltaSeconds / Feel.CarryBlendSeconds, 0.f, 1.f));
 }
 
 void UPA250MeleeComponent::PublishPose()
@@ -457,6 +546,7 @@ void UPA250MeleeComponent::PublishPose()
 	ARFCharacter* Me = OwnerChar();
 	if (!Me) return;
 	const bool bDead = Me->IsDead();
+	UpdateCarry(*Me, GetWorld() ? GetWorld()->GetDeltaSeconds() : 0.f);
 	FPA250MeleePose Pose = bDead ? FPA250MeleePose() : GetBodyPose();
 	if (Me->Musket)
 	{
@@ -465,8 +555,8 @@ void UPA250MeleeComponent::PublishPose()
 		// Club: the musket turns end for end (butt up over the shoulder at -70, butt out in front at -190).
 		// Carry: muzzle up and across to the left, where the left hand can hold it.
 		const float CarryW = Pose.CarryWeight();
-		Me->Musket->MeleePitchOffset = 115.f * Pose.Butt - 6.f * Pose.Coil + 48.f * Pose.Guard - 70.f * Pose.Raise - 190.f * Pose.Chop + CarryPitchDegrees * CarryW;
-		Me->Musket->MeleeYawOffset = -24.f * Pose.Guard + CarryYawDegrees * CarryW;
+		Me->Musket->MeleePitchOffset = 115.f * Pose.Butt - 6.f * Pose.Coil + 48.f * Pose.Guard - 70.f * Pose.Raise - 190.f * Pose.Chop + CarryPose.PitchDeg * CarryW;
+		Me->Musket->MeleeYawOffset = -24.f * Pose.Guard + CarryPose.YawDeg * CarryW;
 		// A man with a bayonet shows one; a man without does not.
 		if (const bool bFixed = HasBayonet(); bFixed != Me->Musket->IsBayonetFixed()) Me->Musket->SetBayonetFixed(bFixed);
 	}

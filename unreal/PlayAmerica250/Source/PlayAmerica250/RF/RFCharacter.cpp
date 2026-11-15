@@ -1,5 +1,8 @@
 #include "RFCharacter.h"
 #include "PA250UnitClasses.h"
+#include "Battle/PA250AnimClips.h"
+#include "Misc/Paths.h"
+#include "Battle/PA250BattleFeel.h"
 #include "Engine/Engine.h"
 #include "Engine/StaticMesh.h"
 #include "Mounted/PA250MountedSoldier.h"
@@ -552,6 +555,193 @@ void ARFCharacter::ApplyThirdPartySoldierMesh()
 	}
 }
 
+void ARFCharacter::TickAnimProbe(float DeltaTime)
+{
+	if (!IsPlayerControlled() || bIsDead) return;
+	static const bool bReloadProbe = FString(FCommandLine::Get()).Contains(TEXT("-PA250AnimProbe=reload"));
+	if (bReloadProbe)
+	{
+		// Debug run: the player fires, then loads standing still, filmed from his front.
+		if (AnimProbeTime < 0.f) AnimProbeTime = 0.f;
+		AnimProbeTime += DeltaTime;
+		const float T = AnimProbeTime - 10.f;
+		if (T < 0.f) return;
+		if (SpringArm)
+		{
+			SpringArm->bUsePawnControlRotation = false;
+			SpringArm->SetUsingAbsoluteRotation(true);
+			SpringArm->SetWorldRotation(FRotator(-4.f, GetActorRotation().Yaw + 150.f, 0.f));
+		}
+		if (T >= 1.f && T - DeltaTime < 1.f) OnFirePressed();
+		if (T >= 2.5f && T - DeltaTime < 2.5f) OnReloadStarted();
+		AMusketWeapon* Gun = GetEquippedFirearm();
+		// Take each stage of the drill as the active reload offers it (a press at the sweet spot).
+		if (Gun && Gun->IsReloading() && T > 3.f && Gun->GetSequencer().GetPhaseProgress() >= 0.5f && AnimProbeLogTimer > 0.2f)
+		{
+			OnReloadStarted();
+		}
+		const int32 Wanted = FMath::FloorToInt((T - 3.f) / 2.f);
+		if (T >= 3.f && Wanted >= AnimProbeStills && AnimProbeStills < 9)
+		{
+			FString Tag;
+			FParse::Value(FCommandLine::Get(), TEXT("PA250AnimProbeTag="), Tag);
+			const FString Path = FPaths::ConvertRelativePathToFull(FPaths::Combine(FPaths::ProjectDir(), TEXT("../../docs/preview"),
+				FString::Printf(TEXT("reload_%s_%d.png"), Tag.IsEmpty() ? TEXT("probe") : *Tag, AnimProbeStills)));
+			FScreenshotRequest::RequestScreenshot(Path, false, false);
+			++AnimProbeStills;
+		}
+		AnimProbeLogTimer -= DeltaTime;
+		if (AnimProbeLogTimer <= 0.f)
+		{
+			AnimProbeLogTimer = 1.f;
+			const UPA250SoldierAnimInstance* Inst = Cast<UPA250SoldierAnimInstance>(GetMesh()->GetAnimInstance());
+			float LeftCm = -1.f;
+			if (Musket && Musket->GetAnimatedMesh())
+			{
+				LeftCm = FVector::Dist(GetMesh()->GetSocketLocation(TEXT("hand_l")), Musket->GetAnimatedMesh()->GetSocketLocation(TEXT("b_gun_LeftHandSpot")));
+			}
+			const FVector RightHand = GetActorTransform().InverseTransformPosition(GetMesh()->GetSocketLocation(TEXT("hand_r")));
+			const FPA250MeleePose Pose = Inst ? Inst->GetMeleePose() : FPA250MeleePose();
+			UE_LOG(LogTemp, Display, TEXT("PA250 reload probe: t=%.1f reloading=%d phase=%d progress=%.2f tier=%s reload_w=%.2f carry_w=%.2f kneel=%.2f ducked=%d left_hand_to_spot_cm=%.1f right_hand_local=(%.0f,%.0f,%.0f) musket_pitch=%.0f"),
+				T, Gun && Gun->IsReloading() ? 1 : 0, Gun ? static_cast<int32>(Gun->GetSequencer().GetPhase()) : -1, Gun ? Gun->GetSequencer().GetPhaseProgress() : 0.f,
+				Inst && Inst->GetLocomotionReport().bShowingFull ? TEXT("full") : TEXT("cheap"), Pose.Reload, Pose.CarryWeight(), Pose.Kneel,
+				GetCharacterMovement() && GetCharacterMovement()->IsCrouching() ? 1 : 0, LeftCm, RightHand.X, RightHand.Y, RightHand.Z,
+				Musket ? Musket->GetActorRotation().Pitch : 0.f);
+		}
+		if (T > 22.f) FPlatformMisc::RequestExit(false);
+		return;
+	}
+	static const bool bAimProbe = FString(FCommandLine::Get()).Contains(TEXT("-PA250AnimProbe=aim"));
+	if (bAimProbe)
+	{
+		// Debug run: stand at the carry, aim level, push the look up as the mouse would, then down.
+		if (AnimProbeTime < 0.f) AnimProbeTime = 0.f;
+		AnimProbeTime += DeltaTime;
+		const float T = AnimProbeTime - 10.f;
+		if (T < 0.f) return;
+		if (T >= 2.f && T - DeltaTime < 2.f) StartAim();
+		if (T >= 3.f && T < 4.5f) AddControllerPitchInput(-0.2f);   // the same call the mouse makes; up
+		if (T >= 6.f && T < 8.5f) AddControllerPitchInput(0.2f);    // down
+		if (T >= 10.f && T - DeltaTime < 10.f) StopAim();
+		if (T >= 10.5f && T < 12.f) AddControllerPitchInput(-0.2f);  // up again, not aiming
+		struct FStill { float At; const TCHAR* Name; };
+		static const FStill Stills[] = {{1.5f, TEXT("carry")}, {2.8f, TEXT("aim_level")}, {5.2f, TEXT("aim_up")}, {9.2f, TEXT("aim_down")}, {12.6f, TEXT("carry_look_up")}};
+		if (AnimProbeStills < UE_ARRAY_COUNT(Stills) && T >= Stills[AnimProbeStills].At)
+		{
+			FString Tag;
+			FParse::Value(FCommandLine::Get(), TEXT("PA250AnimProbeTag="), Tag);
+			const FString Path = FPaths::ConvertRelativePathToFull(FPaths::Combine(FPaths::ProjectDir(), TEXT("../../docs/preview"),
+				FString::Printf(TEXT("aim_%s_%s.png"), Tag.IsEmpty() ? TEXT("probe") : *Tag, Stills[AnimProbeStills].Name)));
+			FScreenshotRequest::RequestScreenshot(Path, false, false);
+			++AnimProbeStills;
+		}
+		AnimProbeLogTimer -= DeltaTime;
+		if (AnimProbeLogTimer <= 0.f)
+		{
+			AnimProbeLogTimer = 0.5f;
+			const UPA250SoldierAnimInstance* Inst = Cast<UPA250SoldierAnimInstance>(GetMesh()->GetAnimInstance());
+			float HandCm = -1.f, RightCm = -1.f;
+			if (Musket && Musket->GetAnimatedMesh() && GetMesh())
+			{
+				HandCm = FVector::Dist(GetMesh()->GetSocketLocation(TEXT("hand_l")), Musket->GetAnimatedMesh()->GetSocketLocation(TEXT("b_gun_LeftHandSpot")));
+				RightCm = FVector::Dist(GetMesh()->GetSocketLocation(TEXT("hand_r")), Musket->GetActorLocation());
+			}
+			UE_LOG(LogTemp, Display, TEXT("PA250 aim probe: t=%.1f aiming=%d control_pitch=%.1f musket_pitch=%.1f tier=%s left_hand_to_spot_cm=%.1f right_hand_to_musket_cm=%.1f"),
+				T, bAiming ? 1 : 0, FRotator::NormalizeAxis(GetControlRotation().Pitch), Musket ? Musket->GetActorRotation().Pitch : 0.f,
+				Inst && Inst->GetLocomotionReport().bShowingFull ? TEXT("full") : TEXT("cheap"), HandCm, RightCm);
+		}
+		// -PA250ProbeFront: the camera looks back at the man from his front (the look still turns him).
+		if (FParse::Param(FCommandLine::Get(), TEXT("PA250ProbeFront")) && SpringArm)
+		{
+			SpringArm->bUsePawnControlRotation = false;
+			SpringArm->SetUsingAbsoluteRotation(true);
+			SpringArm->SetWorldRotation(FRotator(-6.f, GetActorRotation().Yaw + 155.f, 0.f));
+		}
+		if (T > 13.5f) FPlatformMisc::RequestExit(false);
+		return;
+	}
+	static const bool bProbe = FString(FCommandLine::Get()).Contains(TEXT("-PA250AnimProbe=move"));
+	if (!bProbe) return;
+	if (bProbe && FParse::Param(FCommandLine::Get(), TEXT("PA250ProbeFront")) && SpringArm)
+	{
+		// Look back at the man and the squad behind him from his front.
+		SpringArm->bUsePawnControlRotation = false;
+		SpringArm->SetUsingAbsoluteRotation(true);
+		SpringArm->SetWorldRotation(FRotator(-6.f, AnimProbeForward.Rotation().Yaw + 150.f, 0.f));
+	}
+	if (AnimProbeTime < 0.f)
+	{
+		AnimProbeTime = 0.f;
+		AnimProbeForward = GetActorForwardVector().GetSafeNormal2D();
+	}
+	AnimProbeTime += DeltaTime;
+	// Seconds after the script starts (it waits 10 s for the level to settle).
+	const float T = AnimProbeTime - 10.f;
+	if (T < 0.f) return;
+	struct FLeg { float From, To, Scale; bool bSprint; };
+	static const FLeg Legs[] = {
+		{0.f, 3.f, 0.5f, false},     // walk forward
+		{4.5f, 7.5f, -1.f, false},   // turn about and run back
+		{8.5f, 12.f, 1.f, true},     // sprint forward, the squad following
+	};
+	float Scale = 0.f;
+	bool bWantSprint = false;
+	for (const FLeg& L : Legs)
+	{
+		if (T >= L.From && T < L.To)
+		{
+			Scale = L.Scale;
+			bWantSprint = L.bSprint;
+		}
+	}
+	if (bWantSprint != bSprinting)
+	{
+		if (bWantSprint) StartSprint();
+		else StopSprint();
+	}
+	if (Scale != 0.f) AddMovementInput(AnimProbeForward, Scale);
+	// The squad follows from the start, so the walk shows men at the shoulder and the sprint men at the trail.
+	if (T >= 0.f && T - DeltaTime < 0.f)
+	{
+		if (APA250BattleGameMode* GM = GetWorld()->GetAuthGameMode<APA250BattleGameMode>()) GM->GivePlayerOrder(this, 0);
+	}
+	struct FStill { float At; const TCHAR* Name; };
+	static const FStill Stills[] = {{1.5f, TEXT("walk")}, {3.35f, TEXT("stop")}, {4.95f, TEXT("pivot")}, {6.5f, TEXT("run")},
+		{10.5f, TEXT("sprint_squad")}, {12.5f, TEXT("halt")}};
+	if (AnimProbeStills < UE_ARRAY_COUNT(Stills) && T >= Stills[AnimProbeStills].At)
+	{
+		FString Tag;
+		FParse::Value(FCommandLine::Get(), TEXT("PA250AnimProbeTag="), Tag);
+		const FString Path = FPaths::ConvertRelativePathToFull(FPaths::Combine(FPaths::ProjectDir(), TEXT("../../docs/preview"),
+			FString::Printf(TEXT("anim_%s_%s.png"), Tag.IsEmpty() ? TEXT("probe") : *Tag, Stills[AnimProbeStills].Name)));
+		FScreenshotRequest::RequestScreenshot(Path, false, false);
+		UE_LOG(LogTemp, Display, TEXT("PA250 anim probe: still %s at %.1f s"), *Path, T);
+		++AnimProbeStills;
+	}
+	AnimProbeLogTimer -= DeltaTime;
+	if (AnimProbeLogTimer <= 0.f)
+	{
+		AnimProbeLogTimer = 0.5f;
+		const float Speed = GetVelocity().Size2D();
+		const FPA250BattleFeel& Feel = PA250BattleFeel::Get();
+		float HandCm = -1.f;
+		if (Musket && Musket->GetAnimatedMesh() && GetMesh())
+		{
+			HandCm = FVector::Dist(GetMesh()->GetSocketLocation(TEXT("hand_l")), Musket->GetAnimatedMesh()->GetSocketLocation(TEXT("b_gun_LeftHandSpot")));
+		}
+		const UPA250SoldierAnimInstance* Inst = Cast<UPA250SoldierAnimInstance>(GetMesh()->GetAnimInstance());
+		UE_LOG(LogTemp, Display, TEXT("PA250 anim probe: t=%.1f speed=%.0f gait=%s tier=%s searches=%d jumps=%d left_hand_to_spot_cm=%.1f"), T, Speed,
+			PA250BattleFeel::GaitName(PA250BattleFeel::PickGait(Speed, Feel.IdleMaxCmS, Feel.WalkMaxCmS, Feel.RunMaxCmS)),
+			Inst && Inst->GetLocomotionReport().bShowingFull ? TEXT("full") : TEXT("cheap"),
+			Inst ? Inst->GetLocomotionReport().Searches : 0, Inst ? Inst->GetLocomotionReport().Jumps : 0, HandCm);
+	}
+	if (T > 14.f)
+	{
+		UE_LOG(LogTemp, Display, TEXT("PA250 anim probe: done, %d stills"), AnimProbeStills);
+		FPlatformMisc::RequestExit(false);
+	}
+}
+
 void ARFCharacter::UpdateSoldierAnimation()
 {
 	if (!bUsesPeriodSoldier || bIsDead) return;
@@ -571,6 +761,20 @@ void ARFCharacter::UpdateSoldierAnimation()
 	{
 		if (Animation && Instance->GetLocomotion() != Animation) Instance->SetLocomotion(Animation);
 		Instance->SetPlayRate(PlayRate);
+		// Full quality (battle_feel.json animation): motion matching over the databases this gait asks
+		// for. A soldier easing to a halt searches the stops. Mounted men and a lunge stay on the cheap path.
+		const FPA250BattleFeel& Feel = PA250BattleFeel::Get();
+		const bool bFull = bAnimFullQuality && !IsMounted() && !(MeleeComponent && MeleeComponent->IsPlantingFeet()) && PA250AnimClips::LocomotionReady();
+		if (bFull)
+		{
+			const EPA250FootGait Gait = PA250BattleFeel::PickGait(Speed, Feel.IdleMaxCmS, Feel.WalkMaxCmS, Feel.RunMaxCmS);
+			const bool bStopping = Gait != EPA250FootGait::Idle && GetCharacterMovement() && GetCharacterMovement()->GetCurrentAcceleration().IsNearlyZero(1.0);
+			Instance->SetFullQuality(true, PA250AnimClips::LocomotionDatabases(Gait, bStopping), IsPlayerControlled() ? 0.f : Feel.BotSearchThrottleSeconds);
+		}
+		else
+		{
+			Instance->SetFullQuality(false, TArray<UPoseSearchDatabase*>(), 0.f);
+		}
 	}
 }
 
@@ -708,6 +912,7 @@ void ARFCharacter::Tick(float DeltaTime)
 	Super::Tick(DeltaTime);
 	TickMounted(DeltaTime); // gait clip + play rate from ground speed (Mounted/PA250MountedRiding.cpp)
 	TickThrown(DeltaTime);  // thrown from a fallen horse: loose body, then back on his feet
+	TickAnimProbe(DeltaTime);
 	UpdateSoldierAnimation();
 	if (SuppressionTimer > 0.f)
 	{
@@ -1457,13 +1662,13 @@ void ARFCharacter::SelectMountedWeapon(int32 Index)
         if (!MountedPistol) return;
         // Prototype flintlock: short barrel and grip until a period pistol mesh is supplied.
         if (MountedPistol->GetAnimatedMesh()) MountedPistol->GetAnimatedMesh()->SetHiddenInGame(true);
-        auto* Mesh = MountedPistol->GetMusketMesh();
-        Mesh->SetStaticMesh(LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cylinder.Cylinder")));
-        Mesh->SetRelativeLocation(FVector(14.f, 0.f, 0.f));
-        Mesh->SetRelativeRotation(FRotator(90.f, 0.f, 0.f));
-        Mesh->SetRelativeScale3D(FVector(.035f, .035f, .32f));
-        Mesh->SetVisibility(true);
-        Mesh->SetHiddenInGame(false);
+        auto* PistolMesh = MountedPistol->GetMusketMesh();
+        PistolMesh->SetStaticMesh(LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cylinder.Cylinder")));
+        PistolMesh->SetRelativeLocation(FVector(14.f, 0.f, 0.f));
+        PistolMesh->SetRelativeRotation(FRotator(90.f, 0.f, 0.f));
+        PistolMesh->SetRelativeScale3D(FVector(.035f, .035f, .32f));
+        PistolMesh->SetVisibility(true);
+        PistolMesh->SetHiddenInGame(false);
         auto* Grip = NewObject<UStaticMeshComponent>(MountedPistol, TEXT("PistolGrip"));
         Grip->SetupAttachment(MountedPistol->GetRootComponent());
         Grip->SetStaticMesh(LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube")));

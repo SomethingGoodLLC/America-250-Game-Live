@@ -1,6 +1,7 @@
 #include "PA250CombatCommandlet.h"
 #include "ActiveReloadSequencer.h"
 #include "FormationQuery.h"
+#include "PA250FeelCases.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 
@@ -95,6 +96,10 @@ int32 UPA250CombatCommandlet::Main(const FString& Params)
 		R = EvaluateVolley(Shots, 5.f, T);
 		Check(!R.bValid, TEXT("volley expired"));
 	}
+
+	// Battle feel (battle_feel.json): movement, handling, intensity.
+	PA250FeelCases::RunAnimation(Check);
+	PA250FeelCases::RunCover(Check);
 
 	const TCHAR* Passed = GFails == 0 ? TEXT("true") : TEXT("false");
 	const FString Out = FString::Printf(TEXT("{\"passed\":%s,\"fails\":%d}\n"), Passed, GFails);

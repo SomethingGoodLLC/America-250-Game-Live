@@ -7,6 +7,9 @@ public class PlayAmerica250 : ModuleRules
 	public PlayAmerica250(ReadOnlyTargetRules Target) : base(Target)
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
+		// The game catches what the sim core throws (an unreadable save, setup or result). On the Mac
+		// exceptions are always on; on Windows a module must ask, or a catch runs without unwinding.
+		bEnableExceptions = true;
 
 		PublicDependencyModuleNames.AddRange(new string[] {
 			"Core",
@@ -38,6 +41,8 @@ public class PlayAmerica250 : ModuleRules
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[] { "ImageWrapper", "AnimationCore", "AudioCapture", "AudioCaptureCore", "MoviePlayer" });
+		// Motion-matched locomotion (RF/PA250AnimNode_Locomotion): the engine pose search and its blend stack.
+		PrivateDependencyModuleNames.AddRange(new string[] { "PoseSearch", "BlendStack", "Chooser", "AnimGraphRuntime" });
 		PublicIncludePaths.Add("PlayAmerica250/Campaign");
 		PublicIncludePaths.Add("PlayAmerica250/Battle");
 		PublicIncludePaths.Add("PlayAmerica250/Diplomacy");

@@ -1,0 +1,42 @@
+{
+ "name": "battle_setup_hero_detachment",
+ "description": "no general, no hero: a detachment's setup carries no commander and no hero kit",
+ "start_ymdh": {
+  "y": 1775,
+  "m": 4,
+  "d": 20,
+  "h": 0
+ },
+ "battle": {
+  "province": "lexington",
+  "attacker": "british_regulars",
+  "defender": "continental_militia"
+ },
+ "generals": {
+  "british_regulars": "francis_smith"
+ },
+ "expect_setup": {
+  "commander": {
+   "british": "francis_smith"
+  },
+  "no_commander": [
+   "continental"
+  ],
+  "factor_rows": [
+   {
+    "faction": "continental",
+    "label": "commander",
+    "value": 0,
+    "source_has": "a detachment"
+   }
+  ],
+  "morale": {
+   "continental": 70,
+   "british": 80
+  },
+  "no_hero": [
+   "british",
+   "continental"
+  ]
+ }
+}

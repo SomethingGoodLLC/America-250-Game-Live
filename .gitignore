@@ -425,6 +425,10 @@ compile_commands.json
 !protocol/test_vectors/**
 !unreal/PA250Sim/data/
 !unreal/PA250Sim/data/**
+# The bare "public" rule above (Gatsby) also matches Unreal module Public/ folders on a
+# case-insensitive disk; PA250Shaders.h was never tracked because of it. Module headers are source.
+!unreal/PlayAmerica250/Source/**/Public/
+!unreal/PlayAmerica250/Plugins/**/Public/
 
 # Generated stills and rebuildable art (regenerate instead of committing).
 # Screenshots taken as evidence for PROGRESS.md: battle-level captures from
@@ -441,3 +445,7 @@ unreal/PlayAmerica250/SourceArt/battlefield/*.glb
 unreal/PlayAmerica250/SourceArt/battlefield/ue5/
 unreal/PlayAmerica250/SourceArt/battlefield/previews/
 unreal/PlayAmerica250/SourceArt/battlefield/textures/
+# Staging copies of Epic sample packages (Game Animation Sample) that the animation pipeline
+# retargets FROM (Scripts/build_locomotion.py). Never committed: only the retargeted clips are.
+unreal/PlayAmerica250/Content/Characters/UEFN_Mannequin/
+unreal/PlayAmerica250/Content/Characters/UE4_Mannequin/

@@ -1,0 +1,47 @@
+{
+ "name": "tier_pick_distance_limits",
+ "description": "nobody beyond the switch distance is full, however many places are free",
+ "motion_matching": true,
+ "budget": {
+  "full_quality_max": 12,
+  "switch_distance_m": 35
+ },
+ "hysteresis_m": 5,
+ "soldiers": [
+  {
+   "id": "player",
+   "distance_m": 0,
+   "player": true,
+   "was_full": false
+  },
+  {
+   "id": "a",
+   "distance_m": 34.9,
+   "player": false,
+   "was_full": false
+  },
+  {
+   "id": "b",
+   "distance_m": 35,
+   "player": false,
+   "was_full": false
+  },
+  {
+   "id": "c",
+   "distance_m": 35.1,
+   "player": false,
+   "was_full": false
+  },
+  {
+   "id": "d",
+   "distance_m": 80,
+   "player": false,
+   "was_full": false
+  }
+ ],
+ "expect_full": [
+  "player",
+  "a",
+  "b"
+ ]
+}

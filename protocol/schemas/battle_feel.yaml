@@ -1,0 +1,144 @@
+# Battle feel (Play America 250): how the battle moves, answers the hand and looks alive.
+# File: unreal/PA250Sim/data/battle_feel.json, read by the Unreal battle only (Battle/PA250BattleFeel).
+# Display and handling only: nothing here reaches the campaign, and the sim core does not read it.
+# Every number is GAMEPLAY TUNING (GAME INVENTION). Sections are added milestone by milestone.
+# Budgets that depend on the machine are keyed by platform (win64, mac): a platform with
+# `measured: null` has not been measured and holds the lowest setting until it is.
+# Shared vectors: protocol/test_vectors/anim (pytest and the Unreal PA250Combat cases).
+$schema: "http://json-schema.org/draft-07/schema#"
+$id: "battle_feel.v1"
+title: BattleFeelFile
+type: object
+additionalProperties: false
+required: [note, animation, carry, kneel, reload, verify]
+properties:
+  note: {type: string, minLength: 1}
+  animation:
+    type: object
+    additionalProperties: false
+    required: [motion_matching, platforms, switch_hysteresis_m, tier_blend_seconds, cheap_crossfade_seconds,
+               mm_blend_seconds, bot_search_throttle_seconds, play_rate_min, play_rate_max, upper_body_sway,
+               gait_speed_cm_s]
+    description: >-
+      Two ways a soldier's body is animated. full: motion matching over the retargeted locomotion
+      clips (starts, stops, pivots, turns). cheap: one looping clip chosen by speed, cross-faded.
+      The player is always full. Then the soldiers nearest the player, inside switch_distance_m, are
+      full until full_quality_max soldiers are (the player counts as one). A soldier already full
+      stays full out to switch_distance_m + switch_hysteresis_m, so the edge does not flicker.
+    properties:
+      motion_matching:
+        type: boolean
+        description: "false: everyone uses the cheap path whatever the budgets say (the state until M1 verifies, and the fallback)."
+      platforms:
+        type: object
+        additionalProperties: false
+        required: [win64, mac]
+        properties:
+          win64: {$ref: "#/definitions/animation_budget"}
+          mac: {$ref: "#/definitions/animation_budget"}
+      switch_hysteresis_m: {type: number, minimum: 0}
+      tier_blend_seconds: {type: number, minimum: 0, description: "Blend when a soldier changes between full and cheap."}
+      cheap_crossfade_seconds: {type: number, minimum: 0, description: "Cross-fade between the cheap path's clips (it was a hard cut)."}
+      mm_blend_seconds: {type: number, minimum: 0, description: "Blend into a newly matched pose."}
+      bot_search_throttle_seconds: {type: number, minimum: 0, description: "A bot searches for a new pose no oftener than this; the player searches every frame."}
+      play_rate_min: {type: number, exclusiveMinimum: 0}
+      play_rate_max: {type: number, exclusiveMinimum: 0}
+      upper_body_sway: {type: number, minimum: 0, maximum: 1, description: "Share of the matched pose's arm swing kept while both hands hold the musket."}
+      gait_speed_cm_s:
+        type: object
+        additionalProperties: false
+        required: [idle_max, walk_max, run_max]
+        description: "Speed bands that choose the clip set: at or under idle_max idle, to walk_max walk, to run_max run, above it sprint."
+        properties:
+          idle_max: {type: number, minimum: 0}
+          walk_max: {type: number, minimum: 0}
+          run_max: {type: number, minimum: 0}
+  carry:
+    type: object
+    additionalProperties: false
+    required: [blend_seconds, shoulder_at_walk, clear, trail, shoulder, charge]
+    description: >-
+      How the musket is carried while moving, layered on the upper body with both hands on it.
+      trail: at the trail, in the right hand before the right hip, muzzle up and across to the left
+      (the carry the game had before the task of 2026-11-15, unchanged). shoulder: shouldered arms,
+      the piece sloped up at the right side (a bot WALKING with no enemy in view; never at a run). charge: charge
+      bayonet, levelled at the hip (a man charging). Angles are added to the musket's aim; hand_* is
+      where the right hand holds it, in cm from the chest (forward, right, up; up is negative below it).
+    properties:
+      blend_seconds: {type: number, minimum: 0}
+      shoulder_at_walk:
+        type: boolean
+        description: >-
+          true: a bot walking with no enemy in view shoulders his piece. false (2026-11-15): he keeps
+          it at the trail. The shoulder pose here was judged from the front and looked wrong (the piece
+          clutched upright to the chest), so it is off until a pose is made for it.
+      clear:
+        type: object
+        additionalProperties: false
+        required: [distance_cm, half_width_cm, pitch_deg, yaw_deg, check_seconds]
+        description: >-
+          A man at the trail whose muzzle would be in a friend raises it (a squad at its leader's
+          shoulders stood with trailed muskets through the man ahead: user report 2026-11-15).
+        properties:
+          note: {type: string}
+          distance_cm: {type: number, minimum: 0}
+          half_width_cm: {type: number, minimum: 0}
+          pitch_deg: {type: number, minimum: 0, maximum: 90}
+          yaw_deg: {type: number, minimum: -180, maximum: 180}
+          check_seconds: {type: number, exclusiveMinimum: 0}
+      trail: {$ref: "#/definitions/carry_pose"}
+      shoulder: {$ref: "#/definitions/carry_pose"}
+      charge: {$ref: "#/definitions/carry_pose"}
+  kneel:
+    type: object
+    additionalProperties: false
+    required: [drop_cm, rear_foot_back_cm, lean_deg, blend_seconds]
+    description: >-
+      A man who is ducked (down behind a wall or a work while he loads, or ducked by the player)
+      kneels, so that he is in fact hidden: hips lowered by drop_cm with the feet kept on the ground,
+      the right foot drawn back rear_foot_back_cm, the body leant forward lean_deg. Until 2026-11-15
+      ducking only shrank his collision and he stood as tall as ever. Procedural; a clip may replace it.
+    properties:
+      note: {type: string}
+      drop_cm: {type: number, minimum: 0, maximum: 70}
+      rear_foot_back_cm: {type: number, minimum: 0, maximum: 80}
+      lean_deg: {type: number, minimum: -30, maximum: 45}
+      blend_seconds: {type: number, minimum: 0}
+  reload:
+    type: object
+    additionalProperties: false
+    required: [ram_left_hand_height_cm, ram_left_hand_max_slide_cm]
+    description: >-
+      The loading drill's left hand while the musket stands on its butt to be rammed: it holds the
+      barrel at ram_left_hand_height_cm above the man's feet (slid up from the musket's own
+      left-hand spot toward the muzzle, by at most ram_left_hand_max_slide_cm), where a standing man
+      can reach it.
+    properties:
+      note: {type: string}
+      ram_left_hand_height_cm: {type: number, minimum: 40, maximum: 160}
+      ram_left_hand_max_slide_cm: {type: number, minimum: 0, maximum: 130}
+  verify:
+    type: object
+    additionalProperties: false
+    required: [frame_time_margin_pct]
+    properties:
+      frame_time_margin_pct: {type: number, minimum: 0, description: "A milestone may cost at most this much frame time over the M0 baseline."}
+definitions:
+  animation_budget:
+    type: object
+    additionalProperties: false
+    required: [full_quality_max, switch_distance_m, measured]
+    properties:
+      full_quality_max: {type: integer, minimum: 1, description: "Soldiers at full quality at once, the player among them. 1 = the player only (the lowest setting)."}
+      switch_distance_m: {type: number, minimum: 0}
+      measured: {type: ["string", "null"], description: "The date these two were set from a frame-time measurement on this platform (YYYY-MM-DD), or null: not measured, lowest setting."}
+  carry_pose:
+    type: object
+    additionalProperties: false
+    required: [pitch_deg, yaw_deg, hand_forward_cm, hand_right_cm, hand_up_cm]
+    properties:
+      pitch_deg: {type: number, minimum: -90, maximum: 90}
+      yaw_deg: {type: number, minimum: -180, maximum: 180}
+      hand_forward_cm: {type: number}
+      hand_right_cm: {type: number}
+      hand_up_cm: {type: number}

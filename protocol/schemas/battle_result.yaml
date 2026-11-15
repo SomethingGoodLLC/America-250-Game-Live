@@ -79,6 +79,23 @@ properties:
     properties:
       british: {enum: [wounded, killed, captured]}
       continental: {enum: [wounded, killed, captured]}
+  hero:
+    type: object
+    additionalProperties: false
+    required: [faction, person_id, takeovers, seconds_played, fell_while_played]
+    description: >-
+      GAME INVENTION, a report and nothing more: the player fought part of this battle as his side's
+      general (BattleSetup sides.*.commander.hero). It changes nothing in the campaign: what became of
+      the general is said by commander_events alone, as for any general. The sim adds one line to the
+      battle report from it. fell_while_played true without a commander_events entry for that faction
+      is outside the contract (the result is unreadable). A person_id that is not that side's general
+      is ignored.
+    properties:
+      faction: {$ref: "#/definitions/faction"}
+      person_id: {type: string, minLength: 1}
+      takeovers: {type: integer, minimum: 1}
+      seconds_played: {type: number, minimum: 0}
+      fell_while_played: {type: boolean}
   cartridges_spent: {$ref: "#/definitions/by_faction"}
   powder_spent: {$ref: "#/definitions/by_faction"}
   shots_fired: {$ref: "#/definitions/by_faction", description: "Successful discharges; preferred over cartridges_spent when present."}

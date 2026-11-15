@@ -1,0 +1,33 @@
+{
+ "name": "tier_pick_player_only",
+ "description": "the lowest setting (an unmeasured platform): the player alone is full",
+ "motion_matching": true,
+ "budget": {
+  "full_quality_max": 1,
+  "switch_distance_m": 0
+ },
+ "hysteresis_m": 5,
+ "soldiers": [
+  {
+   "id": "player",
+   "distance_m": 0,
+   "player": true,
+   "was_full": false
+  },
+  {
+   "id": "a",
+   "distance_m": 0.5,
+   "player": false,
+   "was_full": false
+  },
+  {
+   "id": "b",
+   "distance_m": 3,
+   "player": false,
+   "was_full": true
+  }
+ ],
+ "expect_full": [
+  "player"
+ ]
+}

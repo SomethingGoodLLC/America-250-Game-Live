@@ -392,3 +392,109 @@ def test_commander_battle_vectors_obey_the_battle_schemas(
             assert row["label"] in labels, row
         side = setup["definitions"]["side"]["properties"]
         assert {"commander", "alarmed", "intel"} <= set(side)
+
+
+# ---- Heroes (GAME INVENTION): the player may fight as the general of his own army ----
+
+HERO = PERSONS["hero"]
+GENERALS = [p for p in PERSONS["persons"] if "general" in p["roles"]]
+PERSON_BY_ID = {p["id"]: p for p in PERSONS["persons"]}
+ABILITY_KINDS = _schema("persons.yaml")["definitions"]["hero_ability"]["properties"][
+    "kind"
+]["enum"]
+
+
+def test_hero_kit_is_marked_invented() -> None:
+    assert HERO["basis"] == "invented" and HERO["note"].strip()
+    overrides = [p for p in PERSONS["persons"] if "hero" in p]
+    assert overrides, "no general carries a kit of his own"
+    for p in overrides:
+        assert p["hero"]["basis"] == "invented", p["id"]
+        assert "general" in p["roles"], p["id"]
+    schema = _validator("persons.yaml")
+    unmarked = json.loads(json.dumps(PERSONS))
+    unmarked["hero"]["basis"] = "documented"
+    assert list(schema.iter_errors(unmarked))
+    no_basis = json.loads(json.dumps(PERSONS))
+    for p in no_basis["persons"]:
+        if "hero" in p:
+            del p["hero"]["basis"]
+    assert list(schema.iter_errors(no_basis))
+
+
+def test_every_generals_first_trait_has_a_hero_ability() -> None:
+    abilities = HERO["trait_abilities"]
+    assert set(abilities) == set(PERSONS["traits"])
+    for p in GENERALS:
+        assert len(p["traits"]) == 2, p["id"]
+        ability = abilities[p["traits"][0]]
+        assert ability["kind"] in ABILITY_KINDS, p["id"]
+        assert ability["label"].strip() and ability["text"].strip()
+    # One kind per trait: six traits, six different abilities.
+    assert len({a["kind"] for a in abilities.values()}) == len(abilities)
+    # The played general is stronger than the general he was: a larger aura, more health.
+    assert HERO["kit"]["aura_radius_m"] > PERSONS["rules"]["commander"]["aura_radius_m"]
+    assert HERO["kit"]["health_scale"] > 1
+    assert HERO["score"]["threshold"] > max(
+        HERO["score"]["kill"], HERO["score"]["capture"], HERO["score"]["rally"]
+    )
+
+
+@pytest.mark.parametrize(
+    "vector",
+    [v for v in _vectors("battle_") if "hero" in v["name"]],
+    ids=lambda v: v["name"],
+)
+def test_hero_battle_vectors_obey_the_battle_schemas(vector: dict[str, Any]) -> None:
+    army_faction = {army: ARMY_FACTION[army] for army in vector["generals"]}
+    general_of = {army_faction[a]: p for a, p in vector["generals"].items()}
+    if "result" in vector:
+        hero = vector["result"].get("hero")
+        assert hero is not None, "a hero result vector with no hero block"
+        if vector["expect"]["schema_valid"]:
+            assert hero["person_id"] in PERSON_IDS
+            fell_without_event = hero["fell_while_played"] and hero[
+                "faction"
+            ] not in vector["result"].get("commander_events", {})
+            # The schema cannot see across fields; the sim refuses that one.
+            assert vector["expect"]["applied"] == (not fell_without_event)
+        return
+    expect = vector["expect_setup"]
+    setup = _schema("battle_setup.yaml")
+    hero_schema = setup["definitions"]["side"]["properties"]["commander"]["properties"][
+        "hero"
+    ]
+    assert hero_schema["properties"]["ability"]["properties"]["kind"]["enum"] == (
+        ABILITY_KINDS
+    )
+    assert "hour_of_day" in setup["properties"]
+    if "hero" not in expect:
+        assert set(expect["no_hero"]) == {"british", "continental"}
+        return
+    want = expect["hero"]
+    # The hero is the player's general (the scenario's player is the Continental side).
+    assert want["faction"] == SCENARIO.get("player_faction", "continental")
+    assert want["faction"] not in expect["no_hero"]
+    person = PERSON_BY_ID[general_of[want["faction"]]]
+    assert want["trait"] == person["traits"][0]
+    assert want["kind"] == HERO["trait_abilities"][want["trait"]]["kind"]
+    own = person.get("hero", {})
+    for key in ("health_scale", "aura_radius_m", "rally_radius_m"):
+        assert want[key] == own.get(key, HERO["kit"][key]), key
+    assert want["rally_cooldown_seconds"] == HERO["kit"]["rally_cooldown_seconds"]
+    # A setup side built from these numbers obeys the schema; one with an ability outside
+    # the closed set does not.
+    ability = dict(HERO["trait_abilities"][want["trait"]], trait=want["trait"])
+    block = {
+        "health_scale": want["health_scale"],
+        "aura_radius_m": want["aura_radius_m"],
+        "rally_radius_m": want["rally_radius_m"],
+        "rally_cooldown_seconds": want["rally_cooldown_seconds"],
+        "ability": ability,
+    }
+    checker = Draft7Validator(hero_schema)
+    assert not [e.message for e in checker.iter_errors(block)]
+    assert list(
+        checker.iter_errors(dict(block, ability=dict(ability, kind="thunderbolt")))
+    )
+    assert list(checker.iter_errors({k: v for k, v in block.items() if k != "ability"}))

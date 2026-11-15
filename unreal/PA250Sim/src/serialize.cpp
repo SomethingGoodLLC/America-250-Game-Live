@@ -1290,6 +1290,7 @@ std::string setup_to_json(const BattleSetup& b) {
     j["scenario_preset"] = b.scenario_preset;
     j["mode"] = b.mode;
     j["seed"] = b.seed;
+    if (b.hour_of_day >= 0) j["hour_of_day"] = b.hour_of_day;  // written only when the sim said it
     j["attacker_faction"] = b.attacker_faction;
     j["defender_faction"] = b.defender_faction;
     j["player_faction"] = b.player_faction;
@@ -1333,6 +1334,22 @@ std::string setup_to_json(const BattleSetup& b) {
                                  {"name", kv.second.commander_name},
                                  {"traits", kv.second.commander_traits},
                                  {"aura_radius_m", kv.second.commander_aura_radius_m}};
+        if (!kv.second.commander_id.empty() && kv.second.has_hero) {
+            const HeroAbility& a = kv.second.hero_ability;
+            side["commander"]["hero"] = {{"health_scale", kv.second.hero_health_scale},
+                                         {"aura_radius_m", kv.second.hero_aura_radius_m},
+                                         {"rally_radius_m", kv.second.hero_rally_radius_m},
+                                         {"rally_cooldown_seconds", kv.second.hero_rally_cooldown_seconds},
+                                         {"ability",
+                                          {{"trait", a.trait},
+                                           {"kind", a.kind},
+                                           {"label", a.label},
+                                           {"text", a.text},
+                                           {"radius_m", a.radius_m},
+                                           {"seconds", a.seconds},
+                                           {"value", a.value},
+                                           {"cooldown_seconds", a.cooldown_seconds}}}};
+        }
         if (kv.second.alarmed) side["alarmed"] = true;
         if (kv.second.intel != "exact")
             side["intel"] = {{"known", false},
@@ -1354,6 +1371,9 @@ BattleSetup setup_from_json(const std::string& text) {
         b.scenario_preset = j.value("scenario_preset", scenario_preset_for_province(b.province_id));
         b.mode = j.value("mode", std::string("conquest"));
         b.seed = j.at("seed").get<uint64_t>();
+        b.hour_of_day = j.value("hour_of_day", -1);
+        if (j.contains("hour_of_day") && (b.hour_of_day < 0 || b.hour_of_day > 23))
+            throw std::runtime_error("setup parse error: hour_of_day outside 0..23");
         b.attacker_faction = j.at("attacker_faction").get<std::string>();
         b.defender_faction = j.at("defender_faction").get<std::string>();
         b.player_faction = j.at("player_faction").get<std::string>();
@@ -1394,6 +1414,23 @@ BattleSetup setup_from_json(const std::string& text) {
                 s.commander_name = c.value("name", "");
                 s.commander_traits = c.value("traits", std::vector<std::string>{});
                 s.commander_aura_radius_m = c.value("aura_radius_m", 0.f);
+                if (c.contains("hero")) {
+                    const json& h = c.at("hero");
+                    s.has_hero = true;
+                    s.hero_health_scale = h.value("health_scale", 1.f);
+                    s.hero_aura_radius_m = h.value("aura_radius_m", 0.f);
+                    s.hero_rally_radius_m = h.value("rally_radius_m", 0.f);
+                    s.hero_rally_cooldown_seconds = h.value("rally_cooldown_seconds", 0.f);
+                    const json& a = h.at("ability");
+                    s.hero_ability.trait = a.value("trait", "");
+                    s.hero_ability.kind = a.value("kind", "");
+                    s.hero_ability.label = a.value("label", "");
+                    s.hero_ability.text = a.value("text", "");
+                    s.hero_ability.radius_m = a.value("radius_m", 0.f);
+                    s.hero_ability.seconds = a.value("seconds", 0.f);
+                    s.hero_ability.value = a.value("value", 0.f);
+                    s.hero_ability.cooldown_seconds = a.value("cooldown_seconds", 0.f);
+                }
             }
             s.alarmed = it.value().value("alarmed", false);
             if (it.value().contains("intel")) {
@@ -1431,6 +1468,12 @@ std::string result_to_json(const BattleResult& r) {
            {"colours_captured", r.colours_captured},
            {"guns_taken", r.guns_taken}};
     if (!r.commander_events.empty()) j["commander_events"] = r.commander_events;
+    if (!r.hero_faction.empty())
+        j["hero"] = {{"faction", r.hero_faction},
+                     {"person_id", r.hero_person_id},
+                     {"takeovers", r.hero_takeovers},
+                     {"seconds_played", r.hero_seconds_played},
+                     {"fell_while_played", r.hero_fell_while_played}};
     return j.dump();
 }
 
@@ -1467,6 +1510,20 @@ BattleResult result_from_json(const std::string& text) {
             if ((ck.first != kBritish && ck.first != kContinental) ||
                 (ck.second != "wounded" && ck.second != "killed" && ck.second != "captured"))
                 throw std::runtime_error("result parse error: unknown commander event " + ck.first + " " + ck.second);
+        // The hero report (GAME INVENTION) changes nothing, but it must agree with commander_events.
+        if (j.contains("hero")) {
+            const json& h = j.at("hero");
+            r.hero_faction = h.at("faction").get<std::string>();
+            r.hero_person_id = h.at("person_id").get<std::string>();
+            r.hero_takeovers = h.at("takeovers").get<int>();
+            r.hero_seconds_played = h.at("seconds_played").get<float>();
+            r.hero_fell_while_played = h.at("fell_while_played").get<bool>();
+            if ((r.hero_faction != kBritish && r.hero_faction != kContinental) || r.hero_person_id.empty() ||
+                r.hero_takeovers < 1 || r.hero_seconds_played < 0.f)
+                throw std::runtime_error("result parse error: hero report outside the contract");
+            if (r.hero_fell_while_played && !r.commander_events.count(r.hero_faction))
+                throw std::runtime_error("result parse error: hero fell with no commander event for " + r.hero_faction);
+        }
         r.guns_taken = j.value("guns_taken", std::map<std::string, int>{});
         for (const auto& ck : r.guns_taken)
             if (ck.second < 0) throw std::runtime_error("result parse error: negative guns for " + ck.first);

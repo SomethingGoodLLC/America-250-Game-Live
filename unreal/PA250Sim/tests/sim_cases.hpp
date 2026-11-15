@@ -1,9 +1,8 @@
 // PA250Sim test cases (hourly clock). Shared by console binary and Unreal automation.
 #pragma once
-#include <dirent.h>
-
 #include <filesystem>
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <functional>
@@ -47,6 +46,30 @@ inline int& g_checks() {
 inline int& g_failed() {
     static int n = 0;
     return n;
+}
+
+// File names in a directory, unsorted (callers sort). *found is false when it cannot be read.
+inline std::vector<std::string> dir_file_names(const std::string& dir, bool* found = nullptr) {
+    std::vector<std::string> names;
+    std::error_code ec;
+    std::filesystem::directory_iterator it(dir, ec);
+    if (found) *found = !ec;
+    if (ec) return names;
+    for (const std::filesystem::directory_iterator end; it != end; it.increment(ec)) {
+        if (ec) break;
+        names.push_back(it->path().filename().string());
+    }
+    return names;
+}
+
+// {"y":..,"m":..,"d":..,"h":..} from a vector.
+inline YMDH ymdh_of(const json& t) {
+    YMDH v;
+    v.y = t.at("y").get<int>();
+    v.m = static_cast<uint8_t>(t.at("m").get<int>());
+    v.d = static_cast<uint8_t>(t.at("d").get<int>());
+    v.h = static_cast<uint8_t>(t.value("h", 0));
+    return v;
 }
 
 #define CHECK(cond)                                                        \
@@ -2409,15 +2432,14 @@ static void test_guns_in_the_campaign() {
 static void test_battle_vectors() {
     ensure_battle_rules();
     const std::string dir = g_vector_dir() + "/../battle";
-    DIR* d = opendir(dir.c_str());
-    CHECK(d != nullptr);
-    if (!d) return;
+    bool found = false;
+    const std::vector<std::string> names = dir_file_names(dir, &found);
+    CHECK(found);
+    if (!found) return;
     std::vector<std::string> files;
-    while (auto* ent = readdir(d)) {
-        std::string n = ent->d_name;
+    for (const std::string& n : names) {
         if (n.size() > 5 && n.substr(n.size() - 5) == ".json" && n[0] != '_') files.push_back(n);
     }
-    closedir(d);
     std::sort(files.begin(), files.end());
     CHECK(files.size() >= 12);
     for (const auto& file : files) {
@@ -2439,6 +2461,18 @@ static void test_battle_vectors() {
             CHECK(ok);
             continue;
         }
+        // A setup document outside the contract: the sim must refuse to read it.
+        if (v.contains("setup") && expect.contains("readable")) {
+            bool readable = true;
+            try {
+                (void)setup_from_json(v.at("setup").dump());
+            } catch (const std::exception&) {
+                readable = false;
+            }
+            want(readable == expect.at("readable").get<bool>(), "readable");
+            CHECK(ok);
+            continue;
+        }
         const json& sc = v.at("scenario");
         const std::string province = sc.at("province").get<std::string>();
         const std::string attacker = sc.at("attacker").get<std::string>();
@@ -2452,6 +2486,7 @@ static void test_battle_vectors() {
                 s.armies.at(it.key()).morale = it.value().get<int>();
         if (sc.contains("attacker_from")) s.armies.at(attacker).previous_province = sc.at("attacker_from").get<std::string>();
         if (sc.contains("fort_level")) s.provinces.at(province).fort_level = sc.at("fort_level").get<int>();
+        if (sc.contains("at_ymdh")) s.now = from_ymdh(ymdh_of(sc.at("at_ymdh")));
         auto men_of = [](const json& j) {
             MenDown m;
             m.killed = j.value("killed", 0);
@@ -2471,6 +2506,10 @@ static void test_battle_vectors() {
             if (expect.contains("mode")) {
                 want(setup.mode == expect.at("mode").get<std::string>(), "mode " + setup.mode);
                 want(setup_from_json(setup_to_json(setup)).mode == setup.mode, "mode survives the document");
+            }
+            if (expect.contains("hour_of_day")) {
+                want(setup.hour_of_day == expect.at("hour_of_day").get<int>(), "hour_of_day " + std::to_string(setup.hour_of_day));
+                want(setup_from_json(setup_to_json(setup)).hour_of_day == setup.hour_of_day, "the hour survives the document");
             }
             if (expect.contains("scenario_preset"))
                 want(setup.scenario_preset == expect.at("scenario_preset").get<std::string>(), "scenario_preset " + setup.scenario_preset);
@@ -2595,15 +2634,14 @@ static void test_battle_vectors() {
 
 static void test_shared_clause_vectors() {
     const std::string dir = g_vector_dir();
-    DIR* d = opendir(dir.c_str());
-    CHECK(d != nullptr);
-    if (!d) return;
+    bool found = false;
+    const std::vector<std::string> names = dir_file_names(dir, &found);
+    CHECK(found);
+    if (!found) return;
     std::vector<std::string> files;
-    while (auto* ent = readdir(d)) {
-        std::string n = ent->d_name;
+    for (const std::string& n : names) {
         if (n.size() > 5 && n.substr(n.size() - 5) == ".json" && n[0] != '_') files.push_back(n);
     }
-    closedir(d);
     std::sort(files.begin(), files.end());
     json base_ctx = json::parse(read_text_file(dir + "/_context.json"));
     for (const auto& file : files) {
@@ -2943,13 +2981,9 @@ static void test_halt_cancels_move() {
 static void test_halt_orders() {
     const std::string dir = g_vector_dir() + "/../campaign";
     std::vector<std::string> files;
-    if (DIR* d = opendir(dir.c_str())) {
-        while (dirent* e = readdir(d)) {
-            const std::string n = e->d_name;
-            if (n.size() > 5 && n.substr(n.size() - 5) == ".json" && (n.rfind("halt_", 0) == 0 || n.rfind("reject_halt", 0) == 0))
-                files.push_back(n);
-        }
-        closedir(d);
+    for (const std::string& n : dir_file_names(dir)) {
+        if (n.size() > 5 && n.substr(n.size() - 5) == ".json" && (n.rfind("halt_", 0) == 0 || n.rfind("reject_halt", 0) == 0))
+            files.push_back(n);
     }
     std::sort(files.begin(), files.end());
     CHECK(files.size() >= 5);
@@ -5800,6 +5834,9 @@ inline int run_all(Reporter& rep, const std::string& data_dir, const std::string
         {"desk_letters_do_not_stop_the_clock", test_desk_letters_do_not_stop_the_clock},
         {"pass_order_vectors", test_pass_order_vectors},
         {"pass_commander_vectors", test_pass_commander_vectors},
+        {"pass_hero_vectors", test_pass_hero_vectors},
+        {"hero_rules_are_data", test_hero_rules_are_data},
+        {"setup_carries_the_hour", test_setup_carries_the_hour},
         {"pass_people", test_pass_people},
         {"pass_politics", test_pass_politics},
         {"pass_decisions", test_pass_decisions},

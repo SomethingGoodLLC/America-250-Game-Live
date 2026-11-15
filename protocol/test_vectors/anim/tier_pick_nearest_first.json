@@ -1,0 +1,54 @@
+{
+ "name": "tier_pick_nearest_first",
+ "description": "the player is always full; then the nearest soldiers inside the switch distance, up to the count (the player counts as one)",
+ "motion_matching": true,
+ "budget": {
+  "full_quality_max": 4,
+  "switch_distance_m": 35
+ },
+ "hysteresis_m": 5,
+ "soldiers": [
+  {
+   "id": "player",
+   "distance_m": 0,
+   "player": true,
+   "was_full": false
+  },
+  {
+   "id": "a",
+   "distance_m": 30,
+   "player": false,
+   "was_full": false
+  },
+  {
+   "id": "b",
+   "distance_m": 4,
+   "player": false,
+   "was_full": false
+  },
+  {
+   "id": "c",
+   "distance_m": 12,
+   "player": false,
+   "was_full": false
+  },
+  {
+   "id": "d",
+   "distance_m": 20,
+   "player": false,
+   "was_full": false
+  },
+  {
+   "id": "e",
+   "distance_m": 50,
+   "player": false,
+   "was_full": false
+  }
+ ],
+ "expect_full": [
+  "player",
+  "b",
+  "c",
+  "d"
+ ]
+}

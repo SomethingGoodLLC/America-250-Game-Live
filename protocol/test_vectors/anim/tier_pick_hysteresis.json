@@ -1,0 +1,47 @@
+{
+ "name": "tier_pick_hysteresis",
+ "description": "a soldier already full stays full out to the switch distance plus the hysteresis; one who was not must come inside the switch distance",
+ "motion_matching": true,
+ "budget": {
+  "full_quality_max": 12,
+  "switch_distance_m": 35
+ },
+ "hysteresis_m": 5,
+ "soldiers": [
+  {
+   "id": "player",
+   "distance_m": 0,
+   "player": true,
+   "was_full": false
+  },
+  {
+   "id": "a",
+   "distance_m": 38,
+   "player": false,
+   "was_full": true
+  },
+  {
+   "id": "b",
+   "distance_m": 38,
+   "player": false,
+   "was_full": false
+  },
+  {
+   "id": "c",
+   "distance_m": 40,
+   "player": false,
+   "was_full": true
+  },
+  {
+   "id": "d",
+   "distance_m": 40.5,
+   "player": false,
+   "was_full": true
+  }
+ ],
+ "expect_full": [
+  "player",
+  "a",
+  "c"
+ ]
+}

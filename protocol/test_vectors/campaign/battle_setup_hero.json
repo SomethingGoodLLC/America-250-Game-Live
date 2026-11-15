@@ -1,0 +1,56 @@
+{
+ "name": "battle_setup_hero",
+ "description": "the player's general carries the hero kit and the ability of his first trait; the other side's general carries none; the setup says the hour",
+ "start_ymdh": {
+  "y": 1775,
+  "m": 4,
+  "d": 20,
+  "h": 0
+ },
+ "at_ymdh": {
+  "y": 1775,
+  "m": 4,
+  "d": 20,
+  "h": 5
+ },
+ "battle": {
+  "province": "lexington",
+  "attacker": "british_regulars",
+  "defender": "continental_militia"
+ },
+ "generals": {
+  "continental_militia": "artemas_ward",
+  "british_regulars": "francis_smith"
+ },
+ "expect_setup": {
+  "commander": {
+   "continental": "artemas_ward",
+   "british": "francis_smith"
+  },
+  "factor_rows": [
+   {
+    "faction": "continental",
+    "label": "commander",
+    "value": 1,
+    "source_has": "Artemas Ward commands"
+   }
+  ],
+  "morale": {
+   "continental": 78,
+   "british": 80
+  },
+  "hour_of_day": 5,
+  "hero": {
+   "faction": "continental",
+   "trait": "defensive",
+   "kind": "hold_fast",
+   "health_scale": 2.0,
+   "aura_radius_m": 45,
+   "rally_radius_m": 60,
+   "rally_cooldown_seconds": 20
+  },
+  "no_hero": [
+   "british"
+  ]
+ }
+}

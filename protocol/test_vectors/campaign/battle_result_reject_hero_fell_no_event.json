@@ -1,0 +1,35 @@
+{
+ "name": "battle_result_reject_hero_fell_no_event",
+ "description": "a hero said to have fallen with no commander event for his side is outside the contract: the result is unreadable",
+ "start_ymdh": {
+  "y": 1775,
+  "m": 4,
+  "d": 20,
+  "h": 0
+ },
+ "battle": {
+  "province": "lexington",
+  "attacker": "british_regulars",
+  "defender": "continental_militia"
+ },
+ "generals": {
+  "continental_militia": "artemas_ward",
+  "british_regulars": "francis_smith"
+ },
+ "result": {
+  "province_id": "lexington",
+  "winner": "british",
+  "end_reason": "army_broke",
+  "hero": {
+   "faction": "continental",
+   "person_id": "artemas_ward",
+   "takeovers": 1,
+   "seconds_played": 12,
+   "fell_while_played": true
+  }
+ },
+ "expect": {
+  "schema_valid": true,
+  "applied": false
+ }
+}

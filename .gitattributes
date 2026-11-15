@@ -3,3 +3,6 @@
 *.fbx filter=lfs diff=lfs merge=lfs -text
 *.blend filter=lfs diff=lfs merge=lfs -text
 *.glb filter=lfs diff=lfs merge=lfs -text
+# Shell scripts must keep LF on every machine: bash refuses CRLF (a Windows checkout with
+# core.autocrlf=true would otherwise rewrite them).
+*.sh text eol=lf

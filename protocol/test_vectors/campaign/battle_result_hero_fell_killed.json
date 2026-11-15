@@ -1,0 +1,55 @@
+{
+ "name": "battle_result_hero_fell_killed",
+ "description": "a general killed while the player leads him is gone from the campaign",
+ "start_ymdh": {
+  "y": 1775,
+  "m": 4,
+  "d": 20,
+  "h": 0
+ },
+ "battle": {
+  "province": "lexington",
+  "attacker": "british_regulars",
+  "defender": "continental_militia"
+ },
+ "generals": {
+  "continental_militia": "artemas_ward",
+  "british_regulars": "francis_smith"
+ },
+ "result": {
+  "province_id": "lexington",
+  "winner": "british",
+  "end_reason": "army_broke",
+  "commander_events": {
+   "continental": "killed"
+  },
+  "hero": {
+   "faction": "continental",
+   "person_id": "artemas_ward",
+   "takeovers": 3,
+   "seconds_played": 140.25,
+   "fell_while_played": true
+  }
+ },
+ "expect": {
+  "schema_valid": true,
+  "applied": true,
+  "persons": {
+   "artemas_ward": {
+    "status": "killed",
+    "role": ""
+   },
+   "francis_smith": {
+    "status": "",
+    "role": "general"
+   }
+  },
+  "report_commander_events": {
+   "continental": "killed"
+  },
+  "report_line_has": [
+   "You fought as General Artemas Ward",
+   "he fell while you led him"
+  ]
+ }
+}

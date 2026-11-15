@@ -12,7 +12,7 @@
 # Level: PA250_LEVEL (default L_Lexington). Output: Saved/PA250/debug_<label>.json and Saved/Logs/debug_<label>.log
 set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-ENGINE="${UE_ROOT:-/Users/Shared/Epic Games/UE_5.8}"
+. "$ROOT/scripts/_ue_env.sh"  # PA250_UE_CMD, PA250_PY, pa250_native (Mac and Windows)
 PROJECT="$ROOT/unreal/PlayAmerica250/PlayAmerica250.uproject"
 SAVED="$ROOT/unreal/PlayAmerica250/Saved/PA250"
 LOGDIR="$ROOT/unreal/PlayAmerica250/Saved/Logs"
@@ -22,8 +22,8 @@ TIMEOUT="${BATTLE_TIMEOUT:-420}"
 LABEL="$1"; shift
 mkdir -p "$SAVED" "$LOGDIR"
 rm -f "$SAVED/battle_result.json" "$SAVED/selftest_battle_result.json"
-"$ENGINE/Engine/Binaries/Mac/UnrealEditor-Cmd" "$PROJECT" "/Game/PA250/Maps/$LEVEL" -game -nullrhi -unattended -nosplash -nosound \
-  -PA250Selftest=battle "$@" -log "-abslog=$LOGDIR/debug_$LABEL.log" >/dev/null 2>&1 &
+"$PA250_UE_CMD" "$(pa250_native "$PROJECT")" "/Game/PA250/Maps/$LEVEL" -game -nullrhi -unattended -nosplash -nosound \
+  -PA250Selftest=battle "$@" -log "-abslog=$(pa250_native "$LOGDIR/debug_$LABEL.log")" >/dev/null 2>&1 &
 PID=$!; waited=0
 while kill -0 "$PID" 2>/dev/null; do
   sleep 3; waited=$((waited + 3))
@@ -33,7 +33,7 @@ wait "$PID" 2>/dev/null; RC=$?
 echo "$LABEL: game exit code $RC (${waited}s)"
 [ -f "$SAVED/battle_result.json" ] || { echo "no battle_result.json; see $LOGDIR/debug_$LABEL.log"; exit 1; }
 cp "$SAVED/battle_result.json" "$SAVED/debug_$LABEL.json"
-python3 - "$SAVED/debug_$LABEL.json" <<'PY'
+"$PA250_PY" - "$(pa250_native "$SAVED/debug_$LABEL.json")" <<'PY'
 import json, sys
 d = json.load(open(sys.argv[1])); t = d["trace"]; r = d["result"]
 print(f"  end reason {d['reason']} | winner {r['winner']} | {d['elapsed_game_seconds']:.0f} game-seconds")

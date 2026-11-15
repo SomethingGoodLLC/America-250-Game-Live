@@ -1,4 +1,5 @@
 #include "MusketWeapon.h"
+#include "Battle/PA250BattleFeel.h"
 #include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Kismet/GameplayStatics.h"
@@ -594,6 +595,13 @@ void AMusketWeapon::UpdateVisuals(float DeltaSeconds)
 	}
 }
 
+float AMusketWeapon::RamHandSlideCm(float SpotZ, float ForwardZ, float HeightCm, float MaxSlideCm)
+{
+	// Only a musket standing steeply (more than about 50 degrees up) is one he reaches up along.
+	if (ForwardZ < 0.77f || SpotZ >= HeightCm || MaxSlideCm <= 0.f) return 0.f;
+	return FMath::Clamp((HeightCm - SpotZ) / ForwardZ, 0.f, MaxSlideCm);
+}
+
 void AMusketWeapon::PoseSupportHand()
 {
 	// The soldier pack only has unarmed idle/walk/run, so the left arm is solved onto the musket's
@@ -637,6 +645,15 @@ void AMusketWeapon::PoseSupportHand()
 	// Reloading, the musket is parked on the body, not carried by the right hand: give the spot outright.
 	T.SpotCS = BodyToWorld.InverseTransformPosition(SpotWorld);
 	T.bSpotAbsolute = BodyPoseAlpha > 0.f; // from the first moment: the right hand is already leaving for the cartridge box
+	T.GunForwardCS = BodyToWorld.InverseTransformVectorNoScale(GetActorForwardVector());
+	if (T.bSpotAbsolute)
+	{
+		// Butt on the ground to ram: the musket's own spot is at his knee, out of a standing man's
+		// reach (his hand hung at his thigh). He holds the barrel higher (battle_feel.json reload).
+		const FPA250BattleFeel& Feel = PA250BattleFeel::Get();
+		T.SpotCS += T.GunForwardCS * RamHandSlideCm(static_cast<float>(T.SpotCS.Z), static_cast<float>(T.GunForwardCS.Z),
+			Feel.RamLeftHandHeightCm, Feel.RamLeftHandMaxSlideCm);
+	}
 	T.GunUpCS = BodyToWorld.InverseTransformVectorNoScale(GetActorUpVector());
 	T.GunForwardCS = BodyToWorld.InverseTransformVectorNoScale(GetActorForwardVector());
 	// Elbow out to his left, low and a little back, so the upper arm hangs beside the body instead of across it.

@@ -7,7 +7,7 @@ $id: "persons.v1"
 title: PersonsFile
 type: object
 additionalProperties: false
-required: [rules, abilities, traits, persons]
+required: [rules, abilities, traits, hero, persons]
 properties:
   note: {type: string}
   rules:
@@ -89,6 +89,77 @@ properties:
       adroit: {$ref: "#/definitions/trait"}
       engineer: {$ref: "#/definitions/trait"}
       popular: {$ref: "#/definitions/trait"}
+  hero:
+    type: object
+    additionalProperties: false
+    required: [basis, note, score, meter, kit, trait_abilities]
+    description: >-
+      GAME INVENTION (every rule and every number). The hero of a battle is the general who commands
+      the player's army. The player earns score in the fight (kills, posts taken, squads rallied) and
+      at score.threshold may take control of him where he stands. While he is played a meter drains
+      (meter.seconds from full to empty) and the same deeds refill it; at empty the player goes back
+      to his file and the general to his own judgement. An army with no general has no hero, and the
+      other side's general is never played. If he falls while played, BattleResult.commander_events
+      applies as for any general (rules.commander).
+    properties:
+      basis: {enum: [invented]}
+      note: {type: string, minLength: 1}
+      score:
+        type: object
+        additionalProperties: false
+        required: [threshold, kill, capture, rally]
+        properties:
+          threshold: {type: integer, minimum: 1, description: "Score at which the takeover is offered. Spent when it is taken."}
+          kill: {type: integer, minimum: 0}
+          capture: {type: integer, minimum: 0, description: "A post taken with the player on it."}
+          rally: {type: integer, minimum: 0, description: "A withdrawing or routing squad the player brought back."}
+      meter:
+        type: object
+        additionalProperties: false
+        required: [seconds, refill_kill_seconds, refill_capture_seconds, refill_rally_seconds]
+        properties:
+          seconds: {type: number, exclusiveMinimum: 0, description: "A full meter lasts this long with no deeds."}
+          refill_kill_seconds: {type: number, minimum: 0}
+          refill_capture_seconds: {type: number, minimum: 0}
+          refill_rally_seconds: {type: number, minimum: 0}
+      kit:
+        type: object
+        additionalProperties: false
+        required: [health_scale, aura_radius_m, rally_radius_m, rally_cooldown_seconds, sword, pistol]
+        description: "What every played general has. A person's own `hero` block may change the first three."
+        properties:
+          health_scale: {type: number, minimum: 1, description: "Times the officer class's health while played."}
+          aura_radius_m: {type: number, minimum: 0, description: "His aura while played; larger than rules.commander.aura_radius_m."}
+          rally_radius_m: {type: number, minimum: 0, description: "His rally reaches every friendly squad within this, not only the nearest."}
+          rally_cooldown_seconds: {type: number, minimum: 0}
+          sword:
+            type: object
+            additionalProperties: false
+            required: [damage, reach_cm, recover_seconds]
+            properties:
+              damage: {type: number, minimum: 0}
+              reach_cm: {type: number, minimum: 0}
+              recover_seconds: {type: number, minimum: 0}
+          pistol:
+            type: object
+            additionalProperties: false
+            required: [damage, range_m, reload_seconds]
+            properties:
+              damage: {type: number, minimum: 0}
+              range_m: {type: number, minimum: 0}
+              reload_seconds: {type: number, minimum: 0}
+      trait_abilities:
+        type: object
+        additionalProperties: false
+        required: [defensive, aggressive, steadfast, adroit, engineer, popular]
+        description: "One ability per trait. A played general has the ability of the FIRST trait in his `traits`."
+        properties:
+          defensive: {$ref: "#/definitions/hero_ability"}
+          aggressive: {$ref: "#/definitions/hero_ability"}
+          steadfast: {$ref: "#/definitions/hero_ability"}
+          adroit: {$ref: "#/definitions/hero_ability"}
+          engineer: {$ref: "#/definitions/hero_ability"}
+          popular: {$ref: "#/definitions/hero_ability"}
   persons:
     type: array
     minItems: 1
@@ -133,6 +204,31 @@ definitions:
             when: {enum: [always, attacking, defending, defending_own_ground]}
             label: {enum: [morale, readiness, reinforcement, fortification]}
             value: {type: integer}
+  hero_ability:
+    type: object
+    additionalProperties: false
+    required: [label, text, kind, radius_m, seconds, value, cooldown_seconds]
+    properties:
+      label: {type: string, minLength: 1}
+      text: {type: string, minLength: 1}
+      kind:
+        enum: [hold_fast, charge, steady, quick_step, throw_up_works, huzza]
+        description: >-
+          CLOSED set; what `value` means is the kind's.
+          hold_fast: for `seconds`, morale pressure on friendly squads within radius_m is multiplied by value.
+          charge: friendly squads within radius_m are ordered to charge, and for `seconds` the shock of
+          their charge is multiplied by value.
+          steady: at once, friendly squads within radius_m lose value of their morale pressure (0..1)
+          and their suppression.
+          quick_step: for `seconds`, friendly soldiers within radius_m move at value times their speed.
+          throw_up_works: a breastwork of value sections is raised where he stands (radius_m is its
+          length in metres; seconds is not used).
+          huzza: at once, every withdrawing or routing friendly squad within radius_m rallies, and for
+          `seconds` his side's reinforcements come value times faster.
+      radius_m: {type: number, minimum: 0}
+      seconds: {type: number, minimum: 0}
+      value: {type: number}
+      cooldown_seconds: {type: number, minimum: 0}
   person:
     type: object
     additionalProperties: false
@@ -162,6 +258,16 @@ definitions:
           role: {enum: [general, delegate, organizer, envoy]}
           army_id: {type: string}
       commander_in_chief: {type: boolean}
+      hero:
+        type: object
+        additionalProperties: false
+        required: [basis]
+        description: "A general's own hero kit numbers, in place of hero.kit's. Invented, like the rest."
+        properties:
+          basis: {enum: [invented]}
+          health_scale: {type: number, minimum: 1}
+          aura_radius_m: {type: number, minimum: 0}
+          rally_radius_m: {type: number, minimum: 0}
       informer:
         type: object
         additionalProperties: false

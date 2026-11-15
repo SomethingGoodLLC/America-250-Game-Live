@@ -8,7 +8,7 @@
 namespace pa250 {
 
 enum class Flow { Campaign, Battle, Diplomacy };
-const char* flow_name(Flow f);
+PA250_API const char* flow_name(Flow f);
 
 struct TraceEntry {
     int seq = 0;
@@ -19,7 +19,7 @@ struct TraceEntry {
     std::string detail;
 };
 
-class CampaignController {
+class PA250_API CampaignController {
 public:
     CampaignController() = default;
 

@@ -181,6 +181,9 @@ public:
 	void SetClothingSeed(uint32 Seed);
 	uint32 GetClothingSeed() const { return bClothingSeedSet ? ClothingSeed : 0; }
 	bool IsUsingPeriodSoldier() const { return bUsesPeriodSoldier; }
+	/** The battle's tier pick (battle_feel.json animation): motion matching for this soldier, or the cheap path. */
+	void SetAnimFullQuality(bool bFull) { bAnimFullQuality = bFull; }
+	bool IsAnimFullQuality() const { return bAnimFullQuality; }
 
 	/** Pure: uniforms tell the sides apart, so a label only appears close up - an enemy inside 15 m and in
 	 *  sight, a squadmate inside 25 m, any other friend inside 12 m. */
@@ -362,6 +365,14 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<UAnimSequence> SoldierRun;
 	bool bUsesPeriodSoldier = false;
+	bool bAnimFullQuality = false;
+	/** Debug run -PA250AnimProbe=move: the player walks, stops, turns about, runs and sprints on a
+	 *  fixed script, with stills and a log line a second (speed, gait, tier, left hand to the musket). */
+	void TickAnimProbe(float DeltaTime);
+	float AnimProbeTime = -1.f;
+	float AnimProbeLogTimer = 0.f;
+	int32 AnimProbeStills = 0;
+	FVector AnimProbeForward = FVector::ForwardVector;
 	uint32 ClothingSeed = 0;
 	bool bClothingSeedSet = false;
 	void UpdateSoldierAnimation();

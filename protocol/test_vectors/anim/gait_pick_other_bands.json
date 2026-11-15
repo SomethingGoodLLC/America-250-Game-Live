@@ -1,0 +1,27 @@
+{
+ "name": "gait_pick_other_bands",
+ "description": "the bands are the data's, not the code's",
+ "bands": {
+  "idle_max": 20,
+  "walk_max": 150,
+  "run_max": 400
+ },
+ "cases": [
+  {
+   "speed_cm_s": 10,
+   "gait": "idle"
+  },
+  {
+   "speed_cm_s": 149,
+   "gait": "walk"
+  },
+  {
+   "speed_cm_s": 220,
+   "gait": "run"
+  },
+  {
+   "speed_cm_s": 450,
+   "gait": "sprint"
+  }
+ ]
+}
