@@ -258,6 +258,7 @@ PA250BattleCards::FAfter PA250BattleCards::AfterBattle(const pa250::BattleReport
 	{
 		A.Notes.Add(FString::Printf(TEXT("Gathered from the field: %d cartridges, %d powder, %d muskets"), Report.scavenged_cartridges, Report.scavenged_powder, Report.scavenged_muskets));
 	}
+	// Net morale only: commander-fall lines already live in MapChanges when a general fell.
 	if (Morale != 0) A.Notes.Add(FString::Printf(TEXT("Your army's morale: %+d"), Morale));
 	if (Report.local_support_after != Report.local_support_before)
 	{

@@ -32,7 +32,10 @@ properties:
         type: object
         additionalProperties: false
         required: [shift_per_week]
-        properties: {shift_per_week: {type: integer}}
+        properties:
+          shift_per_week: {type: integer, description: "Lean shift each Monday while a delegate sits with the bloc."}
+          seat_shift: {type: integer, description: "GAME INVENTION. Lean shift applied once when he is seated (so the floor moves at once)."}
+          reseat_hours: {type: integer, minimum: 0, description: "GAME INVENTION. Hours before a seated delegate may be relieved and moved."}
       envoy:
         type: object
         additionalProperties: false
@@ -56,7 +59,8 @@ properties:
               killed: {type: integer, minimum: 0}
               captured: {type: integer, minimum: 0}
           wounded_days: {type: integer, minimum: 1}
-          army_morale_on_fall: {type: integer}
+          army_morale_on_fall: {type: integer, description: "Campaign morale when the general falls and his side lost (or the day was drawn against them)."}
+          army_morale_on_fall_victory: {type: integer, description: "Campaign morale when the general falls but his side won. Default 0: the army is still a detachment, but a win does not net negative from the fall alone."}
       estimates:
         type: object
         additionalProperties: false

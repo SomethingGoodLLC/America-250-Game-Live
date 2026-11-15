@@ -5,7 +5,7 @@
     "army_unit_cap": 40,
     "muster_buildings": ["militia_muster", "fort"],
     "organizer": {"support_per_month": 1, "muster_hours_pct": 75},
-    "delegate": {"shift_per_week": 3},
+    "delegate": {"shift_per_week": 3, "seat_shift": 3, "reseat_hours": 168},
     "envoy": {"attitude_once": 5},
     "commander": {
       "aura_radius_m": 30,
@@ -14,7 +14,8 @@
       "fall_pressure_seconds": 10,
       "fall_fate_pct": {"wounded": 60, "killed": 25, "captured": 15},
       "wounded_days": 21,
-      "army_morale_on_fall": -8
+      "army_morale_on_fall": -8,
+      "army_morale_on_fall_victory": 0
     },
     "estimates": {"step_men": 20, "width_pct": 30},
     "informer": {"exposed_local_support": 2}

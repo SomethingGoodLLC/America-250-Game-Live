@@ -70,6 +70,8 @@ PLAYAMERICA250_API FString OrderRefusal(const FString& Code);
 struct FBloc
 {
 	FString Id, Name, Lean, Moves, Delegate;
+	/** Why the seated delegate cannot be relieved yet (the week's cooldown), when that is so. */
+	FString Hint;
 	TArray<FAction> Actions;
 };
 struct FMeasure
@@ -89,6 +91,10 @@ struct FFloor
 	TArray<FString> AtSea;      // dispatches in transit, with their dates
 };
 PLAYAMERICA250_API FFloor Floor(const pa250::CampaignState& State);
+/** Pure: rebuild key for the floor panel (not HudEpoch). Changes when what the floor shows changes. */
+PLAYAMERICA250_API FString FloorSignature(const pa250::CampaignState& State);
+/** Pure: rebuild key for the people panel (includes selection). */
+PLAYAMERICA250_API FString PeopleSignature(const pa250::CampaignState& State, const FString& SelectedArmyId, const FString& SelectedProvinceId);
 
 struct FDecisionOption
 {
@@ -108,8 +114,9 @@ PLAYAMERICA250_API FDecision Decision(const pa250::CampaignState& State);
 PLAYAMERICA250_API TArray<FAction> CardAgents(const pa250::CampaignState& State);
 
 using FIssue = TFunction<void(const FString& OrderJson)>;
-TSharedRef<SWidget> BuildPeople(const pa250::CampaignState& State, const FString& SelectedArmyId, const FString& SelectedProvinceId, FIssue Issue, TFunction<void()> Close);
-TSharedRef<SWidget> BuildFloor(const pa250::CampaignState& State, FIssue Issue, TFunction<void()> Close);
+TSharedRef<SWidget> BuildPeople(const pa250::CampaignState& State, const FString& SelectedArmyId, const FString& SelectedProvinceId, FIssue Issue, TFunction<void()> Close, float WrapWidth = 520.f);
+/** WrapWidth is the text wrap (panel width less padding); matches FloorPanelWidth. */
+TSharedRef<SWidget> BuildFloor(const pa250::CampaignState& State, FIssue Issue, TFunction<void()> Close, float WrapWidth = 640.f);
 TSharedRef<SWidget> BuildDecision(const pa250::CampaignState& State, FIssue Issue, const FSlateBrush* Painting);
 TSharedRef<SWidget> BuildCardAgents(const pa250::CampaignState& State, FIssue Issue);
 }

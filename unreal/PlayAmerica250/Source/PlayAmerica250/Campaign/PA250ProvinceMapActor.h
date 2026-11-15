@@ -48,6 +48,8 @@ public:
 	FString ProvinceAtWorld(const FVector& World) const;
 	/** Army whose round counter is under this world point, or empty. */
 	FString ArmyAtWorld(const FVector& World) const;
+	/** Province whose brass mission mark is under this world point, or empty. */
+	FString MissionTargetAtWorld(const FVector& World) const;
 	FString ProvinceForArmy(const FString& ArmyId) const;
 	bool WorldToUV(const FVector& World, FVector2D& OutUV) const;
 	FVector UVToWorld(FVector2D UV, float ZOffset = 2.f) const;
@@ -74,10 +76,11 @@ public:
 	FString DescribeArmyTokens() const;
 	/**
 	 * Hover text for an army (preferred) or a town, from read-only sim state. Your own force shows
-	 * strength and destination; enemy strength and destination stay unreported.
+	 * strength and destination; enemy strength and destination stay unreported. A mission-target
+	 * town also names the active mission (the brass "(!)" mark).
 	 */
 	FString DescribeHover(const FString& ArmyId, const FString& ProvinceId) const;
-	/** World XY box of what is drawn for the hovered army (figures + plate) or town (mark + caption). */
+	/** World XY box of what is drawn for the hovered army (figures + plate) or town (mark + caption + mission "(!)"). */
 	FBox2D HoverWorldBox(const FString& ArmyId, const FString& ProvinceId) const;
 	void PanByUV(FVector2D DeltaUV);
 	/** Absolute pan target (screen-space drag); clamped to what the camera can show. */
@@ -177,7 +180,7 @@ protected:
 	/** Per frame: ease each token toward its sim position (presentation only; the sim stays hourly). */
 	void MoveArmyTokens(float DeltaSeconds);
 	void RefreshBattleMarker();
-	/** A brass mark beside each town the player's current mission points at (all 13 towns can be targets). */
+	/** A brass "(!)" beside each town the player's current mission points at; hover explains it. */
 	void RefreshMissionMarkers();
 	/** "S 3 days" over every town under siege, either side. */
 	void RefreshSiegeMarkers();
@@ -220,6 +223,8 @@ protected:
 	TObjectPtr<UTextRenderComponent> BattleMarker;
 	UPROPERTY()
 	TArray<TObjectPtr<UTextRenderComponent>> MissionMarkers;
+	/** Province id for each MissionMarkers[i] (parallel; empty when that slot is unused). */
+	TArray<FString> MissionMarkerTowns;
 	int32 MissionMarkerHudEpoch = -1;
 	UPROPERTY()
 	TArray<TObjectPtr<UTextRenderComponent>> SiegeMarkers;

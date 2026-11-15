@@ -1,0 +1,48 @@
+{
+ "name": "battle_result_commander_wounded_victory",
+ "description": "a general wounded on the winning side: army is a detachment again, but army_morale_on_fall_victory (0) means no fall morale hit",
+ "start_ymdh": {
+  "y": 1775,
+  "m": 4,
+  "d": 20,
+  "h": 0
+ },
+ "battle": {
+  "province": "lexington",
+  "attacker": "continental_militia",
+  "defender": "british_regulars"
+ },
+ "generals": {
+  "continental_militia": "artemas_ward",
+  "british_regulars": "francis_smith"
+ },
+ "result": {
+  "province_id": "lexington",
+  "winner": "continental",
+  "end_reason": "army_broke",
+  "commander_events": {
+   "continental": "wounded"
+  }
+ },
+ "expect": {
+  "schema_valid": true,
+  "applied": true,
+  "persons": {
+   "artemas_ward": {
+    "status": "wounded",
+    "role": ""
+   },
+   "francis_smith": {
+    "status": "",
+    "role": "general"
+   }
+  },
+  "away_days": {
+   "artemas_ward": 21
+  },
+  "report_commander_events": {
+   "continental": "wounded"
+  },
+  "winner_fall_morale_zero": true
+ }
+}

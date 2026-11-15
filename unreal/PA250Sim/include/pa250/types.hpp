@@ -516,6 +516,7 @@ struct PersonState {
     int uses_left = -1;     // agent: -1 = as the data gives
     std::string status;     // "" | wounded | killed | captured | away | recalled | exposed
     int64_t away_until_hour = 0;  // wounded / away: back at hand at this hour
+    int64_t seated_hour = 0;      // delegate: hour he was seated (reseat cooldown)
     bool unlocked = false;  // a measure made him available
     bool envoy_counted = false;  // the envoy's one-time Attitude was given
 };
@@ -877,6 +878,8 @@ struct BattleRules {
     float army_broke_min_elapsed_seconds = 120.f;
     int army_broke_min_squads = 3;
     int army_broke_morale_penalty = 25;
+    int morale_victory = 5;            // battle_rules.json morale.victory, added to each winning army
+    int morale_defeat = 20;            // ordinary defeat; army_broke uses army_broke_morale_penalty instead
     float posts_swept_seconds = 20.f;
     float posts_swept_min_elapsed_seconds = 60.f;
     float resupply_seconds = 4.f;
@@ -889,6 +892,9 @@ struct BattleRules {
     float cannon_prime_lay_seconds = 5.f;      // prime and lay
     float cannon_untrained_scale = 1.6f;       // the drill is this much slower for men who are not gunners
     float cannon_traverse_deg_per_second = 8.f;
+    float cannon_elevation_min_deg = -5.f;     // how far the piece may dip
+    float cannon_elevation_max_deg = 15.f;     // how far it may raise
+    float cannon_elevation_deg_per_second = 6.f;
     float cannon_round_range_m = 350.f;
     float cannon_round_speed_m = 160.f;        // metres a second (slow enough to be seen)
     float cannon_round_damage = 400.f;
@@ -899,9 +905,16 @@ struct BattleRules {
     float cannon_works_damage = 160.f;         // what one round shot batters off a field work
     float cannon_pressure = 0.5f;              // the morale check on a squad under cannon fire...
     float cannon_pressure_seconds = 8.f;       // ...fading over this long
-    float cannon_canister_range_m = 70.f;      // inside this the crew fires canister
-    int cannon_canister_balls = 20;
-    float cannon_canister_cone_degrees = 6.f;
+    float cannon_grape_range_m = 70.f;         // inside this AI fires grape (was canister)
+    int cannon_grape_balls = 20;
+    float cannon_grape_cone_degrees = 6.f;
+    float cannon_shell_range_m = 300.f;        // exploding shell (GAME INVENTION)
+    float cannon_shell_speed_m = 120.f;
+    float cannon_shell_fuse_min_m = 40.f;
+    float cannon_shell_blast_radius_cm = 400.f;
+    float cannon_shell_damage = 120.f;
+    float cannon_shell_works_damage = 80.f;
+    float cannon_shell_spread_degrees = 1.f;
     float cannon_push_speed_cm = 70.f;         // a crew pushes its gun this fast
     float cannon_follow_gap_m = 80.f;          // a gun this far behind its side's nearest squad is pushed up
     float cannon_capture_radius_cm = 500.f;    // enemies this close with no crew by the gun overrun it...

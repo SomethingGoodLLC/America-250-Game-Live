@@ -86,6 +86,18 @@ public:
 	/** Mission tracker: fold it down to its one-line heading (so it stops covering what is under it), or open it again. */
 	void PressTrackerToggle();
 	bool IsTrackerMinimized() const { return bTrackerMinimized; }
+	/** Mission tree: the full linear path (EU4-style chain). */
+	void PressMissionTreeToggle();
+	bool IsMissionTreeOpen() const { return bShowMissionTree; }
+	/** Find (F): jump to a town or army by name. */
+	void PressFindToggle();
+	bool IsFindOpen() const { return bShowFind; }
+	void FindJumpTo(const FString& Kind, const FString& Id);
+	/** Reorganize: move companies between idle armies in the same town. */
+	void PressReorganizeToggle();
+	bool IsReorganizeOpen() const { return bShowReorganize; }
+	bool CanReorganizeSelected() const;
+	void TransferUnits(const FString& FromArmy, const FString& ToArmy, const FString& UnitClass, int32 Count);
 	/** The HUD's width in Slate units (the UI is scaled by the window's height, so a 16:10 window
 	 *  is narrower in units than a 16:9 one of any size). */
 	float HudWidthUnits() const;
@@ -115,7 +127,7 @@ public:
 	static constexpr float TownsPanelWidth = 250.f;
 	static constexpr float TreasuryPanelWidth = 460.f;
 	/** The selected army's panel: bottom left, to the right of the town panel. */
-	static constexpr float ArmyPanelLeft = 492.f;  // Slate units: the town panel is 472 wide
+	static constexpr float ArmyPanelLeft = 580.f;  // Slate units: the town panel is 560 wide, inset 10, plus a gap
 	static constexpr float ArmyPanelWidth = 470.f;
 	/** Towns list (right): one line per town the player holds, with what is under way there. */
 	FText TownRowStatus(const FString& ProvinceId) const;
@@ -218,10 +230,24 @@ private:
 	TArray<TPair<FString, TSharedPtr<class SWidget>>> BarPieces;
 	bool bShowPeople = false;
 	bool bShowFloor = false;
+	bool bShowMissionTree = false;
+	bool bShowFind = false;
+	bool bShowReorganize = false;
+	FString FindQuery;
+	/** The find field stays alive while the panel is open. Rebuilding it on each letter drops focus, so "Lex" never lands. */
+	TSharedPtr<class SEditableTextBox> FindField;
+	TSharedPtr<class SVerticalBox> FindHits;
+	bool bFindFocusPending = false;
+	/** Escape is handled inside the text field; the field is destroyed on the next tick, not under its own key handler. */
+	bool bFindDismiss = false;
+	FString ReorganizeOtherArmyId;
 	TSharedPtr<class SBox> PeopleBox;
 	TSharedPtr<class SBox> FloorBox;
 	TSharedPtr<class SBox> DecisionBox;
 	TSharedPtr<class SBox> StoryBox;
+	TSharedPtr<class SBox> MissionTreeBox;
+	TSharedPtr<class SBox> FindBox;
+	TSharedPtr<class SBox> ReorganizeBox;
 	bool bStoryUp = false;
 	bool bStoryReady = false;   // the battle level is in memory
 	bool bStoryLeaving = false;
@@ -232,8 +258,14 @@ private:
 	FString PeopleKey;
 	FString FloorKey;
 	FString DecisionKey;
+	FString MissionTreeKey;
+	FString ReorganizeKey;
 	/** Rebuilds the people panel, the floor and the decision screen when what they show changes. */
 	void RefreshPassPanels();
+	void RefreshMissionTreePanel();
+	void RefreshFindPanel();
+	void RebuildFindHits();
+	void RefreshReorganizePanel();
 	/** The painting behind a decision (a placeholder wash until the picture is supplied). */
 	UPROPERTY(Transient)
 	TObjectPtr<class UTexture2D> DecisionTexture;

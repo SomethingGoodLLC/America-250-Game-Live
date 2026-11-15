@@ -33,6 +33,21 @@ struct FTracker
 /** SelectedArmyId may be empty. */
 PLAYAMERICA250_API FTracker Tracker(const pa250::CampaignState& State, const FString& SelectedArmyId);
 
+/** One node on the mission tree (the player's linear path). */
+struct FMissionNode
+{
+	FString Id;
+	int32 Index = 0;       // 1-based among the player's missions
+	int32 Total = 0;
+	FString Title;
+	FString Goal;
+	FString Status;        // locked | active | complete | failed
+	FString Progress;      // live text when active; otherwise empty or "Not before …"
+	FString Deadline;
+};
+/** Pure: every mission of the player's faction in file order. */
+PLAYAMERICA250_API TArray<FMissionNode> MissionTree(const pa250::CampaignState& State);
+
 /** The card shown once when a mission of the player's ends: what happened and what it paid or cost. */
 struct FMissionCard
 {
@@ -48,6 +63,10 @@ PLAYAMERICA250_API FMissionCard MissionCard(const pa250::MissionResult& Result, 
 /** Standing notices for an army that cannot besiege where it stands or where it is marching (it has
  *  no general), with how to get one. Empty when nothing of the kind applies. */
 PLAYAMERICA250_API TArray<FString> SiegeNotices(const pa250::CampaignState& State);
+
+/** Hover line for the brass mission mark on a town: empty unless that town is a target of the
+ *  player's active mission; otherwise "Mission: {title} — {goal}". */
+PLAYAMERICA250_API FString MissionTargetHoverLine(const pa250::CampaignState& State, const FString& ProvinceId);
 
 /** The end screen. */
 struct FEnd

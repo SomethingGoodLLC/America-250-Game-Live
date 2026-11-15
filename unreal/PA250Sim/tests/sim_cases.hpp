@@ -246,6 +246,7 @@ static void test_monthly_supply_once() {
     s.now = from_ymdh({1775, 4, 30, 23});
     const int before_b = s.supplies["british"];
     const int before_c = s.supplies["continental"];
+    const int gold0 = s.player_gold;
     TickOutput t0 = advance_hour(s);  // -> May 1 00:00
     s = t0.state;
     YMDH y = to_ymdh(s.now);
@@ -254,6 +255,16 @@ static void test_monthly_supply_once() {
     const int mid_c = s.supplies["continental"];
     CHECK(mid_b > before_b);
     CHECK(mid_c > before_c);
+    // Opening holdings settle +21 (120→141); fresh() may use a different purse, but net is +21.
+    CHECK(s.player_gold == gold0 + 21);
+    bool town_levy = false, settled = false;
+    for (const auto& ch : s.resource_changes) {
+        if (ch.hour_index != s.now.hour_index) continue;
+        if (ch.reason.find("Town levy,") == 0) town_levy = true;
+        if (ch.reason.find("Month settled:") == 0) settled = true;
+    }
+    CHECK(town_levy);
+    CHECK(settled);
     TickOutput t1 = advance_hour(s);  // May 1 01:00 — no second accrual
     s = t1.state;
     CHECK(s.supplies["british"] == mid_b);
@@ -441,14 +452,14 @@ static void test_battle_personal_kills_morale() {
     r.losses[kBritish]["line_infantry"] = 1;
     r.personal_kills = 4;
     CampaignState after = apply_battle_result(s, r);
-    CHECK(after.armies.at("continental_militia").morale == morale0 + 5 + 4);
+    CHECK(after.armies.at("continental_militia").morale == morale0 + pa250::battle_rules().morale_victory + 4);
     CHECK(after.progress.last_battle_report.personal_kills == 4);
     CHECK(after.progress.last_battle_report.morale_delta.at("continental_militia") == 9);
     // Cap at +5 from personal kills.
     s.pending_battle = {true, "lexington", "british_regulars", "continental_militia"};
     r.personal_kills = 20;
     CampaignState capped = apply_battle_result(s, r);
-    CHECK(capped.armies.at("continental_militia").morale == morale0 + 5 + 5);
+    CHECK(capped.armies.at("continental_militia").morale == morale0 + pa250::battle_rules().morale_victory + 5);
 }
 
 static void test_battle_scavenge_from_losses() {
@@ -543,8 +554,8 @@ static void test_battle_shots_spend_report() {
     CHECK(report_powder == 5);
     CHECK(after.province_stores.at("lexington").cartridges == br.scavenged_cartridges);
     CHECK(after.province_stores.at("lexington").powder == br.scavenged_powder);
-    // Loser-side personal kills: -20 for the loss, +3 for his own kills.
-    CHECK(after.armies.at("continental_militia").morale == 70 - 20 + 3);
+    // Loser-side personal kills: morale.defeat for the loss, +3 for his own kills.
+    CHECK(after.armies.at("continental_militia").morale == 70 - pa250::battle_rules().morale_defeat + 3);
     CHECK(br.personal_kills == 3);
     // The new report/result fields survive the save and the wire formats.
     CampaignState loaded = deserialize(serialize(after));
@@ -558,6 +569,46 @@ static void test_battle_shots_spend_report() {
     const std::string report_json = report_to_json(br);
     CHECK(report_json.find("\"loser_fate\":\"retreated\"") != std::string::npos);
     CHECK(report_json.find("\"scavenged_cartridges\":") != std::string::npos);
+}
+
+static void test_battle_morale_is_data() {
+    const std::string original = read_text_file(g_data_dir() + "/battle_rules.json");
+    load_battle_rules(original);
+    CHECK(battle_rules().morale_victory == 5);
+    CHECK(battle_rules().morale_defeat == 20);
+    std::string changed = original;
+    const auto swap = [](std::string& s, const std::string& from, const std::string& to) {
+        const auto p = s.find(from);
+        CHECK(p != std::string::npos);
+        if (p != std::string::npos) s.replace(p, from.size(), to);
+    };
+    swap(changed, "\"victory\": 5", "\"victory\": 11");
+    swap(changed, "\"defeat\": 20", "\"defeat\": 7");
+    load_battle_rules(changed);
+    CHECK(battle_rules().morale_victory == 11 && battle_rules().morale_defeat == 7);
+    CampaignState s = fresh();
+    s.armies["british_regulars"].province = "lexington";
+    s.armies["continental_militia"].province = "lexington";
+    s.armies["continental_militia"].morale = 70;
+    s.province_stores["lexington"].muskets = 20;
+    s.province_stores["lexington"].cartridges = 80;
+    s.pending_battle = {true, "lexington", "british_regulars", "continental_militia"};
+    BattleResult win;
+    win.province_id = "lexington";
+    win.winner = kContinental;
+    win.objective_holder = kContinental;
+    win.losses[kBritish]["line_infantry"] = 1;
+    CHECK(apply_battle_result(s, win).armies.at("continental_militia").morale == 70 + 11);
+    BattleResult loss = win;
+    loss.winner = kBritish;
+    loss.objective_holder = kBritish;
+    loss.losses.clear();
+    loss.losses[kContinental]["militia"] = 1;
+    loss.retreat_province = "lincoln";
+    s.pending_battle = {true, "lexington", "british_regulars", "continental_militia"};
+    CHECK(apply_battle_result(s, loss).armies.at("continental_militia").morale == 70 - 7);
+    load_battle_rules(original);
+    CHECK(battle_rules().morale_victory == 5 && battle_rules().morale_defeat == 20);
 }
 
 // ---- Phase 1: battles read the campaign ---------------------------------
@@ -5536,9 +5587,17 @@ static void test_treasury() {
     CHECK(view.at("income_total").get<int>() > 0);
     CHECK(view.at("expense_total").get<int>() > 0);  // the seeded militia draws pay
     CHECK(view.at("net").get<int>() == monthly_net_gold(s));
+    CHECK(view.at("on_date_levy").get<bool>());
+    CHECK(view.at("levy_towns").is_array());
+    CHECK(view.at("levy_towns").size() > 0);
     int levy = 0;
+    int towns_held = 0;
     for (const auto& pk : s.provinces)
-        if (pk.second.owner == s.player_faction) levy += town_levy_gold(pk.second);
+        if (pk.second.owner == s.player_faction) {
+            levy += town_levy_gold(pk.second);
+            ++towns_held;
+        }
+    CHECK(static_cast<int>(view.at("levy_towns").size()) == towns_held);
     const int net = monthly_net_gold(s);
     CampaignState m = s;
     m.player_gold += levy;  // the clock credits the levy, then calls the monthly tick
@@ -5546,6 +5605,29 @@ static void test_treasury() {
     CHECK(m.player_gold == 100 + net);
     CHECK(m.progress.treasury_debt == 0);
     CHECK(m.progress.pay_arrears_months == 0);
+    bool month_line = false;
+    for (const auto& ch : m.resource_changes)
+        if (ch.reason.find("Month settled:") == 0 && ch.reason.find("Held on the 1st only") != std::string::npos)
+            month_line = true;
+    CHECK(month_line);
+    // On-date rule: a town lost before the 1st pays nothing that month (no pro-rata).
+    {
+        CampaignState lost = s;
+        const int before_levy = levy;
+        CHECK(lost.provinces.at("lexington").owner == s.player_faction);
+        const int lex = town_levy_gold(lost.provinces.at("lexington"));
+        lost.provinces.at("lexington").owner = kBritish;
+        int after_levy = 0;
+        for (const auto& pk : lost.provinces)
+            if (pk.second.owner == lost.player_faction) after_levy += town_levy_gold(pk.second);
+        CHECK(after_levy == before_levy - lex);
+        const auto lost_view = nlohmann::json::parse(treasury_json(lost));
+        bool named = false;
+        for (const auto& row : lost_view.at("levy_towns"))
+            if (row.at("label").get<std::string>() == "Lexington") named = true;
+        CHECK(!named);
+        CHECK(static_cast<int>(lost_view.at("levy_towns").size()) == towns_held - 1);
+    }
     // Workshops turn out muskets into their own town's magazine.
     CHECK(s.provinces.at("concord").workshop_level == 1);
     CHECK(m.province_stores.at("concord").muskets == s.province_stores.at("concord").muskets + 1);
@@ -5784,6 +5866,7 @@ inline int run_all(Reporter& rep, const std::string& data_dir, const std::string
         {"battle_retreat_destination", test_battle_retreat_destination},
         {"battle_morale_shatter", test_battle_morale_shatter},
         {"battle_personal_kills_morale", test_battle_personal_kills_morale},
+        {"battle_morale_is_data", test_battle_morale_is_data},
         {"battle_scavenge_from_losses", test_battle_scavenge_from_losses},
         {"battle_shots_spend_report", test_battle_shots_spend_report},
         {"field_strength_split", test_field_strength_split},

@@ -63,6 +63,9 @@ FString PA250PassPanels::OrderRefusal(const FString& Code)
 		{TEXT("wrong_role"), TEXT("He cannot serve in that role.")},
 		{TEXT("town_has_organizer"), TEXT("That town has an organizer already.")},
 		{TEXT("unknown_bloc"), TEXT("That bloc does not sit in the body now meeting.")},
+		{TEXT("bloc_taken"), TEXT("That bloc already has a delegate.")},
+		{TEXT("recently_seated"), TEXT("He was only just seated: wait out the week before you move him.")},
+		{TEXT("order_already_given"), TEXT("That order is already on its way.")},
 		{TEXT("already_have_envoy"), TEXT("You have an envoy already.")},
 		{TEXT("no_uses_left"), TEXT("He has done all he can.")},
 		{TEXT("no_battle_pending"), TEXT("The alarm is raised when the enemy is upon a town you defend.")},
@@ -77,6 +80,14 @@ FString PA250PassPanels::OrderRefusal(const FString& Code)
 		{TEXT("not_before_it_returns"), TEXT("It failed: it cannot be put again until it returns.")},
 		{TEXT("needs_person"), TEXT("Someone must be named to go.")},
 		{TEXT("not_pending"), TEXT("That decision is not before you.")},
+		{TEXT("allied_company"), TEXT("That company keeps its own captain: it is never merged.")},
+		{TEXT("not_same_town"), TEXT("Both armies must stand idle in the same town.")},
+		{TEXT("not_your_army"), TEXT("That army is not yours.")},
+		{TEXT("army_on_the_march"), TEXT("An army on the march cannot be reorganized.")},
+		{TEXT("no_units"), TEXT("Name the companies to move.")},
+		{TEXT("not_enough_units"), TEXT("That army has not that many of that class.")},
+		{TEXT("over_cap"), TEXT("The receiving army cannot take that many more companies.")},
+		{TEXT("same_army"), TEXT("Choose two different armies.")},
 	};
 	const FString* Found = Words.Find(Code);
 	return Found ? *Found : FString::Printf(TEXT("The order was refused (%s)."), *Code.Replace(TEXT("_"), TEXT(" ")));
@@ -217,7 +228,10 @@ TArray<PA250PassPanels::FPersonRow> PA250PassPanels::People(const pa250::Campaig
 				};
 				if (!Role.IsEmpty())
 				{
-					Offer(TEXT("Relieve"), PassOrder({{TEXT("order"), TEXT("relieve_person")}, {TEXT("person"), Row.Id}}), TEXT("He gives up his role and is at hand again."));
+					const FString Order = PassOrder({{TEXT("order"), TEXT("relieve_person")}, {TEXT("person"), Row.Id}});
+					Offer(TEXT("Relieve"), Order, TEXT("He gives up his role and is at hand again."));
+					if (Row.Actions.Num() == 0)
+						Row.Hint = OrderRefusal(PassF(pa250::validate_campaign_order(State, PassStd(Order))));
 				}
 				else
 				{
@@ -246,29 +260,31 @@ TArray<PA250PassPanels::FPersonRow> PA250PassPanels::People(const pa250::Campaig
 				}
 				if (!AbilityId.IsEmpty() && UsesLeft > 0)
 				{
+					// A refusal already explained (a delegate seated this week) stays; the ability note is the fallback.
+					auto Note = [&](const TCHAR* Text) { if (Row.Hint.IsEmpty()) Row.Hint = Text; };
 					if (AbilityId == TEXT("scout"))
 					{
-						if (EnemyHere.IsEmpty()) Row.Hint = TEXT("Select a town where an enemy army stands, to have it counted.");
+						if (EnemyHere.IsEmpty()) Note(TEXT("Select a town where an enemy army stands, to have it counted."));
 						else Offer(FString::Printf(TEXT("Scout %s"), *EnemyName), PassOrder({{TEXT("order"), TEXT("use_agent")}, {TEXT("person"), Row.Id}, {TEXT("army_id"), EnemyHere}}), TEXT("Its true strength is known for a week."));
 					}
 					else if (AbilityId == TEXT("boats"))
 					{
-						if (SelArmy.IsEmpty()) Row.Hint = TEXT("Select one of your armies, to find it boats.");
+						if (SelArmy.IsEmpty()) Note(TEXT("Select one of your armies, to find it boats."));
 						else Offer(FString::Printf(TEXT("Boats for %s"), *ArmyName), PassOrder({{TEXT("order"), TEXT("use_agent")}, {TEXT("person"), Row.Id}, {TEXT("army_id"), SelArmy}}), TEXT("It may cross by the ferries and boat routes for three days."));
 					}
 					else if (AbilityId == TEXT("engineer"))
 					{
-						if (SelProvince.IsEmpty()) Row.Hint = TEXT("Select a town you hold, to have works laid out there.");
+						if (SelProvince.IsEmpty()) Note(TEXT("Select a town you hold, to have works laid out there."));
 						else Offer(FString::Printf(TEXT("Works at %s"), *Town), PassOrder({{TEXT("order"), TEXT("use_agent")}, {TEXT("person"), Row.Id}, {TEXT("province"), SelProvince}}), TEXT("One more level of fortification for its defenders, for two weeks."));
 					}
 					else if (AbilityId == TEXT("pen"))
 					{
-						if (SelProvince.IsEmpty()) Row.Hint = TEXT("Select a town you hold, to have her write for it.");
+						if (SelProvince.IsEmpty()) Note(TEXT("Select a town you hold, to have her write for it."));
 						else Offer(FString::Printf(TEXT("Write for %s"), *Town), PassOrder({{TEXT("order"), TEXT("use_agent")}, {TEXT("person"), Row.Id}, {TEXT("province"), SelProvince}}), TEXT("Support rises."));
 					}
 					else if (AbilityId == TEXT("alarm"))
 					{
-						Row.Hint = TEXT("Spent on the card before a battle you defend.");
+						Note(TEXT("Spent on the card before a battle you defend."));
 					}
 				}
 			}
@@ -300,7 +316,8 @@ PA250PassPanels::FFloor PA250PassPanels::Floor(const pa250::CampaignState& State
 	}
 	// A delegate at hand with no role, to be seated.
 	FString FreeDelegate, FreeDelegateName;
-	if (const TSharedPtr<FJsonObject> People = PassParse(pa250::persons_json(State)); People.IsValid() && People->HasField(TEXT("persons")))
+	const TSharedPtr<FJsonObject> People = PassParse(pa250::persons_json(State));
+	if (People.IsValid() && People->HasField(TEXT("persons")))
 	{
 		for (const TSharedPtr<FJsonValue>& V : People->GetArrayField(TEXT("persons")))
 		{
@@ -322,6 +339,20 @@ PA250PassPanels::FFloor PA250PassPanels::Floor(const pa250::CampaignState& State
 		Bloc.Lean = LeanWords(B->GetIntegerField(TEXT("lean")));
 		Bloc.Moves = B->GetStringField(TEXT("moves"));
 		Bloc.Delegate = B->GetStringField(TEXT("delegate"));
+		if (!Bloc.Delegate.IsEmpty() && People.IsValid() && People->HasField(TEXT("persons")))
+		{
+			for (const TSharedPtr<FJsonValue>& PV : People->GetArrayField(TEXT("persons")))
+			{
+				const TSharedPtr<FJsonObject> P = PV->AsObject();
+				if (!P.IsValid() || P->GetStringField(TEXT("name")) != Bloc.Delegate || P->GetStringField(TEXT("bloc")) != Bloc.Id ||
+					P->GetStringField(TEXT("role")) != TEXT("delegate"))
+					continue;
+				const FString Why = PassF(pa250::validate_campaign_order(
+					State, PassStd(PassOrder({{TEXT("order"), TEXT("relieve_person")}, {TEXT("person"), P->GetStringField(TEXT("id"))}}))));
+				if (!Why.IsEmpty()) Bloc.Hint = OrderRefusal(Why);
+				break;
+			}
+		}
 		BlocNames.Add(Bloc.Id, Bloc.Name);
 		auto Offer = [&](const FString& Label, const FString& Order, const FString& Tip) {
 			if (PassAccepted(State, Order)) Bloc.Actions.Add({Label, Order, Tip});
@@ -332,9 +363,12 @@ PA250PassPanels::FFloor PA250PassPanels::Floor(const pa250::CampaignState& State
 			PassOrder({{TEXT("order"), TEXT("lobby")}, {TEXT("action"), TEXT("favor")}, {TEXT("bloc"), Bloc.Id}}), TEXT("Spends one favor for a large shift."));
 		if (!FreeDelegate.IsEmpty() && Bloc.Delegate.IsEmpty())
 		{
-			Offer(FString::Printf(TEXT("Seat %s (%+d a week)"), *FreeDelegateName, Root->GetIntegerField(TEXT("delegate_shift_per_week"))),
+			Offer(FString::Printf(TEXT("Seat %s (%+d now, %+d a week)"), *FreeDelegateName,
+								  Root->HasField(TEXT("delegate_seat_shift")) ? Root->GetIntegerField(TEXT("delegate_seat_shift"))
+																			 : Root->GetIntegerField(TEXT("delegate_shift_per_week")),
+								  Root->GetIntegerField(TEXT("delegate_shift_per_week"))),
 				PassOrder({{TEXT("order"), TEXT("assign_person")}, {TEXT("person"), FreeDelegate}, {TEXT("role"), TEXT("delegate")}, {TEXT("bloc"), Bloc.Id}}),
-				TEXT("A steady shift while he stays with this bloc."));
+				TEXT("He sits with this bloc: the lean moves at once, then weekly. Relieving him takes a week."));
 		}
 		F.Blocs.Add(MoveTemp(Bloc));
 	}
@@ -371,6 +405,42 @@ PA250PassPanels::FFloor PA250PassPanels::Floor(const pa250::CampaignState& State
 		else if (Me.Status != TEXT("sent")) F.Upcoming.Add(MoveTemp(Me));
 	}
 	return F;
+}
+
+FString PA250PassPanels::FloorSignature(const pa250::CampaignState& State)
+{
+	const FFloor F = Floor(State);
+	if (!F.bLoaded) return TEXT("floor:empty");
+	FString Sig = F.Heading + TEXT("|") + F.Summary;
+	for (const FBloc& B : F.Blocs)
+	{
+		Sig += FString::Printf(TEXT("|b:%s:%s:%s:%d:%s"), *B.Id, *B.Lean, *B.Delegate, B.Actions.Num(), *B.Hint);
+		for (const FAction& A : B.Actions) Sig += TEXT(":") + A.Label;
+	}
+	auto Measures = [&](const TCHAR* Tag, const TArray<FMeasure>& List) {
+		for (const FMeasure& M : List)
+		{
+			Sig += FString::Printf(TEXT("|%s:%s:%s:%s:%d"), Tag, *M.Id, *M.When, *M.Status, M.Actions.Num());
+			for (const FAction& A : M.Actions) Sig += TEXT(":") + A.Label;
+		}
+	};
+	Measures(TEXT("o"), F.Open);
+	Measures(TEXT("u"), F.Upcoming);
+	Measures(TEXT("s"), F.Settled);
+	for (const FString& L : F.AtSea) Sig += TEXT("|sea:") + L;
+	return Sig;
+}
+
+FString PA250PassPanels::PeopleSignature(const pa250::CampaignState& State, const FString& SelectedArmyId, const FString& SelectedProvinceId)
+{
+	FString Sig = SelectedArmyId + TEXT("|") + SelectedProvinceId;
+	for (const FPersonRow& R : People(State, SelectedArmyId, SelectedProvinceId))
+	{
+		Sig += FString::Printf(TEXT("|%s:%s:%d:%d"), *R.Id, *R.Where, R.bPresent ? 1 : 0, R.Actions.Num());
+		for (const FAction& A : R.Actions) Sig += TEXT(":") + A.Label;
+		if (!R.Hint.IsEmpty()) Sig += TEXT(":h:") + R.Hint;
+	}
+	return Sig;
 }
 
 PA250PassPanels::FDecision PA250PassPanels::Decision(const pa250::CampaignState& State)
@@ -515,8 +585,9 @@ TSharedRef<SWidget> PTitleBar(const FString& Title, TFunction<void()> Close)
 }
 }
 
-TSharedRef<SWidget> PA250PassPanels::BuildPeople(const pa250::CampaignState& State, const FString& SelArmy, const FString& SelProvince, FIssue Issue, TFunction<void()> Close)
+TSharedRef<SWidget> PA250PassPanels::BuildPeople(const pa250::CampaignState& State, const FString& SelArmy, const FString& SelProvince, FIssue Issue, TFunction<void()> Close, float WrapWidth)
 {
+	const float Wrap = FMath::Max(200.f, WrapWidth);
 	const FLinearColor Cream = FPA250HudStyle::Cream, Dim = FPA250HudStyle::CreamDim;
 	TSharedRef<SVerticalBox> List = SNew(SVerticalBox);
 	FString Group;
@@ -532,11 +603,11 @@ TSharedRef<SWidget> PA250PassPanels::BuildPeople(const pa250::CampaignState& Sta
 				  [SNew(SHorizontalBox)
 				   + SHorizontalBox::Slot().AutoWidth()[PText(R.Name, TEXT("Bold"), 13, R.bPresent ? Cream : Dim)]
 				   + SHorizontalBox::Slot().AutoWidth().Padding(8.f, 0.f, 0.f, 0.f).VAlign(VAlign_Bottom)[PText(R.Where, TEXT("Italic"), 11, FPA250HudStyle::Brass)]];
-		if (!R.Traits.IsEmpty()) Row->AddSlot().AutoHeight()[PText(R.Traits, TEXT("Regular"), 11, Cream, 500.f)];
-		if (!R.Ability.IsEmpty()) Row->AddSlot().AutoHeight()[PText(R.Ability, TEXT("Regular"), 11, Cream, 500.f)];
-		Row->AddSlot().AutoHeight()[PText(R.Note, TEXT("Italic"), 10, Dim, 500.f)];
+		if (!R.Traits.IsEmpty()) Row->AddSlot().AutoHeight()[PText(R.Traits, TEXT("Regular"), 11, Cream, Wrap)];
+		if (!R.Ability.IsEmpty()) Row->AddSlot().AutoHeight()[PText(R.Ability, TEXT("Regular"), 11, Cream, Wrap)];
+		Row->AddSlot().AutoHeight()[PText(R.Note, TEXT("Italic"), 10, Dim, Wrap)];
 		if (R.Actions.Num() > 0) Row->AddSlot().AutoHeight().Padding(0.f, 3.f, 0.f, 0.f)[PButtons(R.Actions, Issue)];
-		else if (!R.Hint.IsEmpty() && R.bPresent) Row->AddSlot().AutoHeight()[PText(R.Hint, TEXT("Italic"), 10, FPA250HudStyle::BrassDim, 500.f)];
+		else if (!R.Hint.IsEmpty() && R.bPresent) Row->AddSlot().AutoHeight()[PText(R.Hint, TEXT("Italic"), 10, FPA250HudStyle::BrassDim, Wrap)];
 		List->AddSlot().AutoHeight().Padding(0.f, 5.f, 0.f, 0.f)[Row];
 	}
 	return SNew(SBorder)
@@ -546,12 +617,14 @@ TSharedRef<SWidget> PA250PassPanels::BuildPeople(const pa250::CampaignState& Sta
 			 + SVerticalBox::Slot().AutoHeight()[PTitleBar(TEXT("YOUR PEOPLE"), Close)]
 			 + SVerticalBox::Slot().AutoHeight().Padding(0.f, 2.f, 0.f, 0.f)
 				   [PText(TEXT("One role at a time. An army with no general is a detachment: it takes in few units and cannot besiege. What each can do depends on the town and army you have selected."),
-						  TEXT("Italic"), 11, Dim, 520.f)]
+						  TEXT("Italic"), 11, Dim, Wrap)]
 			 + SVerticalBox::Slot().FillHeight(1.f)[SNew(SScrollBox) + SScrollBox::Slot()[List]]];
 }
 
-TSharedRef<SWidget> PA250PassPanels::BuildFloor(const pa250::CampaignState& State, FIssue Issue, TFunction<void()> Close)
+TSharedRef<SWidget> PA250PassPanels::BuildFloor(const pa250::CampaignState& State, FIssue Issue, TFunction<void()> Close, float WrapWidth)
 {
+	const float Wrap = FMath::Max(200.f, WrapWidth);
+	const float SummaryWrap = Wrap + 20.f;
 	const FLinearColor Cream = FPA250HudStyle::Cream, Dim = FPA250HudStyle::CreamDim;
 	const FFloor F = Floor(State);
 	TSharedRef<SVerticalBox> List = SNew(SVerticalBox);
@@ -565,7 +638,8 @@ TSharedRef<SWidget> PA250PassPanels::BuildFloor(const pa250::CampaignState& Stat
 				   + SHorizontalBox::Slot().AutoWidth().Padding(8.f, 0.f, 0.f, 0.f).VAlign(VAlign_Bottom)[PText(B.Lean, TEXT("Italic"), 12, FPA250HudStyle::Brass)]
 				   + SHorizontalBox::Slot().AutoWidth().Padding(8.f, 0.f, 0.f, 0.f).VAlign(VAlign_Bottom)
 						 [PText(B.Delegate.IsEmpty() ? FString() : FString::Printf(TEXT("%s sits with them"), *B.Delegate), TEXT("Italic"), 11, Dim)]]
-			+ SVerticalBox::Slot().AutoHeight()[PText(B.Moves, TEXT("Regular"), 11, Dim, 620.f)];
+			+ SVerticalBox::Slot().AutoHeight()[PText(B.Moves, TEXT("Regular"), 11, Dim, Wrap)];
+		if (!B.Hint.IsEmpty()) Row->AddSlot().AutoHeight()[PText(B.Hint, TEXT("Italic"), 11, FPA250HudStyle::Brass, Wrap)];
 		if (B.Actions.Num() > 0) Row->AddSlot().AutoHeight().Padding(0.f, 3.f, 0.f, 0.f)[PButtons(B.Actions, Issue)];
 		List->AddSlot().AutoHeight().Padding(0.f, 5.f, 0.f, 0.f)[Row];
 	}
@@ -581,13 +655,13 @@ TSharedRef<SWidget> PA250PassPanels::BuildFloor(const pa250::CampaignState& Stat
 					   + SHorizontalBox::Slot().AutoWidth().Padding(8.f, 0.f, 0.f, 0.f).VAlign(VAlign_Bottom)[PText(M.When, TEXT("Italic"), 11, FPA250HudStyle::Brass)]];
 			if (bFull)
 			{
-				Row->AddSlot().AutoHeight()[PText(M.Text, TEXT("Regular"), 11, Cream, 620.f)];
+				Row->AddSlot().AutoHeight()[PText(M.Text, TEXT("Regular"), 11, Cream, Wrap)];
 				Row->AddSlot().AutoHeight().Padding(0.f, 2.f, 0.f, 0.f)
 					[SNew(STextBlock).Text(FText::FromString(M.Chances)).Font(FCoreStyle::GetDefaultFontStyle("Mono", 9)).ColorAndOpacity(FPA250HudStyle::Brass)];
 			}
-			Row->AddSlot().AutoHeight()[PText(M.IfPassed, TEXT("Regular"), 11, FPA250HudStyle::Green, 620.f)];
-			Row->AddSlot().AutoHeight()[PText(M.IfFailed, TEXT("Regular"), 11, FPA250HudStyle::Red, 620.f)];
-			if (bFull) Row->AddSlot().AutoHeight()[PText(M.Note, TEXT("Italic"), 10, Dim, 620.f)];
+			Row->AddSlot().AutoHeight()[PText(M.IfPassed, TEXT("Regular"), 11, FPA250HudStyle::Green, Wrap)];
+			Row->AddSlot().AutoHeight()[PText(M.IfFailed, TEXT("Regular"), 11, FPA250HudStyle::Red, Wrap)];
+			if (bFull) Row->AddSlot().AutoHeight()[PText(M.Note, TEXT("Italic"), 10, Dim, Wrap)];
 			if (M.Actions.Num() > 0) Row->AddSlot().AutoHeight().Padding(0.f, 3.f, 0.f, 0.f)[PButtons(M.Actions, Issue)];
 			List->AddSlot().AutoHeight().Padding(0.f, 6.f, 0.f, 0.f)[Row];
 		}
@@ -595,7 +669,7 @@ TSharedRef<SWidget> PA250PassPanels::BuildFloor(const pa250::CampaignState& Stat
 	if (F.AtSea.Num() > 0)
 	{
 		List->AddSlot().AutoHeight().Padding(0.f, 10.f, 0.f, 2.f)[PHeader(TEXT("DISPATCHES AT SEA"))];
-		for (const FString& L : F.AtSea) List->AddSlot().AutoHeight().Padding(0.f, 3.f, 0.f, 0.f)[PText(L, TEXT("Regular"), 12, Cream, 620.f)];
+		for (const FString& L : F.AtSea) List->AddSlot().AutoHeight().Padding(0.f, 3.f, 0.f, 0.f)[PText(L, TEXT("Regular"), 12, Cream, Wrap)];
 	}
 	AddMeasures(TEXT("ON THE FLOOR"), F.Open, true);
 	AddMeasures(TEXT("NOT YET"), F.Upcoming, false);
@@ -605,7 +679,7 @@ TSharedRef<SWidget> PA250PassPanels::BuildFloor(const pa250::CampaignState& Stat
 		.Padding(FMargin(14.f, 10.f))
 			[SNew(SVerticalBox)
 			 + SVerticalBox::Slot().AutoHeight()[PTitleBar(F.Heading.ToUpper(), Close)]
-			 + SVerticalBox::Slot().AutoHeight().Padding(0.f, 2.f, 0.f, 0.f)[PText(F.Summary, TEXT("Italic"), 11, Dim, 640.f)]
+			 + SVerticalBox::Slot().AutoHeight().Padding(0.f, 2.f, 0.f, 0.f)[PText(F.Summary, TEXT("Italic"), 11, Dim, SummaryWrap)]
 			 + SVerticalBox::Slot().FillHeight(1.f)[SNew(SScrollBox) + SScrollBox::Slot()[List]]];
 }
 

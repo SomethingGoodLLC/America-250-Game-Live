@@ -21,6 +21,8 @@
 #include "Styling/AppStyle.h"
 #include "Styling/CoreStyle.h"
 #include "Widgets/Input/SButton.h"
+#include "Widgets/Input/SEditableTextBox.h"
+#include "Framework/Application/SlateApplication.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SWrapBox.h"
@@ -43,6 +45,40 @@ namespace
 {
 FString ToFStr(const std::string& S) { return FString(UTF8_TO_TCHAR(S.c_str())); }
 std::string ToStd(const FString& S) { return std::string(TCHAR_TO_UTF8(*S)); }
+
+bool NameHas(const FString& Name, const FString& Query)
+{
+	return Query.IsEmpty() || Name.Contains(Query, ESearchCase::IgnoreCase);
+}
+
+/** Standing in a town: not on a march, and not still walking back from a halt (path is empty then). */
+bool ArmyStanding(const pa250::Army& A)
+{
+	return A.path.empty() && A.returning_hours <= 0;
+}
+
+struct FFindHit
+{
+	FString Kind;
+	FString Id;
+	FString Label;
+};
+
+void CollectFindHits(const pa250::CampaignState& St, const FString& Query, TArray<FFindHit>& Out)
+{
+	for (const auto& Pk : St.provinces)
+	{
+		const FString Name = ToFStr(Pk.second.name);
+		if (!NameHas(Name, Query)) continue;
+		Out.Add({TEXT("town"), ToFStr(Pk.first), Name});
+	}
+	for (const auto& Ak : St.armies)
+	{
+		const FString Name = ToFStr(Ak.second.name);
+		if (!NameHas(Name, Query)) continue;
+		Out.Add({TEXT("army"), ToFStr(Ak.first), Name});
+	}
+}
 
 int32 FitCount(const pa250::Army& A)
 {
@@ -182,6 +218,20 @@ void UPA250MapWidget::RefreshTreasuryCache() const
 		const TSharedPtr<FJsonObject> L = V->AsObject();
 		if (L.IsValid()) Row(TEXT("   ") + L->GetStringField(TEXT("label")), Signed(L->GetIntegerField(TEXT("gold"))));
 	}
+	if (Root->HasField(TEXT("levy_towns")))
+	{
+		const TArray<TSharedPtr<FJsonValue>>& LevyTowns = Root->GetArrayField(TEXT("levy_towns"));
+		if (LevyTowns.Num() > 0)
+		{
+			Row(TEXT("   Towns that pay (held on the 1st)"), TEXT(""));
+			for (const TSharedPtr<FJsonValue>& V : LevyTowns)
+			{
+				const TSharedPtr<FJsonObject> L = V->AsObject();
+				if (L.IsValid())
+					Row(TEXT("      ") + L->GetStringField(TEXT("label")), Signed(L->GetIntegerField(TEXT("gold"))));
+			}
+		}
+	}
 	Row(TEXT(""), TEXT(""));
 	Row(TEXT("EXPENSES, EACH MONTH"), TEXT(""));
 	const TArray<TSharedPtr<FJsonValue>>& Expenses = Root->GetArrayField(TEXT("expenses"));
@@ -197,10 +247,13 @@ void UPA250MapWidget::RefreshTreasuryCache() const
 	LoanInterestPct = Root->GetIntegerField(TEXT("loan_interest_pct"));
 	bCanBorrow = Root->GetBoolField(TEXT("can_borrow"));
 	bCanRepay = Root->GetBoolField(TEXT("can_repay"));
-	TreasuryNote = FString::Printf(TEXT("Also each month, into your towns' magazines: +%d muskets from workshops, +%d provisions from farms.\n"
-										"Accounts are settled on the 1st. A shortfall is borrowed up to the limit; beyond it the army goes "
-										"unpaid and its morale falls."),
-								   Root->GetIntegerField(TEXT("muskets")), Root->GetIntegerField(TEXT("provisions")));
+	TreasuryNote = FString::Printf(
+		TEXT("Also each month, into your towns' magazines: +%d muskets from workshops, +%d provisions from farms.\n"
+			 "ON-DATE LEVY: a town pays only if you hold it on the morning of the 1st — lost in April, nothing in May "
+			 "(no pro-rata for days held). The list above is the projection for towns you hold now. After settlement, "
+			 "the Ledger shows each town that paid. A shortfall is borrowed up to the limit; beyond it the army goes "
+			 "unpaid and its morale falls."),
+		Root->GetIntegerField(TEXT("muskets")), Root->GetIntegerField(TEXT("provisions")));
 	const int32 Arrears = Root->GetIntegerField(TEXT("arrears_months"));
 	if (Arrears > 0) TreasuryNote = FString::Printf(TEXT("THE ARMY IS UNPAID (%d month%s).\n"), Arrears, Arrears == 1 ? TEXT("") : TEXT("s")) + TreasuryNote;
 }
@@ -483,8 +536,98 @@ void UPA250MapWidget::PressPeopleToggle()
 void UPA250MapWidget::PressFloorToggle()
 {
 	bShowFloor = !bShowFloor;
-	if (bShowFloor) bShowPeople = false;
+	if (bShowFloor)
+	{
+		bShowPeople = false;
+		bShowTreasury = false;  // the centred treasury panel would run under the floor at 16:10
+	}
 	FloorKey.Reset();
+}
+
+void UPA250MapWidget::PressMissionTreeToggle()
+{
+	bShowMissionTree = !bShowMissionTree;
+	if (bShowMissionTree) bTrackerMinimized = true;
+	MissionTreeKey.Reset();
+}
+
+void UPA250MapWidget::PressFindToggle()
+{
+	bShowFind = !bShowFind;
+	if (!bShowFind) FindQuery.Reset();
+	RefreshFindPanel();
+	InvalidateLayoutAndVolatility();
+}
+
+void UPA250MapWidget::FindJumpTo(const FString& Kind, const FString& Id)
+{
+	FString Label = Id;
+	if (Kind == TEXT("town"))
+	{
+		SelectedProvinceId = Id;
+		SelectedArmyId.Reset();
+		if (UPA250Subsystem* S = Sub())
+		{
+			if (const auto It = S->GetState().provinces.find(ToStd(Id)); It != S->GetState().provinces.end())
+				Label = ToFStr(It->second.name);
+		}
+	}
+	else
+	{
+		SelectedArmyId = Id;
+		if (UPA250Subsystem* S = Sub())
+		{
+			if (const auto It = S->GetState().armies.find(ToStd(Id)); It != S->GetState().armies.end())
+			{
+				SelectedProvinceId = ToFStr(It->second.province);
+				Label = ToFStr(It->second.name);
+			}
+		}
+	}
+	NotifyMapSelectionChanged();
+	PressFocusSelected();
+	bShowFind = false;
+	FindQuery.Reset();
+	RefreshFindPanel();
+	SetStatusMessage(Kind == TEXT("town") ? FString::Printf(TEXT("Jumped to %s."), *Label)
+										  : FString::Printf(TEXT("Focused on %s."), *Label));
+}
+
+void UPA250MapWidget::PressReorganizeToggle()
+{
+	if (!CanReorganizeSelected())
+	{
+		SetStatusMessage(TEXT("Reorganize needs another of your armies idle in the same town (allied companies stay their own)."));
+		return;
+	}
+	bShowReorganize = !bShowReorganize;
+	ReorganizeKey.Reset();
+}
+
+bool UPA250MapWidget::CanReorganizeSelected() const
+{
+	UPA250Subsystem* S = Sub();
+	if (!S || SelectedArmyId.IsEmpty() || !S->GetController().has_campaign()) return false;
+	const pa250::CampaignState& St = S->GetState();
+	const auto It = St.armies.find(ToStd(SelectedArmyId));
+	if (It == St.armies.end() || It->second.faction != St.player_faction || !ArmyStanding(It->second) || It->second.role == "allied_company")
+		return false;
+	for (const auto& Kv : St.armies)
+	{
+		if (Kv.first == It->first) continue;
+		if (Kv.second.faction == St.player_faction && Kv.second.province == It->second.province && ArmyStanding(Kv.second) &&
+			Kv.second.role != "allied_company")
+			return true;
+	}
+	return false;
+}
+
+void UPA250MapWidget::TransferUnits(const FString& FromArmy, const FString& ToArmy, const FString& UnitClass, int32 Count)
+{
+	if (Count <= 0 || UnitClass.IsEmpty()) return;
+	const FString Order = FString::Printf(TEXT("{\"order\":\"transfer_units\",\"from_army\":\"%s\",\"to_army\":\"%s\",\"units\":{\"%s\":%d}}"),
+										  *FromArmy, *ToArmy, *UnitClass, Count);
+	IssueOrder(Order);
 }
 
 void UPA250MapWidget::IssueOrder(const FString& OrderJson)
@@ -494,19 +637,21 @@ void UPA250MapWidget::IssueOrder(const FString& OrderJson)
 	{
 		return;
 	}
-	const bool bImmediate = S->IsBattlePending() || S->IsDecisionPending();
+	// While the clock is stopped (pause, battle or decision) the order is carried out at once; else
+	// it is queued for the next hour, as a march order is.
+	const bool bImmediate = S->IsPaused() || S->IsBattlePending() || S->IsDecisionPending();
 	FString Err;
-	if (!S->IssueOrderJson(OrderJson, Err))
+	if (!S->IssueOrderJson(OrderJson, Err, bImmediate))
 	{
 		SetStatusMessage(PA250PassPanels::OrderRefusal(Err));
 		return;
 	}
-	// At a stopped clock the order is carried out at once and the ledger has its line; otherwise it
-	// is on its way and takes effect within the hour, as a march order does.
-	SetStatusMessage(bImmediate ? S->GetLastResourceChangeReason() : FString(TEXT("Order given: it takes effect within the hour.")));
+	const FString Note = S->GetLastResourceChangeReason();
+	SetStatusMessage(bImmediate && !Note.IsEmpty() ? Note : FString(TEXT("Order given: it takes effect within the hour.")));
 	PeopleKey.Reset();
 	FloorKey.Reset();
 	DecisionKey.Reset();
+	if (!ReorganizeKey.IsEmpty()) ReorganizeKey.Reset();
 }
 
 void UPA250MapWidget::RefreshPassPanels()
@@ -521,23 +666,37 @@ void UPA250MapWidget::RefreshPassPanels()
 	auto Issue = [Weak](const FString& Order) {
 		if (Weak.IsValid()) Weak->IssueOrder(Order);
 	};
-	const FString Base = FString::Printf(TEXT("%d|%s|%s"), S->GetHudEpoch(), *SelectedArmyId, *SelectedProvinceId);
-	const FString WantPeople = bShowPeople && !S->IsBattlePending() ? Base : FString();
+	// HudEpoch moves every sim hour; rebuilding the floor that often flashes and drops clicks.
+	// Key on what the panel shows (as the city view does), not the epoch.
+	const FString WantPeople = bShowPeople && !S->IsBattlePending()
+								   ? PA250PassPanels::PeopleSignature(St, SelectedArmyId, SelectedProvinceId)
+								   : FString();
 	if (PeopleBox.IsValid() && WantPeople != PeopleKey)
 	{
 		PeopleKey = WantPeople;
-		PeopleBox->SetContent(WantPeople.IsEmpty() ? SNullWidget::NullWidget
-												   : PA250PassPanels::BuildPeople(St, SelectedArmyId, SelectedProvinceId, Issue, [Weak]() {
-														 if (Weak.IsValid()) Weak->PressPeopleToggle();
-													 }));
+		PeopleBox->SetContent(WantPeople.IsEmpty()
+								  ? SNullWidget::NullWidget
+								  : PA250PassPanels::BuildPeople(St, SelectedArmyId, SelectedProvinceId, Issue,
+																 [Weak]() {
+																	 if (Weak.IsValid()) Weak->PressPeopleToggle();
+																 },
+																 520.f));
 	}
-	const FString WantFloor = bShowFloor && !S->IsBattlePending() ? Base : FString();
+	const float FloorW = PA250PassPanels::FloorPanelWidth(HudWidthUnits(), IsTrackerShown() && !bTrackerMinimized);
+	// Width is part of the key so opening the tracker rewraps once. The hour is not: that was the flash.
+	const FString WantFloor = bShowFloor && !S->IsBattlePending()
+								  ? PA250PassPanels::FloorSignature(St) + FString::Printf(TEXT("|w%.0f"), FloorW)
+								  : FString();
 	if (FloorBox.IsValid() && WantFloor != FloorKey)
 	{
 		FloorKey = WantFloor;
-		FloorBox->SetContent(WantFloor.IsEmpty() ? SNullWidget::NullWidget : PA250PassPanels::BuildFloor(St, Issue, [Weak]() {
-			if (Weak.IsValid()) Weak->PressFloorToggle();
-		}));
+		FloorBox->SetContent(WantFloor.IsEmpty()
+								 ? SNullWidget::NullWidget
+								 : PA250PassPanels::BuildFloor(St, Issue,
+															   [Weak]() {
+																   if (Weak.IsValid()) Weak->PressFloorToggle();
+															   },
+															   FloorW - 60.f));
 	}
 	const FString WantDecision = ToFStr(St.pass.pending_decision);
 	if (DecisionBox.IsValid() && WantDecision != DecisionKey)
@@ -561,6 +720,314 @@ void UPA250MapWidget::RefreshPassPanels()
 				   bPlaceholder ? TEXT(", placeholder") : TEXT(""));
 		}
 	}
+}
+
+void UPA250MapWidget::RefreshMissionTreePanel()
+{
+	UPA250Subsystem* S = Sub();
+	if (!MissionTreeBox.IsValid() || !S || !S->GetController().has_campaign()) return;
+	FString Sig;
+	if (bShowMissionTree && !S->IsBattlePending())
+	{
+		for (const PA250ArcPanels::FMissionNode& N : PA250ArcPanels::MissionTree(S->GetState()))
+			Sig += N.Id + TEXT(":") + N.Status + TEXT(":") + N.Progress + TEXT("|");
+	}
+	if (Sig == MissionTreeKey) return;
+	MissionTreeKey = Sig;
+	if (Sig.IsEmpty())
+	{
+		MissionTreeBox->SetContent(SNullWidget::NullWidget);
+		return;
+	}
+	const FLinearColor Cream = FPA250HudStyle::Cream;
+	TSharedRef<SVerticalBox> List = SNew(SVerticalBox);
+	List->AddSlot().AutoHeight().Padding(0.f, 0.f, 0.f, 6.f)
+		[SNew(STextBlock)
+			 .Font(FPA250HudStyle::Font(TEXT("Italic"), 11))
+			 .ColorAndOpacity(FPA250HudStyle::CreamDim)
+			 .AutoWrapText(true)
+			 .Text(FText::FromString(TEXT("Your path of missions. Locked ones stay readable so you can plan ahead.")))];
+	for (const PA250ArcPanels::FMissionNode& N : PA250ArcPanels::MissionTree(S->GetState()))
+	{
+		FLinearColor Col = Cream;
+		if (N.Status == TEXT("complete")) Col = FPA250HudStyle::Green;
+		else if (N.Status == TEXT("failed")) Col = FPA250HudStyle::Red;
+		else if (N.Status == TEXT("locked")) Col = FPA250HudStyle::CreamDim;
+		else Col = FPA250HudStyle::Brass;
+		const FString Head = FString::Printf(TEXT("%d/%d  %s  ·  %s"), N.Index, N.Total, *N.Title, *N.Status.ToUpper());
+		TSharedRef<SVerticalBox> Row = SNew(SVerticalBox) +
+									   SVerticalBox::Slot().AutoHeight()[SNew(STextBlock)
+																			 .Font(FPA250HudStyle::Font(TEXT("Bold"), 13))
+																			 .ColorAndOpacity(Col)
+																			 .AutoWrapText(true)
+																			 .Text(FText::FromString(Head))] +
+									   SVerticalBox::Slot().AutoHeight()[SNew(STextBlock)
+																			 .Font(FPA250HudStyle::Font(TEXT("Regular"), 11))
+																			 .ColorAndOpacity(Cream)
+																			 .AutoWrapText(true)
+																			 .Text(FText::FromString(N.Goal))];
+		if (!N.Progress.IsEmpty())
+			Row->AddSlot().AutoHeight()[SNew(STextBlock)
+											.Font(FPA250HudStyle::Font(TEXT("Italic"), 11))
+											.ColorAndOpacity(FPA250HudStyle::Brass)
+											.AutoWrapText(true)
+											.Text(FText::FromString(N.Progress))];
+		if (!N.Deadline.IsEmpty())
+			Row->AddSlot().AutoHeight()[SNew(STextBlock)
+											.Font(FPA250HudStyle::Font(TEXT("Regular"), 11))
+											.ColorAndOpacity(FPA250HudStyle::Red)
+											.Text(FText::FromString(N.Deadline))];
+		List->AddSlot().AutoHeight().Padding(0.f, 0.f, 0.f, 10.f)[Row];
+		if (N.Index < N.Total)
+			List->AddSlot().AutoHeight().HAlign(HAlign_Center).Padding(0.f, 0.f, 0.f, 6.f)
+				[SNew(STextBlock).Font(FPA250HudStyle::Font(TEXT("Bold"), 12)).ColorAndOpacity(FPA250HudStyle::BrassDim).Text(FText::FromString(TEXT("↓")))];
+	}
+	TWeakObjectPtr<UPA250MapWidget> Weak(this);
+	MissionTreeBox->SetContent(
+		SNew(SBorder)
+			.BorderImage(&FPA250HudStyle::Get().Panel)
+			.Padding(FMargin(14.f, 10.f))
+				[SNew(SVerticalBox) +
+				 SVerticalBox::Slot().AutoHeight()
+					 [SNew(SHorizontalBox) +
+					  SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Center)
+						  [SNew(STextBlock)
+							   .Font(FPA250HudStyle::Font(TEXT("Bold"), 16))
+							   .ColorAndOpacity(Cream)
+							   .Text(FText::FromString(TEXT("MISSION TREE")))] +
+					  SHorizontalBox::Slot().AutoWidth()
+						  [SNew(SButton)
+							   .ButtonStyle(&FPA250HudStyle::Get().Button)
+							   .IsFocusable(false)
+							   .ContentPadding(FMargin(9.f, 2.f))
+							   .OnClicked_Lambda([Weak]() {
+								   if (Weak.IsValid()) Weak->PressMissionTreeToggle();
+								   return FReply::Handled();
+							   })
+								   [SNew(STextBlock)
+										.Font(FPA250HudStyle::Font(TEXT("Regular"), 11))
+										.ColorAndOpacity(Cream)
+										.Text(FText::FromString(TEXT("Close")))]]] +
+				 SVerticalBox::Slot().FillHeight(1.f).Padding(0.f, 8.f, 0.f, 0.f)[SNew(SScrollBox) + SScrollBox::Slot()[List]]]);
+}
+
+void UPA250MapWidget::RebuildFindHits()
+{
+	if (!FindHits.IsValid()) return;
+	FindHits->ClearChildren();
+	UPA250Subsystem* S = Sub();
+	if (!S || !S->GetController().has_campaign()) return;
+	TArray<FFindHit> Hits;
+	CollectFindHits(S->GetState(), FindQuery, Hits);
+	const FLinearColor Cream = FPA250HudStyle::Cream;
+	TWeakObjectPtr<UPA250MapWidget> Weak(this);
+	for (const FFindHit& H : Hits)
+	{
+		const FString Kind = H.Kind;
+		const FString Id = H.Id;
+		const FString Line = FString::Printf(TEXT("%s · %s"), Kind == TEXT("town") ? TEXT("Town") : TEXT("Army"), *H.Label);
+		FindHits->AddSlot().AutoHeight().Padding(0.f, 2.f, 0.f, 0.f)
+			[SNew(SButton)
+				 .ButtonStyle(&FPA250HudStyle::Get().Button)
+				 .IsFocusable(false)
+				 .HAlign(HAlign_Left)
+				 .ContentPadding(FMargin(8.f, 4.f))
+				 .OnClicked_Lambda([Weak, Kind, Id]() {
+					 if (Weak.IsValid()) Weak->FindJumpTo(Kind, Id);
+					 return FReply::Handled();
+				 })
+					 [SNew(STextBlock)
+						  .Font(FPA250HudStyle::Font(TEXT("Regular"), 12))
+						  .ColorAndOpacity(Cream)
+						  .Text(FText::FromString(Line))]];
+	}
+}
+
+void UPA250MapWidget::RefreshFindPanel()
+{
+	if (!FindBox.IsValid()) return;
+	if (!bShowFind)
+	{
+		FindBox->SetContent(SNullWidget::NullWidget);
+		FindField.Reset();
+		FindHits.Reset();
+		bFindFocusPending = false;
+		return;
+	}
+	if (!FindField.IsValid())
+	{
+		const FLinearColor Cream = FPA250HudStyle::Cream;
+		TWeakObjectPtr<UPA250MapWidget> Weak(this);
+		FindHits = SNew(SVerticalBox);
+		FindField = SNew(SEditableTextBox)
+						.Font(FPA250HudStyle::Font(TEXT("Regular"), 13))
+						.HintText(FText::FromString(TEXT("Town or army, then Enter. Esc closes.")))
+						.Text(FText::FromString(FindQuery))
+						.OnTextChanged_Lambda([Weak](const FText& T) {
+							if (!Weak.IsValid()) return;
+							Weak->FindQuery = T.ToString();
+							Weak->RebuildFindHits();
+						})
+						.OnTextCommitted_Lambda([Weak](const FText& T, ETextCommit::Type Commit) {
+							if (!Weak.IsValid() || Commit != ETextCommit::OnEnter) return;
+							Weak->FindQuery = T.ToString();
+							UPA250Subsystem* S2 = Weak->Sub();
+							if (!S2 || !S2->GetController().has_campaign()) return;
+							TArray<FFindHit> Hits;
+							CollectFindHits(S2->GetState(), Weak->FindQuery, Hits);
+							if (Hits.Num() > 0) Weak->FindJumpTo(Hits[0].Kind, Hits[0].Id);
+						})
+						.OnKeyDownHandler_Lambda([Weak](const FGeometry&, const FKeyEvent& E) {
+							if (E.GetKey() != EKeys::Escape || !Weak.IsValid()) return FReply::Unhandled();
+							Weak->bShowFind = false;
+							Weak->FindQuery.Reset();
+							Weak->bFindDismiss = true;
+							return FReply::Handled();
+						});
+		FindBox->SetContent(
+			SNew(SBorder)
+				.BorderImage(&FPA250HudStyle::Get().Panel)
+				.Padding(FMargin(14.f, 10.f))
+					[SNew(SVerticalBox) +
+					 SVerticalBox::Slot().AutoHeight()
+						 [SNew(STextBlock)
+							  .Font(FPA250HudStyle::Font(TEXT("Bold"), 16))
+							  .ColorAndOpacity(Cream)
+							  .Text(FText::FromString(TEXT("FIND")))] +
+					 SVerticalBox::Slot().AutoHeight().Padding(0.f, 8.f, 0.f, 6.f)[FindField.ToSharedRef()] +
+					 SVerticalBox::Slot().AutoHeight().MaxHeight(280.f)[SNew(SScrollBox) + SScrollBox::Slot()[FindHits.ToSharedRef()]]]);
+		bFindFocusPending = true;
+	}
+	RebuildFindHits();
+}
+
+void UPA250MapWidget::RefreshReorganizePanel()
+{
+	UPA250Subsystem* S = Sub();
+	if (!ReorganizeBox.IsValid() || !S || !S->GetController().has_campaign()) return;
+	const bool bShow = bShowReorganize && CanReorganizeSelected() && !S->IsBattlePending();
+	FString Sig;
+	if (bShow)
+	{
+		const pa250::CampaignState& St = S->GetState();
+		const auto Mine = St.armies.find(ToStd(SelectedArmyId));
+		if (Mine == St.armies.end())
+		{
+			bShowReorganize = false;
+			ReorganizeBox->SetContent(SNullWidget::NullWidget);
+			ReorganizeKey.Reset();
+			return;
+		}
+		Sig = SelectedArmyId + TEXT("|") + ToFStr(Mine->second.province);
+		for (const auto& Kv : St.armies)
+		{
+			if (Kv.second.faction != St.player_faction || Kv.second.province != Mine->second.province) continue;
+			// Idle or not, not the hour count: returning_hours falls every march hour and would rebuild the buttons.
+			const bool bIdle = ArmyStanding(Kv.second) && Kv.second.role != "allied_company";
+			Sig += TEXT("|") + ToFStr(Kv.first) + (bIdle ? TEXT(":idle") : TEXT(":away"));
+			if (!bIdle) continue;
+			for (const auto& U : Kv.second.units) Sig += FString::Printf(TEXT(":%s=%d"), *ToFStr(U.first), U.second);
+		}
+	}
+	if (Sig == ReorganizeKey) return;
+	ReorganizeKey = Sig;
+	if (!bShow)
+	{
+		ReorganizeBox->SetContent(SNullWidget::NullWidget);
+		return;
+	}
+	const pa250::CampaignState& St = S->GetState();
+	const auto Mine = St.armies.find(ToStd(SelectedArmyId));
+	TArray<FString> Others;
+	for (const auto& Kv : St.armies)
+	{
+		if (Kv.first == Mine->first) continue;
+		if (Kv.second.faction == St.player_faction && Kv.second.province == Mine->second.province && ArmyStanding(Kv.second) &&
+			Kv.second.role != "allied_company")
+			Others.Add(ToFStr(Kv.first));
+	}
+	Others.Sort();
+	if (Others.Num() == 0)
+	{
+		bShowReorganize = false;
+		ReorganizeBox->SetContent(SNullWidget::NullWidget);
+		return;
+	}
+	if (ReorganizeOtherArmyId.IsEmpty() || !Others.Contains(ReorganizeOtherArmyId)) ReorganizeOtherArmyId = Others[0];
+	const auto Other = St.armies.find(ToStd(ReorganizeOtherArmyId));
+	const FLinearColor Cream = FPA250HudStyle::Cream;
+	TWeakObjectPtr<UPA250MapWidget> Weak(this);
+	auto UnitRows = [&](const pa250::Army& From, const FString& FromId, const FString& ToId) -> TSharedRef<SWidget> {
+		TSharedRef<SVerticalBox> Col = SNew(SVerticalBox);
+		Col->AddSlot().AutoHeight().Padding(0.f, 0.f, 0.f, 4.f)
+			[SNew(STextBlock)
+				 .Font(FPA250HudStyle::Font(TEXT("Bold"), 13))
+				 .ColorAndOpacity(Cream)
+				 .Text(FText::FromString(ToFStr(From.name)))];
+		for (const auto& U : From.units)
+		{
+			if (U.second <= 0) continue;
+			const FString Cls = ToFStr(U.first);
+			const int32 N = U.second;
+			Col->AddSlot().AutoHeight().Padding(0.f, 2.f, 0.f, 0.f)
+				[SNew(SHorizontalBox) +
+				 SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Center)
+					 [SNew(STextBlock)
+						  .Font(FPA250HudStyle::Font(TEXT("Regular"), 12))
+						  .ColorAndOpacity(Cream)
+						  .Text(FText::FromString(FString::Printf(TEXT("%s × %d"), *Cls.Replace(TEXT("_"), TEXT(" ")), N)))] +
+				 SHorizontalBox::Slot().AutoWidth()
+					 [SNew(SButton)
+						  .ButtonStyle(&FPA250HudStyle::Get().Button)
+						  .IsFocusable(false)
+						  .ContentPadding(FMargin(8.f, 2.f))
+						  .ToolTipText(FText::FromString(TEXT("Move one company to the other army.")))
+						  .OnClicked_Lambda([Weak, FromId, ToId, Cls]() {
+							  if (Weak.IsValid()) Weak->TransferUnits(FromId, ToId, Cls, 1);
+							  return FReply::Handled();
+						  })
+							  [SNew(STextBlock)
+								   .Font(FPA250HudStyle::Font(TEXT("Regular"), 11))
+								   .ColorAndOpacity(Cream)
+								   .Text(FText::FromString(TEXT("Move 1")))]]];
+		}
+		return Col;
+	};
+	ReorganizeBox->SetContent(
+		SNew(SBorder)
+			.BorderImage(&FPA250HudStyle::Get().Panel)
+			.Padding(FMargin(14.f, 10.f))
+				[SNew(SVerticalBox) +
+				 SVerticalBox::Slot().AutoHeight()
+					 [SNew(SHorizontalBox) +
+					  SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Center)
+						  [SNew(STextBlock)
+							   .Font(FPA250HudStyle::Font(TEXT("Bold"), 16))
+							   .ColorAndOpacity(Cream)
+							   .Text(FText::FromString(TEXT("REORGANIZE")))] +
+					  SHorizontalBox::Slot().AutoWidth()
+						  [SNew(SButton)
+							   .ButtonStyle(&FPA250HudStyle::Get().Button)
+							   .IsFocusable(false)
+							   .ContentPadding(FMargin(9.f, 2.f))
+							   .OnClicked_Lambda([Weak]() {
+								   if (Weak.IsValid()) Weak->PressReorganizeToggle();
+								   return FReply::Handled();
+							   })
+								   [SNew(STextBlock)
+										.Font(FPA250HudStyle::Font(TEXT("Regular"), 11))
+										.ColorAndOpacity(Cream)
+										.Text(FText::FromString(TEXT("Close")))]]] +
+				 SVerticalBox::Slot().AutoHeight().Padding(0.f, 4.f, 0.f, 8.f)
+					 [SNew(STextBlock)
+						  .Font(FPA250HudStyle::Font(TEXT("Italic"), 11))
+						  .ColorAndOpacity(FPA250HudStyle::CreamDim)
+						  .AutoWrapText(true)
+						  .Text(FText::FromString(TEXT("Move companies between armies standing idle in this town. Allied companies (Stockbridge) cannot merge.")))] +
+				 SVerticalBox::Slot().AutoHeight()
+					 [SNew(SHorizontalBox) +
+					  SHorizontalBox::Slot().FillWidth(1.f).Padding(0.f, 0.f, 10.f, 0.f)[UnitRows(Mine->second, SelectedArmyId, ReorganizeOtherArmyId)] +
+					  SHorizontalBox::Slot().FillWidth(1.f)[UnitRows(Other->second, ReorganizeOtherArmyId, SelectedArmyId)]]]);
 }
 
 FString UPA250MapWidget::HaltMessage(const FString& ArmyName, const FString& TownName, int32 HoursIntoLeg)
@@ -752,8 +1219,9 @@ FText UPA250MapWidget::LedgerText() const
 	(void)S->GetHudEpoch();
 	const pa250::CampaignState& St = S->GetState();
 	FString Lines = FString::Printf(TEXT("Treasury 🪙 %d · Support %d\n"), St.player_gold, St.local_support);
-	Lines += TEXT("Recent changes:\n");
-	const int32 Start = FMath::Max(0, static_cast<int32>(St.resource_changes.size()) - 12);
+	Lines += TEXT("Recent changes (town levies are on-date: held on the 1st only):\n");
+	// Keep enough room for a May 1 town-by-town settlement cluster.
+	const int32 Start = FMath::Max(0, static_cast<int32>(St.resource_changes.size()) - 28);
 	for (int32 i = Start; i < static_cast<int32>(St.resource_changes.size()); ++i)
 	{
 		Lines += TEXT("  ") + ToFStr(St.resource_changes[static_cast<size_t>(i)].reason) + TEXT("\n");
@@ -1151,6 +1619,18 @@ void UPA250MapWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 	}
 	RefreshBattleCards();
 	RefreshPassPanels();
+	RefreshMissionTreePanel();
+	RefreshReorganizePanel();
+	if (bFindDismiss)
+	{
+		bFindDismiss = false;
+		RefreshFindPanel();
+	}
+	if (bFindFocusPending && FindField.IsValid())
+	{
+		FSlateApplication::Get().SetKeyboardFocus(FindField, EFocusCause::SetDirectly);
+		bFindFocusPending = false;
+	}
 	// Nobody is there to press Continue in an autoplay or probe run: it is pressed once the field is
 	// ready (a probe waits long enough for its still to be taken first).
 	if (bStoryUp && bStoryReady && !bStoryLeaving)
@@ -1371,6 +1851,11 @@ FReply UPA250MapWidget::NativeOnKeyDown(const FGeometry& InGeometry, const FKeyE
 		PressHalt();
 		return FReply::Handled();
 	}
+	if (Key == EKeys::F)
+	{
+		PressFindToggle();
+		return FReply::Handled();
+	}
 	if (Key == EKeys::Escape)
 	{
 		// Layered: close transient panels first, then clear selection. Pause is
@@ -1378,6 +1863,27 @@ FReply UPA250MapWidget::NativeOnKeyDown(const FGeometry& InGeometry, const FKeyE
 		if (IsCityViewOpen())
 		{
 			CloseCityView();
+			return FReply::Handled();
+		}
+		if (bShowFind)
+		{
+			bShowFind = false;
+			FindQuery.Reset();
+			RefreshFindPanel();
+			return FReply::Handled();
+		}
+		if (bShowMissionTree)
+		{
+			bShowMissionTree = false;
+			MissionTreeKey.Reset();
+			RefreshMissionTreePanel();
+			return FReply::Handled();
+		}
+		if (bShowReorganize)
+		{
+			bShowReorganize = false;
+			ReorganizeKey.Reset();
+			RefreshReorganizePanel();
 			return FReply::Handled();
 		}
 		if (bShowPeople || bShowFloor)
@@ -1980,9 +2486,42 @@ TSharedRef<SWidget> UPA250MapWidget::RebuildWidget()
 										  .AutoWrapText(true)
 										  .Text_Lambda([this]() { return SelectedArmyBannerText(); })] +
 								 SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Left).Padding(0.f, 6.f, 0.f, 0.f)
-									 [MakeButton(TEXT("Halt  (H)"), [this]() { PressHalt(); },
-												 TAttribute<EVisibility>::CreateLambda([this]() { return CanHaltSelected() ? EVisibility::Visible : EVisibility::Collapsed; }),
-												 FText::FromString(TEXT("Halt this army. On the road it turns about and marches back to the town it left.")))]]]]
+									 [SNew(SHorizontalBox) +
+									  SHorizontalBox::Slot().AutoWidth().Padding(0.f, 0.f, 6.f, 0.f)
+										  [MakeButton(TEXT("Halt  (H)"), [this]() { PressHalt(); },
+													  TAttribute<EVisibility>::CreateLambda([this]() { return CanHaltSelected() ? EVisibility::Visible : EVisibility::Collapsed; }),
+													  FText::FromString(TEXT("Halt this army. On the road it turns about and marches back to the town it left.")))] +
+									  SHorizontalBox::Slot().AutoWidth()
+										  [MakeButton(TEXT("Reorganize"), [this]() { PressReorganizeToggle(); },
+													  TAttribute<EVisibility>::CreateLambda([this]() {
+														  return CanReorganizeSelected() ? EVisibility::Visible : EVisibility::Collapsed;
+													  }),
+													  FText::FromString(TEXT("Move companies between your armies idle in this town.")))]]]]]
+		+ SOverlay::Slot()
+			  .VAlign(VAlign_Top)
+			  .HAlign(HAlign_Left)
+			  .Padding(FMargin(16.f, 88.f, 0.f, 0.f))
+				  [SAssignNew(MissionTreeBox, SBox)
+					   .WidthOverride(420.f)
+					   .MaxDesiredHeight(520.f)
+					   .Visibility_Lambda([this]() {
+						   UPA250Subsystem* S2 = Sub();
+						   return bShowMissionTree && S2 && !S2->IsBattlePending() ? EVisibility::Visible : EVisibility::Collapsed;
+					   })]
+		+ SOverlay::Slot()
+			  .VAlign(VAlign_Center)
+			  .HAlign(HAlign_Center)
+				  [SAssignNew(ReorganizeBox, SBox)
+					   .WidthOverride(640.f)
+					   .Visibility_Lambda([this]() {
+						   UPA250Subsystem* S2 = Sub();
+						   return bShowReorganize && S2 && !S2->IsBattlePending() ? EVisibility::Visible : EVisibility::Collapsed;
+					   })]
+		+ SOverlay::Slot()
+			  .VAlign(VAlign_Top)
+			  .HAlign(HAlign_Center)
+			  .Padding(FMargin(0.f, 120.f, 0.f, 0.f))
+				  [SAssignNew(FindBox, SBox).WidthOverride(420.f)]
 		+ SOverlay::Slot()
 			  .VAlign(VAlign_Top)
 			  .HAlign(HAlign_Center)
@@ -2217,6 +2756,10 @@ TSharedRef<SWidget> UPA250MapWidget::RebuildWidget()
 											  if (T.Notices.Num() > 0) Line += FString::Printf(TEXT("  ·  %d %s"), T.Notices.Num(), T.Notices.Num() == 1 ? TEXT("notice") : TEXT("notices"));
 											  return FText::FromString(Line);
 										  })] +
+									  SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(10.f, 0.f, 0.f, 0.f)
+										  [MakeButton(TEXT("Tree"), [this]() { PressMissionTreeToggle(); },
+											  TAttribute<EVisibility>::CreateLambda([this]() { return bTrackerMinimized ? EVisibility::Collapsed : EVisibility::Visible; }),
+											  FText::FromString(TEXT("All missions on your path: locked, active, done or failed.")))] +
 									  SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(10.f, 0.f, 0.f, 0.f)
 										  [MakeButton(TEXT("Hide"), [this]() { PressTrackerToggle(); },
 											  TAttribute<EVisibility>::CreateLambda([this]() { return bTrackerMinimized ? EVisibility::Collapsed : EVisibility::Visible; }),
@@ -2623,7 +3166,9 @@ bool UPA250MapWidget::IsPointOverHud(FVector2D ScreenPos) const
 	{
 		return true;
 	}
-	if (IsViewportPointOver(PeopleBox, ScreenPos) || IsViewportPointOver(FloorBox, ScreenPos))
+	if (IsViewportPointOver(PeopleBox, ScreenPos) || IsViewportPointOver(FloorBox, ScreenPos) ||
+		IsViewportPointOver(MissionTreeBox, ScreenPos) || IsViewportPointOver(FindBox, ScreenPos) ||
+		IsViewportPointOver(ReorganizeBox, ScreenPos))
 	{
 		return true;
 	}

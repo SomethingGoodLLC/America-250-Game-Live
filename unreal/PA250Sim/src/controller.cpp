@@ -99,14 +99,25 @@ std::string CampaignController::stamp_general(const std::string& army_id, const 
     return "";
 }
 
-std::vector<std::string> CampaignController::issue_order(const std::string& order_json) {
+std::vector<std::string> CampaignController::issue_order(const std::string& order_json, bool apply_now) {
     if (!started_ || flow_ != Flow::Campaign) return {detail::err("not_in_campaign")};
     const std::string refusal = validate_campaign_order(state_, order_json);
     if (!refusal.empty()) return {refusal};
+    // A second order naming the same person while one is already queued would silently fail later.
+    for (const Command& c : state_.pending_commands) {
+        if (c.payload.kind != CommandKind::CampaignOrder) continue;
+        try {
+            const auto a = nlohmann::json::parse(order_json);
+            const auto b = nlohmann::json::parse(c.payload.result_json);
+            if (a.contains("person") && b.contains("person") && a.at("person") == b.at("person") && !a.at("person").get<std::string>().empty())
+                return {"order_already_given"};
+        } catch (...) {
+        }
+    }
     CommandPayload p;
     p.kind = CommandKind::CampaignOrder;
     p.result_json = order_json;
-    if (state_.pending_battle.active || !state_.pass.pending_decision.empty()) {
+    if (apply_now || state_.pending_battle.active || !state_.pass.pending_decision.empty()) {
         std::string error;
         state_ = apply_campaign_order(state_, order_json, error);
         if (!error.empty()) return {error};

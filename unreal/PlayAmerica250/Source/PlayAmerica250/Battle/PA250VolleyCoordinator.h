@@ -176,6 +176,12 @@ public:
 	// ---- Support roles (values in unit_classes.json verbs.ensign / musician) ----
 	/** Where a side's colours fly (carried, not fallen). Squads near them rally sooner. */
 	void SetColours(FName Faction, bool bFlying, const FVector& Where);
+	/** Battlefield callout + shouted VO (general falls, etc.). */
+	void CallOut(FName VoiceFaction, const TCHAR* Key, const TCHAR* Text, const FVector& Where, float Seconds = 2.f)
+	{
+		Shout(VoiceFaction, Key, Text, Where, Seconds);
+	}
+	void CallOutNearListener(const TCHAR* Key, const TCHAR* Text) { ShoutNearListener(Key, Text); }
 	/** A morale check on a whole side: its colours fell or were taken, or it is under cannon fire. */
 	void PressSide(FName Faction, float Pressure, float Seconds, const TCHAR* CountAs);
 	/** The same on one squad (round shot ploughing through it). */

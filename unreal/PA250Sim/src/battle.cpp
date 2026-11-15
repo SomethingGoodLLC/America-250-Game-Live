@@ -216,6 +216,11 @@ void load_battle_rules(const std::string& json_text) {
             r.army_broke_min_squads = f.value("min_squads", r.army_broke_min_squads);
             r.army_broke_morale_penalty = f.value("morale_penalty", r.army_broke_morale_penalty);
         }
+        if (j.contains("morale")) {
+            const json& f = j.at("morale");
+            r.morale_victory = f.value("victory", r.morale_victory);
+            r.morale_defeat = f.value("defeat", r.morale_defeat);
+        }
         if (j.contains("posts_swept")) {
             const json& f = j.at("posts_swept");
             r.posts_swept_seconds = f.value("seconds", r.posts_swept_seconds);
@@ -267,6 +272,9 @@ void load_battle_rules(const std::string& json_text) {
             r.cannon_prime_lay_seconds = f.value("prime_lay_seconds", r.cannon_prime_lay_seconds);
             r.cannon_untrained_scale = f.value("untrained_drill_scale", r.cannon_untrained_scale);
             r.cannon_traverse_deg_per_second = f.value("traverse_deg_per_second", r.cannon_traverse_deg_per_second);
+            r.cannon_elevation_min_deg = f.value("elevation_min_deg", r.cannon_elevation_min_deg);
+            r.cannon_elevation_max_deg = f.value("elevation_max_deg", r.cannon_elevation_max_deg);
+            r.cannon_elevation_deg_per_second = f.value("elevation_deg_per_second", r.cannon_elevation_deg_per_second);
             r.cannon_round_range_m = f.value("round_shot_range_m", r.cannon_round_range_m);
             r.cannon_round_speed_m = f.value("round_shot_speed_m", r.cannon_round_speed_m);
             r.cannon_round_damage = f.value("round_shot_damage", r.cannon_round_damage);
@@ -277,9 +285,17 @@ void load_battle_rules(const std::string& json_text) {
             r.cannon_works_damage = f.value("works_damage", r.cannon_works_damage);
             r.cannon_pressure = f.value("morale_pressure", r.cannon_pressure);
             r.cannon_pressure_seconds = f.value("morale_seconds", r.cannon_pressure_seconds);
-            r.cannon_canister_range_m = f.value("canister_range_m", r.cannon_canister_range_m);
-            r.cannon_canister_balls = f.value("canister_balls", r.cannon_canister_balls);
-            r.cannon_canister_cone_degrees = f.value("canister_cone_degrees", r.cannon_canister_cone_degrees);
+            // Grape (player-facing); older files still say canister_*.
+            r.cannon_grape_range_m = f.value("grape_range_m", f.value("canister_range_m", r.cannon_grape_range_m));
+            r.cannon_grape_balls = f.value("grape_balls", f.value("canister_balls", r.cannon_grape_balls));
+            r.cannon_grape_cone_degrees = f.value("grape_cone_degrees", f.value("canister_cone_degrees", r.cannon_grape_cone_degrees));
+            r.cannon_shell_range_m = f.value("shell_range_m", r.cannon_shell_range_m);
+            r.cannon_shell_speed_m = f.value("shell_speed_m", r.cannon_shell_speed_m);
+            r.cannon_shell_fuse_min_m = f.value("shell_fuse_min_m", r.cannon_shell_fuse_min_m);
+            r.cannon_shell_blast_radius_cm = f.value("shell_blast_radius_cm", r.cannon_shell_blast_radius_cm);
+            r.cannon_shell_damage = f.value("shell_damage", r.cannon_shell_damage);
+            r.cannon_shell_works_damage = f.value("shell_works_damage", r.cannon_shell_works_damage);
+            r.cannon_shell_spread_degrees = f.value("shell_spread_degrees", r.cannon_shell_spread_degrees);
             r.cannon_push_speed_cm = f.value("push_speed_cm", r.cannon_push_speed_cm);
             r.cannon_follow_gap_m = f.value("follow_gap_m", r.cannon_follow_gap_m);
             r.cannon_capture_radius_cm = f.value("capture_radius_cm", r.cannon_capture_radius_cm);
@@ -983,13 +999,13 @@ CampaignState apply_battle_result(const CampaignState& in, const BattleResult& r
         if (kv.first != pb.attacker_army && kv.first != pb.defender_army) continue;
         if (a.province != r.province_id) continue;
         if (a.faction == r.winner) {
-            int bump = 5;
+            int bump = rules.morale_victory;
             if (a.faction == s.player_faction) bump += personal_morale;
             a.morale = detail::clamp_int(a.morale + bump, 0, 100);
         } else {
             // A broken army (army_broke) pays a heavier morale price but keeps its survivors: it is
-            // not dispersed by the morale floor.
-            a.morale = detail::clamp_int(a.morale - (army_broke ? rules.army_broke_morale_penalty : 20), 0, 100);
+            // not dispersed by the morale floor. An ordinary defeat costs morale.defeat.
+            a.morale = detail::clamp_int(a.morale - (army_broke ? rules.army_broke_morale_penalty : rules.morale_defeat), 0, 100);
             if (a.faction == s.player_faction && personal_morale > 0)
                 a.morale = detail::clamp_int(a.morale + personal_morale, 0, 100);
             const int fit = detail::total_units(a);

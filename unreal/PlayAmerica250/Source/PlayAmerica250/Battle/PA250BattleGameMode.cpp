@@ -882,6 +882,95 @@ int32 APA250BattleGameMode::SpawnGunCrews(FName Faction, int32 MostMen)
 	return Spawned;
 }
 
+int32 APA250BattleGameMode::EnsureGunCrew(APA250FieldGun* Gun, ARFCharacter* Player)
+{
+	if (!Gun || !Player) return 0;
+	int32 Kept = 0;
+	for (TActorIterator<ARFCharacter> It(GetWorld()); It; ++It)
+	{
+		if (It->IsDead() || *It == Player || It->FactionId != Gun->GetFaction()) continue;
+		if (FVector::Dist2D(It->GetActorLocation(), Gun->GetActorLocation()) > Rules.cannon_crew_radius_cm) continue;
+		if (Gun->PostOf(*It) != INDEX_NONE) continue;
+		if (Gun->ClaimPost(*It) != INDEX_NONE) ++Kept;
+	}
+	Gun->RecountCrew();
+	int32 Summoned = 0;
+	while (Gun->GetCrew() < Rules.cannon_min_crew && Summoned < Rules.cannon_min_crew)
+	{
+		const int32 Slot = Gun->FreePostIndex();
+		if (Slot == INDEX_NONE) break;
+		ARFCharacter* Mate = SummonGunMate(Gun, Slot);
+		if (!Mate) break;
+		Gun->ClaimPost(Mate);
+		++Summoned;
+		Gun->RecountCrew();
+	}
+	UE_LOG(LogTemp, Display, TEXT("PA250 guns: crew %d at the piece (need %d), kept %d, summoned %d"),
+		Gun->GetCrew(), Rules.cannon_min_crew, Kept, Summoned);
+	return Gun->GetCrew();
+}
+
+ARFCharacter* APA250BattleGameMode::SummonGunMate(APA250FieldGun* Gun, int32 Post)
+{
+	if (!Gun || !GetWorld()) return nullptr;
+	const FName CrewClass(UTF8_TO_TCHAR(Rules.guns_crew_class.c_str()));
+	const FTransform At(Gun->GetActorRotation(), Gun->GetCrewPost(Post));
+	if (ClassMenInReserve(Gun->GetFaction(), CrewClass) > 0)
+	{
+		if (ARFCharacter* Man = SpawnBotAt(Gun->GetFaction(), CrewClass, At))
+		{
+			UE_LOG(LogTemp, Display, TEXT("PA250 guns: a %s gunner from the reserve takes a post"), *Gun->GetFaction().ToString());
+			return Man;
+		}
+	}
+	// The army has no gunner left. A mate stands the post so the piece can be worked. He is not a
+	// ticket and he is not a man of the army (CountAlive skips the tag).
+	ARFCharacter* C = GetWorld()->SpawnActorDeferred<ARFCharacter>(ARFCharacter::StaticClass(), At, nullptr, nullptr,
+		ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+	if (!C) return nullptr;
+	C->SetClothingSeed(0x6C11u + static_cast<uint32>(Post));
+	C->AIControllerClass = APA250BotController::StaticClass();
+	C->FinishSpawning(At);
+	C->SpawnDefaultController();
+	ConfigureSoldier(C, Gun->GetFaction(), CrewClass);
+	C->Tags.AddUnique(TEXT("PA250GunMate"));
+	if (AController* Ctl = C->GetController())
+	{
+		ControllerFaction.Add(Ctl, Gun->GetFaction());
+		ControllerClass.Add(Ctl, CrewClass);
+	}
+	UE_LOG(LogTemp, Display, TEXT("PA250 guns: summoned a mate at a %s gun (no gunner left in reserve)"), *Gun->GetFaction().ToString());
+	return C;
+}
+
+FString APA250BattleGameMode::GeneralFallWords(bool bOurs, const FString& RankName, const FString& Fate, int32 Variant, FString& OutKey)
+{
+	const bool bKilled = Fate == TEXT("killed");
+	const bool bCaptured = Fate == TEXT("captured") || Fate == TEXT("taken");
+	const TCHAR* FateWord = bKilled ? TEXT("killed") : (bCaptured ? TEXT("taken") : TEXT("wounded"));
+	OutKey = bOurs
+		? FString(bKilled ? TEXT("general_killed") : (bCaptured ? TEXT("general_captured") : TEXT("general_wounded")))
+		: FString(bKilled ? TEXT("enemy_general_killed") : (bCaptured ? TEXT("enemy_general_captured") : TEXT("enemy_general_wounded")));
+	FString Surname = RankName;
+	int32 Space = INDEX_NONE;
+	if (RankName.FindLastChar(TEXT(' '), Space) && Space + 1 < RankName.Len()) Surname = RankName.Mid(Space + 1);
+	const int32 V = Variant & 1;
+	if (bOurs)
+	{
+		return V == 0
+			? FString::Printf(TEXT("%s is %s!"), *RankName, FateWord)
+			: FString::Printf(TEXT("%s! %s is %s!"), *Surname, *RankName, FateWord);
+	}
+	return V == 0
+		? FString::Printf(TEXT("%s is %s!"), *RankName, FateWord)
+		: FString::Printf(TEXT("%s! Their general, %s, is %s!"), *Surname, *RankName, FateWord);
+}
+
+int32 APA250BattleGameMode::GeneralFallVariant(uint64 Seed, uint32 FactionSalt)
+{
+	return static_cast<int32>((Seed + static_cast<uint64>(FactionSalt)) % 2ull);
+}
+
 APA250FieldGun* APA250BattleGameMode::GunAt(const ARFCharacter* Soldier) const
 {
 	if (!Soldier) return nullptr;
@@ -907,7 +996,8 @@ bool APA250BattleGameMode::PlayerFiresGun(ARFCharacter* Soldier)
 		ShowNotice(TEXT("The gun is not loaded"), 2.f);
 		return true;
 	}
-	if (!Gun->PlayerFire(LeaderAim)) ShowNotice(TEXT("The gun cannot fire: too few men at it, or the mark is out of range"), 3.f);
+	// Fire itself says why: too few men, or grape / shell / round too far.
+	Gun->PlayerFire(LeaderAim);
 	return true;
 }
 
@@ -937,11 +1027,48 @@ void APA250BattleGameMode::NotifyGunTaken(APA250FieldGun* Gun, FName From)
 	if (Volleys) Volleys->PressSide(From, Rules.cannon_pressure, Rules.cannon_pressure_seconds, TEXT("GunLost"));
 }
 
-void APA250BattleGameMode::NotifyGunFired(APA250FieldGun* Gun, bool bCanister)
+void APA250BattleGameMode::NotifyGunFired(APA250FieldGun* Gun, EPA250Shot Shot)
 {
 	if (!Gun) return;
 	GunShots.FindOrAdd(Gun->GetFaction())++;
-	if (bCanister) CanisterShots.FindOrAdd(Gun->GetFaction())++;
+	if (Shot == EPA250Shot::Grape) CanisterShots.FindOrAdd(Gun->GetFaction())++;
+}
+
+bool APA250BattleGameMode::PlacePlayerAtGun(ARFCharacter* Soldier)
+{
+	if (!Soldier || Soldier->IsDead() || !PA250UnitClasses::KitFor(Soldier->FactionId, Soldier->UnitClass).bServesGuns) return false;
+	APA250FieldGun* Best = nullptr;
+	float BestD = TNumericLimits<float>::Max();
+	for (APA250FieldGun* Gun : Guns)
+	{
+		if (!Gun || Gun->GetFaction() != Soldier->FactionId) continue;
+		const float D = FVector::DistSquared2D(Gun->GetActorLocation(), Soldier->GetActorLocation());
+		if (D < BestD)
+		{
+			BestD = D;
+			Best = Gun;
+		}
+	}
+	if (!Best) return false;
+	const int32 Post = Best->ForceClaimPost(Soldier);
+	if (Post == INDEX_NONE) return false;
+	Soldier->TeleportTo(Best->GetCrewPost(Post) + FVector(0.f, 0.f, 10.f), Best->GetActorRotation(), false, true);
+	Best->SetPlayerGunner(Soldier);
+	const int32 Crew = EnsureGunCrew(Best, Soldier);
+	const FString Chip = Best->LoadChip();
+	ShowNotice(Crew >= Rules.cannon_min_crew
+		? FString::Printf(TEXT("You serve the gun (crew %d). %s"), Crew, *Chip)
+		: FString::Printf(TEXT("You serve the gun, but only %d men are at it"), Crew), 6.f);
+	UE_LOG(LogTemp, Display, TEXT("PA250 guns: player placed at a %s gun as %s, crew %d"), *Soldier->FactionId.ToString(), *Soldier->UnitClass.ToString(), Crew);
+	return true;
+}
+
+bool APA250BattleGameMode::PlayerCycleGunShot(ARFCharacter* Soldier, int32 Delta)
+{
+	APA250FieldGun* Gun = GunAt(Soldier);
+	if (!Gun || Gun->GetPlayerGunner() != Soldier) return false;
+	Gun->CycleShot(Delta);
+	return true;
 }
 
 void APA250BattleGameMode::NotifyRoundShot(ARFCharacter* Man, bool bStruck)
@@ -1554,6 +1681,7 @@ void APA250BattleGameMode::BeginPlay()
 	MaybeStartMeleeProbe();
 	MaybeStartClassPortraits();
 	MaybeStartGunStill();
+	MaybeStartGunServe();
 	MaybeStartLandingStill();
 	// A moment after BeginPlay, so the player's pawn and its musket exist whatever the spawn order.
 	FTimerHandle ClassPick;
@@ -2219,6 +2347,7 @@ bool APA250BattleGameMode::RekitPlayer(APlayerController* PC, FName UnitClass)
 	ConfigureSoldier(Me, PlayerFaction, UnitClass);
 	UE_LOG(LogTemp, Display, TEXT("PA250 class: player takes the field as %s (%s)"), *UnitClass.ToString(),
 		PA250UnitClasses::KitFor(PlayerFaction, UnitClass).Label);
+	PlacePlayerAtGun(Me);
 	return true;
 }
 
@@ -2235,7 +2364,7 @@ void APA250BattleGameMode::MaybeOpenClassPick(APlayerController* PC)
 	if (!bForce)
 	{
 		for (const TCHAR* Probe : {TEXT("PA250NoClassPick"), TEXT("PA250Preview="), TEXT("PA250BattleShots="), TEXT("PA250HurtProbe"),
-				 TEXT("PA250TakeoverProbe"), TEXT("PA250FpsSample"), TEXT("PA250MeleeProbe"), TEXT("PA250ClassPortraits"), TEXT("PA250GunStill"), TEXT("PA250LandingStill"), TEXT("PA250OrderProbe")})
+				 TEXT("PA250TakeoverProbe"), TEXT("PA250FpsSample"), TEXT("PA250MeleeProbe"), TEXT("PA250ClassPortraits"), TEXT("PA250GunStill"), TEXT("PA250GunServe"), TEXT("PA250LandingStill"), TEXT("PA250OrderProbe")})
 		{
 			if (Cmd.Contains(Probe)) return;
 		}
@@ -2284,7 +2413,7 @@ int32 APA250BattleGameMode::CountAlive(FName Faction) const
 	int32 N = 0;
 	for (TActorIterator<ARFCharacter> It(GetWorld()); It; ++It)
 	{
-		if (!It->IsDead() && It->FactionId == Faction) ++N;
+		if (!It->IsDead() && It->FactionId == Faction && !It->ActorHasTag(TEXT("PA250GunMate"))) ++N;
 	}
 	return N;
 }
@@ -2910,6 +3039,7 @@ bool APA250BattleGameMode::RequestSpawn(AController* Controller, FName UnitClass
 	if (ARFCharacter* C = Cast<ARFCharacter>(NewPawn))
 	{
 		ConfigureSoldier(C, Faction, Cls);
+		if (Controller->IsA<APlayerController>()) PlacePlayerAtGun(C);
 	}
 	FrameHumanCamera(Cast<APlayerController>(Controller), NewPawn);
 	return true;
@@ -3368,7 +3498,7 @@ int32 APA250BattleGameMode::CountAlive(FName Faction, FName UnitClass) const
 	int32 N = 0;
 	for (TActorIterator<ARFCharacter> It(GetWorld()); It; ++It)
 	{
-		if (!It->IsDead() && It->FactionId == Faction && It->UnitClass == UnitClass)
+		if (!It->IsDead() && It->FactionId == Faction && It->UnitClass == UnitClass && !It->ActorHasTag(TEXT("PA250GunMate")))
 		{
 			++N;
 		}
@@ -3773,8 +3903,10 @@ void APA250BattleGameMode::UseClassAbility(ARFCharacter* Soldier)
 		}
 		else
 		{
+			Gun->ForceClaimPost(Soldier);
 			Gun->SetPlayerGunner(Soldier);
-			ShowNotice(TEXT("You serve the gun: it lays where you look, your trigger fires it, R works the drill"), 5.f);
+			const int32 Crew = EnsureGunCrew(Gun, Soldier);
+			ShowNotice(FString::Printf(TEXT("You serve the gun (crew %d). %s"), Crew, *Gun->LoadChip()), 5.f);
 		}
 		return;
 	}
@@ -3847,9 +3979,11 @@ FString APA250BattleGameMode::GetAbilityLine(const ARFCharacter* Soldier) const
 	const float Left = PlayerAbilityReadyAt - (GetWorld() ? GetWorld()->GetTimeSeconds() : 0.f);
 	if (const APA250FieldGun* Gun = GunAt(Soldier))
 	{
-		return Gun->GetPlayerGunner() == Soldier ? Gun->StatusLine() : FString(TEXT("T  Serve this gun"));
+		return Gun->GetPlayerGunner() == Soldier
+			? Gun->StatusLine()
+			: FString(TEXT("T  Serve this gun (look lays · [ ] load · fire · R drill)"));
 	}
-	if (Kit.bServesGuns) return TEXT("Gunner: go to one of your side's guns and press T to serve it");
+	if (Kit.bServesGuns) return TEXT("Gunner: Deploy places you at a gun; or go to one and press T to serve it");
 	if (Kit.bBuildsWorks) return TEXT("T  Dig: stand at a marked place or a battered bank and raise the work");
 	if (Kit.bRallies) return Left > 0.f ? FString::Printf(TEXT("T  Rally / order: %.0f s"), Left) : FString(TEXT("T  Rally a routing squad, or order the nearest line to volley or charge"));
 	if (Kit.bVolleyShock) return Left > 0.f ? FString::Printf(TEXT("T  Call a volley: %.0f s"), Left) : FString(TEXT("T  Call your line's volley: 3 muskets together shake the squad they hit"));
@@ -4266,9 +4400,36 @@ void APA250BattleGameMode::OnCharacterDied(ARFCharacter* Victim, AController* Vi
 		GeneralFate.Add(Victim->FactionId, UTF8_TO_TCHAR(Fate.c_str()));
 		if (Volleys) Volleys->PressSide(Victim->FactionId, GeneralRules.fall_pressure, GeneralRules.fall_pressure_seconds, TEXT("GeneralFell"));
 		const auto Side = Setup.sides.find(ToStd(Victim->FactionId));
-		const FString Name = Side != Setup.sides.end() ? FString(UTF8_TO_TCHAR(Side->second.commander_name.c_str())) : FString(TEXT("The general"));
-		PushKillFeed(FString::Printf(TEXT("%s is down!"), *Name));
-		UE_LOG(LogTemp, Display, TEXT("PA250 general: %s falls (%s); morale check on the %s side"), *Name, UTF8_TO_TCHAR(Fate.c_str()), *Victim->FactionId.ToString());
+		const FString Name = Side != Setup.sides.end() && !Side->second.commander_name.empty()
+			? FString(UTF8_TO_TCHAR(Side->second.commander_name.c_str()))
+			: FString(TEXT("The general"));
+		const bool bOurs = Victim->FactionId == PlayerFaction;
+		const FString FateText(UTF8_TO_TCHAR(Fate.c_str()));
+		FString Key;
+		const int32 Variant = GeneralFallVariant(Setup.seed, GetTypeHash(Victim->FactionId));
+		const FString Words = GeneralFallWords(bOurs, Name, FateText, Variant, Key);
+		const FName Voice = bOurs ? Victim->FactionId : PlayerFaction;
+		PushKillFeed(Words);
+		const double Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
+		const bool bHold = GeneralCalloutUntil >= 0.0 && Now < GeneralCalloutUntil;
+		if (!bHold)
+		{
+			ShowNotice(Words, 6.f);
+			GeneralCalloutUntil = Now + 6.0;
+			if (Volleys)
+			{
+				if (bOurs) Volleys->CallOut(Voice, *Key, *Words, Victim->GetActorLocation(), 6.f);
+				else Volleys->CallOutNearListener(*Key, *Words);
+			}
+			UE_LOG(LogTemp, Display, TEXT("PA250 general shout: voice %s key %s variant %d \"%s\""),
+				*Voice.ToString(), *Key, Variant, *Words);
+		}
+		else
+		{
+			UE_LOG(LogTemp, Display, TEXT("PA250 general shout: held (callout still up) voice %s key %s variant %d \"%s\""),
+				*Voice.ToString(), *Key, Variant, *Words);
+		}
+		UE_LOG(LogTemp, Display, TEXT("PA250 general: %s falls (%s); morale check on the %s side"), *Name, *FateText, *Victim->FactionId.ToString());
 		return;
 	}
 	// M6: tickets spent on death (and bleed), not spawn.
@@ -4293,7 +4454,8 @@ void APA250BattleGameMode::OnCharacterDied(ARFCharacter* Victim, AController* Vi
 			PushKillFeed(Victim->FactionId == PlayerFaction ? TEXT("Our colours are down!") : TEXT("Their colours are down!"));
 			UE_LOG(LogTemp, Display, TEXT("PA250 colours: the %s colours fall with their bearer; morale check on that side"), *Victim->FactionId.ToString());
 		}
-		SpendDeathTicket(Victim->FactionId, Victim->UnitClass);
+		if (!Victim->ActorHasTag(TEXT("PA250GunMate"))) SpendDeathTicket(Victim->FactionId, Victim->UnitClass);
+		else UE_LOG(LogTemp, Display, TEXT("PA250 guns: a summoned mate is down (no ticket)"));
 		// The rifleman's verb: an officer he picks off leaves that officer's squad shaken.
 		if (const ARFCharacter* Marksman = Killer ? Cast<ARFCharacter>(Killer->GetPawn()) : nullptr)
 		{

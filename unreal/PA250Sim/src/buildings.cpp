@@ -372,6 +372,7 @@ struct BudgetLine {
 struct Budget {
     std::vector<BudgetLine> income;
     std::vector<BudgetLine> expenses;
+    std::vector<BudgetLine> levy_towns;  // per-town levy for the treasury breakdown
     int income_total = 0;
     int expense_total = 0;  // positive number
     int muskets = 0;        // workshop output (resources, not gold)
@@ -403,7 +404,9 @@ Budget monthly_budget(const CampaignState& s, const std::string& faction) {
         const Province& p = pk.second;
         if (p.owner != faction) continue;
         ++towns;
-        b.levy += town_levy_gold(p);
+        const int town_levy = town_levy_gold(p);
+        b.levy += town_levy;
+        b.levy_towns.push_back({p.name, town_levy});
         // Depot trade needs a harbour or a crossroads (catalog income_requires_tags).
         if (const BuildingDef* depot = find_def("depot");
             depot && (has_any_tag(p, depot->income_requires_tags) || building_grandfathered(p, "depot")))
@@ -1405,16 +1408,19 @@ std::string treasury_json(const CampaignState& state) {
     j["loan_step"] = t.loan_step;
     j["loan_interest_pct"] = t.loan_interest_pct;
     j["arrears_months"] = state.progress.pay_arrears_months;
-    json inc = json::array(), exp = json::array();
+    json inc = json::array(), exp = json::array(), towns = json::array();
     for (const auto& l : b.income) inc.push_back({{"label", l.label}, {"gold", l.gold}});
     for (const auto& l : b.expenses) exp.push_back({{"label", l.label}, {"gold", l.gold}});
+    for (const auto& l : b.levy_towns) towns.push_back({{"label", l.label}, {"gold", l.gold}});
     j["income"] = inc;
     j["expenses"] = exp;
+    j["levy_towns"] = towns;
     j["income_total"] = b.income_total;
     j["expense_total"] = b.expense_total;
     j["net"] = b.income_total - b.expense_total;
     j["muskets"] = b.muskets;
     j["provisions"] = b.provisions;
+    j["on_date_levy"] = true;  // towns pay only if held on the morning of the 1st
     std::string e1, e2;
     take_loan(state, e1);
     repay_loan(state, e2);
@@ -1528,44 +1534,68 @@ void settle_monthly_budget(CampaignState& s) {
     // Expenses: interest, upkeep, then pay. What the purse cannot meet is borrowed up to the
     // credit limit; past that the soldiers go unpaid.
     int due = b.expense_total;
+    int short_by = 0;
     if (due <= 0) {
         s.progress.pay_arrears_months = 0;
-        return;
-    }
-    int short_by = std::max(0, due - s.player_gold);
-    if (short_by > 0) {
-        const int room = std::max(0, treasury_credit_limit(s) - std::max(0, s.progress.treasury_debt));
-        const int borrowed = std::min(short_by, room);
-        if (borrowed > 0) {
-            s.player_gold += borrowed;
-            s.progress.treasury_debt = std::max(0, s.progress.treasury_debt) + borrowed;
-            log_gold("Borrowed to meet the month's bills: +" + std::to_string(borrowed) + " gold (debt " +
-                         std::to_string(s.progress.treasury_debt) + ")",
-                     borrowed);
-            short_by -= borrowed;
-        }
-    }
-    const int paid = std::min(due, s.player_gold);
-    s.player_gold -= paid;
-    if (b.interest > 0) log_gold("Interest on debt: -" + std::to_string(b.interest) + " gold", -b.interest);
-    if (b.upkeep > 0) log_gold("Building upkeep: -" + std::to_string(b.upkeep) + " gold", -b.upkeep);
-    if (b.pay > 0) log_gold("Army pay: -" + std::to_string(b.pay) + " gold", -b.pay);
-    if (short_by > 0) {
-        ++s.progress.pay_arrears_months;
-        for (auto& ak : s.armies) {
-            if (ak.second.faction != s.player_faction) continue;
-            ak.second.morale = detail::clamp_int(ak.second.morale - t.unpaid_morale, 0, 100);
-        }
-        const int before = s.local_support;
-        s.local_support = detail::clamp_int(s.local_support - t.unpaid_support, 0, 100);
-        ResourceChange ch;
-        ch.reason = "Pay in arrears by " + std::to_string(short_by) + " gold: the army's morale falls (-" +
-                    std::to_string(t.unpaid_morale) + "), Support " + std::to_string(s.local_support - before);
-        ch.local_support = s.local_support - before;
-        ch.gold = short_by;  // the logged expense lines above overstate what left the purse by this much
-        detail::record_resource_change(s, ch);
     } else {
-        s.progress.pay_arrears_months = 0;
+        short_by = std::max(0, due - s.player_gold);
+        if (short_by > 0) {
+            const int room = std::max(0, treasury_credit_limit(s) - std::max(0, s.progress.treasury_debt));
+            const int borrowed = std::min(short_by, room);
+            if (borrowed > 0) {
+                s.player_gold += borrowed;
+                s.progress.treasury_debt = std::max(0, s.progress.treasury_debt) + borrowed;
+                log_gold("Borrowed to meet the month's bills: +" + std::to_string(borrowed) + " gold (debt " +
+                             std::to_string(s.progress.treasury_debt) + ")",
+                         borrowed);
+                short_by -= borrowed;
+            }
+        }
+        const int paid = std::min(due, s.player_gold);
+        s.player_gold -= paid;
+        if (b.interest > 0) log_gold("Interest on debt: -" + std::to_string(b.interest) + " gold", -b.interest);
+        if (b.upkeep > 0) log_gold("Building upkeep: -" + std::to_string(b.upkeep) + " gold", -b.upkeep);
+        if (b.pay > 0) log_gold("Army pay: -" + std::to_string(b.pay) + " gold", -b.pay);
+        if (short_by > 0) {
+            ++s.progress.pay_arrears_months;
+            for (auto& ak : s.armies) {
+                if (ak.second.faction != s.player_faction) continue;
+                ak.second.morale = detail::clamp_int(ak.second.morale - t.unpaid_morale, 0, 100);
+            }
+            const int before = s.local_support;
+            s.local_support = detail::clamp_int(s.local_support - t.unpaid_support, 0, 100);
+            ResourceChange ch;
+            ch.reason = "Pay in arrears by " + std::to_string(short_by) + " gold: the army's morale falls (-" +
+                        std::to_string(t.unpaid_morale) + "), Support " + std::to_string(s.local_support - before);
+            ch.local_support = s.local_support - before;
+            ch.gold = short_by;  // the logged expense lines above overstate what left the purse by this much
+            detail::record_resource_change(s, ch);
+        } else {
+            s.progress.pay_arrears_months = 0;
+        }
+    }
+    // One summary for the status line: net + short parts. Town-by-town lives in the ledger lines above.
+    {
+        const int net = b.income_total - b.expense_total;
+        std::string parts;
+        auto add = [&](const std::string& label, int gold) {
+            if (gold == 0) return;
+            if (!parts.empty()) parts += " · ";
+            parts += label + " " + (gold > 0 ? "+" : "") + std::to_string(gold);
+        };
+        add("Levies", b.levy);
+        add("trade", b.trade);
+        add("sea", b.subsidy);
+        add("pay", -b.pay);
+        add("upkeep", -b.upkeep);
+        add("interest", -b.interest);
+        ResourceChange sum;
+        sum.reason = "Month settled: treasury " + std::string(net >= 0 ? "+" : "") + std::to_string(net) +
+                     " gold (now " + std::to_string(s.player_gold) + ")" +
+                     (parts.empty() ? std::string() : ": " + parts) +
+                     ". Held on the 1st only — open Treasury or the Ledger for each town.";
+        sum.gold = net;  // display only; purse already moved
+        detail::record_resource_change(s, sum);
     }
 }
 

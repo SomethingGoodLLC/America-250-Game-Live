@@ -45,6 +45,30 @@ FString PA250ArcPanels::LiveScoreboard(const pa250::CampaignState& State)
 						   *TimeLeft(W.hours_remaining));
 }
 
+FString PA250ArcPanels::MissionTargetHoverLine(const pa250::CampaignState& State, const FString& ProvinceId)
+{
+	if (ProvinceId.IsEmpty()) return FString();
+	const std::string Pid = TCHAR_TO_UTF8(*ProvinceId);
+	const std::string Mine = State.player_faction;
+	for (const pa250::MissionDef& M : pa250::mission_defs())
+	{
+		if (M.faction != Mine) continue;
+		if (StatusOf(State, M.id) != "active") continue;
+		bool bTarget = false;
+		for (const std::string& Town : M.target_provinces)
+		{
+			if (Town == Pid)
+			{
+				bTarget = true;
+				break;
+			}
+		}
+		if (!bTarget) return FString();
+		return FString::Printf(TEXT("Mission: %s — %s"), *ToF(M.title), *ToF(M.goal));
+	}
+	return FString();
+}
+
 TArray<FString> PA250ArcPanels::SiegeNotices(const pa250::CampaignState& State)
 {
 	TArray<FString> Out;
@@ -115,6 +139,46 @@ PA250ArcPanels::FMissionCard PA250ArcPanels::MissionCard(const pa250::MissionRes
 	else if (Upcoming) C.Next = FString::Printf(TEXT("Next: %s. %s"), *ToF(Upcoming->title), *ToF(Upcoming->goal));
 	else C.Next = TEXT("No mission is waiting: the campaign is yours to finish.");
 	return C;
+}
+
+TArray<PA250ArcPanels::FMissionNode> PA250ArcPanels::MissionTree(const pa250::CampaignState& State)
+{
+	TArray<FMissionNode> Out;
+	const std::string Mine = State.player_faction;
+	const int64 Now = State.now.hour_index;
+	int32 Total = 0;
+	for (const pa250::MissionDef& M : pa250::mission_defs())
+		if (M.faction == Mine) ++Total;
+	int32 Index = 0;
+	for (const pa250::MissionDef& M : pa250::mission_defs())
+	{
+		if (M.faction != Mine) continue;
+		++Index;
+		FMissionNode N;
+		N.Id = ToF(M.id);
+		N.Index = Index;
+		N.Total = Total;
+		N.Title = ToF(M.title);
+		N.Goal = ToF(M.goal);
+		N.Status = ToF(StatusOf(State, M.id));
+		if (N.Status == TEXT("active"))
+		{
+			N.Progress = ToF(pa250::mission_progress_text(State, Mine, M.complete));
+			const auto It = State.progress.missions.find(M.id);
+			if (It != State.progress.missions.end() && It->second.deadline_hour > 0)
+				N.Deadline = FString::Printf(TEXT("%s left"), *TimeLeft(It->second.deadline_hour - Now));
+		}
+		else if (N.Status == TEXT("locked") && M.has_available_from && Now < pa250::from_ymdh(M.available_from).hour_index)
+		{
+			N.Progress = FString::Printf(TEXT("Not before %s"), *DateWords(M.available_from));
+		}
+		else if (N.Status == TEXT("locked") && M.prerequisite_must_succeed)
+		{
+			N.Progress = TEXT("Needs the mission before it done");
+		}
+		Out.Add(MoveTemp(N));
+	}
+	return Out;
 }
 
 PA250ArcPanels::FTracker PA250ArcPanels::Tracker(const pa250::CampaignState& State, const FString& SelectedArmyId)

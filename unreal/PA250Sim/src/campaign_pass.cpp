@@ -209,10 +209,12 @@ struct CpPersonRules {
     std::vector<std::string> muster_buildings = {"militia_muster", "fort"};
     int organizer_support = 1, organizer_muster_pct = 75;
     int delegate_shift_per_week = 3;
+    int delegate_seat_shift = 3;      // applied once when seated (GAME INVENTION)
+    int delegate_reseat_hours = 168;  // before relieve is allowed (GAME INVENTION, 7 days)
     int envoy_attitude = 5;
     float aura_radius_m = 30.f, home_post_radius_m = 25.f, fall_pressure = 0.6f, fall_pressure_seconds = 10.f;
     int fate_wounded = 60, fate_killed = 25, fate_captured = 15;
-    int wounded_days = 21, army_morale_on_fall = -8;
+    int wounded_days = 21, army_morale_on_fall = -8, army_morale_on_fall_victory = 0;
     int step_men = 20, width_pct = 30;
     int exposed_support = 2;
 };
@@ -614,6 +616,7 @@ void cp_release_person(CampaignState& s, const std::string& id) {
     st.army_id.clear();
     st.province.clear();
     st.bloc.clear();
+    // seated_hour kept: the reseat cooldown runs from when he was last seated
 }
 
 void cp_seed(CampaignState& s) {
@@ -1090,6 +1093,8 @@ void cp_tick_decisions(CampaignState& s, std::vector<Interrupt>& interrupts) {
 
 struct CpOrder {
     std::string order, army_id, province, person, role, bloc, action, measure, decision, option;
+    std::string from_army, to_army;
+    std::map<std::string, int> units;  // transfer_units: class -> count
 };
 
 std::string cp_parse_order(const std::string& text, CpOrder& o) {
@@ -1097,9 +1102,17 @@ std::string cp_parse_order(const std::string& text, CpOrder& o) {
         const cp_json j = cp_json::parse(text);
         if (!j.is_object() || !j.contains("order") || !j.at("order").is_string()) return "malformed_order";
         for (auto it = j.begin(); it != j.end(); ++it) {
+            const std::string& k = it.key();
+            if (k == "units") {
+                if (!it.value().is_object()) return "malformed_order";
+                for (auto uit = it.value().begin(); uit != it.value().end(); ++uit) {
+                    if (!uit.value().is_number_integer()) return "malformed_order";
+                    o.units[uit.key()] = uit.value().get<int>();
+                }
+                continue;
+            }
             if (!it.value().is_string()) return "malformed_order";
             const std::string v = it.value().get<std::string>();
-            const std::string& k = it.key();
             if (k == "order") o.order = v;
             else if (k == "army_id") o.army_id = v;
             else if (k == "province") o.province = v;
@@ -1110,12 +1123,15 @@ std::string cp_parse_order(const std::string& text, CpOrder& o) {
             else if (k == "measure") o.measure = v;
             else if (k == "decision") o.decision = v;
             else if (k == "option") o.option = v;
+            else if (k == "from_army") o.from_army = v;
+            else if (k == "to_army") o.to_army = v;
             else return "unexpected_field";
         }
     } catch (...) {
         return "malformed_order";
     }
-    if (!cp_known(o.order, {"halt", "form_army", "assign_person", "relieve_person", "use_agent", "lobby", "vote_now", "send_dispatch", "decide"}))
+    if (!cp_known(o.order, {"halt", "form_army", "assign_person", "relieve_person", "use_agent", "lobby", "vote_now",
+                            "send_dispatch", "decide", "transfer_units"}))
         return "unknown_order";
     return "";
 }
@@ -1169,6 +1185,8 @@ std::string cp_validate(const CampaignState& s, const CpOrder& o) {
             if (!g_cp_politics_loaded) return "politics_not_loaded";
             const CpBody* body = cp_active_body(s, side);
             if (!body || !cp_bloc(*body, o.bloc)) return "unknown_bloc";
+            for (const auto& pk : s.pass.persons)
+                if (pk.second.role == "delegate" && pk.second.bloc == o.bloc && pk.second.status.empty()) return "bloc_taken";
         }
         if (o.role == "envoy")
             for (const CpPerson& q : g_cp_persons)
@@ -1178,8 +1196,37 @@ std::string cp_validate(const CampaignState& s, const CpOrder& o) {
     if (o.order == "relieve_person") {
         const CpPerson* p = nullptr;
         if (const std::string e = cp_check_person(s, o.person, p); !e.empty()) return e;
-        if (cp_pstate(s, p->id).role.empty()) return "holds_no_role";
-        if (s.pending_battle.active && cp_pstate(s, p->id).role == "general") return "battle_pending";
+        const PersonState st = cp_pstate(s, p->id);
+        if (st.role.empty()) return "holds_no_role";
+        if (s.pending_battle.active && st.role == "general") return "battle_pending";
+        if (st.role == "delegate" && g_cp_prules.delegate_reseat_hours > 0 && st.seated_hour > 0 &&
+            s.now.hour_index < st.seated_hour + g_cp_prules.delegate_reseat_hours)
+            return "recently_seated";
+        return "";
+    }
+    if (o.order == "transfer_units") {
+        if (o.from_army.empty() || o.to_army.empty()) return "unknown_army";
+        if (o.from_army == o.to_army) return "same_army";
+        auto fit = s.armies.find(o.from_army);
+        auto tit = s.armies.find(o.to_army);
+        if (fit == s.armies.end() || tit == s.armies.end()) return "unknown_army";
+        const Army& from = fit->second;
+        const Army& to = tit->second;
+        if (from.faction != side || to.faction != side) return "not_your_army";
+        if (from.role == "allied_company" || to.role == "allied_company") return "allied_company";
+        // A halt part-way clears the path and sets returning_hours: the army is still on the road.
+        if (!from.path.empty() || !to.path.empty() || from.returning_hours > 0 || to.returning_hours > 0)
+            return "army_on_the_march";
+        if (from.province != to.province) return "not_same_town";
+        if (o.units.empty()) return "no_units";
+        int moving = 0;
+        for (const auto& u : o.units) {
+            if (u.second <= 0) return "no_units";
+            if (detail::map_get(from.units, u.first) < u.second) return "not_enough_units";
+            moving += u.second;
+        }
+        const int cap = detail::army_unit_cap(s, to);
+        if (cap > 0 && detail::total_units(to) + moving > cap) return "over_cap";
         return "";
     }
     if (o.order == "use_agent") {
@@ -1274,6 +1321,8 @@ std::vector<std::string> load_persons(const std::string& json_text) {
         rules.organizer_support = r.at("organizer").at("support_per_month").get<int>();
         rules.organizer_muster_pct = r.at("organizer").at("muster_hours_pct").get<int>();
         rules.delegate_shift_per_week = r.at("delegate").at("shift_per_week").get<int>();
+        rules.delegate_seat_shift = r.at("delegate").value("seat_shift", rules.delegate_shift_per_week);
+        rules.delegate_reseat_hours = r.at("delegate").value("reseat_hours", 168);
         rules.envoy_attitude = r.at("envoy").at("attitude_once").get<int>();
         const cp_json& c = r.at("commander");
         rules.aura_radius_m = c.at("aura_radius_m").get<float>();
@@ -1285,6 +1334,7 @@ std::vector<std::string> load_persons(const std::string& json_text) {
         rules.fate_captured = c.at("fall_fate_pct").at("captured").get<int>();
         rules.wounded_days = c.at("wounded_days").get<int>();
         rules.army_morale_on_fall = c.at("army_morale_on_fall").get<int>();
+        rules.army_morale_on_fall_victory = c.value("army_morale_on_fall_victory", 0);
         rules.step_men = r.at("estimates").at("step_men").get<int>();
         rules.width_pct = r.at("estimates").at("width_pct").get<int>();
         rules.exposed_support = r.at("informer").at("exposed_local_support").get<int>();
@@ -1919,9 +1969,16 @@ void pass_after_battle(CampaignState& s, const CampaignState& before, const Batt
             }
             auto ait = s.armies.find(aid);
             if (ait != s.armies.end()) {
-                ait->second.morale = clamp_int(ait->second.morale + g_cp_prules.army_morale_on_fall, 0, 100);
-                report.morale_delta[aid] += g_cp_prules.army_morale_on_fall;
-                line += ". " + ait->second.name + " is a detachment again (morale " + std::to_string(g_cp_prules.army_morale_on_fall) + ")";
+                // A win still loses the general (detachment), but does not take the full fall hit.
+                const int hit = (faction == r.winner) ? g_cp_prules.army_morale_on_fall_victory
+                                                      : g_cp_prules.army_morale_on_fall;
+                if (hit != 0) {
+                    ait->second.morale = clamp_int(ait->second.morale + hit, 0, 100);
+                    report.morale_delta[aid] += hit;
+                    line += ". " + ait->second.name + " is a detachment again (morale " + std::to_string(hit) + ")";
+                } else {
+                    line += ". " + ait->second.name + " is a detachment again";
+                }
             }
             report.commander_events[faction] = ev->second;
             report.change_reasons.push_back(line);
@@ -2022,9 +2079,16 @@ std::string pass_to_json(const CampaignPass& p) {
     cp_json persons = cp_json::object();
     for (const auto& pk : p.persons) {
         const PersonState& st = pk.second;
-        persons[pk.first] = {{"role", st.role},       {"army_id", st.army_id},   {"province", st.province}, {"bloc", st.bloc},
-                             {"uses_left", st.uses_left}, {"status", st.status}, {"away_until_hour", st.away_until_hour},
-                             {"unlocked", st.unlocked},   {"envoy_counted", st.envoy_counted}};
+        persons[pk.first] = {{"role", st.role},
+                             {"army_id", st.army_id},
+                             {"province", st.province},
+                             {"bloc", st.bloc},
+                             {"uses_left", st.uses_left},
+                             {"status", st.status},
+                             {"away_until_hour", st.away_until_hour},
+                             {"seated_hour", st.seated_hour},
+                             {"unlocked", st.unlocked},
+                             {"envoy_counted", st.envoy_counted}};
     }
     j["persons"] = persons;
     j["bloc_lean"] = p.bloc_lean;
@@ -2080,6 +2144,7 @@ CampaignPass pass_from_json(const std::string& text) {
             st.uses_left = it.value().value("uses_left", -1);
             st.status = it.value().value("status", "");
             st.away_until_hour = it.value().value("away_until_hour", static_cast<int64_t>(0));
+            st.seated_hour = it.value().value("seated_hour", static_cast<int64_t>(0));
             st.unlocked = it.value().value("unlocked", false);
             st.envoy_counted = it.value().value("envoy_counted", false);
             p.persons[it.key()] = st;
@@ -2195,10 +2260,18 @@ CampaignState apply_campaign_order(const CampaignState& in, const std::string& o
                     0, 0, o.province);
         } else if (o.role == "delegate") {
             st.bloc = o.bloc;
+            st.seated_hour = s.now.hour_index;
+            if (g_cp_prules.delegate_seat_shift != 0) cp_shift_bloc(s, o.bloc, g_cp_prules.delegate_seat_shift);
             const CpBody* body = cp_active_body(s, side);
             const CpBloc* bloc = body ? cp_bloc(*body, o.bloc) : nullptr;
-            cp_note(s, who + " sits as your delegate among the " + (bloc ? bloc->name : o.bloc) + ": +" +
-                           std::to_string(g_cp_prules.delegate_shift_per_week) + " a week while he stays");
+            std::string note = who + " sits as your delegate among the " + (bloc ? bloc->name : o.bloc);
+            if (g_cp_prules.delegate_seat_shift != 0)
+                note += ": " + std::string(g_cp_prules.delegate_seat_shift > 0 ? "+" : "") +
+                        std::to_string(g_cp_prules.delegate_seat_shift) + " now, +" +
+                        std::to_string(g_cp_prules.delegate_shift_per_week) + " a week while he stays";
+            else
+                note += ": +" + std::to_string(g_cp_prules.delegate_shift_per_week) + " a week while he stays";
+            cp_note(s, note);
         } else {
             int gain = 0;
             if (!st.envoy_counted && s.relations.count(kBritish) && side != kBritish) {
@@ -2213,6 +2286,42 @@ CampaignState apply_campaign_order(const CampaignState& in, const std::string& o
         const std::string role = cp_pstate(s, o.person).role;
         cp_release_person(s, o.person);
         cp_note(s, who + " is relieved as " + role + " and is at hand");
+    } else if (o.order == "transfer_units") {
+        Army& from = s.armies.at(o.from_army);
+        Army& to = s.armies.at(o.to_army);
+        int moved = 0, guns_moved = 0;
+        for (const auto& u : o.units) {
+            from.units[u.first] -= u.second;
+            if (from.units[u.first] <= 0) from.units.erase(u.first);
+            to.units[u.first] += u.second;
+            moved += u.second;
+            if (u.first == "artilleryman") {
+                const int take = std::min(u.second, std::max(0, from.guns));
+                from.guns -= take;
+                to.guns += take;
+                guns_moved += take;
+            }
+        }
+        const int a = std::max(0, detail::total_units(to) - moved);
+        const int b = moved;
+        if (a + b > 0) {
+            // Morale of the joined men averages into the receiver.
+            to.morale = (to.morale * a + from.morale * b) / (a + b);
+            to.readiness = (to.readiness * a + from.readiness * b) / (a + b);
+        }
+        std::string note = std::to_string(moved) + (moved == 1 ? " company" : " companies") + " leave " + from.name +
+                           " for " + to.name;
+        if (guns_moved > 0) note += " (and " + std::to_string(guns_moved) + " guns)";
+        cp_note(s, note, 0, 0, to.province);
+        if (detail::total_units(from) <= 0) {
+            for (auto& pk : s.pass.persons)
+                if (pk.second.role == "general" && pk.second.army_id == o.from_army) cp_release_person(s, pk.first);
+            for (auto& pc : s.progress.personnel_commitments)
+                if (pc.army_id == o.from_army) pc.army_id = o.to_army;
+            for (auto& cj : s.progress.cartridge_jobs)
+                if (cj.army_id == o.from_army) cj.army_id = o.to_army;
+            s.armies.erase(o.from_army);
+        }
     } else if (o.order == "use_agent") {
         const CpAbility& ab = g_cp_abilities.at(p->ability);
         s.pass.persons[o.person].uses_left = cp_uses_left(s, *p) - 1;
@@ -2346,6 +2455,8 @@ std::string politics_json(const CampaignState& s) {
     out["write_shift"] = g_cp_lobby.write_shift;
     out["favor_shift"] = g_cp_lobby.favor_shift;
     out["delegate_shift_per_week"] = g_cp_prules.delegate_shift_per_week;
+    out["delegate_seat_shift"] = g_cp_prules.delegate_seat_shift;
+    out["delegate_reseat_hours"] = g_cp_prules.delegate_reseat_hours;
     if (s.player_faction == kBritish) {
         out["ministry_confidence"] = s.pass.ministry_confidence;
         out["recall_floor"] = g_cp_lobby.recall_floor;
