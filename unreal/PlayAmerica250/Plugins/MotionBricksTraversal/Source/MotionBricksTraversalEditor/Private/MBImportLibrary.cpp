@@ -90,7 +90,7 @@ UMBGeneratedClip* UMBImportLibrary::ImportGeneratedMotion(const FString& Filenam
     const float Scale = RefGlobal[Pelvis].GetLocation().Z/SourceHeight;
     if (!FMath::IsFinite(Scale) || Scale < 0.5f || Scale > 1.5f)
         return Fail(TEXT("Unexpected mannequin/SOMA height ratio"));
-    const TMap<FName,FString> Mapping = {
+    TMap<FName,FString> Mapping = {
         {TEXT("pelvis"),TEXT("Hips")},{TEXT("spine_01"),TEXT("Spine1")},
         {TEXT("spine_03"),TEXT("Spine2")},{TEXT("spine_05"),TEXT("Chest")},
         {TEXT("neck_01"),TEXT("Neck1")},{TEXT("neck_02"),TEXT("Neck2")},{TEXT("head"),TEXT("Head")},
@@ -103,6 +103,10 @@ UMBGeneratedClip* UMBImportLibrary::ImportGeneratedMotion(const FString& Filenam
         {TEXT("thigh_r"),TEXT("RightLeg")},{TEXT("calf_r"),TEXT("RightShin")},
         {TEXT("foot_r"),TEXT("RightFoot")},{TEXT("ball_r"),TEXT("RightToeBase")}
     };
+    if (Ref.FindBoneIndex(TEXT("spine_05")) == INDEX_NONE) {
+        Mapping.Add(TEXT("spine_02"),TEXT("Spine2"));
+        Mapping.Add(TEXT("spine_03"),TEXT("Chest"));
+    }
     // SOMA's T-pose and Quinn's A-pose differ noticeably in the arms. Match
     // anatomical segment directions after rotation retargeting, retaining twist.
     const TMap<FName,TPair<FName,FString>> LimbEnds = {
@@ -124,7 +128,8 @@ UMBGeneratedClip* UMBImportLibrary::ImportGeneratedMotion(const FString& Filenam
         {TEXT("ik_foot_r"),TEXT("foot_r")}
     };
     const FString Folder = TEXT("/Game/Developers/MotionBricksEvaluation/");
-    if (!Variant.IsEmpty() && Variant != TEXT("Manny") && Variant != TEXT("Quinn")) return Fail(TEXT("Unknown evaluation variant"));
+    if (!Variant.IsEmpty() && Variant != TEXT("Manny") && Variant != TEXT("Quinn") && Variant != TEXT("AmericanSoldier"))
+        return Fail(TEXT("Unknown evaluation variant"));
     const FString Suffix = Variant.IsEmpty() ? FString() : TEXT("_")+Variant;
     const FString AnimName = TEXT("A_GeneratedTraversal")+Suffix;
     const FString ClipName = TEXT("DA_GeneratedTraversal")+Suffix;

@@ -2,7 +2,7 @@
 param(
     [string] $EngineRoot = 'C:/Program Files/Epic Games/UE_5.8',
     [string] $Project = (Join-Path $PSScriptRoot '../../../MotionBricksEvaluation/SharedVaultTestHost/MBTestHost.uproject'),
-    [ValidateSet('Manny', 'Quinn')] [string] $Soldier = 'Manny',
+    [ValidateSet('Manny', 'Quinn', 'AmericanSoldier')] [string] $Soldier = 'Manny',
     [switch] $Verify,
     [ValidateRange(15, 240)] [int] $FPS = 60
 )

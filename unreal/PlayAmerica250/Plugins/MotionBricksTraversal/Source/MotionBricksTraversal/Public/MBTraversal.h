@@ -5,6 +5,7 @@
 #include "GameFramework/GameModeBase.h"
 #include "MBTraversal.generated.h"
 
+class UAnimInstance;
 class UAnimSequence;
 class UMBTraversalComponent;
 class USkeletalMesh;
@@ -73,7 +74,12 @@ private:
     void Trigger();
     void SelectManny();
     void SelectQuinn();
+    void SelectAmericanSoldier();
     void ConfigureSoldier(bool bManny);
+    void ConfigureAmericanSoldier();
+    void ClearPreviewGear();
+    void BuildLicensedMusket();
+    USceneComponent* AttachSlungMusket();
     void BuildStandInGear(bool bManny);
     void SampleMusketClearance();
     UFUNCTION() void HandleVaultFinished(bool bCompleted);
@@ -84,6 +90,12 @@ private:
     float NormalHalfHeight = 88.f;
     UPROPERTY(Transient) TArray<TObjectPtr<USceneComponent>> Gear;
     UPROPERTY(Transient) TObjectPtr<USceneComponent> Musket;
+    UPROPERTY(Transient) TSubclassOf<UAnimInstance> MannequinAnimClass;
+    UPROPERTY(Transient) TObjectPtr<UAnimSequence> SoldierIdle;
+    UPROPERTY(Transient) TObjectPtr<UAnimSequence> SoldierWalk;
+    double MusketHalfLength = 0.0;
+    float MusketRadius = 0.f;
+    bool bExpectMusket = false;
     FString SoldierName;
     int32 MusketChecks = 0;
     int32 MusketWallHits = 0;

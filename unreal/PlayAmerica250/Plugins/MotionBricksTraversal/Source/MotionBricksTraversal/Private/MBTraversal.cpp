@@ -1,6 +1,8 @@
 #include "MBTraversal.h"
+#include "MBPreviewSoldierAnim.h"
 #include "MBTraversalComponent.h"
 #include "Animation/AnimInstance.h"
+#include "Animation/AnimSequence.h"
 #include "Camera/CameraComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/InputComponent.h"
@@ -72,7 +74,8 @@ AMBTestCharacter::AMBTestCharacter() {
     GetMesh()->SetRelativeLocationAndRotation(FVector(0,0,-88),FRotator(0,-90,0));
     GetMesh()->AddTickPrerequisiteActor(this);
     static ConstructorHelpers::FClassFinder<UAnimInstance> AnimBP(TEXT("/Game/Characters/Mannequins/Anims/Unarmed/ABP_Unarmed"));
-    GetMesh()->SetAnimInstanceClass(AnimBP.Class);
+    MannequinAnimClass = AnimBP.Class;
+    GetMesh()->SetAnimInstanceClass(MannequinAnimClass);
     USpringArmComponent* Arm = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraArm"));
     Arm->SetupAttachment(RootComponent);
     Arm->TargetArmLength = 360.f;
@@ -89,7 +92,8 @@ void AMBTestCharacter::BeginPlay() {
     bVerify = FParse::Param(FCommandLine::Get(),TEXT("MBVerify"));
     FString Soldier;
     FParse::Value(FCommandLine::Get(),TEXT("MBSoldier="),Soldier);
-    ConfigureSoldier(Soldier != TEXT("Quinn"));
+    if (Soldier == TEXT("AmericanSoldier")) ConfigureAmericanSoldier();
+    else ConfigureSoldier(Soldier != TEXT("Quinn"));
     Traversal->OnVaultFinished.AddDynamic(this,&AMBTestCharacter::HandleVaultFinished);
     if (bVerify && Clip) {
         ObservedContacts.SetNum(Clip->Contacts.Num());
@@ -101,7 +105,7 @@ void AMBTestCharacter::BeginPlay() {
         PC->SetInputMode(FInputModeGameOnly());
         PC->bShowMouseCursor = false;
     }
-    SetResult(Clip ? FString::Printf(TEXT("%s | R reset, E vault, 1 Manny, 2 Quinn, B block landing"),*SoldierName) :
+    SetResult(Clip ? FString::Printf(TEXT("%s | R reset, E vault, 1 Manny, 2 Quinn, 3 American Soldier"),*SoldierName) :
         TEXT("Missing per-rig clip: run build_test_map.py"));
 }
 
@@ -117,6 +121,7 @@ void AMBTestCharacter::SetupPlayerInputComponent(UInputComponent* Input) {
     Input->BindKey(EKeys::B, IE_Pressed, this, &AMBTestCharacter::ToggleBlockedLanding);
     Input->BindKey(EKeys::One, IE_Pressed, this, &AMBTestCharacter::SelectManny);
     Input->BindKey(EKeys::Two, IE_Pressed, this, &AMBTestCharacter::SelectQuinn);
+    Input->BindKey(EKeys::Three, IE_Pressed, this, &AMBTestCharacter::SelectAmericanSoldier);
 }
 void AMBTestCharacter::Trigger() { TryTraversal(); }
 void AMBTestCharacter::SetResult(const FString& Message) {
@@ -128,13 +133,44 @@ void AMBTestCharacter::ConfigureSoldier(bool bManny) {
     const TCHAR* Rig = bManny ? TEXT("Manny") : TEXT("Quinn");
     const FString MeshPath = FString::Printf(TEXT("/Game/Characters/Mannequins/Meshes/SKM_%s_Simple"),Rig);
     const FString ClipPath = FString::Printf(TEXT("/Game/Developers/MotionBricksEvaluation/DA_GeneratedTraversal_%s"),Rig);
+    ClearPreviewGear();
+    GetMesh()->SetAnimInstanceClass(nullptr);
     GetMesh()->SetSkeletalMeshAsset(LoadObject<USkeletalMesh>(nullptr,*MeshPath));
+    GetMesh()->SetAnimInstanceClass(MannequinAnimClass);
     Clip = LoadObject<UMBGeneratedClip>(nullptr,*ClipPath);
     if (!Clip && !bManny) Clip = LoadObject<UMBGeneratedClip>(nullptr,
         TEXT("/Game/Developers/MotionBricksEvaluation/DA_GeneratedTraversal"));
     SoldierName = bManny ? TEXT("Manny - Continental stand-in, slung musket") : TEXT("Quinn - Militia stand-in, unarmed");
+    bExpectMusket = bManny;
     BuildStandInGear(bManny);
     UE_LOG(LogTemp, Display, TEXT("MB_SOLDIER %s clip=%s"),*SoldierName,*GetNameSafe(Clip));
+}
+
+void AMBTestCharacter::ConfigureAmericanSoldier() {
+    ClearPreviewGear();
+    bExpectMusket = true;
+    SoldierName = TEXT("American Soldier - Fab uniform and slung musket");
+    GetMesh()->SetAnimInstanceClass(nullptr);
+    GetMesh()->SetSkeletalMeshAsset(LoadObject<USkeletalMesh>(nullptr,
+        TEXT("/Game/american_soldier/base_mesh/SK_AMERICAN_SOLDIER.SK_AMERICAN_SOLDIER")));
+    Clip = LoadObject<UMBGeneratedClip>(nullptr,
+        TEXT("/Game/Developers/MotionBricksEvaluation/DA_GeneratedTraversal_AmericanSoldier"));
+    SoldierIdle = LoadObject<UAnimSequence>(nullptr,TEXT("/Game/american_soldier/demo/ThirdPersonIdle"));
+    SoldierWalk = LoadObject<UAnimSequence>(nullptr,TEXT("/Game/american_soldier/demo/ThirdPersonWalk"));
+    GetMesh()->SetAnimInstanceClass(UMBPreviewSoldierAnim::StaticClass());
+    if (UMBPreviewSoldierAnim* Anim = Cast<UMBPreviewSoldierAnim>(GetMesh()->GetAnimInstance())) {
+        Anim->SetLocomotion(SoldierIdle);
+    }
+    BuildLicensedMusket();
+    UE_LOG(LogTemp, Display, TEXT("MB_SOLDIER %s mesh=%s clip=%s"),*SoldierName,
+        *GetPathNameSafe(GetMesh()->GetSkeletalMeshAsset()),*GetNameSafe(Clip));
+}
+
+void AMBTestCharacter::SelectAmericanSoldier() {
+    if (bVerify || Traversal->IsVaulting() || !LoadObject<UMBGeneratedClip>(nullptr,
+        TEXT("/Game/Developers/MotionBricksEvaluation/DA_GeneratedTraversal_AmericanSoldier"))) return;
+    ConfigureAmericanSoldier();
+    ResetAttempt();
 }
 
 void AMBTestCharacter::SelectManny() {
@@ -198,6 +234,9 @@ void AMBTestCharacter::ToggleBlockedLanding() {
 
 void AMBTestCharacter::Tick(float Dt) {
     Super::Tick(Dt);
+    if (UMBPreviewSoldierAnim* Anim = Cast<UMBPreviewSoldierAnim>(GetMesh()->GetAnimInstance())) {
+        Anim->SetLocomotion(GetVelocity().SizeSquared2D() > 25.f ? SoldierWalk : SoldierIdle);
+    }
     APlayerController* PC = Cast<APlayerController>(Controller);
     if (PC && PC->WasInputKeyJustPressed(EKeys::V)) bDebug = !bDebug;
     if (Traversal->IsVaulting()) {

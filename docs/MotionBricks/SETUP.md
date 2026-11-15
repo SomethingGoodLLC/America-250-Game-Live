@@ -1,14 +1,14 @@
 # Run the MotionBricks evaluation
 
-The Windows evaluation targets **Unreal 5.8.4** (CL 58902052). The shared component demo uses the Manny and Quinn rigs from the game archive with locally generated preview gear. The licensed soldier and musket packs are separate local dependencies. Open the separate test host or launch the test map directly.
+The Windows evaluation targets **Unreal 5.8.4** (CL 58902052). The isolated test host supports Manny, Quinn, and the purchased American Soldier with the Historic Soldier Weapon Pack musket slung across his back.
 
-From the workspace folder:
+From the game checkout, pass the path to your test host:
 
 ```powershell
-& '.\America-250-Game-Live\tools\motionbricks\launch_test.ps1'
+& ./tools/motionbricks/launch_test.ps1 -Project 'C:/path/to/MBTestHost.uproject' -Soldier AmericanSoldier
 ```
 
-In the demo, **WASD** moves and the **left/right arrows** turn. Walk into the outlined approach region and press **E** while facing the wall. **R** returns to the marked approach, **1** selects Manny with the slung preview musket, and **2** selects Quinn. **B** toggles the landing obstruction and **V** toggles the guides. When testing the rejection cases, read the message on screen or look for `MotionBricks:` in the Unreal log.
+In the demo, **WASD** moves and the **left/right arrows** turn. Walk into the outlined approach region and press **E** while facing the wall. **R** returns to the marked approach. **1** selects Manny with the slung preview musket, **2** selects Quinn, and **3** selects the licensed soldier when installed. **B** toggles the landing obstruction and **V** toggles the guides. Rejection reasons appear on screen and in the Unreal log under `MotionBricks:`.
 
 To spot-check the course, press **E** from the spawn, then use **R** and turn 90° before retrying. Both attempts should be rejected. Reset, toggle the blocker with **B**, and confirm **E** is rejected again. Remove the blocker, press **E** twice, and hold **W** after landing to verify walking. Repeat with `-FPS 30` and `-FPS 60` if you want to compare motion at the two caps.
 
@@ -41,18 +41,25 @@ $export = Join-Path $eval 'GeneratedVault'
 & "$mb/.venv/Scripts/python.exe" "$tools/generate_traversal.py" --motionbricks $mb --output $export
 if ($LASTEXITCODE) { throw 'MotionBricks exporter failed' }
 
+# Restore the purchased packs when building the licensed preview.
+git -C "$workspace/America-250-Game-Live" lfs pull --include='unreal/PlayAmerica250/Content/american_soldier/**,unreal/PlayAmerica250/Content/HS_WeaponPack_01/**'
 # Use a fresh directory so the importer never replaces existing assets.
-$project = & "$tools/prepare_test_host.ps1" -Destination "$eval/FreshTestHost"
+# Omit -IncludeLicensedPacks for the Manny and Quinn demo.
+$project = & "$tools/prepare_test_host.ps1" -Destination "$eval/FreshTestHost" -IncludeLicensedPacks
 & "$ue/Engine/Build/BatchFiles/Build.bat" MBTestHostEditor Win64 Development "-Project=$project" -WaitMutex -NoHotReloadFromIDE -NoUBTMakefiles
 if ($LASTEXITCODE) { throw 'Unreal build failed' }
 
 $env:PA250_MB_MOTION = Join-Path $export 'generated_traversal.json'
 $script = "$tools/build_test_map.py".Replace('\','/')
 & "$ue/Engine/Binaries/Win64/UnrealEditor-Cmd.exe" $project -run=pythonscript "-script=$script" -unattended -nullrhi -nosplash
-# Look for MB_MAP_CREATED and the three packages in Content/Developers/MotionBricksEvaluation.
+# Look for MB_MAP_CREATED and one MB_CLIP_CREATED per installed rig.
+& "$tools/launch_test.ps1" -Project $project -Soldier AmericanSoldier -Verify -FPS 30
+& "$tools/launch_test.ps1" -Project $project -Soldier AmericanSoldier -Verify -FPS 60
 & "$tools/launch_test.ps1" -Project $project -Soldier Manny -Verify -FPS 30
 & "$tools/launch_test.ps1" -Project $project -Soldier Quinn -Verify -FPS 60
 & "$tools/launch_test.ps1" -Project $project
 ```
 
-The first TensorRT launch builds a GPU-specific plan. Keep the evaluation JSON, generated Unreal animation and map, model downloads, TensorRT plans, and capture files local. The built test host is disposable. To bring the code and docs back to Mac, apply the local task commits or the exported Git patches to the original checkout. The plugin defaults to disabled in the main game. Enable it explicitly on any editor project used to evaluate it. Offline Unreal playback uses engine APIs only. Generation still uses the Windows NVIDIA workspace, and macOS Metal playback requires a fresh test.
+To add the licensed clip to an existing two-rig host, refresh it with `-RefreshPlugin -IncludeLicensedPacks`, rebuild, and set `$env:PA250_MB_IMPORT_SOLDIER_ONLY = '1'` before running the import command above. The importer leaves the saved map in place. Clear that environment variable after the import with `Remove-Item Env:PA250_MB_IMPORT_SOLDIER_ONLY`.
+
+The first TensorRT launch builds a GPU-specific plan. Keep the evaluation JSON, generated Unreal animation and map, model downloads, TensorRT plans, and capture files local. The built test host is disposable. The plugin defaults to disabled in the main game. Offline Unreal playback uses engine APIs only. Generation still uses the Windows NVIDIA workspace, and macOS Metal playback requires a fresh test.

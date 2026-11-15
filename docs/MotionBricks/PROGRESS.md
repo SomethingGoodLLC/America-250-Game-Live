@@ -104,3 +104,24 @@ $importLog = Join-Path (Resolve-Path $target).Path 'MBImport_final.log'
 Reused `VaultBenchmark/generated_traversal.json` and the 5.8.4 test host. Added import-time two-bone IK for the wall palm and both landing steps, a small exit height correction, and rendered contact measurements. The first runtime measurements found that Quinn's proportions were being retargeted twice. The importer now sets Quinn as the sequence's retarget source mesh. The previous generated packages are backed up in the workspace beside the host under `BeforeContactPolish` and `ContactBakeBeforeSourceFix`.
 
 Ran the refresh, build, import, and 30/60 FPS commands above with `MBImport_contacts.log` for the final import. Both rendered verification logs end in `MB_VERIFY RESULT PASS`. See the contact retest table in TEST_RESULTS.md and the evidence folders named `Contacts_30fps` and `Contacts_60fps`.
+
+## 2026-11-15 — shared traversal and purchased soldier
+
+Merged the user's campaign and Git LFS updates into the traversal branch using the ZIP's original Git commit as the base. Pushed the merged shared-component checkpoint to `master` at `cbede55`. Restored `american_soldier` and `HS_WeaponPack_01` from Git LFS and copied them into the isolated `SharedVaultTestHost`. The preview uses the pack's 84-bone soldier mesh, the pack's idle and walk sequences, and the purchased musket as a slung prop.
+
+```powershell
+# From this checkout, with the existing two-rig host and export:
+$project = & ./tools/motionbricks/prepare_test_host.ps1 -Destination "$eval/SharedVaultTestHost" -RefreshPlugin -IncludeLicensedPacks
+& "$ue/Engine/Build/BatchFiles/Build.bat" MBTestHostEditor Win64 Development "-Project=$project" -WaitMutex
+$env:PA250_MB_MOTION = Join-Path $eval 'VaultBenchmark/generated_traversal.json'
+$env:PA250_MB_IMPORT_SOLDIER_ONLY = '1'
+$script = (Resolve-Path './tools/motionbricks/build_test_map.py').Path
+& "$ue/Engine/Binaries/Win64/UnrealEditor-Cmd.exe" $project -run=pythonscript "-script=$script" -unattended -nullrhi -nosplash
+Remove-Item Env:PA250_MB_IMPORT_SOLDIER_ONLY
+& ./tools/motionbricks/launch_test.ps1 -Project $project -Soldier AmericanSoldier -Verify -FPS 30
+& ./tools/motionbricks/launch_test.ps1 -Project $project -Soldier AmericanSoldier -Verify -FPS 60
+& ./tools/motionbricks/launch_test.ps1 -Project $project -Soldier Quinn -Verify -FPS 30
+& ./tools/motionbricks/launch_test.ps1 -Project $project -Soldier Quinn -Verify -FPS 60
+```
+
+The import commandlet reported an outdated Visual C++ redistributable at startup. It emitted `MB_CLIP_CREATED`, wrote both licensed-soldier packages and the fresh rendered runs loaded them. See TEST_RESULTS.md for playback results and screenshot locations.

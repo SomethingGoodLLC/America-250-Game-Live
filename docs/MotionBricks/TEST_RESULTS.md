@@ -64,4 +64,19 @@ Both Unreal 5.8.4 Direct3D 12 runs passed. The samples below come from the evalu
 
 Both caps passed the existing trigger, rejection, repeat, synchronization, and walking checks. Planar root drift stayed at 0.000 cm. Median frame deltas were 33.333 ms at the 30 FPS cap and 16.667 ms at the 60 FPS cap.
 
+## Shared component with the purchased soldier
+
+Unreal 5.8.4 rendered the American Soldier with the Historic Soldier Weapon Pack musket slung across his back, and Quinn as an unarmed militia stand-in. Both rigs used the same component and 76 cm wall, with their own generated clips. All four runs passed the trigger, rejection, synchronization, repeat and return-to-walking checks. Planar root drift was 0.000 cm in each run.
+
+| Rig and FPS cap | Maximum palm height / planar error | Maximum landing height / planar error across both feet |
+|---|---:|---:|
+| American Soldier, 30 FPS | 0.129 / 0.034 cm | 0.185 / 0.021 cm |
+| American Soldier, 60 FPS | 0.151 / 0.150 cm | 0.203 / 0.079 cm |
+| Quinn, 30 FPS | 0.150 / 0.002 cm | 0.500 / 0.815 cm |
+| Quinn, 60 FPS | 0.150 / 0.166 cm | 0.500 / 0.815 cm |
+
+The test swept a volume based on the purchased musket's bounds. It registered zero wall or floor hits over 40 samples at 30 FPS and 80 samples at 60 FPS. The lowest sampled floor clearance was 60.99 cm. Held-musket transitions are outside the preview.
+
+Local logs and six stills per run live under `MotionBricksEvaluation/Evidence/Licensed_AmericanSoldier_30fps`, `Licensed_AmericanSoldier_60fps`, `Licensed_Quinn_30fps`, and `Licensed_Quinn_60fps`. Each set includes approach, hand plant, clearance, both landing steps, and post-landing stance.
+
 The screenshots show the palm on the top of the wall and a planted left boot during touchdown, followed by the right step. Find all six screenshots and the rendered log for each cap in `MotionBricksEvaluation/Evidence/Contacts_30fps` and `MotionBricksEvaluation/Evidence/Contacts_60fps`. The markers approximate contact surfaces on Quinn. This does not measure every mesh vertex or cover arbitrary obstacles.

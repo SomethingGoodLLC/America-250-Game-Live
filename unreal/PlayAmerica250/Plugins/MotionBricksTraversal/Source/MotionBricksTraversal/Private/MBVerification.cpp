@@ -55,6 +55,7 @@ void AMBTestCharacter::TickVerification(float DeltaSeconds) {
             return;
         }
         Check(TEXT("generated data loaded"), true);
+        if (bExpectMusket) Check(TEXT("slung musket asset loaded"), IsValid(Musket));
         Check(TEXT("excessive distance rejected"), !TryTraversal() && LastResult.Contains(TEXT("approach")));
         ResetAttempt();
         for (TActorIterator<AMBTestCourse> It(GetWorld()); It; ++It) {

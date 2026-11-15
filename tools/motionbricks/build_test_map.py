@@ -8,28 +8,26 @@ import unreal
 FOLDER = "/Game/Developers/MotionBricksEvaluation"
 MAP = FOLDER + "/L_MotionBricksTraversal"
 WALL_HEIGHT_CM = 76.0
+SOLDIER_MESH = "/Game/american_soldier/base_mesh/SK_AMERICAN_SOLDIER"
 
 
 def build():
     source = Path(os.environ["PA250_MB_MOTION"]).resolve(strict=True)
+    if os.environ.get("PA250_MB_IMPORT_SOLDIER_ONLY") == "1":
+        import_clip(source, load_mesh(SOLDIER_MESH), "AmericanSoldier")
+        return
     if unreal.EditorAssetLibrary.does_asset_exist(MAP):
         raise RuntimeError(f"The reserved map already exists at {MAP}")
-    meshes = {}
-    for name in ("Manny", "Quinn"):
-        path = "/Game/Characters/Mannequins/Meshes/SKM_" + name + "_Simple"
-        meshes[name] = unreal.EditorAssetLibrary.load_asset(path)
-        if not isinstance(meshes[name], unreal.SkeletalMesh):
-            raise RuntimeError(f"Missing mannequin mesh at {path}")
+    meshes = {name: load_mesh(f"/Game/Characters/Mannequins/Meshes/SKM_{name}_Simple")
+              for name in ("Manny", "Quinn")}
+    if unreal.EditorAssetLibrary.does_asset_exist(SOLDIER_MESH):
+        meshes["AmericanSoldier"] = load_mesh(SOLDIER_MESH)
     level = unreal.get_editor_subsystem(unreal.LevelEditorSubsystem)
     editor = unreal.get_editor_subsystem(unreal.UnrealEditorSubsystem)
     actors = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
     if not level.new_level(MAP):
         raise RuntimeError(f"Could not create {MAP}")
-    clips = {}
-    for name, mesh in meshes.items():
-        clips[name] = unreal.MBImportLibrary.import_generated_motion(str(source), mesh, name, WALL_HEIGHT_CM)
-        if not clips[name]:
-            raise RuntimeError(f"The {name} MotionBricks import failed. See the Unreal log.")
+    clips = {name: import_clip(source, mesh, name) for name, mesh in meshes.items()}
     world = editor.get_editor_world()
     world.get_world_settings().set_editor_property("default_game_mode", unreal.MBTestGameMode.static_class())
 
@@ -53,6 +51,21 @@ def build():
     if not level.save_current_level():
         raise RuntimeError(f"Could not save {MAP}")
     unreal.log(f"MB_MAP_CREATED {MAP} using {', '.join(clip.get_path_name() for clip in clips.values())}")
+
+
+def load_mesh(path):
+    mesh = unreal.EditorAssetLibrary.load_asset(path)
+    if not isinstance(mesh, unreal.SkeletalMesh):
+        raise RuntimeError(f"Missing skeletal mesh at {path}")
+    return mesh
+
+
+def import_clip(source, mesh, name):
+    clip = unreal.MBImportLibrary.import_generated_motion(str(source), mesh, name, WALL_HEIGHT_CM)
+    if not clip:
+        raise RuntimeError(f"The {name} MotionBricks import failed. See the Unreal log.")
+    unreal.log(f"MB_CLIP_CREATED {clip.get_path_name()} for {mesh.get_path_name()}")
+    return clip
 
 
 build()

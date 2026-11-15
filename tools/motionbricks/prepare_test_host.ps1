@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)] [string] $Destination,
-    [switch] $RefreshPlugin
+    [switch] $RefreshPlugin,
+    [switch] $IncludeLicensedPacks
 )
 
 $ErrorActionPreference = 'Stop'
@@ -74,4 +75,19 @@ IMPLEMENT_PRIMARY_GAME_MODULE(FDefaultGameModuleImpl, MBTestHost, "MBTestHost");
 New-Item -ItemType Directory -Force -Path $pluginTarget | Out-Null
 Copy-Item -LiteralPath (Join-Path $pluginSource "$pluginName.uplugin") -Destination $pluginTarget -Force
 Copy-Item -LiteralPath (Join-Path $pluginSource 'Source') -Destination $pluginTarget -Force -Recurse
+if ($IncludeLicensedPacks) {
+    $packPaths = @(
+        'american_soldier/base_mesh/SK_AMERICAN_SOLDIER.uasset',
+        'HS_WeaponPack_01/Meshes/MusketRifle/Meshes/SM_HS_WP01_MusketRifle_X_0.uasset'
+    )
+    foreach ($assetPath in $packPaths) {
+        $asset = Join-Path $source "Content/$assetPath"
+        if (!(Test-Path -LiteralPath $asset -PathType Leaf) -or (Get-Item -LiteralPath $asset).Length -lt 1024) {
+            throw "Restore the licensed LFS asset first: $asset"
+        }
+    }
+    foreach ($pack in @('american_soldier','HS_WeaponPack_01')) {
+        Copy-Item -LiteralPath (Join-Path $source "Content/$pack") -Destination "$hostDir/Content" -Force -Recurse
+    }
+}
 Write-Output $descriptor
