@@ -11,5 +11,6 @@ class MOTIONBRICKSTRAVERSALEDITOR_API UMBImportLibrary : public UBlueprintFuncti
 public:
     /** Import only to the reserved evaluation directory. Existing assets are refused. */
     UFUNCTION(BlueprintCallable, Category="MotionBricks Evaluation")
-    static UMBGeneratedClip* ImportGeneratedMotion(const FString& Filename, USkeletalMesh* Mesh);
+    static UMBGeneratedClip* ImportGeneratedMotion(const FString& Filename, USkeletalMesh* Mesh,
+        const FString& Variant = TEXT(""), float CourseWallHeight = 0.f);
 };

@@ -40,7 +40,8 @@ bool SaveAsset(UObject* Asset) {
 }
 }
 
-UMBGeneratedClip* UMBImportLibrary::ImportGeneratedMotion(const FString& Filename, USkeletalMesh* Mesh) {
+UMBGeneratedClip* UMBImportLibrary::ImportGeneratedMotion(const FString& Filename, USkeletalMesh* Mesh,
+    const FString& Variant, float CourseWallHeight) {
     auto Fail = [](const TCHAR* Message)->UMBGeneratedClip* { UE_LOG(LogTemp,Error,TEXT("MotionBricks import: %s"),Message); return nullptr; };
     if (!Mesh || !Mesh->GetSkeleton()) return Fail(TEXT("Missing target mesh/skeleton"));
     FString Text;
@@ -123,11 +124,15 @@ UMBGeneratedClip* UMBImportLibrary::ImportGeneratedMotion(const FString& Filenam
         {TEXT("ik_foot_r"),TEXT("foot_r")}
     };
     const FString Folder = TEXT("/Game/Developers/MotionBricksEvaluation/");
-    const FString AnimPath = Folder+TEXT("A_GeneratedTraversal");
-    const FString ClipPath = Folder+TEXT("DA_GeneratedTraversal");
+    if (!Variant.IsEmpty() && Variant != TEXT("Manny") && Variant != TEXT("Quinn")) return Fail(TEXT("Unknown evaluation variant"));
+    const FString Suffix = Variant.IsEmpty() ? FString() : TEXT("_")+Variant;
+    const FString AnimName = TEXT("A_GeneratedTraversal")+Suffix;
+    const FString ClipName = TEXT("DA_GeneratedTraversal")+Suffix;
+    const FString AnimPath = Folder+AnimName;
+    const FString ClipPath = Folder+ClipName;
     if (FPackageName::DoesPackageExist(AnimPath) || FPackageName::DoesPackageExist(ClipPath))
         return Fail(TEXT("Refusing to overwrite existing assets; use a fresh evaluation host"));
-    UAnimSequence* Animation = NewObject<UAnimSequence>(CreatePackage(*AnimPath),TEXT("A_GeneratedTraversal"),RF_Public|RF_Standalone);
+    UAnimSequence* Animation = NewObject<UAnimSequence>(CreatePackage(*AnimPath),*AnimName,RF_Public|RF_Standalone);
     Animation->SetSkeleton(Mesh->GetSkeleton());
     Animation->SetPreviewMesh(Mesh);
     // The tracks already use this mesh's proportions. The shared skeleton's
@@ -181,14 +186,15 @@ UMBGeneratedClip* UMBImportLibrary::ImportGeneratedMotion(const FString& Filenam
         }
         LocalFrames.Add(MoveTemp(Local));
     }
-    UMBGeneratedClip* Clip = NewObject<UMBGeneratedClip>(CreatePackage(*ClipPath),TEXT("DA_GeneratedTraversal"),RF_Public|RF_Standalone);
+    UMBGeneratedClip* Clip = NewObject<UMBGeneratedClip>(CreatePackage(*ClipPath),*ClipName,RF_Public|RF_Standalone);
     Clip->Animation = Animation;
+    Clip->TargetMesh = Mesh;
     Clip->FPS = 30.f;
     for (const auto& Frame : Motion) Clip->RootOffsets.Add((Frame[Hips].GetLocation()-First)*Scale);
     Clip->WallDistance = -First.X*Scale;
     const FString Primitive = Json->GetStringField(TEXT("primitive"));
     const FString Sequence = Json->GetStringField(TEXT("sequence"));
-    Clip->WallHeight = (Primitive == TEXT("jump_0_75m") ? 78.f : 50.f) * Scale;
+    Clip->WallHeight = CourseWallHeight > 0.f ? CourseWallHeight : (Primitive == TEXT("jump_0_75m") ? 78.f : 50.f) * Scale;
     if (Primitive == TEXT("jump_0_75m") && Sequence == TEXT("OneHandedJump0") && LocalFrames.Num() == 41) {
         if (!BakeVaultContacts(Ref,RefGlobal,LocalFrames,*Clip)) return Fail(TEXT("Contact bake failed on the evaluation vault"));
     }

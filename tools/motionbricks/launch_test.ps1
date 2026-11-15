@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
     [string] $EngineRoot = 'C:/Program Files/Epic Games/UE_5.8',
-    [string] $Project = (Join-Path $PSScriptRoot '../../../MotionBricksEvaluation/VaultTestHost/MBTestHost.uproject'),
+    [string] $Project = (Join-Path $PSScriptRoot '../../../MotionBricksEvaluation/SharedVaultTestHost/MBTestHost.uproject'),
+    [ValidateSet('Manny', 'Quinn')] [string] $Soldier = 'Manny',
     [switch] $Verify,
     [ValidateRange(15, 240)] [int] $FPS = 60
 )
@@ -12,11 +13,11 @@ $descriptor = (Resolve-Path -LiteralPath $Project).Path
 $map = '/Game/Developers/MotionBricksEvaluation/L_MotionBricksTraversal'
 $argsList = @(
     ('"{0}"' -f $descriptor), $map, '-game', '-d3d12',
-    '-windowed', '-ResX=1280', '-ResY=720', '-nosplash', '-unattended',
+    '-windowed', '-ResX=1280', '-ResY=720', '-nosplash', '-unattended', "-MBSoldier=$Soldier",
     ('-ExecCmds="t.MaxFPS {0}"' -f $FPS)
 )
 if ($Verify) {
-    $logPath = Join-Path (Split-Path $descriptor -Parent) "MBVerify_${FPS}.log"
+    $logPath = Join-Path (Split-Path $descriptor -Parent) "MBVerify_${Soldier}_${FPS}.log"
     $argsList += @('-MBVerify', ('-abslog="{0}"' -f $logPath))
     Write-Output "Verification log: $logPath"
     $started = [DateTime]::UtcNow

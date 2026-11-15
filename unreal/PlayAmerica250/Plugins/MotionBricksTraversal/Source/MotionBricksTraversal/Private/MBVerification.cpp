@@ -1,10 +1,10 @@
 #include "MBTraversal.h"
-#include "Animation/AnimInstance.h"
-#include "Animation/AnimMontage.h"
+#include "MBTraversalComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/Engine.h"
+#include "EngineUtils.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PlayerController.h"
 #include "HAL/PlatformMisc.h"
@@ -14,8 +14,9 @@
 
 void AMBTestCharacter::SampleVerificationContacts(UWorld* World, ELevelTick TickType, float DeltaSeconds) {
     const AMBTestCourse* Course = ActiveCourse.Get();
-    if (World != GetWorld() || !Clip || !Course || VerificationPhase != 2 || !bTraversing) return;
-    const float Frame = Elapsed*Clip->FPS;
+    if (World != GetWorld() || !Clip || !Course || VerificationPhase != 2 || !Traversal->IsVaulting()) return;
+    SampleMusketClearance();
+    const float Frame = Traversal->GetElapsed()*Clip->FPS;
     for (int32 Index=0; Index<Clip->Contacts.Num(); ++Index) {
         const FMBCourseContact& Contact = Clip->Contacts[Index];
         if (Frame < Contact.FirstFrame-0.02f || Frame > Contact.LastFrame+0.02f) continue;
@@ -56,6 +57,17 @@ void AMBTestCharacter::TickVerification(float DeltaSeconds) {
         Check(TEXT("generated data loaded"), true);
         Check(TEXT("excessive distance rejected"), !TryTraversal() && LastResult.Contains(TEXT("approach")));
         ResetAttempt();
+        for (TActorIterator<AMBTestCourse> It(GetWorld()); It; ++It) {
+            FMBVaultTarget Target = It->GetVaultTarget();
+            const TCHAR* OtherRig = Musket ? TEXT("Quinn") : TEXT("Manny");
+            const FString OtherPath = FString::Printf(TEXT("/Game/Developers/MotionBricksEvaluation/DA_GeneratedTraversal_%s"),OtherRig);
+            UMBGeneratedClip* OtherClip = LoadObject<UMBGeneratedClip>(nullptr,*OtherPath);
+            Check(TEXT("other rig's animation rejected"), OtherClip &&
+                Traversal->TryStart(OtherClip,Target) == EMBVaultStart::IncompatibleMesh);
+            Target.CourseFrame.AddToTranslation(FVector(0,0,12));
+            Check(TEXT("mismatched course frame rejected"), Traversal->TryStart(Clip,Target) == EMBVaultStart::WrongObstacle);
+            break;
+        }
         AddActorWorldRotation(FRotator(0,90,0));
         Check(TEXT("wrong direction rejected"), !TryTraversal() && LastResult.Contains(TEXT("approach")));
         ResetAttempt();
@@ -81,9 +93,9 @@ void AMBTestCharacter::TickVerification(float DeltaSeconds) {
         VerificationPhase = 6;
         return;
     case 8:
-        if (bTraversing) {
+        if (Traversal->IsVaulting()) {
             Check(TEXT("valid approach accepted through E binding"), true);
-            Check(TEXT("repeat input during traversal rejected"), !TryTraversal() && bTraversing && LastResult.Contains(TEXT("already")));
+            Check(TEXT("repeat input during traversal rejected"), !TryTraversal() && Traversal->IsVaulting() && LastResult.Contains(TEXT("already")));
             VerificationPhase = 2;
         } else if (VerificationTime >= 0.3f) {
             Check(TEXT("valid approach accepted through E binding"), false);
@@ -91,21 +103,21 @@ void AMBTestCharacter::TickVerification(float DeltaSeconds) {
         }
         return;
     case 2:
-        if (bTraversing) {
-            const float Fraction = Elapsed/Clip->Duration();
+        if (Traversal->IsVaulting()) {
+            const float Fraction = Traversal->GetElapsed()/Clip->Duration();
             if (VerificationCapture == 0 && Fraction > 0.40f) {
-                const UAnimInstance* Anim = GetMesh()->GetAnimInstance();
-                const bool bSynchronized = TraversalMontage && Anim &&
-                    FMath::IsNearlyEqual(Anim->Montage_GetPosition(TraversalMontage),Elapsed,0.001f);
-                const float SlotWeight = Anim ? Anim->GetSlotMontageGlobalWeight(TEXT("DefaultSlot")) : 0.f;
-                UE_LOG(LogTemp, Display, TEXT("MB_VERIFY slot weight %.3f at %.3f s"),SlotWeight,Elapsed);
-                Check(TEXT("montage blended and synchronized"), bSynchronized && SlotWeight > 0.9f);
+                Check(TEXT("montage blended and synchronized"),Traversal->IsPoseSynchronized());
                 ++VerificationCapture;
             }
             return;
         }
         Check(TEXT("first traversal complete"), LastResult.StartsWith(TEXT("Complete")));
         Check(TEXT("normal capsule restored"), FMath::IsNearlyEqual(GetCapsuleComponent()->GetUnscaledCapsuleHalfHeight(),NormalHalfHeight));
+        if (Musket) {
+            UE_LOG(LogTemp, Display, TEXT("MB_VERIFY musket wall/floor hits %d, lowest floor clearance %.2f cm on %d frames"),
+                MusketWallHits,MusketMinFloorClearance,MusketChecks);
+            Check(TEXT("slung musket clears wall and floor"),MusketChecks >= 20 && MusketWallHits == 0 && MusketMinFloorClearance > 0.0);
+        }
         Check(TEXT("three baked contacts available"), Clip->Contacts.Num() == 3);
         for (int32 Index=0; Index<ObservedContacts.Num(); ++Index) {
             const FObservedContact& Observed = ObservedContacts[Index];
@@ -116,8 +128,8 @@ void AMBTestCharacter::TickVerification(float DeltaSeconds) {
             Check(*Label,Observed.Samples >= 2 && Observed.HeightError < 1.5 && Observed.PlanarError < 1.5);
         }
         VerificationLanding = GetActorLocation();
-        {
-            const FVector Expected = VerificationStart+TraversalRotation.RotateVector(Clip->RootOffsets.Last());
+        if (const AMBTestCourse* Course = ActiveCourse.Get()) {
+            const FVector Expected = VerificationStart+Course->GetActorQuat().RotateVector(Clip->RootOffsets.Last());
             const double Drift = FVector::Dist2D(Expected,VerificationLanding);
             UE_LOG(LogTemp, Display, TEXT("MB_VERIFY planar root drift %.3f cm"), Drift);
             Check(TEXT("planar root drift below 1 cm"), Drift < 1.0);
@@ -138,8 +150,8 @@ void AMBTestCharacter::TickVerification(float DeltaSeconds) {
         return;
     case 4:
         if (VerificationTime < 0.15f) return;
-        if (TryTraversal()) {
-            Check(TEXT("second attempt accepted"), true);
+        if (ActiveCourse.IsValid() && Traversal->TryStart(Clip,ActiveCourse->GetVaultTarget()) == EMBVaultStart::Started) {
+            Check(TEXT("second attempt accepted through component API"), true);
             VerificationCapture = 0;
             VerificationPhase = 5;
         } else {
@@ -148,12 +160,12 @@ void AMBTestCharacter::TickVerification(float DeltaSeconds) {
         }
         return;
     case 5:
-        if (bTraversing) {
+        if (Traversal->IsVaulting()) {
             // Recording is separate from the first attempt's contact samples.
             static const float CaptureFrames[] = {17.0f, 24.0f, 33.0f, 39.0f};
             static const TCHAR* const CaptureLabels[] = {TEXT("hand"),TEXT("clearance"),TEXT("left_foot"),TEXT("right_foot")};
             if (VerificationCapture < UE_ARRAY_COUNT(CaptureFrames) &&
-                Elapsed*Clip->FPS >= CaptureFrames[VerificationCapture]-0.05f) {
+                Traversal->GetElapsed()*Clip->FPS >= CaptureFrames[VerificationCapture]-0.05f) {
                 Capture(CaptureLabels[VerificationCapture++]);
             }
             return;

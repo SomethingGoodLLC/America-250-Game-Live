@@ -6,8 +6,10 @@
 #include "MBTraversal.generated.h"
 
 class UAnimSequence;
-class UAnimMontage;
+class UMBTraversalComponent;
+class USkeletalMesh;
 class UStaticMeshComponent;
+struct FMBVaultTarget;
 
 USTRUCT()
 struct FMBCourseContact {
@@ -29,10 +31,14 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="MotionBricks Evaluation") float FPS = 30.f;
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="MotionBricks Evaluation") float WallDistance = 167.f;
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="MotionBricks Evaluation") float WallHeight = 68.f;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Traversal") float WallDepth = 30.f;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Traversal") float WallWidth = 70.f;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Traversal") bool bMatchWallDimensions = true;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Traversal") TSoftObjectPtr<USkeletalMesh> TargetMesh;
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="MotionBricks Evaluation") FString Provenance;
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="MotionBricks Evaluation") bool bEvaluationOnly = true;
     UPROPERTY() TArray<FMBCourseContact> Contacts;
-    float Duration() const { return RootOffsets.Num() > 1 ? (RootOffsets.Num()-1)/FPS : 0.f; }
+    float Duration() const { return RootOffsets.Num() > 1 && FMath::IsFinite(FPS) && FPS > 0.f ? (RootOffsets.Num()-1)/FPS : 0.f; }
     FVector Sample(float Time) const;
 };
 
@@ -45,6 +51,7 @@ public:
     UPROPERTY(VisibleAnywhere, Category="MotionBricks Evaluation") TObjectPtr<UStaticMeshComponent> Wall;
     UPROPERTY(VisibleAnywhere, Category="MotionBricks Evaluation") TObjectPtr<UStaticMeshComponent> LandingBlocker;
     void ToggleLanding();
+    FMBVaultTarget GetVaultTarget() const;
 };
 
 UCLASS()
@@ -57,25 +64,30 @@ public:
     virtual void Tick(float DeltaSeconds) override;
     virtual void SetupPlayerInputComponent(UInputComponent* Input) override;
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="MotionBricks Evaluation") TObjectPtr<UMBGeneratedClip> Clip;
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="MotionBricks Evaluation") bool bTraversing = false;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Traversal") TObjectPtr<UMBTraversalComponent> Traversal;
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="MotionBricks Evaluation") FString LastResult = TEXT("Ready");
     UFUNCTION(BlueprintCallable, Category="MotionBricks Evaluation") bool TryTraversal();
     UFUNCTION(BlueprintCallable, Category="MotionBricks Evaluation") void ResetAttempt();
     UFUNCTION(BlueprintCallable, Category="MotionBricks Evaluation") void ToggleBlockedLanding();
 private:
     void Trigger();
-    void Finish(bool bSuccess);
-    bool ClearAt(const FVector& Position, float HalfHeight) const;
+    void SelectManny();
+    void SelectQuinn();
+    void ConfigureSoldier(bool bManny);
+    void BuildStandInGear(bool bManny);
+    void SampleMusketClearance();
+    UFUNCTION() void HandleVaultFinished(bool bCompleted);
     void SetResult(const FString& Message);
     void TickVerification(float DeltaSeconds);
     void SampleVerificationContacts(UWorld* World, ELevelTick TickType, float DeltaSeconds);
-    FVector Origin;
-    FRotator TraversalRotation;
     TWeakObjectPtr<AMBTestCourse> ActiveCourse;
-    float Elapsed = 0.f;
     float NormalHalfHeight = 88.f;
-    TSubclassOf<UAnimInstance> LocomotionClass;
-    UPROPERTY(Transient) TObjectPtr<UAnimMontage> TraversalMontage;
+    UPROPERTY(Transient) TArray<TObjectPtr<USceneComponent>> Gear;
+    UPROPERTY(Transient) TObjectPtr<USceneComponent> Musket;
+    FString SoldierName;
+    int32 MusketChecks = 0;
+    int32 MusketWallHits = 0;
+    double MusketMinFloorClearance = TNumericLimits<double>::Max();
     bool bDebug = true;
     bool bVerify = false;
     bool bVerificationPassed = true;

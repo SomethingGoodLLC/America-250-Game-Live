@@ -1,6 +1,6 @@
 # Run the MotionBricks evaluation
 
-The Windows evaluation is built with **Unreal 5.8.4** (CL 58902052). It uses Quinn from the supplied game archive. Open the separate test host or launch the test map directly.
+The Windows evaluation targets **Unreal 5.8.4** (CL 58902052). The shared component demo uses the Manny and Quinn rigs from the game archive with locally generated preview gear. The licensed soldier and musket packs are separate local dependencies. Open the separate test host or launch the test map directly.
 
 From the workspace folder:
 
@@ -8,7 +8,7 @@ From the workspace folder:
 & '.\America-250-Game-Live\tools\motionbricks\launch_test.ps1'
 ```
 
-In the demo, **WASD** moves and the **left/right arrows** turn. Walk into the outlined approach region and press **E** while facing the wall. **R** returns to the marked approach, **B** toggles the landing obstruction, and **V** toggles the guides. When testing the rejection cases, read the message on screen or look for `MotionBricks:` in the Unreal log.
+In the demo, **WASD** moves and the **left/right arrows** turn. Walk into the outlined approach region and press **E** while facing the wall. **R** returns to the marked approach, **1** selects Manny with the slung preview musket, and **2** selects Quinn. **B** toggles the landing obstruction and **V** toggles the guides. When testing the rejection cases, read the message on screen or look for `MotionBricks:` in the Unreal log.
 
 To spot-check the course, press **E** from the spawn, then use **R** and turn 90° before retrying. Both attempts should be rejected. Reset, toggle the blocker with **B**, and confirm **E** is rejected again. Remove the blocker, press **E** twice, and hold **W** after landing to verify walking. Repeat with `-FPS 30` and `-FPS 60` if you want to compare motion at the two caps.
 
@@ -50,8 +50,8 @@ $env:PA250_MB_MOTION = Join-Path $export 'generated_traversal.json'
 $script = "$tools/build_test_map.py".Replace('\','/')
 & "$ue/Engine/Binaries/Win64/UnrealEditor-Cmd.exe" $project -run=pythonscript "-script=$script" -unattended -nullrhi -nosplash
 # Look for MB_MAP_CREATED and the three packages in Content/Developers/MotionBricksEvaluation.
-& "$tools/launch_test.ps1" -Project $project -Verify -FPS 30
-& "$tools/launch_test.ps1" -Project $project -Verify -FPS 60
+& "$tools/launch_test.ps1" -Project $project -Soldier Manny -Verify -FPS 30
+& "$tools/launch_test.ps1" -Project $project -Soldier Quinn -Verify -FPS 60
 & "$tools/launch_test.ps1" -Project $project
 ```
 
