@@ -100,6 +100,12 @@ int32 UPA250CombatCommandlet::Main(const FString& Params)
 	// Battle feel (battle_feel.json): movement, handling, intensity.
 	PA250FeelCases::RunAnimation(Check);
 	PA250FeelCases::RunCover(Check);
+	PA250FeelCases::RunTraversal(Check);
+	PA250FeelCases::RunInput(Check);
+	PA250FeelCases::RunClips(Check);
+	PA250FeelCases::RunHero(Check);
+	PA250FeelCases::RunIntensity(Check);
+	PA250FeelCases::RunLook(Check);
 
 	const TCHAR* Passed = GFails == 0 ? TEXT("true") : TEXT("false");
 	const FString Out = FString::Printf(TEXT("{\"passed\":%s,\"fails\":%d}\n"), Passed, GFails);

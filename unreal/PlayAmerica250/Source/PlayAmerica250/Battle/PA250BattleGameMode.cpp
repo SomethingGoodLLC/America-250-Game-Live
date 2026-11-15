@@ -43,6 +43,8 @@
 #include "PA250MeleeComponent.h"
 #include "PA250MeleeTuning.h"
 #include "PA250SpawnScreen.h"
+#include "PA250Intensity.h"
+#include "PA250BattleLook.h"
 #include "PA250UnitClasses.h"
 #include "PA250VolleyCoordinator.h"
 #include "PA250FieldWork.h"
@@ -1074,6 +1076,86 @@ bool APA250BattleGameMode::PlayerCycleGunShot(ARFCharacter* Soldier, int32 Delta
 void APA250BattleGameMode::NotifyRoundShot(ARFCharacter* Man, bool bStruck)
 {
 	(bStruck ? RoundShotStruck : RoundShotKnockedDown)++;
+	if (Man) PA250Intensity::RoundShotStrike(GetWorld(), Man->GetActorLocation());
+}
+
+void APA250BattleGameMode::ShowDirt(float Seconds)
+{
+	if (Hud) Hud->ShowDirt(Seconds);
+}
+
+void APA250BattleGameMode::TickIntensityProbe()
+{
+	static const bool bProbe = FParse::Param(FCommandLine::Get(), TEXT("PA250IntensityProbe"));
+	if (!bProbe || IntensityProbeStep > 3) return;
+	APlayerController* PC = GetWorld()->GetFirstPlayerController();
+	ARFCharacter* Me = PC ? Cast<ARFCharacter>(PC->GetPawn()) : nullptr;
+	const float T = GetWorld()->GetTimeSeconds() - StartTime;
+	if (!Me || Me->IsDead()) return;
+	if (IntensityProbeStep == 0 && T > 12.f)
+	{
+		++IntensityProbeStep;
+		FVector Ear = Me->GetActorLocation();
+		FPA250BattleAudio::GetListener(this, Ear);
+		const float FovBefore = Me->GetCurrentFOV();
+		const bool bCounted = PA250Intensity::NearMiss(Me, Ear + Me->GetActorForwardVector() * 3000.f, Ear + Me->GetActorRightVector() * 100.f, Ear);
+		UE_LOG(LogTemp, Display, TEXT("PA250 intensity probe: near miss counted=%d fov %.1f -> %.1f shakes=%d music layers=%d missing=%s"), bCounted ? 1 : 0, FovBefore,
+			Me->GetCurrentFOV(), PA250Intensity::ShakeCount(), Music.IsValid() ? Music->NumPlaying() : 0, Music.IsValid() ? *FString::Join(Music->GetMissing(), TEXT(",")) : TEXT("-"));
+	}
+	else if (IntensityProbeStep == 1 && T > 14.f)
+	{
+		++IntensityProbeStep;
+		const int32 Shakes = PA250Intensity::ShakeCount();
+		PA250Intensity::RoundShotStrike(GetWorld(), Me->GetActorLocation() + Me->GetActorForwardVector() * 300.f);
+		PA250Intensity::RoundShotStrike(GetWorld(), Me->GetActorLocation() + Me->GetActorForwardVector() * 20000.f);
+		UE_LOG(LogTemp, Display, TEXT("PA250 intensity probe: round shot 3 m off and 200 m off: shakes +%d dirt=%d hud dirt alpha=%.2f"), PA250Intensity::ShakeCount() - Shakes,
+			PA250Intensity::DirtCount(), Hud ? Hud->GetDirtAlpha() : -1.f);
+	}
+	else if (IntensityProbeStep == 2 && T > 14.4f)
+	{
+		++IntensityProbeStep;
+		FScreenshotRequest::RequestScreenshot(FPaths::ConvertRelativePathToFull(FPaths::Combine(FPaths::ProjectDir(), TEXT("../../docs/preview/intensity_dirt.png"))), true, false);
+		// Three men near him are shot down, so the fallen can be looked at once they have settled.
+		TArray<ARFCharacter*> Near;
+		for (TActorIterator<ARFCharacter> It(GetWorld()); It; ++It)
+		{
+			if (*It != Me && !It->IsDead() && !IsGeneral(*It) && FVector::Dist(It->GetActorLocation(), Me->GetActorLocation()) < 1500.f) Near.Add(*It);
+		}
+		for (int32 i = 0; i < FMath::Min(3, Near.Num()); ++i) UGameplayStatics::ApplyDamage(Near[i], 100000.f, nullptr, nullptr, UDamageType::StaticClass());
+		if (PC) PC->SetControlRotation(FRotator(-25.f, PC->GetControlRotation().Yaw + 180.f, 0.f));
+	}
+	else if (IntensityProbeStep == 3 && T > 24.f)
+	{
+		++IntensityProbeStep;
+		int32 Fallen = 0, Frozen = 0;
+		for (TActorIterator<ARFCharacter> It(GetWorld()); It; ++It)
+		{
+			if (!It->IsDead()) continue;
+			++Fallen;
+			Frozen += It->IsCorpseFrozen() ? 1 : 0;
+		}
+		FScreenshotRequest::RequestScreenshot(FPaths::ConvertRelativePathToFull(FPaths::Combine(FPaths::ProjectDir(), TEXT("../../docs/preview/intensity_fallen.png"))), true, false);
+		UE_LOG(LogTemp, Display, TEXT("PA250 intensity probe: fallen on the field %d (budget %d), frozen %d; shouts charge=%d rout=%d officer_down=%d"), Fallen, ARFCharacter::GetMaxCorpses(), Frozen,
+			Volleys ? Volleys->ShoutEventCount(TEXT("charge")) : 0, Volleys ? Volleys->ShoutEventCount(TEXT("rout")) : 0, Volleys ? Volleys->ShoutEventCount(TEXT("officer_down")) : 0);
+		FTimerHandle Quit;
+		GetWorldTimerManager().SetTimer(Quit, FTimerDelegate::CreateLambda([]() { FPlatformMisc::RequestExit(false); }), 1.5f, false);
+	}
+}
+
+void APA250BattleGameMode::TickMusic(float DeltaSeconds)
+{
+	TickIntensityProbe();
+	if (!Music.IsValid() || Music->NumPlaying() == 0 || !Volleys) return;
+	MusicUpdateTimer -= DeltaSeconds;
+	if (MusicUpdateTimer > 0.f) return;
+	MusicUpdateTimer = 1.f;
+	int32 Initial = 0;
+	if (const TMap<FName, int32>* Pool = InitialPool.Find(PlayerFaction))
+	{
+		for (const auto& KV : *Pool) Initial += KV.Value;
+	}
+	const float Reserve = Initial > 0 ? float(TicketsRemaining(PlayerFaction)) / Initial : 1.f;
+	Music->Update(Volleys->SteadyShare(PlayerFaction), Reserve);
 }
 
 void APA250BattleGameMode::NotifyShove(ARFCharacter* By, ARFCharacter* Victim)
@@ -1215,6 +1297,7 @@ void APA250BattleGameMode::TickSupport(float DeltaSeconds)
 			Flag->CarryOff();
 			ColoursLost.FindOrAdd(F)++;
 			ColoursTaken.FindOrAdd(Foe->FactionId)++;
+			if (Volleys && F == PlayerFaction) Volleys->ShoutEvent(TEXT("colours_taken"), F, Flag->GetActorLocation());
 			if (Volleys)
 			{
 				Volleys->SetColours(F, false, FVector::ZeroVector);
@@ -1567,7 +1650,12 @@ void APA250BattleGameMode::BeginPlay()
 	{
 		FPA250BattleAudio::PlayBattleBegins(this);
 		FPA250BattleAudio::StartAmbience(this);
+		Music = MakeShared<FPA250BattleMusic>();
+		Music->Start(this);
 	}
+	// The level's light for the battle's hour, and this platform's rendering tier (battle_look.json).
+	// A debug battle's clock is not a battle's hour: it keeps the light the level was built with unless -PA250Hour says one.
+	PA250BattleLook::Apply(GetWorld(), Setup.hour_of_day, !bDebugBattle);
 	StartTime = GetWorld()->GetTimeSeconds();
 	// The story screen gives way to the field: it fades in from black (a played battle only).
 	if (!bAutoplayBots && FApp::CanEverRender())
@@ -2539,9 +2627,12 @@ void APA250BattleGameMode::TickAnimTiers(float DeltaSeconds)
 	const TArray<int32> Full = PA250BattleFeel::PickFullQuality(bOn, Budget, Feel.SwitchHysteresisM, Inputs);
 	TSet<int32> FullSet(Full);
 	int32 Showing = 0, Searches = 0, Jumps = 0, NoHistory = 0;
+	const FPA250BattleLookData& Look = PA250BattleLook::Get();
 	for (int32 i = 0; i < Men.Num(); ++i)
 	{
 		Men[i]->SetAnimFullQuality(FullSet.Contains(i));
+		// The soldier budget (battle_look.json soldier_lod): no shadow from a man far from the viewer.
+		if (Look.bLoaded) Men[i]->SetLookBudget(!Viewer || Look.ShadowCastM <= 0.f || Inputs[i].DistanceM <= Look.ShadowCastM, Look.bUpdateRateOptimisation);
 		if (!bAnimProbe) continue;
 		if (const UPA250SoldierAnimInstance* Inst = Cast<UPA250SoldierAnimInstance>(Men[i]->GetMesh()->GetAnimInstance()))
 		{
@@ -2796,7 +2887,10 @@ float APA250BattleGameMode::GeneralAuraCm(FName Faction) const
 	const TWeakObjectPtr<ARFCharacter>* G = Generals.Find(Faction);
 	if (!G || !G->IsValid() || G->Get()->IsDead()) return 0.f;
 	const auto Side = Setup.sides.find(ToStd(Faction));
-	return Side == Setup.sides.end() ? 0.f : Side->second.commander_aura_radius_m * 100.f;
+	if (Side == Setup.sides.end()) return 0.f;
+	// While the player fights as him, his presence is the hero kit's.
+	if (Hero.bPlaying && Faction == PlayerFaction && Side->second.has_hero) return Side->second.hero_aura_radius_m * 100.f;
+	return Side->second.commander_aura_radius_m * 100.f;
 }
 
 void APA250BattleGameMode::SpawnGenerals()
@@ -3120,7 +3214,8 @@ bool APA250BattleGameMode::TakeOverSoldier(APlayerController* PC)
 	for (TActorIterator<ARFCharacter> It(GetWorld()); It && !bFromFile; ++It)
 	{
 		ARFCharacter* C = *It;
-		if (C->IsDead() || C->FactionId != PlayerFaction || C->IsMounted() || !Cast<APA250BotController>(C->GetController())) continue;
+		// Never the general: he is taken only through the hero screen, with his kit and his meter.
+		if (C->IsDead() || C->FactionId != PlayerFaction || C->IsMounted() || !Cast<APA250BotController>(C->GetController()) || IsGeneral(C)) continue;
 		const float D = Old ? FVector::DistSquared(C->GetActorLocation(), Old->GetActorLocation()) : 0.f;
 		if (D < BestD)
 		{
@@ -3939,6 +4034,9 @@ void APA250BattleGameMode::UseClassAbility(ARFCharacter* Soldier)
 		ShowNotice(FString(Kit.Verb), 5.f);
 		return;
 	}
+	// As the general the player rallies every routing squad within the hero's radius (its own cooldown);
+	// with none routing, or the rally not ready, T is the officer's ordinary word below.
+	if (IsPlayedGeneral(Soldier) && UseHeroRally(Soldier)) return;
 	if (Now < PlayerAbilityReadyAt)
 	{
 		ShowNotice(FString::Printf(TEXT("Not yet: %.0f s"), PlayerAbilityReadyAt - Now), 2.f);
@@ -3950,6 +4048,7 @@ void APA250BattleGameMode::UseClassAbility(ARFCharacter* Soldier)
 	{
 		PlayerAbilityReadyAt = Now + Verbs.RallyCooldownSeconds;
 		ShowNotice(TEXT("You rally the men: they stop and re-form"), 4.f);
+		NoteHeroEvent(EPA250HeroEvent::Rally);
 		return;
 	}
 	// An officer may order either; a regular calls his line's volley; a grenadier leads the charge.
@@ -4430,6 +4529,13 @@ void APA250BattleGameMode::OnCharacterDied(ARFCharacter* Victim, AController* Vi
 				*Voice.ToString(), *Key, Variant, *Words);
 		}
 		UE_LOG(LogTemp, Display, TEXT("PA250 general: %s falls (%s); morale check on the %s side"), *Name, *FateText, *Victim->FactionId.ToString());
+		// The player was fighting as him: he is given a body again (his own, the next man of his file,
+		// any man standing, or the spawn screen). Before 2026-11-15 this branch returned with the
+		// player left in the corpse.
+		if (Victim->FactionId == PlayerFaction && (Hero.bPlaying || (VictimController && VictimController->IsA<APlayerController>())))
+		{
+			HeroFell(Cast<APlayerController>(VictimController));
+		}
 		return;
 	}
 	// M6: tickets spent on death (and bleed), not spawn.
@@ -4454,6 +4560,11 @@ void APA250BattleGameMode::OnCharacterDied(ARFCharacter* Victim, AController* Vi
 			PushKillFeed(Victim->FactionId == PlayerFaction ? TEXT("Our colours are down!") : TEXT("Their colours are down!"));
 			UE_LOG(LogTemp, Display, TEXT("PA250 colours: the %s colours fall with their bearer; morale check on that side"), *Victim->FactionId.ToString());
 		}
+		// An officer of the player's side is down: the men near say so (intensity.shouts.officer_down).
+		if (Volleys && Victim->FactionId == PlayerFaction && PA250UnitClasses::KitFor(Victim->FactionId, Victim->UnitClass).bOfficer)
+		{
+			Volleys->ShoutEvent(TEXT("officer_down"), Victim->FactionId, Victim->GetActorLocation());
+		}
 		if (!Victim->ActorHasTag(TEXT("PA250GunMate"))) SpendDeathTicket(Victim->FactionId, Victim->UnitClass);
 		else UE_LOG(LogTemp, Display, TEXT("PA250 guns: a summoned mate is down (no ticket)"));
 		// The rifleman's verb: an officer he picks off leaves that officer's squad shaken.
@@ -4474,6 +4585,7 @@ void APA250BattleGameMode::OnCharacterDied(ARFCharacter* Victim, AController* Vi
 				if (Killer->IsLocalPlayerController() && KillerChar->FactionId != Victim->FactionId)
 				{
 					++PersonalKills;
+					NoteHeroEvent(EPA250HeroEvent::Kill);
 				}
 				auto Label = [](const ARFCharacter* C, bool bYou) {
 					if (bYou) return FString(TEXT("You"));
@@ -4536,6 +4648,7 @@ void APA250BattleGameMode::OnCharacterDied(ARFCharacter* Victim, AController* Vi
 		{
 			Delay = FMath::Max(3.f, RespawnDelay * Sit->second.reinforcement_scale);
 		}
+		Delay *= HeroReinforceDelayScale(F); // the played general's huzza: the reserve comes up faster for its time
 	}
 	FTimerHandle H;
 	GetWorldTimerManager().SetTimer(H, FTimerDelegate::CreateWeakLambda(this, [this, OldCtl, F, Cls, Clothes, bOnColours]() {
@@ -4652,8 +4765,20 @@ void APA250BattleGameMode::Tick(float DeltaSeconds)
 		{
 			++PostFlips;
 			if (FirstFlipAt < 0.f) FirstFlipAt = GetWorld()->GetTimeSeconds() - StartTime;
+			// A post taken with the player standing on it counts toward leading the general.
+			if (WP->GetHolder() == PlayerFaction)
+			{
+				const APlayerController* FlipPC = GetWorld()->GetFirstPlayerController();
+				const ARFCharacter* Taker = FlipPC ? Cast<ARFCharacter>(FlipPC->GetPawn()) : nullptr;
+				if (Taker && !Taker->IsDead() && FVector::Dist2D(Taker->GetActorLocation(), WP->GetActorLocation()) <= WP->Radius)
+				{
+					NoteHeroEvent(EPA250HeroEvent::Capture);
+				}
+			}
 		}
 	}
+	TickHero(DeltaSeconds);
+	TickMusic(DeltaSeconds);
 	// How long each side kept half its opening men standing (battle trace: holding behind works).
 	for (const FName F : {FName(TEXT("british")), FName(TEXT("continental"))})
 	{
@@ -4775,6 +4900,19 @@ void APA250BattleGameMode::EndBattle(FName Winner, const FString& Reason)
 		Result.commander_events[ToStd(Kv.Key)] = TCHAR_TO_UTF8(*Kv.Value);
 	}
 	Result.personal_kills = PersonalKills;
+	// The hero report (battle_result.yaml hero): only when the player fought as his general. It
+	// changes nothing in the campaign; commander_events above says what became of him.
+	if (Hero.Takeovers > 0)
+	{
+		if (const auto HeroSideIt = Setup.sides.find(ToStd(PlayerFaction)); HeroSideIt != Setup.sides.end() && !HeroSideIt->second.commander_id.empty())
+		{
+			Result.hero_faction = ToStd(PlayerFaction);
+			Result.hero_person_id = HeroSideIt->second.commander_id;
+			Result.hero_takeovers = Hero.Takeovers;
+			Result.hero_seconds_played = Hero.SecondsPlayed;
+			Result.hero_fell_while_played = Hero.bFellWhilePlayed;
+		}
+	}
 	for (const auto& FK : Result.casualties)
 	{
 		int32 Killed = 0, Wounded = 0, Taken = 0;
@@ -4957,6 +5095,12 @@ void APA250BattleGameMode::WriteBattleFile(const FString& Reason) const
 			*Who(TEXT("british")), *Who(TEXT("continental")), *GeneralFate.FindRef(TEXT("british")), *GeneralFate.FindRef(TEXT("continental")), GeneralAuraChecks,
 			Alarmed(TEXT("british")) ? TEXT("true") : TEXT("false"), Alarmed(TEXT("continental")) ? TEXT("true") : TEXT("false"), AlarmMusteredAtOnce);
 	}
+	Json += HeroTraceJson();
+	Json += FString::Printf(TEXT(",\"look\":\"%s\""), *PA250BattleLook::Applied());
+	Json += FString::Printf(TEXT(",\"intensity\":{\"near_misses\":%d,\"shakes\":%d,\"dirt\":%d,\"shouts\":{\"charge\":%d,\"rout\":%d,\"officer_down\":%d,\"colours_taken\":%d},\"music_layers\":%d}"),
+		PA250Intensity::NearMissCount(), PA250Intensity::ShakeCount(), PA250Intensity::DirtCount(), Volleys ? Volleys->ShoutEventCount(TEXT("charge")) : 0,
+		Volleys ? Volleys->ShoutEventCount(TEXT("rout")) : 0, Volleys ? Volleys->ShoutEventCount(TEXT("officer_down")) : 0,
+		Volleys ? Volleys->ShoutEventCount(TEXT("colours_taken")) : 0, Music.IsValid() ? Music->NumPlaying() : 0);
 	Json += FString::Printf(TEXT(",\"held\":{\"first_flip_seconds\":%.0f,\"half_strength_seconds\":{\"british\":%.0f,\"continental\":%.0f}}"), FirstFlipAt,
 		HalfStrengthAt.Contains(TEXT("british")) ? HalfStrengthAt.FindRef(TEXT("british")) : -1.f,
 		HalfStrengthAt.Contains(TEXT("continental")) ? HalfStrengthAt.FindRef(TEXT("continental")) : -1.f);

@@ -1,0 +1,50 @@
+{
+ "name": "music_layers_other_rules",
+ "description": "the weights and the layers are the data's; shares outside 0..1 are held to it",
+ "morale_weight": 1.0,
+ "ticket_weight": 0.0,
+ "layers": [
+  {
+   "bank": "a",
+   "from": 0.5,
+   "full": 1.0
+  },
+  {
+   "bank": "b",
+   "from": 0.2,
+   "full": 0.2
+  }
+ ],
+ "cases": [
+  {
+   "what": "only morale counts",
+   "steady_share": 0.25,
+   "reserve_share": 0.0,
+   "intensity": 0.75,
+   "gains": [
+    0.5,
+    1.0
+   ]
+  },
+  {
+   "what": "a step layer: off below its mark",
+   "steady_share": 0.9,
+   "reserve_share": 1.0,
+   "intensity": 0.1,
+   "gains": [
+    0.0,
+    0.0
+   ]
+  },
+  {
+   "what": "shares past their ends",
+   "steady_share": 1.5,
+   "reserve_share": -1.0,
+   "intensity": 0.0,
+   "gains": [
+    0.0,
+    0.0
+   ]
+  }
+ ]
+}

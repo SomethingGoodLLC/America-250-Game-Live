@@ -1,0 +1,68 @@
+{
+ "name": "traversal_classify_edges",
+ "description": "a limit belongs to the easier action: at the hurdle height it is a hurdle, at the vault height a vault, at the mantle height a mantle",
+ "rules": {
+  "hurdle_min_cm": 40,
+  "hurdle_max_height_cm": 75,
+  "vault_max_height_cm": 130,
+  "vault_max_depth_cm": 100,
+  "mantle_max_height_cm": 150,
+  "mantle_max_depth_cm": 220
+ },
+ "cases": [
+  {
+   "what": "just under the least height",
+   "height_cm": 39.9,
+   "depth_cm": 20,
+   "action": "none"
+  },
+  {
+   "what": "the least height",
+   "height_cm": 40,
+   "depth_cm": 20,
+   "action": "hurdle"
+  },
+  {
+   "what": "the hurdle height",
+   "height_cm": 75,
+   "depth_cm": 20,
+   "action": "hurdle"
+  },
+  {
+   "what": "just over it",
+   "height_cm": 75.1,
+   "depth_cm": 20,
+   "action": "vault"
+  },
+  {
+   "what": "the vault height",
+   "height_cm": 130,
+   "depth_cm": 100,
+   "action": "vault"
+  },
+  {
+   "what": "just over the vault height",
+   "height_cm": 130.1,
+   "depth_cm": 100,
+   "action": "mantle"
+  },
+  {
+   "what": "just over the vault depth",
+   "height_cm": 100,
+   "depth_cm": 100.1,
+   "action": "mantle"
+  },
+  {
+   "what": "the mantle height and depth",
+   "height_cm": 150,
+   "depth_cm": 220,
+   "action": "mantle"
+  },
+  {
+   "what": "just over the mantle depth",
+   "height_cm": 100,
+   "depth_cm": 220.1,
+   "action": "none"
+  }
+ ]
+}

@@ -569,6 +569,32 @@ static void test_hero_rules_are_data() {
 
 // M7 (time bands): the setup says the hour of the day, from the campaign clock; an old document that
 // does not say it reads as "not said" and is written back without it.
+// The battle's takeover screen says what a general's fall costs; the numbers are the persons file's.
+static void test_commander_rules_carry_the_fall_costs() {
+    CampaignPassData data;
+    const json original = json::parse(read_text_file(g_data_dir() + "/persons_boston_1775.json"));
+    const json& c = original.at("rules").at("commander");
+    {
+        const CommanderRules r = commander_rules();
+        CHECK(r.wounded_days == c.at("wounded_days").get<int>());
+        CHECK(r.army_morale_on_fall == c.at("army_morale_on_fall").get<int>());
+        CHECK(r.army_morale_on_fall_victory == c.value("army_morale_on_fall_victory", 0));
+        CHECK(r.detachment_unit_cap == original.at("rules").at("detachment_unit_cap").get<int>());
+        CHECK(r.fate_wounded == c.at("fall_fate_pct").at("wounded").get<int>());
+        CHECK(r.wounded_days > 0 && r.army_morale_on_fall < 0 && r.detachment_unit_cap > 0);
+    }
+    {
+        json changed = original;
+        changed["rules"]["commander"]["wounded_days"] = 33;
+        changed["rules"]["commander"]["army_morale_on_fall"] = -12;
+        changed["rules"]["detachment_unit_cap"] = 7;
+        CHECK(load_persons(changed.dump()).empty());
+        const CommanderRules r = commander_rules();
+        CHECK(r.wounded_days == 33 && r.army_morale_on_fall == -12 && r.detachment_unit_cap == 7);
+    }
+    CHECK(load_persons(original.dump()).empty());
+}
+
 static void test_setup_carries_the_hour() {
     ensure_battle_rules();
     for (int h : {0, 5, 12, 19, 23}) {

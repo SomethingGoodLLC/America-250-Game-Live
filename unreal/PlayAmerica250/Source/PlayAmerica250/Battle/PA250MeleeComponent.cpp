@@ -1,4 +1,7 @@
 #include "PA250MeleeComponent.h"
+#include "Battle/PA250BattleFeel.h"
+#include "Battle/PA250AnimClips.h"
+#include "Animation/AnimSequence.h"
 #include "AIController.h"
 #include "PA250UnitClasses.h"
 #include "Components/CapsuleComponent.h"
@@ -100,7 +103,7 @@ void UPA250MeleeComponent::TickComponent(float DeltaTime, ELevelTick TickType, F
 		{
 			PendingThrustTimer = -1.f;
 			const ARFCharacter* Victim = bClubSwing
-				? SweepAttack(V.ClubReachCm, V.ClubRadiusCm, V.ClubDamage, true, EPA250MeleeAction::Club)
+				? SweepAttack(bSword ? SwordReachCm : V.ClubReachCm, V.ClubRadiusCm, bSword ? SwordDamage : V.ClubDamage, true, EPA250MeleeAction::Club)
 				: SweepAttack(V.ThrustReachCm, V.ThrustRadiusCm, V.ThrustDamage, true, EPA250MeleeAction::Thrust);
 			bStepping = false;
 			if (LastBlow == EPA250Blow::Parried)
@@ -180,7 +183,7 @@ void UPA250MeleeComponent::TickVisual(float DeltaTime)
 	switch (Visual)
 	{
 	case EPA250MeleeVisual::Thrust:
-		if (PendingThrustTimer < 0.f && VisualTime >= ActiveWindup + VisualHold + ThrustRecoverSeconds) SetVisual(EPA250MeleeVisual::None);
+		if (PendingThrustTimer < 0.f && VisualTime >= ActiveWindup + VisualHold + (bSword ? FMath::Max(ThrustRecoverSeconds, SwordRecoverSeconds) : ThrustRecoverSeconds)) SetVisual(EPA250MeleeVisual::None);
 		break;
 	case EPA250MeleeVisual::ButtStroke:
 		if (VisualTime >= ButtSeconds) SetVisual(EPA250MeleeVisual::None);
@@ -378,6 +381,32 @@ bool UPA250MeleeComponent::IssuedBayonet(FName Faction, FName UnitClass, uint32 
 	case EPA250Bayonet::None: return false;
 	case EPA250Bayonet::Some: return Seed % 4 == 0;
 	default: return true;
+	}
+}
+
+void UPA250MeleeComponent::Flinch(const FVector& WorldDir, float Strength)
+{
+	if (FlinchTime >= 0.f) return; // a real blow's reaction is not replaced
+	FlinchDirWorld = WorldDir.GetSafeNormal2D();
+	FlinchStrength = FMath::Clamp(Strength, 0.f, 1.f);
+	FlinchTime = FlinchDirWorld.IsNearlyZero() ? -1.f : 0.f;
+}
+
+void UPA250MeleeComponent::SetSword(bool bOn, float Damage, float ReachCm, float RecoverSeconds)
+{
+	if (bOn == bSword) return;
+	bSword = bOn;
+	if (bOn)
+	{
+		BayonetBeforeSword = BayonetOverride;
+		BayonetOverride = 0; // no bayonet: his blow is the cut
+		SwordDamage = Damage;
+		SwordReachCm = ReachCm;
+		SwordRecoverSeconds = RecoverSeconds;
+	}
+	else
+	{
+		BayonetOverride = BayonetBeforeSword;
 	}
 }
 
@@ -616,6 +645,23 @@ void UPA250MeleeComponent::PublishPose()
 	{
 		Pose.Reload = 0.f;
 	}
+	// A drill clip from the registry (anim_clips.json) takes the upper body in place of the hands
+	// made in code, scrubbed by the stage's progress; kneeling when he is ducked. The musket stays
+	// where the drill parks it. With no clip for the stage, the code's hands are the placeholder.
+	UAnimSequence* DrillClip = nullptr;
+	float DrillTime = 0.f;
+	if (!bDead && ReloadWeight > 0.005f && Me->Musket && Me->Musket->IsReloading() && Me->IsUsingPeriodSoldier())
+	{
+		const FActiveReloadSequencer& Drill = Me->Musket->GetSequencer();
+		const FName ClipName = PA250AnimClips::DrillClipName(Drill.GetPhase(), Me->bIsCrouched);
+		if (!ClipName.IsNone()) DrillClip = PA250AnimClips::Clip(ClipName);
+		if (DrillClip)
+		{
+			DrillTime = Drill.GetPhaseProgress() * DrillClip->GetPlayLength();
+			Pose.Reload = 0.f;
+		}
+	}
+	Anim->SetUpperBodyClip(DrillClip, DrillTime, DrillClip ? ReloadWeight : 0.f, false);
 	OffsetMusket(ClubOffset + Palm + ReloadShift, bParked ? &Parked : nullptr);
 	const FVector FlinchWorld = !bDead && FlinchTime >= 0.f
 		? FlinchDirWorld * (FlinchStrength * FlinchWeight(FlinchTime, GetValues().FlinchSeconds)) : FVector::ZeroVector;
@@ -625,6 +671,15 @@ void UPA250MeleeComponent::PublishPose()
 		Pose.ForwardCS = ToWorld.InverseTransformVectorNoScale(Me->GetActorForwardVector());
 		Pose.RightCS = ToWorld.InverseTransformVectorNoScale(Me->GetActorRightVector());
 		Pose.FlinchCS = ToWorld.InverseTransformVectorNoScale(FlinchWorld);
+	}
+	// The played general's arms are a sword and a pistol: the musket's holds are not his.
+	if (Me->HasHeroArms())
+	{
+		Pose.Carry = 0.f;
+		Pose.Shoulder = 0.f;
+		Pose.Reload = 0.f;
+		Pose.Level = 0.f;
+		Pose.Guard = 0.f;
 	}
 	Anim->SetMeleePose(Pose);
 }
@@ -782,7 +837,7 @@ bool UPA250MeleeComponent::DoThrust()
 
 void UPA250MeleeComponent::RequestThrust()
 {
-	if (!DoThrust()) BufferedThrustTimer = 0.3f;
+	if (!DoThrust()) BufferedThrustTimer = PA250BattleFeel::Get().BufferThrustSeconds; // battle_feel.json input.buffer_seconds.thrust
 }
 
 void UPA250MeleeComponent::NotifyIncoming(float Seconds)
@@ -1126,7 +1181,7 @@ ARFCharacter* UPA250MeleeComponent::SweepAttack(float ReachCm, float RadiusCm, f
 
 		const bool bReloading = Victim->Musket && Victim->Musket->IsReloading();
 		float Applied = ComputeHitDamage(Damage, bAllowBackstabBonus, Victim->GetActorForwardVector(), VictimToMe, bReloading, V);
-		Applied *= FMath::Max(0.f, DamageScale);
+		Applied *= FMath::Max(0.f, DamageScale) * FMath::Max(0.f, OrderDamageScale);
 		if (bRiposte) Applied *= V.RiposteDamageMultiplier;
 		const bool bBlocked = Guard == EPA250Guard::Block;
 		if (bBlocked) Applied *= Action == EPA250MeleeAction::Charge ? V.ChargeBlockDamageScale : V.BlockDamageScale;

@@ -468,6 +468,11 @@ void APA250BotController::Tick(float DeltaSeconds)
 		}
 		// Under his leader's order a man well behind his place runs to it; otherwise the line's own pace.
 		MoveComp->MaxWalkSpeed = (Form.bHurry && FVector::Dist2D(Me->GetActorLocation(), Form.Target) > Form.HurryBeyondCm) ? Me->SprintSpeed : BaseWalkSpeed;
+		// quick_step (the played general's verb): the squad's pace for its time.
+		if (const APA250BattleGameMode* PaceGM = GetWorld() ? GetWorld()->GetAuthGameMode<APA250BattleGameMode>() : nullptr)
+		{
+			if (const UPA250VolleyCoordinator* PaceV = PaceGM->GetVolleys()) MoveComp->MaxWalkSpeed *= PaceV->SpeedScaleFor(Me);
+		}
 		if (Form.bMayCharge && TryBayonet(Me, Enemy, Dist, T)) return;
 		const float ArriveCm = Form.ArriveCm > 0.f ? Form.ArriveCm : T.FormationArriveCm;
 		const bool bAtSpot = FVector::Dist2D(Me->GetActorLocation(), Form.Target) <= ArriveCm;

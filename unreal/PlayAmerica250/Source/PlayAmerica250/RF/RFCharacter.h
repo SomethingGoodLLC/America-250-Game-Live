@@ -5,6 +5,7 @@
 #include "GameFramework/Character.h"
 #include "InputActionValue.h"
 #include "ActiveReloadSequencer.h"
+#include "PA250InputBuffer.h"
 #include "RFCharacter.generated.h"
 
 class APA250MountedSoldier;
@@ -18,6 +19,8 @@ class AMusketWeapon;
 class UStaticMeshComponent;
 class UPA250AimComponent;
 class UPA250MeleeComponent;
+class UPA250TraversalComponent;
+class UMotionWarpingComponent;
 class UWidgetComponent;
 class UPA250WeaponTuning;
 class UPA250FactionVisuals;
@@ -34,6 +37,13 @@ public:
 	UFUNCTION(Exec, BlueprintCallable, Category="Mounted")
 	void ToggleMounted();
     AMusketWeapon* GetEquippedFirearm() const;
+	/** The played general's arms (M5): a sword in hand and a pistol drawn while he aims, in place of
+	 *  the musket. Prototype shapes, as the mounted rider's, until period models are supplied. The
+	 *  numbers are the persons data's. Off: his musket again. */
+	void SetHeroArms(bool bOn, float SwordDamage, float SwordReachCm, float SwordRecoverSeconds, float PistolDamage, float PistolRangeM, float PistolReloadSeconds);
+	bool HasHeroArms() const { return bHeroArms; }
+	/** Debug probes: hold or let go the aim as the player's key would. */
+	void ProbeAim(bool bOn) { if (bOn) StartAim(); else StopAim(); }
     void SelectMountedSword();
     void SelectMountedRifle();
     void SelectMountedPistol();
@@ -103,6 +113,13 @@ public:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat")
 	TObjectPtr<UPA250MeleeComponent> MeleeComponent;
+
+	/** Automatic traversal (M2): the engine fits the vault clips' root motion to the obstacle. */
+	UPROPERTY(VisibleAnywhere, Category = "Movement")
+	TObjectPtr<UMotionWarpingComponent> MotionWarping;
+	UPROPERTY(VisibleAnywhere, Category = "Movement")
+	TObjectPtr<UPA250TraversalComponent> Traversal;
+	UPA250TraversalComponent* GetTraversal() const { return Traversal; }
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Team")
 	TObjectPtr<UStaticMeshComponent> HatMesh;
@@ -260,6 +277,13 @@ public:
 	/** How long the fallen stay on the field (pa250.CorpseSeconds) and how many at once (pa250.MaxCorpses). */
 	static float GetCorpseSeconds();
 	static int32 GetMaxCorpses();
+	/** The fallen body stops simulating once it has settled (intensity.corpses.freeze_after_seconds). */
+	void FreezeCorpse();
+	/** The look budget (battle_look.json soldier_lod): whether he casts a shadow now, and whether the engine may animate him at a lower rate when far or off screen. */
+	void SetLookBudget(bool bCastShadow, bool bUpdateRateOptimisation);
+	int8 LookShadow = -1;
+	bool IsCorpseFrozen() const { return bCorpseFrozen; }
+	bool bCorpseFrozen = false;
 	float SuppressionSwayDegrees = 0.f;
 	float SuppressionTimer = 0.f;
 	bool bInLine = false;
@@ -282,6 +306,7 @@ public:
 	void ApplyCameraKick(float PitchDeg, float YawDeg);
 	/** Momentary FOV change (deg, - = punch in); the camera blend eases it back. */
 	void PunchFOV(float Degrees) { CurrentFOV = FMath::Clamp(CurrentFOV + Degrees, 30.f, 110.f); }
+	float GetCurrentFOV() const { return CurrentFOV; }
 	/** Extra FOV while a bayonet charge is running. */
 	UPROPERTY(EditAnywhere, Category = "Camera")
 	float ChargeFOVBoost = 7.f;
@@ -328,6 +353,16 @@ protected:
 	void StopAim();
 	void OnFirePressed();
 	void OnReloadStarted();
+	/** Jump key: over the obstacle before him if there is one he can cross (at any speed), else a jump. */
+	void OnJumpPressed();
+	/** M3: presses that could not be acted on at once, acted on when they can be (battle_feel.json input). */
+	void TickInputBuffer();
+	/** M3: the player's movement and camera values from battle_feel.json movement; a bot keeps the class's own. */
+	void ApplyMovementFeel(bool bPlayer);
+	bool TryFireNow();
+	bool IsOverObstacle() const;
+	FPA250InputBuffer InputBuffer;
+	bool bPlayerFeelApplied = false;
 	void OnReloadCompleted();
 	void OnShoulderSwap();
 	void OnMeleePressed();
@@ -335,6 +370,9 @@ protected:
 	void OnSensitivityUp();
 	void OnChargePressed();
 	void OnAbilityPressed();
+	/** Y: the takeover screen for the general, when the player has earned him. U: the played general's own ability. */
+	void OnHeroPressed();
+	void OnHeroAbilityPressed();
 	/** Number keys: on foot an order to his file (1 to 6); in the saddle 1 to 3 choose the weapon. */
 	void OnNumberKey(int32 Number);
 	void OnKey1() { OnNumberKey(1); }
@@ -413,6 +451,13 @@ private:
     void SelectMountedWeapon(int32 Index);
     int32 MountedWeaponIndex = 0;
     UPROPERTY(Transient) TObjectPtr<AMusketWeapon> MountedPistol;
+	UPROPERTY(Transient) TObjectPtr<AMusketWeapon> HeroPistol;
+	UPROPERTY(Transient) TArray<TObjectPtr<UStaticMeshComponent>> HeroSword;
+	bool bHeroArms = false;
+	float HeroPistolOutUntil = -1.f;
+	float HeroAimAlpha = 0.f;
+	float HeroRecoilAlpha = 0.f;
+	void TickHeroArms(float DeltaTime);
 
 	// Riding state (Mounted/PA250MountedRiding.cpp).
 	/** Saddle -> foot: weapons back in his hands, foot movement restored. Returns the horse (not destroyed). */

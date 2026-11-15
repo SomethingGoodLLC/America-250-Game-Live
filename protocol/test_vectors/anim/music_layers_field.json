@@ -1,0 +1,80 @@
+{
+ "name": "music_layers_field",
+ "description": "the data's layers and weights: quiet when the day goes well, every layer in when his squads are broken and his reserve is spent",
+ "morale_weight": 0.6,
+ "ticket_weight": 0.4,
+ "layers": [
+  {
+   "bank": "music_battle_low",
+   "from": 0.0,
+   "full": 0.0
+  },
+  {
+   "bank": "music_battle_mid",
+   "from": 0.25,
+   "full": 0.5
+  },
+  {
+   "bank": "music_battle_high",
+   "from": 0.6,
+   "full": 0.85
+  }
+ ],
+ "cases": [
+  {
+   "what": "all steady, reserve whole",
+   "steady_share": 1.0,
+   "reserve_share": 1.0,
+   "intensity": 0.0,
+   "gains": [
+    1.0,
+    0.0,
+    0.0
+   ]
+  },
+  {
+   "what": "half his squads shaken",
+   "steady_share": 0.5,
+   "reserve_share": 1.0,
+   "intensity": 0.3,
+   "gains": [
+    1.0,
+    0.2,
+    0.0
+   ]
+  },
+  {
+   "what": "half shaken, half the reserve spent",
+   "steady_share": 0.5,
+   "reserve_share": 0.5,
+   "intensity": 0.5,
+   "gains": [
+    1.0,
+    1.0,
+    0.0
+   ]
+  },
+  {
+   "what": "none steady, half the reserve spent",
+   "steady_share": 0.0,
+   "reserve_share": 0.5,
+   "intensity": 0.8,
+   "gains": [
+    1.0,
+    1.0,
+    0.8
+   ]
+  },
+  {
+   "what": "the worst of it",
+   "steady_share": 0.0,
+   "reserve_share": 0.0,
+   "intensity": 1.0,
+   "gains": [
+    1.0,
+    1.0,
+    1.0
+   ]
+  }
+ ]
+}

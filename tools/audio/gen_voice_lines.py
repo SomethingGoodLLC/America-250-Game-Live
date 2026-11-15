@@ -59,6 +59,9 @@ LINES: dict[str, tuple[str, str]] = {
     "enemy_general_wounded": ("Their general is hit!", "soldier"),
     "enemy_general_killed": ("Their general is down!", "soldier"),
     "enemy_general_captured": ("We've taken their general!", "soldier"),
+    # Battle intensity (2026-11-15; battle_feel.json intensity.shouts).
+    "officer_down": ("The officer is down!", "soldier"),
+    "colours_taken": ("They have our colours!", "soldier"),
 }
 
 # Shouting delivery: low stability for urgency, high style.
@@ -90,13 +93,20 @@ def tidy(pcm: np.ndarray) -> np.ndarray:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--force", action="store_true", help="regenerate even if the WAV exists")
+    ap.add_argument("--only", default="", help="comma-separated line keys: generate these and no others")
     args = ap.parse_args()
+    only = {k for k in args.only.split(",") if k}
+    unknown = only - set(LINES)
+    if unknown:
+        sys.exit(f"--only: not in LINES: {', '.join(sorted(unknown))}")
     key = read_key()
     made = skipped = 0
     chars = 0
     with httpx.Client(timeout=60) as client:
         for side, voices in VOICES.items():
             for line_key, (text, who) in LINES.items():
+                if only and line_key not in only:
+                    continue
                 path = OUT / side / f"{line_key}.wav"
                 if path.exists() and not args.force:
                     skipped += 1

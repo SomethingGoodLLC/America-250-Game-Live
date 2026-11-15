@@ -709,6 +709,11 @@ struct CommanderRules {
     float fall_pressure = 0.6f;        // the morale check on his side when he falls...
     float fall_pressure_seconds = 10.f;  // ...fading over this long
     int fate_wounded = 60, fate_killed = 25, fate_captured = 15;  // what becomes of him, in 100
+    // What his fall costs the campaign (the battle shows it before the player takes him into the fight):
+    int wounded_days = 0;                 // a wounded general is away this long
+    int army_morale_on_fall = 0;          // on his army when its side lost the battle...
+    int army_morale_on_fall_victory = 0;  // ...and when it won
+    int detachment_unit_cap = 0;          // an army with no general takes in at most this many units
 };
 
 // GAME INVENTION (persons data `hero`): the player may fight part of a battle as the general who

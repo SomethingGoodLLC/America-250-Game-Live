@@ -5920,6 +5920,7 @@ inline int run_all(Reporter& rep, const std::string& data_dir, const std::string
         {"pass_hero_vectors", test_pass_hero_vectors},
         {"hero_rules_are_data", test_hero_rules_are_data},
         {"setup_carries_the_hour", test_setup_carries_the_hour},
+        {"commander_rules_carry_the_fall_costs", test_commander_rules_carry_the_fall_costs},
         {"pass_people", test_pass_people},
         {"pass_politics", test_pass_politics},
         {"pass_decisions", test_pass_decisions},

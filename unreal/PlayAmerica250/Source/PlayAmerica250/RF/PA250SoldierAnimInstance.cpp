@@ -150,6 +150,36 @@ float FPA250SoldierAnimProxy::StepTierAlpha(float Alpha, bool bWantFull, float D
 	return FMath::Clamp(Alpha + DeltaSeconds / BlendSeconds, 0.f, 1.f);
 }
 
+void UPA250SoldierAnimInstance::SetUpperBodyClip(UAnimSequence* InClip, float InTime, float InWeight, bool bInLoop)
+{
+	if (InClip && CurrentSkeleton && InClip->GetSkeleton() != CurrentSkeleton)
+	{
+		if (!bUpperRefusedLogged)
+		{
+			bUpperRefusedLogged = true;
+			UE_LOG(LogTemp, Error, TEXT("PA250 anim clips: %s is on another skeleton than the soldier's; it is not played"), *InClip->GetPathName());
+		}
+		InClip = nullptr;
+	}
+	UpperClip = InClip;
+	UpperTime = InTime;
+	UpperWeight = InClip ? FMath::Clamp(InWeight, 0.f, 1.f) : 0.f;
+	bUpperLoop = bInLoop;
+}
+
+void FPA250SoldierAnimProxy::UpperBodyMask(const FBoneContainer& Bones, FName UpperRoot, TArray<bool>& OutMask)
+{
+	OutMask.Reset();
+	const FCompactPoseBoneIndex Root = FindBone(Bones, UpperRoot);
+	if (Root == INDEX_NONE) return;
+	OutMask.Init(false, Bones.GetCompactPoseNumBones());
+	for (int32 i = 0; i < OutMask.Num(); ++i)
+	{
+		const FCompactPoseBoneIndex Bone(i);
+		OutMask[i] = Bone == Root || Bones.BoneIsChildOf(Bone, Root);
+	}
+}
+
 void FPA250SoldierAnimProxy::Initialize(UAnimInstance* InAnimInstance)
 {
 	// The search reads the pose history through the graph message this node publishes, so the
@@ -235,6 +265,13 @@ void FPA250SoldierAnimProxy::PreUpdate(UAnimInstance* InAnimInstance, float Delt
 	Hand = Inst->GetSupportHandTarget();
 	Melee = Inst->GetMeleePose();
 	MountedAim = Inst->GetMountedAim();
+	TraversalClip = Inst->GetTraversalClip();
+	TraversalTime = Inst->GetTraversalTime();
+	TraversalWeight = Inst->GetTraversalWeight();
+	UpperClip = Inst->GetUpperBodyClip();
+	UpperTime = Inst->GetUpperBodyTime();
+	UpperWeight = Inst->GetUpperBodyWeight();
+	bUpperLoop = Inst->GetUpperBodyLoop();
 }
 
 void FPA250SoldierAnimProxy::Update(float DeltaSeconds)
@@ -315,6 +352,47 @@ bool FPA250SoldierAnimProxy::Evaluate(FPoseContext& Output)
 	{
 		Output.ResetToRefPose();
 	}
+	if (UpperClip && UpperWeight > 0.f)
+	{
+		// A registered clip over the upper body (the loading drill): spine_01 and everything above
+		// it take the clip's local pose; hips and legs stay with the movement under them.
+		const FBoneContainer& Bones = Output.Pose.GetBoneContainer();
+		if (UpperMaskSerial != static_cast<int32>(Bones.GetSerialNumber()) || UpperMask.Num() != Bones.GetCompactPoseNumBones())
+		{
+			UpperMaskSerial = static_cast<int32>(Bones.GetSerialNumber());
+			UpperBodyMask(Bones, TEXT("spine_01"), UpperMask);
+		}
+		if (UpperMask.Num() == Bones.GetCompactPoseNumBones())
+		{
+			FCompactPose Upper;
+			Upper.SetBoneContainer(&Bones);
+			FBlendedCurve UpperCurve;
+			UpperCurve.InitFrom(Output.Curve);
+			UE::Anim::FStackAttributeContainer UpperAttributes;
+			FAnimationPoseData UpperData(Upper, UpperCurve, UpperAttributes);
+			UpperClip->GetAnimationPose(UpperData, FAnimExtractContext(UpperTime, false, {}, bUpperLoop));
+			for (const FCompactPoseBoneIndex Bone : Output.Pose.ForEachBoneIndex())
+			{
+				if (UpperMask[Bone.GetInt()]) Output.Pose[Bone] = BlendBone(Output.Pose[Bone], Upper[Bone], UpperWeight);
+			}
+		}
+	}
+	if (TraversalClip && TraversalWeight > 0.f)
+	{
+		// Over an obstacle: the montage's clip over the locomotion pose, by the montage's weight. Its
+		// root motion is taken out here (the montage moves the capsule with it).
+		FCompactPose Over;
+		Over.SetBoneContainer(&Output.Pose.GetBoneContainer());
+		FBlendedCurve OverCurve;
+		OverCurve.InitFrom(Output.Curve);
+		UE::Anim::FStackAttributeContainer OverAttributes;
+		FAnimationPoseData OverData(Over, OverCurve, OverAttributes);
+		TraversalClip->GetAnimationPose(OverData, FAnimExtractContext(TraversalTime, true, {}, false));
+		for (const FCompactPoseBoneIndex Bone : Output.Pose.ForEachBoneIndex())
+		{
+			Output.Pose[Bone] = BlendBone(Output.Pose[Bone], Over[Bone], TraversalWeight);
+		}
+	}
 	const bool bMelee = Melee.IsActive();
 	if (bMelee || Hand.bEnabled || MountedAim.bEnabled)
 	{
@@ -337,7 +415,8 @@ bool FPA250SoldierAnimProxy::Evaluate(FPoseContext& Output)
 				Support.SpotFromGripCS = FMath::Lerp(Support.SpotFromGripCS, ButtDir * 18.f, FMath::Min(1.f, Club * 3.f));
 			}
 			GripRightHand(CS.Pose, Support);
-			SolveSupportHand(CS.Pose, Support);
+			// Over an obstacle the left hand is the clip's (it goes to the wall); the right keeps the musket.
+			if (TraversalWeight < 0.5f) SolveSupportHand(CS.Pose, Support);
 		}
 		FCSPose<FCompactPose>::ConvertComponentPosesToLocalPoses(MoveTemp(CS.Pose), Output.Pose);
 		Output.Pose.NormalizeRotations();

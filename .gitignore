@@ -410,6 +410,11 @@ unreal/PlayAmerica250/Content/KiteDemo/
 # American Soldier: /Game/american_soldier; coat materials stay under Content/PA250.
 # Dropped/imported Fab meshes (cannon, foliage, buildings); re-import via tools/ue.
 unreal/PlayAmerica250/Content/ThirdParty/
+# Animation drop folder (Scripts/import_anim_drop.py): source FBX files dropped for import, and
+# the clips that must stay on this machine (MotionBricks evaluation output, for one).
+unreal/PlayAmerica250/SourceArt/anim_drop/
+unreal/PlayAmerica250/Content/PA250/Anim/Local/
+unreal/PlayAmerica250/Content/PA250/Anim/_DropStaging/
 # Machine-local clangd DB (regenerate via UBT -Mode=GenerateClangDatabase)
 unreal/PlayAmerica250/compile_commands.json
 

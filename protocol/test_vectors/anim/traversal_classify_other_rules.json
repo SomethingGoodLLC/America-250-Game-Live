@@ -1,0 +1,38 @@
+{
+ "name": "traversal_classify_other_rules",
+ "description": "the limits are the data's, not the code's",
+ "rules": {
+  "hurdle_min_cm": 20,
+  "hurdle_max_height_cm": 50,
+  "vault_max_height_cm": 90,
+  "vault_max_depth_cm": 40,
+  "mantle_max_height_cm": 200,
+  "mantle_max_depth_cm": 100
+ },
+ "cases": [
+  {
+   "what": "a kerb is a hurdle here",
+   "height_cm": 25,
+   "depth_cm": 30,
+   "action": "hurdle"
+  },
+  {
+   "what": "the stone wall is a mantle here",
+   "height_cm": 110,
+   "depth_cm": 80,
+   "action": "mantle"
+  },
+  {
+   "what": "a tall bank can be climbed here",
+   "height_cm": 190,
+   "depth_cm": 60,
+   "action": "mantle"
+  },
+  {
+   "what": "the redoubt is too deep here",
+   "height_cm": 135,
+   "depth_cm": 160,
+   "action": "none"
+  }
+ ]
+}

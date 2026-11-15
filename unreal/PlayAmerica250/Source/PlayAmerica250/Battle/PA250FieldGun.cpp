@@ -1,4 +1,5 @@
 #include "PA250FieldGun.h"
+#include "Battle/PA250Intensity.h"
 #include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
@@ -726,6 +727,7 @@ void APA250CannonBall::Tick(float DeltaSeconds)
 			Bank->AddDirtBurst(Hit.ImpactPoint, FVector(Hit.ImpactNormal), R.cannon_dirt_burst_scale);
 		}
 		FPA250BattleAudio::PlayAt(this, TEXT("impact_ground"), Hit.ImpactPoint, EPA250SoundRange::Gunfire, 1.f, 0.1f);
+		PA250Intensity::RoundShotStrike(GetWorld(), Hit.ImpactPoint); // the player's camera shakes, and close by earth is thrown over his view
 		Destroy();
 		return;
 	}

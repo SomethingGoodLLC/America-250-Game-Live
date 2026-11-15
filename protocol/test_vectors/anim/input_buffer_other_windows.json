@@ -1,0 +1,61 @@
+{
+ "name": "input_buffer_other_windows",
+ "description": "the window is the data's: an order given mid-vault is kept half a second, and a zero window keeps nothing",
+ "window_s": 0.5,
+ "cases": [
+  {
+   "what": "an order 0.45 s before he lands",
+   "events": [
+    [
+     "press",
+     2.0
+    ],
+    [
+     "ready",
+     2.45
+    ]
+   ],
+   "fires_at": [
+    2.45
+   ]
+  },
+  {
+   "what": "an order 0.6 s before he lands",
+   "events": [
+    [
+     "press",
+     2.0
+    ],
+    [
+     "ready",
+     2.6
+    ]
+   ],
+   "fires_at": []
+  },
+  {
+   "what": "two presses, two chances, one firing",
+   "events": [
+    [
+     "press",
+     2.0
+    ],
+    [
+     "ready",
+     2.1
+    ],
+    [
+     "press",
+     2.2
+    ],
+    [
+     "ready",
+     2.9
+    ]
+   ],
+   "fires_at": [
+    2.1
+   ]
+  }
+ ]
+}

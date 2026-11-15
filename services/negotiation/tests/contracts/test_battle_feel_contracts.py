@@ -131,3 +131,126 @@ def test_gait_vectors_follow_the_rule(vector: dict[str, Any]) -> None:
 def test_there_are_vectors_for_each_rule() -> None:
     assert len(_vectors("tier_pick_")) >= 6
     assert len(_vectors("gait_pick_")) >= 2
+
+
+def classify_traversal(height: float, depth: float, r: dict[str, float]) -> str:
+    """The traversal rule of battle_feel.yaml, in plain Python."""
+    if height < r["hurdle_min_cm"]:
+        return "none"
+    if height > r["mantle_max_height_cm"] or depth > r["mantle_max_depth_cm"]:
+        return "none"
+    if depth <= r["vault_max_depth_cm"] and height <= r["vault_max_height_cm"]:
+        return "hurdle" if height <= r["hurdle_max_height_cm"] else "vault"
+    return "mantle"
+
+
+@pytest.mark.parametrize(
+    "vector", _vectors("traversal_classify_"), ids=lambda v: v["name"]
+)
+def test_traversal_vectors_follow_the_rule(vector: dict[str, Any]) -> None:
+    for case in vector["cases"]:
+        got = classify_traversal(case["height_cm"], case["depth_cm"], vector["rules"])
+        assert got == case["action"], case
+
+
+def test_the_levels_obstacles_are_crossed_and_houses_are_not() -> None:
+    rules = FEEL["traversal"]
+    assert (
+        rules["hurdle_min_cm"]
+        < rules["hurdle_max_height_cm"]
+        < rules["vault_max_height_cm"]
+        <= rules["mantle_max_height_cm"]
+    )
+    assert rules["vault_max_depth_cm"] <= rules["mantle_max_depth_cm"]
+    # The generated levels' walls are 110 cm high and 80 cm through; a breastwork 120 by 90.
+    assert classify_traversal(110, 80, rules) == "vault"
+    assert classify_traversal(120, 90, rules) == "vault"
+    assert classify_traversal(300, 30, rules) == "none"
+    field = next(
+        v for v in _vectors("traversal_classify_") if v["name"].endswith("field")
+    )
+    assert field["rules"] == {k: rules[k] for k in field["rules"]}
+
+
+def run_buffer(events: list[list[Any]], window: float) -> list[float]:
+    """The input-buffer rule of battle_feel.yaml, in plain Python."""
+    pressed: float | None = None
+    fired: list[float] = []
+    for kind, at in events:
+        if kind == "press":
+            pressed = at
+        elif pressed is not None:
+            if at - pressed <= window + 1e-9:
+                fired.append(at)
+            pressed = None
+    return fired
+
+
+@pytest.mark.parametrize("vector", _vectors("input_buffer_"), ids=lambda v: v["name"])
+def test_input_buffer_vectors_follow_the_rule(vector: dict[str, Any]) -> None:
+    for case in vector["cases"]:
+        assert run_buffer(case["events"], vector["window_s"]) == case["fires_at"], case
+
+
+def test_movement_and_input_values_are_sane() -> None:
+    move = FEEL["movement"]
+    assert move["walk_speed_cm"] < move["sprint_speed_cm"]
+    # A sprint is still what sets off a traversal, and a walk is not.
+    assert (
+        move["walk_speed_cm"]
+        < FEEL["traversal"]["min_speed_cm_s"]
+        <= move["sprint_speed_cm"]
+    )
+    windows = FEEL["input"]["buffer_seconds"]
+    assert set(windows) == {"fire", "reload", "vault", "order", "thrust"}
+    assert all(0 <= w <= 1 for w in windows.values())
+    # A buffered shot must be able to outlast nothing longer than the lock that causes it.
+    assert windows["fire"] <= move["fire_lock_seconds"]
+    assert len(_vectors("input_buffer_")) >= 3
+
+
+def music_intensity(
+    steady: float, reserve: float, morale_w: float, ticket_w: float
+) -> float:
+    """The music rule of battle_feel.yaml, in plain Python."""
+    steady = min(1.0, max(0.0, steady))
+    reserve = min(1.0, max(0.0, reserve))
+    return min(1.0, max(0.0, morale_w * (1 - steady) + ticket_w * (1 - reserve)))
+
+
+def layer_gain(intensity: float, layer: dict[str, float]) -> float:
+    if layer["full"] <= layer["from"]:
+        return 1.0 if intensity >= layer["from"] else 0.0
+    return min(
+        1.0, max(0.0, (intensity - layer["from"]) / (layer["full"] - layer["from"]))
+    )
+
+
+@pytest.mark.parametrize("vector", _vectors("music_layers_"), ids=lambda v: v["name"])
+def test_music_vectors_follow_the_rule(vector: dict[str, Any]) -> None:
+    for case in vector["cases"]:
+        intensity = music_intensity(
+            case["steady_share"],
+            case["reserve_share"],
+            vector["morale_weight"],
+            vector["ticket_weight"],
+        )
+        assert intensity == pytest.approx(case["intensity"]), case
+        gains = [layer_gain(intensity, layer) for layer in vector["layers"]]
+        assert gains == pytest.approx(case["gains"]), case
+
+
+def test_intensity_values_are_sane() -> None:
+    feel = FEEL["intensity"]
+    assert feel["round_shot"]["shake_inner_m"] < feel["round_shot"]["shake_outer_m"]
+    music = feel["music"]
+    assert music["morale_weight"] + music["ticket_weight"] == pytest.approx(1.0)
+    # The first layer always plays; each later one comes in no earlier than the one before.
+    assert music["layers"][0]["from"] == 0 and music["layers"][0]["full"] == 0
+    marks = [layer["from"] for layer in music["layers"]]
+    assert marks == sorted(marks)
+    field = next(v for v in _vectors("music_layers_") if v["name"].endswith("field"))
+    assert field["layers"] == music["layers"]
+    assert field["morale_weight"] == music["morale_weight"]
+    assert set(feel["shouts"]) == {"charge", "rout", "officer_down", "colours_taken"}
+    assert len(_vectors("music_layers_")) >= 2

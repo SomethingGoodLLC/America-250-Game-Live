@@ -12,6 +12,7 @@
 #include "Engine/GameViewportClient.h"
 #include "UnrealClient.h"
 #include "Camera/CameraComponent.h"
+#include "Camera/CameraActor.h"
 #include "Components/CapsuleComponent.h"
 #include "PA250Cover.h"
 #include "pa250/sim.hpp"
@@ -24,6 +25,7 @@
 #include "Engine/LocalPlayer.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PlayerController.h"
+#include "GameFramework/InputSettings.h"
 #include "GameFramework/SpringArmComponent.h"
 #include "InputAction.h"
 #include "InputMappingContext.h"
@@ -37,6 +39,9 @@
 #include "EngineUtils.h"
 #include "PA250FactionVisuals.h"
 #include "PA250MeleeComponent.h"
+#include "Battle/PA250TraversalComponent.h"
+#include "Battle/PA250TraversalLinks.h"
+#include "MotionWarpingComponent.h"
 #include "PA250ThirdPartyAssets.h"
 #include "PA250VolleyCoordinator.h"
 #include "PA250WeaponTuning.h"
@@ -75,6 +80,8 @@ ARFCharacter::ARFCharacter()
 	HealthComponent = CreateDefaultSubobject<URFHealthComponent>(TEXT("HealthComponent"));
 	AimComponent = CreateDefaultSubobject<UPA250AimComponent>(TEXT("AimComponent"));
 	MeleeComponent = CreateDefaultSubobject<UPA250MeleeComponent>(TEXT("MeleeComponent"));
+	MotionWarping = CreateDefaultSubobject<UMotionWarpingComponent>(TEXT("MotionWarping"));
+	Traversal = CreateDefaultSubobject<UPA250TraversalComponent>(TEXT("Traversal"));
 
 	TeamMarker = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("TeamMarker"));
 	TeamMarker->SetupAttachment(RootComponent);
@@ -110,6 +117,12 @@ ARFCharacter::ARFCharacter()
 
 	bUseControllerRotationYaw = true;
 	GetCharacterMovement()->bOrientRotationToMovement = false;
+	// Walk and sprint speed are data (battle_feel.json movement); the class's own values stand when the file gave none.
+	if (const FPA250BattleFeel& MoveFeel = PA250BattleFeel::Get(); MoveFeel.WalkSpeedCm > 0.f && MoveFeel.SprintSpeedCm > 0.f)
+	{
+		WalkSpeed = MoveFeel.WalkSpeedCm;
+		SprintSpeed = MoveFeel.SprintSpeedCm;
+	}
 	GetCharacterMovement()->MaxWalkSpeed = WalkSpeed;
 	GetCharacterMovement()->JumpZVelocity = 450.f;
 	// Ducking behind a 1.1 m wall: crouched capsule is 1.0 m tall (top below the wall).
@@ -574,6 +587,8 @@ void ARFCharacter::TickAnimProbe(float DeltaTime)
 		}
 		if (T >= 1.f && T - DeltaTime < 1.f) OnFirePressed();
 		if (T >= 2.5f && T - DeltaTime < 2.5f) OnReloadStarted();
+		// -PA250ProbeKneel: he ducks for the load, so the kneeling drill is what shows.
+		if (T >= 2.6f && T - DeltaTime < 2.6f && FParse::Param(FCommandLine::Get(), TEXT("PA250ProbeKneel"))) OnDuckPressed();
 		AMusketWeapon* Gun = GetEquippedFirearm();
 		// Take each stage of the drill as the active reload offers it (a press at the sweet spot).
 		if (Gun && Gun->IsReloading() && T > 3.f && Gun->GetSequencer().GetPhaseProgress() >= 0.5f && AnimProbeLogTimer > 0.2f)
@@ -602,11 +617,12 @@ void ARFCharacter::TickAnimProbe(float DeltaTime)
 			}
 			const FVector RightHand = GetActorTransform().InverseTransformPosition(GetMesh()->GetSocketLocation(TEXT("hand_r")));
 			const FPA250MeleePose Pose = Inst ? Inst->GetMeleePose() : FPA250MeleePose();
-			UE_LOG(LogTemp, Display, TEXT("PA250 reload probe: t=%.1f reloading=%d phase=%d progress=%.2f tier=%s reload_w=%.2f carry_w=%.2f kneel=%.2f ducked=%d left_hand_to_spot_cm=%.1f right_hand_local=(%.0f,%.0f,%.0f) musket_pitch=%.0f"),
+			UE_LOG(LogTemp, Display, TEXT("PA250 reload probe: t=%.1f reloading=%d phase=%d progress=%.2f tier=%s reload_w=%.2f carry_w=%.2f kneel=%.2f ducked=%d left_hand_to_spot_cm=%.1f right_hand_local=(%.0f,%.0f,%.0f) musket_pitch=%.0f drill_clip=%s drill_t=%.2f drill_w=%.2f"),
 				T, Gun && Gun->IsReloading() ? 1 : 0, Gun ? static_cast<int32>(Gun->GetSequencer().GetPhase()) : -1, Gun ? Gun->GetSequencer().GetPhaseProgress() : 0.f,
 				Inst && Inst->GetLocomotionReport().bShowingFull ? TEXT("full") : TEXT("cheap"), Pose.Reload, Pose.CarryWeight(), Pose.Kneel,
 				GetCharacterMovement() && GetCharacterMovement()->IsCrouching() ? 1 : 0, LeftCm, RightHand.X, RightHand.Y, RightHand.Z,
-				Musket ? Musket->GetActorRotation().Pitch : 0.f);
+				Musket ? Musket->GetActorRotation().Pitch : 0.f, Inst && Inst->GetUpperBodyClip() ? *Inst->GetUpperBodyClip()->GetName() : TEXT("none"),
+				Inst ? Inst->GetUpperBodyTime() : 0.f, Inst ? Inst->GetUpperBodyWeight() : 0.f);
 		}
 		if (T > 22.f) FPlatformMisc::RequestExit(false);
 		return;
@@ -658,6 +674,124 @@ void ARFCharacter::TickAnimProbe(float DeltaTime)
 			SpringArm->SetWorldRotation(FRotator(-6.f, GetActorRotation().Yaw + 155.f, 0.f));
 		}
 		if (T > 13.5f) FPlatformMisc::RequestExit(false);
+		return;
+	}
+	static const bool bVaultProbe = FString(FCommandLine::Get()).Contains(TEXT("-PA250AnimProbe=vault"));
+	if (bVaultProbe)
+	{
+		// Debug run: the player is stood 6 m from a wall (the nearest, or the -PA250ProbeWall=N-th
+		// nearest), square to it, and sprints at it; filmed from the side.
+		static FVector WallFace = FVector::ZeroVector;
+		static float NextStill = -1.f;
+		if (AnimProbeTime < 0.f) AnimProbeTime = 0.f;
+		AnimProbeTime += DeltaTime;
+		const float T = AnimProbeTime - 10.f;
+		if (T < 0.f) return;
+		if (T - DeltaTime < 0.f)
+		{
+			int32 Skip = 0;
+			FParse::Value(FCommandLine::Get(), TEXT("PA250ProbeWall="), Skip);
+			TArray<AActor*> Walls;
+			for (TActorIterator<AActor> It(GetWorld()); It; ++It)
+			{
+				if (It->ActorHasTag(TEXT("PA250Cover"))) Walls.Add(*It);
+			}
+			const FVector Me = GetActorLocation();
+			Walls.Sort([Me](const AActor& A, const AActor& B) { return FVector::DistSquared(A.GetActorLocation(), Me) < FVector::DistSquared(B.GetActorLocation(), Me); });
+			AnimProbeForward = GetActorForwardVector().GetSafeNormal2D();
+			if (Walls.IsValidIndex(Skip))
+			{
+				const AActor* Wall = Walls[Skip];
+				FVector Origin, Extent;
+				Wall->GetActorBounds(true, Origin, Extent);
+				FVector Axis = Extent.X >= Extent.Y ? FVector::XAxisVector : FVector::YAxisVector;
+				float Depth = 2.f * static_cast<float>(FMath::Min(Extent.X, Extent.Y));
+				if (const UStaticMeshComponent* WallMesh = Cast<UStaticMeshComponent>(Wall->GetRootComponent()); WallMesh && WallMesh->GetStaticMesh())
+				{
+					const FVector Size = WallMesh->GetStaticMesh()->GetBoundingBox().GetSize() * WallMesh->GetComponentScale().GetAbs();
+					Axis = Size.X >= Size.Y ? WallMesh->GetComponentQuat().GetAxisX() : WallMesh->GetComponentQuat().GetAxisY();
+					Depth = static_cast<float>(FMath::Min(Size.X, Size.Y));
+					Origin = WallMesh->Bounds.Origin;
+				}
+				FVector Normal = FVector(-Axis.Y, Axis.X, 0.f).GetSafeNormal2D();
+				if (FVector::DotProduct(Normal, Me - Origin) < 0.f) Normal = -Normal;
+				WallFace = Origin + Normal * (0.5f * Depth);
+				FVector Start = WallFace + Normal * 600.f;
+				FHitResult Ground;
+				FCollisionQueryParams Params(SCENE_QUERY_STAT(PA250VaultProbe), false, this);
+				if (GetWorld()->LineTraceSingleByChannel(Ground, Start + FVector(0.f, 0.f, 400.f), Start - FVector(0.f, 0.f, 800.f), ECC_Visibility, Params))
+				{
+					Start.Z = Ground.ImpactPoint.Z + GetCapsuleComponent()->GetScaledCapsuleHalfHeight() + 5.f;
+				}
+				SetActorLocation(Start, false, nullptr, ETeleportType::TeleportPhysics);
+				AnimProbeForward = -Normal;
+				// A fixed camera beside the wall, looking along it at the place he crosses.
+				const FVector Eye = WallFace + Axis.GetSafeNormal2D() * 520.f + Normal * 120.f + FVector(0.f, 0.f, 170.f);
+				if (ACameraActor* Cam = GetWorld()->SpawnActor<ACameraActor>(Eye, (WallFace + FVector(0.f, 0.f, 60.f) - Eye).Rotation()))
+				{
+					if (APlayerController* PC = Cast<APlayerController>(GetController())) PC->SetViewTarget(Cam);
+				}
+				UE_LOG(LogTemp, Display, TEXT("PA250 vault probe: wall %s (%d of %d), bounds %.0f x %.0f x %.0f cm, start 600 cm from its face"), *Wall->GetName(), Skip,
+					Walls.Num(), 2.f * Extent.X, 2.f * Extent.Y, 2.f * Extent.Z);
+			}
+			else
+			{
+				UE_LOG(LogTemp, Error, TEXT("PA250 vault probe: no wall %d (the level has %d)"), Skip, Walls.Num());
+			}
+		}
+		if (AController* C = GetController()) C->SetControlRotation(AnimProbeForward.Rotation());
+		const float Off = static_cast<float>(FVector::DotProduct(WallFace - GetActorLocation(), AnimProbeForward));
+		// He runs at the wall, and halts 3 m beyond it (he used to run on into whatever stood behind).
+		if (T >= 1.f && Off > -300.f)
+		{
+			if (!bSprinting) StartSprint();
+			AddMovementInput(AnimProbeForward, 1.f);
+		}
+		else if (bSprinting)
+		{
+			StopSprint();
+		}
+		const bool bOver = Traversal && Traversal->IsTraversing();
+		static const bool bStills = FParse::Param(FCommandLine::Get(), TEXT("PA250ProbeStills"));
+		if (bStills && NextStill < 0.f && Off < 320.f)
+		{
+			// Slow motion from here: a screenshot stalls a frame, and at full speed that frame would carry him through the wall.
+			NextStill = T;
+			GetWorldSettings()->SetTimeDilation(0.12f);
+		}
+		if (NextStill >= 0.f && T >= NextStill && AnimProbeStills < 9)
+		{
+			FString Tag;
+			FParse::Value(FCommandLine::Get(), TEXT("PA250AnimProbeTag="), Tag);
+			const FString Path = FPaths::ConvertRelativePathToFull(FPaths::Combine(FPaths::ProjectDir(), TEXT("../../docs/preview"),
+				FString::Printf(TEXT("vault_%s_%d.png"), Tag.IsEmpty() ? TEXT("probe") : *Tag, AnimProbeStills)));
+			FScreenshotRequest::RequestScreenshot(Path, false, false);
+			++AnimProbeStills;
+			NextStill = T + 0.17f;
+		}
+		AnimProbeLogTimer -= DeltaTime;
+		if (AnimProbeLogTimer <= 0.f)
+		{
+			const UPA250SoldierAnimInstance* Inst = Cast<UPA250SoldierAnimInstance>(GetMesh()->GetAnimInstance());
+			AnimProbeLogTimer = bOver || (Inst && Inst->GetTraversalWeight() > 0.f) ? 0.f : 0.1f;
+			UE_LOG(LogTemp, Display, TEXT("PA250 vault probe: t=%.2f to_face_cm=%.0f feet_z=%.0f speed=%.0f mode=%d over=%d action=%s last=%s clip_t=%.2f weight=%.2f yaw_off=%.0f"), T, Off,
+				GetActorLocation().Z - GetCapsuleComponent()->GetScaledCapsuleHalfHeight(), GetVelocity().Size2D(), static_cast<int32>(GetCharacterMovement()->MovementMode),
+				bOver ? 1 : 0, Traversal ? PA250BattleFeel::TraversalName(Traversal->GetAction()) : TEXT("-"),
+				Traversal ? PA250TraversalStartName(Traversal->GetLastResult()) : TEXT("-"), Inst ? Inst->GetTraversalTime() : 0.f, Inst ? Inst->GetTraversalWeight() : 0.f,
+				FMath::FindDeltaAngleDegrees(AnimProbeForward.Rotation().Yaw, GetActorRotation().Yaw));
+		}
+		if (T > (bStills ? 22.f : 12.f))
+		{
+			int32 LinkCrossings = 0, LinkRefused = 0, LinkHeld = 0, LinkCount = 0;
+			if (const UPA250TraversalLinks* TraversalLinks = GetWorld()->GetSubsystem<UPA250TraversalLinks>())
+			{
+				TraversalLinks->Totals(LinkCrossings, LinkRefused, LinkHeld);
+				LinkCount = TraversalLinks->Num();
+			}
+			UE_LOG(LogTemp, Display, TEXT("PA250 vault probe: done, %d crossings, %d stills; bots: %d links, %d crossings, %d refused, %d held back"),
+				Traversal ? Traversal->GetStartedCount() : 0, AnimProbeStills, LinkCount, LinkCrossings, LinkRefused, LinkHeld);
+			FPlatformMisc::RequestExit(false);
+		}
 		return;
 	}
 	static const bool bProbe = FString(FCommandLine::Get()).Contains(TEXT("-PA250AnimProbe=move"));
@@ -897,6 +1031,8 @@ void ARFCharacter::ApplyCameraPose(float DeltaTime)
 
 void ARFCharacter::UpdateFacingMode()
 {
+	// Over an obstacle his facing is the crossing's (the warp turns him square to it).
+	if (IsOverObstacle()) return;
 	// Bots face their focus (enemy) while engaging; otherwise they turn into their movement.
 	const AAIController* AI = Cast<AAIController>(Controller);
 	const bool bBotFocused = AI && (AI->GetFocusActor() != nullptr || FAISystem::IsValidLocation(AI->GetFocalPoint()));
@@ -924,6 +1060,9 @@ void ARFCharacter::Tick(float DeltaTime)
 		FaceControlYawTimer = FMath::Max(0.f, FaceControlYawTimer - DeltaTime);
 	}
 	TickMovementLock(DeltaTime);
+	TickHeroArms(DeltaTime);
+	if (!MountedVisual && IsPlayerControlled() != bPlayerFeelApplied) ApplyMovementFeel(IsPlayerControlled());
+	TickInputBuffer();
 	if (Musket) Musket->SetReloadPaused(IsReloadBlockedByMovement());
 	TickFootsteps(DeltaTime);
 	TickFireOverStance();
@@ -958,6 +1097,12 @@ void ARFCharacter::Tick(float DeltaTime)
 void ARFCharacter::NotifyFired()
 {
 	FaceControlYawTimer = FaceControlYawHoldSeconds;
+	if (bHeroArms && GetWorld())
+	{
+		// The pistol stays in his hand a moment after the shot, and kicks.
+		HeroPistolOutUntil = GetWorld()->GetTimeSeconds() + 1.2f;
+		HeroRecoilAlpha = 1.f;
+	}
 	if (WeaponTuning)
 	{
 		ApplyCameraKick(WeaponTuning->Values.RecoilPitchDegrees, WeaponTuning->Values.RecoilYawDegrees);
@@ -1090,6 +1235,8 @@ void ARFCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompone
 	PlayerInputComponent->BindKey(EKeys::B, IE_Pressed, this, &ARFCharacter::OnShovePressed);    // the shove
 	// The class verb (order a volley or a charge, rally): T. Passive verbs answer with what they do.
 	PlayerInputComponent->BindKey(EKeys::T, IE_Pressed, this, &ARFCharacter::OnAbilityPressed);
+	PlayerInputComponent->BindKey(EKeys::Y, IE_Pressed, this, &ARFCharacter::OnHeroPressed);        // the general, when earned
+	PlayerInputComponent->BindKey(EKeys::U, IE_Pressed, this, &ARFCharacter::OnHeroAbilityPressed); // his own ability, as him
 	PlayerInputComponent->BindKey(EKeys::One, IE_Pressed, this, &ARFCharacter::OnKey1);
 	PlayerInputComponent->BindKey(EKeys::Two, IE_Pressed, this, &ARFCharacter::OnKey2);
 	PlayerInputComponent->BindKey(EKeys::Three, IE_Pressed, this, &ARFCharacter::OnKey3);
@@ -1100,7 +1247,7 @@ void ARFCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompone
 	{
 		EIC->BindAction(IA_Move, ETriggerEvent::Triggered, this, &ARFCharacter::Move);
 		EIC->BindAction(IA_Look, ETriggerEvent::Triggered, this, &ARFCharacter::Look);
-		EIC->BindAction(IA_Jump, ETriggerEvent::Started, this, &ACharacter::Jump);
+		EIC->BindAction(IA_Jump, ETriggerEvent::Started, this, &ARFCharacter::OnJumpPressed);
 		EIC->BindAction(IA_Jump, ETriggerEvent::Completed, this, &ACharacter::StopJumping);
 		EIC->BindAction(IA_Sprint, ETriggerEvent::Started, this, &ARFCharacter::StartSprint);
 		EIC->BindAction(IA_Sprint, ETriggerEvent::Completed, this, &ARFCharacter::StopSprint);
@@ -1237,19 +1384,107 @@ void ARFCharacter::OnShovePressed()
 }
 void ARFCharacter::OnGuardPressed() { if (MeleeComponent && !bIsDead) MeleeComponent->SetGuardHeld(true); }
 void ARFCharacter::OnGuardReleased() { if (MeleeComponent) MeleeComponent->SetGuardHeld(false); }
-void ARFCharacter::OnFirePressed()
+bool ARFCharacter::IsOverObstacle() const
 {
-	if (bThrownFromHorse) return;
+	return Traversal && Traversal->IsTraversing();
+}
+
+bool ARFCharacter::TryFireNow()
+{
+	if (bThrownFromHorse || IsOverObstacle()) return false;
 	// At a gun he serves, his trigger fires the gun, not his musket.
 	if (!MountedVisual && !bIsDead)
 	{
 		if (APA250BattleGameMode* GM = GetWorld() ? GetWorld()->GetAuthGameMode<APA250BattleGameMode>() : nullptr)
 		{
-			if (GM->PlayerFiresGun(this)) return;
+			if (GM->PlayerFiresGun(this)) return true;
 		}
 	}
-	if (MountedVisual && !MountedVisual->HasFirearm()) MountedVisual->Slash();
-	else FireMusket();
+	if (MountedVisual && !MountedVisual->HasFirearm())
+	{
+		MountedVisual->Slash();
+		return true;
+	}
+	return FireMusket();
+}
+
+void ARFCharacter::OnFirePressed()
+{
+	// A press that cannot fire yet (the last stage of the load, in the air, over a wall) is kept for
+	// input.buffer_seconds.fire and fires the moment it can.
+	if (!TryFireNow() && !bIsDead && !MountedVisual && GetWorld()) InputBuffer.Press(EPA250BufferedAction::Fire, GetWorld()->GetTimeSeconds());
+}
+
+void ARFCharacter::OnJumpPressed()
+{
+	if (bIsDead) return;
+	if (MountedVisual || !Traversal)
+	{
+		Jump();
+		return;
+	}
+	if (IsOverObstacle()) return;
+	const FPA250BattleFeel& Feel = PA250BattleFeel::Get();
+	const float Speed = static_cast<float>(GetVelocity().Size2D());
+	const FName Gait = Speed > Feel.WalkMaxCmS ? FName(TEXT("run")) : Speed > Feel.IdleMaxCmS ? FName(TEXT("walk")) : FName(TEXT("stand"));
+	const FVector Way = Speed > Feel.IdleMaxCmS ? GetVelocity() : GetActorForwardVector();
+	const EPA250TraversalStart Why = Traversal->TryStart(Way, Feel.TraversalDetectDistanceCm, Gait);
+	if (Why == EPA250TraversalStart::Started) return;
+	// Just landed or still in the air: the press is kept for input.buffer_seconds.vault. Otherwise it is a jump.
+	if ((Why == EPA250TraversalStart::Busy || Why == EPA250TraversalStart::NotGrounded) && GetWorld())
+	{
+		InputBuffer.Press(EPA250BufferedAction::Vault, GetWorld()->GetTimeSeconds());
+	}
+	if (Why != EPA250TraversalStart::Busy) Jump();
+}
+
+void ARFCharacter::TickInputBuffer()
+{
+	if (!IsPlayerControlled() || !GetWorld()) return;
+	if (bIsDead || MountedVisual)
+	{
+		InputBuffer = FPA250InputBuffer();
+		return;
+	}
+	const FPA250BattleFeel& Feel = PA250BattleFeel::Get();
+	const double Now = GetWorld()->GetTimeSeconds();
+	if (InputBuffer.Live(EPA250BufferedAction::Fire, Now, Feel.BufferFireSeconds) && TryFireNow())
+	{
+		InputBuffer.Spend(EPA250BufferedAction::Fire);
+	}
+	if (IsOverObstacle()) return; // the rest wait until he is over
+	if (InputBuffer.Consume(EPA250BufferedAction::Reload, Now, Feel.BufferReloadSeconds)) OnReloadStarted();
+	int32 Number = 0;
+	if (InputBuffer.Consume(EPA250BufferedAction::Order, Now, Feel.BufferOrderSeconds, &Number)) OnNumberKey(Number);
+	if (GetCharacterMovement() && GetCharacterMovement()->IsMovingOnGround() && InputBuffer.Live(EPA250BufferedAction::Vault, Now, Feel.BufferVaultSeconds))
+	{
+		const FVector Way = GetVelocity().Size2D() > Feel.IdleMaxCmS ? GetVelocity() : GetActorForwardVector();
+		const EPA250TraversalStart Why = Traversal ? Traversal->TryStart(Way, Feel.TraversalDetectDistanceCm, TEXT("run")) : EPA250TraversalStart::NoObstacle;
+		if (Why != EPA250TraversalStart::Busy) InputBuffer.Spend(EPA250BufferedAction::Vault);
+	}
+}
+
+void ARFCharacter::ApplyMovementFeel(bool bPlayer)
+{
+	bPlayerFeelApplied = bPlayer;
+	UCharacterMovementComponent* Move = GetCharacterMovement();
+	const ARFCharacter* Defaults = GetClass()->GetDefaultObject<ARFCharacter>();
+	const UCharacterMovementComponent* DefaultMove = Defaults ? Defaults->GetCharacterMovement() : nullptr;
+	if (!Move || !DefaultMove) return;
+	const FPA250BattleFeel& Feel = PA250BattleFeel::Get();
+	const bool bUse = bPlayer && Feel.MoveMaxAcceleration > 0.f;
+	Move->MaxAcceleration = bUse ? Feel.MoveMaxAcceleration : DefaultMove->MaxAcceleration;
+	Move->BrakingDecelerationWalking = bUse ? Feel.MoveBrakingDeceleration : DefaultMove->BrakingDecelerationWalking;
+	Move->RotationRate.Yaw = bUse ? Feel.RotationRateYawDeg : DefaultMove->RotationRate.Yaw;
+	if (SpringArm && Defaults->SpringArm) SpringArm->CameraLagSpeed = bUse ? Feel.CameraLagSpeed : Defaults->SpringArm->CameraLagSpeed;
+	if (bUse)
+	{
+		// The engine's own smoothing of raw mouse movement (it adds a frame or two of lag to the look).
+		GetMutableDefault<UInputSettings>()->bEnableMouseSmoothing = Feel.bMouseSmoothing;
+		UE_LOG(LogTemp, Display, TEXT("PA250 input: player movement from data: acceleration %.0f, braking %.0f, turn %.0f deg/s, camera lag %.0f, still after a shot %.2f s, mouse smoothing %s"),
+			Move->MaxAcceleration, Move->BrakingDecelerationWalking, Move->RotationRate.Yaw, SpringArm ? SpringArm->CameraLagSpeed : 0.f, Feel.FireLockSeconds,
+			Feel.bMouseSmoothing ? TEXT("on") : TEXT("off"));
+	}
 }
 void ARFCharacter::OnMeleePressed()
 {
@@ -1302,6 +1537,12 @@ void ARFCharacter::SetDucking(bool bDuck)
 void ARFCharacter::OnNumberKey(int32 Number)
 {
 	if (bIsDead) return;
+	// Given over a wall, an order is kept (input.buffer_seconds.order) and given when he lands.
+	if (IsOverObstacle() && IsPlayerControlled() && GetWorld())
+	{
+		InputBuffer.Press(EPA250BufferedAction::Order, GetWorld()->GetTimeSeconds(), Number);
+		return;
+	}
 	if (MountedVisual)
 	{
 		if (Number >= 1 && Number <= 3) SelectMountedWeapon(Number - 1);
@@ -1310,6 +1551,176 @@ void ARFCharacter::OnNumberKey(int32 Number)
 	if (APA250BattleGameMode* GM = GetWorld() ? GetWorld()->GetAuthGameMode<APA250BattleGameMode>() : nullptr)
 	{
 		GM->GivePlayerOrder(this, Number);
+	}
+}
+
+void ARFCharacter::OnHeroPressed()
+{
+	if (bIsDead) return;
+	if (APA250BattleGameMode* GM = GetWorld() ? GetWorld()->GetAuthGameMode<APA250BattleGameMode>() : nullptr)
+	{
+		GM->OpenHeroScreen(Cast<APlayerController>(GetController()));
+	}
+}
+
+void ARFCharacter::OnHeroAbilityPressed()
+{
+	if (bIsDead) return;
+	if (APA250BattleGameMode* GM = GetWorld() ? GetWorld()->GetAuthGameMode<APA250BattleGameMode>() : nullptr)
+	{
+		GM->UseHeroAbility(this);
+	}
+}
+
+void ARFCharacter::SetHeroArms(bool bOn, float SwordDamage, float SwordReachCm, float SwordRecoverSeconds, float PistolDamage, float PistolRangeM, float PistolReloadSeconds)
+{
+	if (bOn == bHeroArms) return;
+	StopAim();
+	bHeroArms = bOn;
+	if (MeleeComponent) MeleeComponent->SetSword(bOn, SwordDamage, SwordReachCm, SwordRecoverSeconds);
+	if (!bOn)
+	{
+		for (UStaticMeshComponent* Part : HeroSword)
+		{
+			if (Part) Part->SetVisibility(false);
+		}
+		if (HeroPistol)
+		{
+			HeroPistol->SetReloadHeld(false);
+			HeroPistol->SetActorHiddenInGame(true);
+		}
+		if (Musket && !bIsDead) Musket->SetActorHiddenInGame(false);
+		if (UPA250SoldierAnimInstance* Inst = GetMesh() ? Cast<UPA250SoldierAnimInstance>(GetMesh()->GetAnimInstance()) : nullptr)
+		{
+			Inst->SetMountedAim(FPA250MountedAim());
+		}
+		return;
+	}
+	if (Musket)
+	{
+		Musket->SetReloadHeld(false);
+		Musket->SetActorHiddenInGame(true);
+	}
+	UStaticMesh* Cube = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube"));
+	if (HeroSword.IsEmpty() && GetMesh() && Cube)
+	{
+		// The sword: the mounted rider's prototype (grip, guard, blade on the right hand) until a period sword is supplied.
+		struct FPart { const TCHAR* Name; FVector At; FVector Scale; };
+		const FPart Parts[] = {
+			{TEXT("HeroSwordGrip"), FVector::ZeroVector, FVector(.04f, .04f, .14f)},
+			{TEXT("HeroSwordGuard"), FVector(0.f, 0.f, 7.f), FVector(.18f, .035f, .025f)},
+			{TEXT("HeroSwordBlade"), FVector(0.f, 0.f, 50.f), FVector(.05f, .015f, .85f)},
+		};
+		for (const FPart& P : Parts)
+		{
+			UStaticMeshComponent* Part = NewObject<UStaticMeshComponent>(this, P.Name);
+			Part->SetStaticMesh(Cube);
+			Part->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+			Part->SetupAttachment(GetMesh(), TEXT("hand_r"));
+			Part->SetRelativeLocation(P.At);
+			Part->SetRelativeScale3D(P.Scale);
+			AddInstanceComponent(Part);
+			Part->RegisterComponent();
+			HeroSword.Add(Part);
+		}
+	}
+	if (!HeroPistol && GetWorld())
+	{
+		// The pistol: the rider's prototype flintlock (a short barrel and a grip) until a period pistol is supplied.
+		FActorSpawnParameters Params;
+		Params.Owner = this;
+		Params.Instigator = this;
+		Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+		HeroPistol = GetWorld()->SpawnActor<AMusketWeapon>(AMusketWeapon::StaticClass(), GetActorTransform(), Params);
+		if (HeroPistol)
+		{
+			if (HeroPistol->GetAnimatedMesh()) HeroPistol->GetAnimatedMesh()->SetHiddenInGame(true);
+			if (UStaticMeshComponent* Barrel = HeroPistol->GetMusketMesh())
+			{
+				Barrel->SetStaticMesh(LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cylinder.Cylinder")));
+				Barrel->SetRelativeLocation(FVector(14.f, 0.f, 0.f));
+				Barrel->SetRelativeRotation(FRotator(90.f, 0.f, 0.f));
+				Barrel->SetRelativeScale3D(FVector(.035f, .035f, .32f));
+				Barrel->SetVisibility(true);
+				Barrel->SetHiddenInGame(false);
+			}
+			if (Cube)
+			{
+				UStaticMeshComponent* Grip = NewObject<UStaticMeshComponent>(HeroPistol, TEXT("PistolGrip"));
+				Grip->SetupAttachment(HeroPistol->GetRootComponent());
+				Grip->SetStaticMesh(Cube);
+				Grip->SetRelativeLocation(FVector(0.f, 0.f, -6.f));
+				Grip->SetRelativeScale3D(FVector(.05f, .04f, .12f));
+				Grip->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+				HeroPistol->AddInstanceComponent(Grip);
+				Grip->RegisterComponent();
+			}
+			HeroPistol->GetMuzzleLocation()->SetRelativeLocation(FVector(30.f, 0.f, 0.f));
+			HeroPistol->AttachToComponent(GetMesh(), FAttachmentTransformRules::SnapToTargetNotIncludingScale, TEXT("hand_r"));
+			if (USceneComponent* PistolRoot = HeroPistol->GetRootComponent()) PistolRoot->SetUsingAbsoluteRotation(true);
+		}
+	}
+	if (HeroPistol)
+	{
+		// Its numbers are the persons data's: one damage out to its range, and its own time to load.
+		HeroPistol->WeaponTuning = UPA250WeaponTuning::MakeRuntimeDefaults();
+		FPA250WeaponTuningValues& V = HeroPistol->WeaponTuning->Values;
+		V.TorsoDamageNear = PistolDamage;
+		V.TorsoDamageFar = PistolDamage;
+		V.FalloffStartMeters = PistolRangeM;
+		V.FalloffEndMeters = PistolRangeM + 1.f;
+		V.MaxRangeMeters = PistolRangeM;
+		V.ProjectileSpeed = 20000.f; // as the rider's pistol
+		for (FPA250ReloadPresetValues* Preset : {&V.Authentic, &V.Arcade})
+		{
+			const float Share = Preset->BaseSeconds > 0.f ? PistolReloadSeconds / Preset->BaseSeconds : 1.f;
+			Preset->BaseSeconds = PistolReloadSeconds;
+			Preset->PerfectSeconds *= Share;
+			Preset->FailedSeconds *= Share;
+		}
+		HeroPistol->ApplyWeaponTuning();
+		HeroPistol->SetActorHiddenInGame(true); // drawn while he aims
+	}
+	for (UStaticMeshComponent* Part : HeroSword)
+	{
+		if (Part) Part->SetVisibility(true);
+	}
+	HeroPistolOutUntil = -1.f;
+	HeroAimAlpha = 0.f;
+	HeroRecoilAlpha = 0.f;
+}
+
+void ARFCharacter::TickHeroArms(float DeltaTime)
+{
+	if (!bHeroArms || bIsDead || !GetWorld()) return;
+	const float Now = GetWorld()->GetTimeSeconds();
+	const bool bLoading = HeroPistol && HeroPistol->IsReloading();
+	// Sword in hand; the pistol is out while he aims, loads, or has just fired.
+	const bool bPistolOut = HeroPistol && (bAiming || bLoading || Now < HeroPistolOutUntil);
+	for (UStaticMeshComponent* Part : HeroSword)
+	{
+		if (Part) Part->SetVisibility(!bPistolOut);
+	}
+	HeroAimAlpha = FMath::FInterpTo(HeroAimAlpha, bAiming ? 1.f : 0.f, DeltaTime, 9.f);
+	HeroRecoilAlpha = FMath::FInterpTo(HeroRecoilAlpha, 0.f, DeltaTime, 6.f);
+	FRotator View = GetActorRotation();
+	if (const AController* C = GetController()) View = C->GetControlRotation();
+	if (HeroPistol)
+	{
+		HeroPistol->SetActorHiddenInGame(!bPistolOut);
+		HeroPistol->SetActorRotation(FRotator(View.Pitch + HeroRecoilAlpha * 7.f - (bLoading ? 22.f : 0.f), View.Yaw, 0.f));
+	}
+	// The one-handed hold the rider uses, on foot: the right arm carries the pistol along his aim.
+	if (UPA250SoldierAnimInstance* Inst = GetMesh() ? Cast<UPA250SoldierAnimInstance>(GetMesh()->GetAnimInstance()) : nullptr)
+	{
+		FPA250MountedAim Hold;
+		Hold.bEnabled = bPistolOut;
+		Hold.bPistol = true;
+		Hold.AimAlpha = HeroAimAlpha;
+		Hold.ReloadAlpha = bLoading ? 1.f : 0.f;
+		Hold.RecoilAlpha = HeroRecoilAlpha;
+		Hold.DirectionCS = GetMesh()->GetComponentTransform().InverseTransformVectorNoScale(View.Vector());
+		Inst->SetMountedAim(Hold);
 	}
 }
 
@@ -1434,7 +1845,9 @@ bool ARFCharacter::FireMusketAt(FVector TargetLocation, bool bCompensateDrop)
 	const bool bShot = Equipped->Fire(Dir, bAiming, OwnerSpeed, FormationAccuracyScale * OfficerAccuracyScale * RangeScale);
 	if (bShot)
 	{
-		if (!MountedVisual) LockMovement(WeaponTuning ? WeaponTuning->Values.FireStillSeconds : 0.6f);
+		// The player's stand after his shot is battle_feel.json movement.fire_lock_seconds; a bot's is his weapon's.
+		const float PlayerStill = PA250BattleFeel::Get().FireLockSeconds;
+		if (!MountedVisual) LockMovement(IsPlayerControlled() && PlayerStill > 0.f ? PlayerStill : WeaponTuning ? WeaponTuning->Values.FireStillSeconds : 0.6f);
 		NotifyFired();
 		if (MountedVisual) MountedVisual->NotifyFirearmShot();
 		if (APA250BattleGameMode* GM = GetWorld() ? GetWorld()->GetAuthGameMode<APA250BattleGameMode>() : nullptr)
@@ -1480,6 +1893,12 @@ bool ARFCharacter::IsReloadBlockedByMovement() const
 
 void ARFCharacter::OnReloadStarted()
 {
+	// Pressed over a wall, the load is kept (input.buffer_seconds.reload) and begun when he lands.
+	if (IsOverObstacle() && IsPlayerControlled() && GetWorld())
+	{
+		InputBuffer.Press(EPA250BufferedAction::Reload, GetWorld()->GetTimeSeconds());
+		return;
+	}
 	// At a gun he serves, the key works the gun's drill.
 	if (!bIsDead && !MountedVisual)
 	{
@@ -1508,13 +1927,56 @@ void ARFCharacter::OnReloadStarted()
 	}
 }
 
-static TAutoConsoleVariable<float> CVarCorpseSeconds(TEXT("pa250.CorpseSeconds"), 45.f,
-	TEXT("Seconds a fallen soldier stays on the field."));
-static TAutoConsoleVariable<int32> CVarMaxCorpses(TEXT("pa250.MaxCorpses"), 24,
-	TEXT("Most fallen soldiers left on the field at once; the oldest is cleared first."));
+// The fallen: battle_feel.json intensity.corpses; a console variable set to 0 or more overrides the file.
+static TAutoConsoleVariable<float> CVarCorpseSeconds(TEXT("pa250.CorpseSeconds"), -1.f,
+	TEXT("Seconds a fallen soldier stays on the field (-1: battle_feel.json intensity.corpses.seconds)."));
+static TAutoConsoleVariable<int32> CVarMaxCorpses(TEXT("pa250.MaxCorpses"), -1,
+	TEXT("Most fallen soldiers left on the field at once; the oldest is cleared first (-1: battle_feel.json intensity.corpses.max)."));
 
-float ARFCharacter::GetCorpseSeconds() { return FMath::Max(3.f, CVarCorpseSeconds.GetValueOnGameThread()); }
-int32 ARFCharacter::GetMaxCorpses() { return FMath::Max(0, CVarMaxCorpses.GetValueOnGameThread()); }
+float ARFCharacter::GetCorpseSeconds()
+{
+	const float Override = CVarCorpseSeconds.GetValueOnGameThread();
+	return FMath::Max(3.f, Override >= 0.f ? Override : PA250BattleFeel::Get().CorpseSeconds);
+}
+int32 ARFCharacter::GetMaxCorpses()
+{
+	const int32 Override = CVarMaxCorpses.GetValueOnGameThread();
+	return FMath::Max(0, Override >= 0 ? Override : PA250BattleFeel::Get().CorpsesMax);
+}
+
+void ARFCharacter::SetLookBudget(bool bCastShadow, bool bUpdateRateOptimisation)
+{
+	USkeletalMeshComponent* Body = GetMesh();
+	if (!Body) return;
+	if (Body->bEnableUpdateRateOptimizations != bUpdateRateOptimisation) Body->bEnableUpdateRateOptimizations = bUpdateRateOptimisation;
+	const int8 Want = bCastShadow ? 1 : 0;
+	if (LookShadow == Want) return;
+	LookShadow = Want;
+	Body->SetCastShadow(bCastShadow);
+	for (USkeletalMeshComponent* Part : BodyParts)
+	{
+		if (Part) Part->SetCastShadow(bCastShadow);
+	}
+	for (UStaticMeshComponent* Piece : ClassHatPieces)
+	{
+		if (Piece) Piece->SetCastShadow(bCastShadow);
+	}
+	if (HatMesh) HatMesh->SetCastShadow(bCastShadow);
+}
+
+void ARFCharacter::FreezeCorpse()
+{
+	// He lies as he fell: the body stops simulating and stops being animated, so the fallen cost a draw and nothing more.
+	USkeletalMeshComponent* Body = GetMesh();
+	if (!bIsDead || !Body || bCorpseFrozen) return;
+	bCorpseFrozen = true;
+	Body->bNoSkeletonUpdate = true;
+	Body->PutAllRigidBodiesToSleep();
+	Body->SetAllBodiesSimulatePhysics(false);
+	Body->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	Body->SetComponentTickEnabled(false);
+	SetActorTickEnabled(false);
+}
 
 void ARFCharacter::OnWounded(float Damage, const FVector& From)
 {
@@ -1539,6 +2001,8 @@ void ARFCharacter::OnDeath(AActor* Victim)
 	}
 	Dismount();
 	bIsDead = true;
+	if (Traversal) Traversal->Cancel();
+	if (HeroPistol) HeroPistol->SetActorHiddenInGame(true);
 	if (APlayerController* PC = Cast<APlayerController>(GetController()))
 	{
 		DisableInput(PC);
@@ -1591,6 +2055,11 @@ void ARFCharacter::OnDeath(AActor* Victim)
 	if (TeamMarker) TeamMarker->SetVisibility(false);
 	// The fallen stay on the field (they are what the fight looked like), up to a cap: oldest cleared first.
 	SetLifeSpan(GetCorpseSeconds());
+	if (const float FreezeAfter = PA250BattleFeel::Get().CorpseFreezeAfterSeconds; FreezeAfter > 0.f && !IsPlayerControlled())
+	{
+		FTimerHandle FreezeTimer;
+		GetWorldTimerManager().SetTimer(FreezeTimer, this, &ARFCharacter::FreezeCorpse, FreezeAfter, false);
+	}
 	TArray<ARFCharacter*> Fallen;
 	for (TActorIterator<ARFCharacter> It(GetWorld()); It; ++It)
 	{
@@ -1649,12 +2118,13 @@ void ARFCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
     if (OwnHorse && !OwnHorse->IsHorseDead()) OwnHorse->Destroy(); // its man is gone from the field
     OwnHorse = nullptr;
     if (MountedPistol) { MountedPistol->Destroy(); MountedPistol = nullptr; }
+    if (HeroPistol) { HeroPistol->Destroy(); HeroPistol = nullptr; }
     Super::EndPlay(EndPlayReason);
 }
 
 AMusketWeapon* ARFCharacter::GetEquippedFirearm() const
 {
-    if (!MountedVisual) return Musket;
+    if (!MountedVisual) return bHeroArms && HeroPistol ? HeroPistol.Get() : Musket.Get();
     return MountedWeaponIndex == 1 ? Musket.Get() : MountedWeaponIndex == 2 ? MountedPistol.Get() : nullptr;
 }
 

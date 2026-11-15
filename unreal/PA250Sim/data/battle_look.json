@@ -1,0 +1,332 @@
+{
+  "note": "How the battle looks (GAME INVENTION). Each level has a look for each time band; the battle's hour (battle setup hour_of_day) picks the band. The levels' own lights are set from this when the battle begins; no level is regenerated. tiers are tried lowest first and the highest that holds frame_rate_bar on every level in every band on a platform is that platform's `chosen`; a platform not measured runs the lowest.",
+  "frame_rate_bar": 45,
+  "time_bands": {
+    "dawn": [
+      [
+        4,
+        8
+      ]
+    ],
+    "day": [
+      [
+        9,
+        16
+      ]
+    ],
+    "dusk": [
+      [
+        17,
+        23
+      ],
+      [
+        0,
+        3
+      ]
+    ]
+  },
+  "default_band": "day",
+  "levels": {
+    "L_Lexington": {
+      "dawn": {
+        "note": "As the level is built (Scripts/build_levels.py LIGHT).",
+        "sun_rot": [
+          -15,
+          165,
+          0
+        ],
+        "sun_lux": 15.0,
+        "sun_color": [
+          255,
+          165,
+          95
+        ],
+        "sky_intensity": 1.0,
+        "fog_density": 0.014,
+        "fog_height_falloff": 0.3,
+        "volumetric_fog": true,
+        "exposure_ev": 1.6,
+        "white_temp": 7300,
+        "gain": [
+          1.12,
+          1.0,
+          0.82
+        ],
+        "bloom": 0.4,
+        "vignette": 0.3
+      },
+      "day": {
+        "note": "New for this pass: not looked at beside a reference.",
+        "sun_rot": [
+          -40,
+          205,
+          0
+        ],
+        "sun_lux": 11.0,
+        "sun_color": [
+          255,
+          238,
+          214
+        ],
+        "sky_intensity": 1.0,
+        "fog_density": 0.005,
+        "fog_height_falloff": 0.3,
+        "volumetric_fog": true,
+        "exposure_ev": 0.35,
+        "white_temp": 6700,
+        "gain": [
+          1.04,
+          1.0,
+          0.93
+        ],
+        "bloom": 0.4,
+        "vignette": 0.3
+      },
+      "dusk": {
+        "note": "New for this pass: not looked at beside a reference.",
+        "sun_rot": [
+          -9,
+          290,
+          0
+        ],
+        "sun_lux": 10.0,
+        "sun_color": [
+          255,
+          196,
+          150
+        ],
+        "sky_intensity": 0.8,
+        "fog_density": 0.011,
+        "fog_height_falloff": 0.3,
+        "volumetric_fog": true,
+        "exposure_ev": 1.3,
+        "white_temp": 6800,
+        "gain": [
+          1.05,
+          1.0,
+          0.93
+        ],
+        "bloom": 0.45,
+        "vignette": 0.35
+      }
+    },
+    "L_Concord": {
+      "dawn": {
+        "note": "New for this pass: not looked at beside a reference.",
+        "sun_rot": [
+          -15,
+          120,
+          0
+        ],
+        "sun_lux": 15.0,
+        "sun_color": [
+          255,
+          165,
+          95
+        ],
+        "sky_intensity": 1.0,
+        "fog_density": 0.014,
+        "fog_height_falloff": 0.3,
+        "volumetric_fog": true,
+        "exposure_ev": 1.6,
+        "white_temp": 7300,
+        "gain": [
+          1.12,
+          1.0,
+          0.82
+        ],
+        "bloom": 0.4,
+        "vignette": 0.3
+      },
+      "day": {
+        "note": "As the level is built (Scripts/build_levels.py LIGHT).",
+        "sun_rot": [
+          -40,
+          205,
+          0
+        ],
+        "sun_lux": 11.0,
+        "sun_color": [
+          255,
+          238,
+          214
+        ],
+        "sky_intensity": 1.0,
+        "fog_density": 0.005,
+        "fog_height_falloff": 0.3,
+        "volumetric_fog": true,
+        "exposure_ev": 0.35,
+        "white_temp": 6700,
+        "gain": [
+          1.04,
+          1.0,
+          0.93
+        ],
+        "bloom": 0.4,
+        "vignette": 0.3
+      },
+      "dusk": {
+        "note": "New for this pass: not looked at beside a reference.",
+        "sun_rot": [
+          -9,
+          290,
+          0
+        ],
+        "sun_lux": 10.0,
+        "sun_color": [
+          255,
+          196,
+          150
+        ],
+        "sky_intensity": 0.8,
+        "fog_density": 0.011,
+        "fog_height_falloff": 0.3,
+        "volumetric_fog": true,
+        "exposure_ev": 1.3,
+        "white_temp": 6800,
+        "gain": [
+          1.05,
+          1.0,
+          0.93
+        ],
+        "bloom": 0.45,
+        "vignette": 0.35
+      }
+    },
+    "L_Harbor": {
+      "dawn": {
+        "note": "New for this pass: not looked at beside a reference.",
+        "sun_rot": [
+          -15,
+          120,
+          0
+        ],
+        "sun_lux": 15.0,
+        "sun_color": [
+          255,
+          165,
+          95
+        ],
+        "sky_intensity": 1.0,
+        "fog_density": 0.018,
+        "fog_height_falloff": 0.3,
+        "volumetric_fog": true,
+        "exposure_ev": 1.6,
+        "white_temp": 7300,
+        "gain": [
+          1.12,
+          1.0,
+          0.82
+        ],
+        "bloom": 0.4,
+        "vignette": 0.3
+      },
+      "day": {
+        "note": "As the level is built (Scripts/build_levels.py LIGHT).",
+        "sun_rot": [
+          -40,
+          205,
+          0
+        ],
+        "sun_lux": 11.0,
+        "sun_color": [
+          255,
+          238,
+          214
+        ],
+        "sky_intensity": 1.0,
+        "fog_density": 0.005,
+        "fog_height_falloff": 0.3,
+        "volumetric_fog": true,
+        "exposure_ev": 0.35,
+        "white_temp": 6700,
+        "gain": [
+          1.04,
+          1.0,
+          0.93
+        ],
+        "bloom": 0.4,
+        "vignette": 0.3
+      },
+      "dusk": {
+        "note": "New for this pass: not looked at beside a reference.",
+        "sun_rot": [
+          -9,
+          290,
+          0
+        ],
+        "sun_lux": 10.0,
+        "sun_color": [
+          255,
+          196,
+          150
+        ],
+        "sky_intensity": 0.8,
+        "fog_density": 0.014,
+        "fog_height_falloff": 0.3,
+        "volumetric_fog": true,
+        "exposure_ev": 1.3,
+        "white_temp": 6800,
+        "gain": [
+          1.05,
+          1.0,
+          0.93
+        ],
+        "bloom": 0.45,
+        "vignette": 0.35
+      }
+    }
+  },
+  "tiers": [
+    {
+      "name": "low",
+      "note": "No Lumen: distance-field ambient occlusion, screen-space reflections, ordinary shadow maps.",
+      "cvars": {
+        "r.DynamicGlobalIlluminationMethod": 0,
+        "r.ReflectionMethod": 2,
+        "r.Shadow.Virtual.Enable": 0,
+        "r.DistanceFieldAO": 1,
+        "r.ScreenPercentage": 100
+      }
+    },
+    {
+      "name": "medium",
+      "note": "Lumen global illumination, screen-space reflections, ordinary shadow maps.",
+      "cvars": {
+        "r.DynamicGlobalIlluminationMethod": 1,
+        "r.ReflectionMethod": 2,
+        "r.Shadow.Virtual.Enable": 0,
+        "r.DistanceFieldAO": 1,
+        "r.ScreenPercentage": 100
+      }
+    },
+    {
+      "name": "high",
+      "note": "Lumen global illumination and reflections, virtual shadow maps: the project's settings before this pass.",
+      "cvars": {
+        "r.DynamicGlobalIlluminationMethod": 1,
+        "r.ReflectionMethod": 1,
+        "r.Shadow.Virtual.Enable": 1,
+        "r.DistanceFieldAO": 1,
+        "r.ScreenPercentage": 100
+      }
+    }
+  ],
+  "chosen": {
+    "win64": {
+      "tier": "high",
+      "measured": "2026-11-15",
+      "note": "NVIDIA L4, 1920x1080, 40 bots: 51 to 60 fps on the three levels in the three bands, GPU 13.7 to 17.8 ms. Two of six samples at Lexington dusk read 40 fps with the game thread at 24 ms and the GPU lower; they did not come back in three more. See PROGRESS.md."
+    },
+    "mac": {
+      "tier": "low",
+      "measured": null,
+      "note": "Not measured on the Mac: the lowest tier until it is."
+    }
+  },
+  "soldier_lod": {
+    "note": "Applied twice a second by distance from the viewer (APA250BattleGameMode::TickAnimTiers).",
+    "shadow_cast_m": 60,
+    "update_rate_optimisation": true
+  }
+}
