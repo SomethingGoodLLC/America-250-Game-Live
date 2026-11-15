@@ -1,0 +1,16 @@
+{
+ "name": "reject_unknown_order",
+ "description": "an order outside the contract is refused",
+ "start_ymdh": {
+  "y": 1775,
+  "m": 4,
+  "d": 20,
+  "h": 0
+ },
+ "order": {
+  "order": "teleport",
+  "army_id": "continental_militia"
+ },
+ "expect_error": "unknown_order",
+ "schema_valid": false
+}

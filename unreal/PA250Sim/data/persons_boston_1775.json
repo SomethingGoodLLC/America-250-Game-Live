@@ -1,0 +1,282 @@
+{
+  "note": "People of the Boston campaign. Every number here is GAMEPLAY TUNING. Every claim about a person carries a basis: 'documented' (the record says so) or 'invented' (made for the game). All trait assignments are invented. Contract: protocol/schemas/persons.yaml.",
+  "rules": {
+    "detachment_unit_cap": 12,
+    "army_unit_cap": 40,
+    "muster_buildings": ["militia_muster", "fort"],
+    "organizer": {"support_per_month": 1, "muster_hours_pct": 75},
+    "delegate": {"shift_per_week": 3},
+    "envoy": {"attitude_once": 5},
+    "commander": {
+      "aura_radius_m": 30,
+      "home_post_radius_m": 25,
+      "fall_pressure": 0.6,
+      "fall_pressure_seconds": 10,
+      "fall_fate_pct": {"wounded": 60, "killed": 25, "captured": 15},
+      "wounded_days": 21,
+      "army_morale_on_fall": -8
+    },
+    "estimates": {"step_men": 20, "error_pct": 30},
+    "informer": {"exposed_local_support": 2}
+  },
+  "abilities": {
+    "alarm": {
+      "label": "Alarm",
+      "where": "pre_battle",
+      "text": "Rides ahead of the enemy: the defenders are under arms when he arrives, and every company musters at once.",
+      "morale": 3,
+      "muster_at_once": true
+    },
+    "scout": {
+      "label": "Scout",
+      "where": "map_army",
+      "text": "Counts an enemy army: its true strength, morale and rounds are known for a time.",
+      "days": 7
+    },
+    "engineer": {
+      "label": "Engineer",
+      "where": "map_town",
+      "text": "Lays out works in a town you hold: one more level of fortification for a time.",
+      "fortification": 1,
+      "days": 14
+    },
+    "boats": {
+      "label": "Boats",
+      "where": "map_army",
+      "text": "Finds boats and men to row them: an army may cross the water where no road runs, for a time.",
+      "days": 3
+    },
+    "pen": {
+      "label": "Pen",
+      "where": "map_town",
+      "text": "Writes for a town: Support rises.",
+      "local_support": 3
+    }
+  },
+  "traits": {
+    "defensive": {"label": "Defensive", "text": "Steadies men who stand to receive an attack.", "effects": [{"when": "defending", "label": "morale", "value": 8}]},
+    "aggressive": {"label": "Aggressive", "text": "Drives an attack home.", "effects": [{"when": "attacking", "label": "morale", "value": 8}]},
+    "steadfast": {"label": "Steadfast", "text": "Keeps the ranks full: fewer men fall out before a fight.", "effects": [{"when": "always", "label": "readiness", "value": 10}]},
+    "adroit": {"label": "Adroit", "text": "Feeds men into the fight quickly.", "effects": [{"when": "always", "label": "reinforcement", "value": 15}]},
+    "engineer": {"label": "Engineer", "text": "Digs in on his own ground.", "effects": [{"when": "defending_own_ground", "label": "fortification", "value": 1}]},
+    "popular": {"label": "Popular", "text": "The men follow him gladly.", "effects": [{"when": "always", "label": "morale", "value": 4}]}
+  },
+  "persons": [
+    {
+      "id": "artemas_ward", "name": "Artemas Ward", "rank": "General", "side": "continental", "roles": ["general"],
+      "available_from": {"y": 1775, "m": 4, "d": 20},
+      "traits": ["defensive", "steadfast"],
+      "note": "Took command of the army gathering at Cambridge on 20 April 1775.",
+      "basis": "documented"
+    },
+    {
+      "id": "israel_putnam", "name": "Israel Putnam", "rank": "General", "side": "continental", "roles": ["general"],
+      "available_from": {"y": 1775, "m": 4, "d": 21},
+      "traits": ["aggressive", "popular"],
+      "note": "Heard of Lexington on 20 April in Connecticut and rode for Cambridge, reaching it the next day.",
+      "basis": "documented"
+    },
+    {
+      "id": "william_prescott", "name": "William Prescott", "rank": "Colonel", "side": "continental", "roles": ["general"],
+      "available_from": {"y": 1775, "m": 4, "d": 20},
+      "traits": ["defensive", "engineer"],
+      "note": "Marched his regiment on the Lexington alarm; commanded in the redoubt on Breed's Hill on 17 June 1775. The day he is free to command here is the game's.",
+      "basis": "documented"
+    },
+    {
+      "id": "john_stark", "name": "John Stark", "rank": "Colonel", "side": "continental", "roles": ["general"],
+      "available_from": {"y": 1775, "m": 4, "d": 22},
+      "traits": ["aggressive", "steadfast"],
+      "note": "Brought New Hampshire men to the siege within days of Lexington and held the rail fence on 17 June 1775. The day he is free to command here is the game's.",
+      "basis": "documented"
+    },
+    {
+      "id": "william_heath", "name": "William Heath", "rank": "General", "side": "continental", "roles": ["general"],
+      "available_from": {"y": 1775, "m": 4, "d": 19},
+      "traits": ["defensive", "adroit"],
+      "note": "The only general officer on the field on 19 April 1775: he directed the militia along the road back from Lexington.",
+      "basis": "documented"
+    },
+    {
+      "id": "john_thomas", "name": "John Thomas", "rank": "General", "side": "continental", "roles": ["general"],
+      "available_from": {"y": 1775, "m": 4, "d": 20},
+      "traits": ["engineer", "steadfast"],
+      "note": "Commanded the right of the siege line at Roxbury, and led the men who fortified Dorchester Heights in March 1776.",
+      "basis": "documented"
+    },
+    {
+      "id": "nathanael_greene", "name": "Nathanael Greene", "rank": "General", "side": "continental", "roles": ["general"],
+      "available_from": {"y": 1775, "m": 5, "d": 25},
+      "traits": ["adroit", "popular"],
+      "note": "Brought Rhode Island's Army of Observation to the siege in May 1775. The day of the month is the game's.",
+      "basis": "documented"
+    },
+    {
+      "id": "benedict_arnold", "name": "Benedict Arnold", "rank": "Captain", "side": "continental", "roles": ["general"],
+      "available_from": {"y": 1775, "m": 4, "d": 29},
+      "traits": ["aggressive", "adroit"],
+      "note": "Reached Cambridge with his Connecticut company at the end of April 1775, and marched for Quebec that September.",
+      "basis": "documented"
+    },
+    {
+      "id": "george_washington", "name": "George Washington", "rank": "General", "side": "continental", "roles": ["general"],
+      "requires_measure": "commander_in_chief",
+      "traits": ["steadfast", "popular"],
+      "note": "Named commander in chief by Congress on 15 June 1775; reached Cambridge on 2 July. He serves here only if Congress names him.",
+      "basis": "documented"
+    },
+    {
+      "id": "joseph_warren", "name": "Joseph Warren", "rank": "Dr.", "side": "continental", "roles": ["delegate", "organizer", "envoy"],
+      "available_from": {"y": 1775, "m": 4, "d": 18},
+      "note": "Physician, head of the Committee of Safety and president of the Provincial Congress in the spring of 1775; he sent Revere and Dawes out on 18 April.",
+      "basis": "documented"
+    },
+    {
+      "id": "john_adams", "name": "John Adams", "rank": "Mr.", "side": "continental", "roles": ["delegate", "organizer"],
+      "available_from": {"y": 1775, "m": 4, "d": 18},
+      "note": "Massachusetts delegate to the Continental Congress; he proposed Washington for the command.",
+      "basis": "documented"
+    },
+    {
+      "id": "samuel_adams", "name": "Samuel Adams", "rank": "Mr.", "side": "continental", "roles": ["delegate", "organizer"],
+      "available_from": {"y": 1775, "m": 4, "d": 18},
+      "note": "Organizer of the Boston committee of correspondence and delegate to the Continental Congress.",
+      "basis": "documented"
+    },
+    {
+      "id": "john_hancock", "name": "John Hancock", "rank": "Mr.", "side": "continental", "roles": ["delegate", "organizer"],
+      "available_from": {"y": 1775, "m": 4, "d": 18},
+      "note": "President of the Provincial Congress, and from 24 May 1775 president of the Continental Congress.",
+      "basis": "documented"
+    },
+    {
+      "id": "paul_revere", "name": "Paul Revere", "rank": "Mr.", "side": "continental", "roles": ["agent"],
+      "available_from": {"y": 1775, "m": 4, "d": 18},
+      "ability": "alarm", "uses": 2,
+      "note": "Express rider for the Committee of Safety; rode to Lexington on the night of 18 April 1775. The number of uses is the game's.",
+      "basis": "documented"
+    },
+    {
+      "id": "william_dawes", "name": "William Dawes", "rank": "Mr.", "side": "continental", "roles": ["agent"],
+      "available_from": {"y": 1775, "m": 4, "d": 18},
+      "ability": "alarm", "uses": 1,
+      "note": "Rode out by Boston Neck with the same warning on the night of 18 April 1775.",
+      "basis": "documented"
+    },
+    {
+      "id": "richard_gridley", "name": "Richard Gridley", "rank": "Colonel", "side": "continental", "roles": ["agent"],
+      "available_from": {"y": 1775, "m": 4, "d": 23},
+      "ability": "engineer", "uses": 2,
+      "note": "Chief engineer of the Massachusetts army; laid out the redoubt on Breed's Hill on the night of 16 June 1775. The day he is at hand is the game's.",
+      "basis": "documented"
+    },
+    {
+      "id": "henry_knox", "name": "Henry Knox", "rank": "Mr.", "side": "continental", "roles": ["agent"],
+      "available_from": {"y": 1775, "m": 4, "d": 24},
+      "ability": "engineer", "uses": 1,
+      "note": "Boston bookseller who left the town after Lexington and helped lay out the works at Roxbury; later brought the guns from Ticonderoga. The day he is at hand is the game's.",
+      "basis": "documented"
+    },
+    {
+      "id": "john_glover", "name": "John Glover", "rank": "Colonel", "side": "continental", "roles": ["agent"],
+      "available_from": {"y": 1775, "m": 6, "d": 22},
+      "ability": "boats", "uses": 2,
+      "note": "His Marblehead regiment of seamen and fishermen marched to Cambridge on 22 June 1775.",
+      "basis": "documented"
+    },
+    {
+      "id": "daniel_morgan", "name": "Daniel Morgan", "rank": "Captain", "side": "continental", "roles": ["agent"],
+      "available_from": {"y": 1775, "m": 8, "d": 6},
+      "ability": "scout", "uses": 2,
+      "note": "Marched his Virginia rifle company to Cambridge, arriving on 6 August 1775.",
+      "basis": "documented"
+    },
+    {
+      "id": "mercy_otis_warren", "name": "Mercy Otis Warren", "rank": "Mrs.", "side": "continental", "roles": ["agent"],
+      "available_from": {"y": 1775, "m": 4, "d": 18},
+      "ability": "pen", "uses": 2,
+      "note": "Wrote satires against the Crown's officers; 'The Group' was printed in 1775.",
+      "basis": "documented"
+    },
+    {
+      "id": "benjamin_church", "name": "Benjamin Church", "rank": "Dr.", "side": "continental", "roles": ["organizer", "delegate"],
+      "available_from": {"y": 1775, "m": 4, "d": 18},
+      "informer": {"for": "british", "exposed": {"y": 1775, "m": 10, "d": 4}},
+      "note": "Member of the Committee of Safety who passed information to General Gage. A ciphered letter was intercepted and a council of war found against him on 4 October 1775.",
+      "basis": "documented"
+    },
+    {
+      "id": "thomas_gage", "name": "Thomas Gage", "rank": "General", "side": "british", "roles": ["envoy", "general"],
+      "available_from": {"y": 1775, "m": 4, "d": 18},
+      "starts_as": {"role": "envoy"},
+      "commander_in_chief": true,
+      "traits": ["defensive", "steadfast"],
+      "note": "Commander in chief in North America and military governor of Massachusetts. He was recalled in the autumn of 1775 and William Howe took the command.",
+      "basis": "documented"
+    },
+    {
+      "id": "hugh_percy", "name": "Hugh, Earl Percy", "rank": "Brigadier", "side": "british", "roles": ["general"],
+      "available_from": {"y": 1775, "m": 4, "d": 18},
+      "starts_as": {"role": "general", "army_id": "british_garrison"},
+      "traits": ["steadfast", "adroit"],
+      "note": "Led the brigade that marched out of Boston on 19 April 1775 and brought Smith's column back. His command of the garrison at the opening is the game's.",
+      "basis": "documented"
+    },
+    {
+      "id": "francis_smith", "name": "Francis Smith", "rank": "Lieutenant Colonel", "side": "british", "roles": ["general"],
+      "available_from": {"y": 1775, "m": 4, "d": 18},
+      "starts_as": {"role": "general", "army_id": "british_regulars"},
+      "traits": ["defensive", "steadfast"],
+      "note": "Commanded the column sent to Concord on the night of 18 April 1775.",
+      "basis": "documented"
+    },
+    {
+      "id": "john_pitcairn", "name": "John Pitcairn", "rank": "Major", "side": "british", "roles": ["general"],
+      "available_from": {"y": 1775, "m": 4, "d": 18},
+      "traits": ["aggressive", "popular"],
+      "note": "Major of Marines, second in command of the Concord column; killed at Bunker Hill on 17 June 1775.",
+      "basis": "documented"
+    },
+    {
+      "id": "samuel_graves", "name": "Samuel Graves", "rank": "Vice Admiral", "side": "british", "roles": ["delegate", "agent"],
+      "available_from": {"y": 1775, "m": 4, "d": 18},
+      "ability": "boats", "uses": 3,
+      "note": "Commanded the squadron at Boston; the boats that carried the troops on 18 April and 17 June 1775 were his.",
+      "basis": "documented"
+    },
+    {
+      "id": "henry_de_berniere", "name": "Henry De Berniere", "rank": "Ensign", "side": "british", "roles": ["agent"],
+      "available_from": {"y": 1775, "m": 4, "d": 18},
+      "ability": "scout", "uses": 2,
+      "note": "Sent out in disguise by Gage in February and March 1775 to sketch the roads to Worcester and Concord; he guided the column on 19 April.",
+      "basis": "documented"
+    },
+    {
+      "id": "timothy_ruggles", "name": "Timothy Ruggles", "rank": "Brigadier", "side": "british", "roles": ["organizer"],
+      "available_from": {"y": 1775, "m": 4, "d": 18},
+      "note": "Loyalist leader who raised the Loyal American Associators in Boston in 1775.",
+      "basis": "documented"
+    },
+    {
+      "id": "william_howe", "name": "William Howe", "rank": "Major General", "side": "british", "roles": ["general"],
+      "requires_measure": "reinforcement",
+      "traits": ["aggressive", "steadfast"],
+      "note": "Landed at Boston from the Cerberus on 25 May 1775; led the assault on Breed's Hill and took the command when Gage was recalled.",
+      "basis": "documented"
+    },
+    {
+      "id": "henry_clinton", "name": "Henry Clinton", "rank": "Major General", "side": "british", "roles": ["general"],
+      "requires_measure": "reinforcement",
+      "traits": ["adroit", "defensive"],
+      "note": "Landed at Boston from the Cerberus on 25 May 1775; urged a landing behind the works at Charlestown.",
+      "basis": "documented"
+    },
+    {
+      "id": "john_burgoyne", "name": "John Burgoyne", "rank": "Major General", "side": "british", "roles": ["general"],
+      "requires_measure": "reinforcement",
+      "traits": ["aggressive", "popular"],
+      "note": "Landed at Boston from the Cerberus on 25 May 1775.",
+      "basis": "documented"
+    }
+  ]
+}

@@ -406,6 +406,7 @@ void APA250BotController::Tick(float DeltaSeconds)
 	if (TickSapper(Me, Enemy, Dist, T)) return;
 	LastSapperWork = -1.f;
 	if (TickGunner(Me, Enemy, Dist, T)) return;
+	if (TickGeneral(Me, Enemy, Dist, T)) return;
 	if (TickSurgeon(Me, Enemy, Dist, T)) return;
 	LastSurgeonWork = -1.f;
 	if (TickFallenColours(Me, Enemy, Dist, T)) return;
@@ -460,7 +461,8 @@ void APA250BotController::Tick(float DeltaSeconds)
 				return;
 			}
 		}
-		MoveComp->MaxWalkSpeed = BaseWalkSpeed;
+		// Under his leader's order a man well behind his place runs to it; otherwise the line's own pace.
+		MoveComp->MaxWalkSpeed = (Form.bHurry && FVector::Dist2D(Me->GetActorLocation(), Form.Target) > Form.HurryBeyondCm) ? Me->SprintSpeed : BaseWalkSpeed;
 		if (Form.bMayCharge && TryBayonet(Me, Enemy, Dist, T)) return;
 		const float ArriveCm = Form.ArriveCm > 0.f ? Form.ArriveCm : T.FormationArriveCm;
 		const bool bAtSpot = FVector::Dist2D(Me->GetActorLocation(), Form.Target) <= ArriveCm;
@@ -650,6 +652,29 @@ bool APA250BotController::TickSapper(ARFCharacter* Me, ARFCharacter* Enemy, floa
 	const float Laboured = LastSapperWork >= 0.f ? FMath::Min(Now - LastSapperWork, 1.f) : 0.f;
 	LastSapperWork = Now;
 	GM->LabourOnWork(Work, Laboured, Me);
+	return true;
+}
+
+bool APA250BotController::TickGeneral(ARFCharacter* Me, ARFCharacter* Enemy, float Dist, const FPA250BotTuningValues& T)
+{
+	APA250BattleGameMode* GM = GetWorld() ? GetWorld()->GetAuthGameMode<APA250BattleGameMode>() : nullptr;
+	FVector Station;
+	float RadiusCm = 0.f;
+	if (!GM || !GM->GeneralStation(Me, Station, RadiusCm)) return false;
+	const float Away = FVector::Dist2D(Me->GetActorLocation(), Station);
+	// A bayonet in his face is his own affair, as long as it has not drawn him off his ground.
+	if (Enemy && Dist < T.ChargeRangeCm * 0.5f && Away <= RadiusCm) return false;
+	Me->SetDucking(false);
+	if (Away > RadiusCm * 0.5f)
+	{
+		State = EBotState::Advance;
+		ClearFocus(EAIFocusPriority::Gameplay);
+		MoveToward(Me, Station, 100.f);
+		return true;
+	}
+	StopMovement();
+	if (Enemy) SetFocalPoint(Enemy->GetActorLocation());
+	State = EBotState::Defend;
 	return true;
 }
 

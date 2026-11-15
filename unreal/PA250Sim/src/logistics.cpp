@@ -777,7 +777,7 @@ CampaignState approve_purchase(const CampaignState& state, const std::string& de
         error = "powder_needs_harbor_depot";
         return state;
     }
-    const int cost = purchase_cost(powder, cartridges, muskets, bayonets, provisions, lead, paper);
+    const int cost = purchase_cost_now(state, powder, cartridges, muskets, bayonets, provisions, lead, paper);
     if (s.player_gold < cost) {
         error = "insufficient_gold";
         return state;
@@ -1299,37 +1299,74 @@ CampaignState resolve_commander_request(const CampaignState& in, const std::stri
     Army* cmd_army = nullptr;
     auto ait = s.armies.find(cmd.army_id);
     if (ait != s.armies.end()) cmd_army = &ait->second;
+    // What each answer costs and gains is data (catalog "commander_letter"); without the catalog
+    // the letter only sets his orders, as it always did.
+    const CommanderLetterChoice* data = nullptr;
+    const std::vector<CommanderLetterChoice> choices = commander_letter_choices();
+    for (const CommanderLetterChoice& c : choices)
+        if (c.id == action || detail::contains(c.aliases, action)) data = &c;
+    auto apply_data = [&](int fallback_morale, int fallback_readiness, int fallback_support) {
+        const int morale = data ? data->effects.army_morale : fallback_morale;
+        const int readiness = data ? data->effects.army_readiness : fallback_readiness;
+        const int support = data ? data->effects.local_support : fallback_support;
+        if (cmd_army) {
+            cmd_army->morale = detail::clamp_int(cmd_army->morale + morale, 0, 100);
+            cmd_army->readiness = detail::clamp_int(cmd_army->readiness + readiness, 0, 100);
+        }
+        const int support_before = s.local_support;
+        s.local_support = detail::clamp_int(s.local_support + support, 0, 100);
+        if (data) {
+            s.staff.letters_processed_today += std::max(0, data->effects.clerk_load);
+            s.pass.favors = std::max(0, s.pass.favors + data->effects.favors);
+            const std::string town = commander_letter_province();
+            if (!town.empty()) {
+                // A new answer replaces what an earlier one left at the town.
+                auto& tf = s.pass.town_factors;
+                tf.erase(std::remove_if(tf.begin(), tf.end(),
+                                        [&](const TownFactor& f) { return f.province == town && f.source.rfind("Letter, " + letter->subject, 0) == 0; }),
+                         tf.end());
+                for (const CommanderLetterFactor& f : data->factors) {
+                    TownFactor t;
+                    t.province = town;
+                    t.faction = s.player_faction;
+                    t.label = f.label;
+                    t.value = f.value;
+                    t.source = "Letter, " + letter->subject + ": " + data->label;
+                    t.one_battle = true;
+                    tf.push_back(t);
+                }
+            }
+        }
+        if (s.local_support != support_before || data) {
+            ResourceChange ch;
+            ch.reason = letter->subject + ": " + (data ? data->label : action) +
+                        (s.local_support != support_before ? ". Support " + std::string(s.local_support > support_before ? "+" : "") +
+                                                                 std::to_string(s.local_support - support_before)
+                                                           : std::string());
+            ch.local_support = s.local_support - support_before;
+            detail::record_resource_change(s, ch);
+        }
+    };
     if (action == "clarify" || action == "preserve_force") {
         cmd.objective = "preserve_force";
         cmd.risk = "cautious";
         letter->status = "approved";
-        letter->reason = "Orders clarified: preserve the company; screen only.";
-        if (cmd_army) cmd_army->readiness = detail::clamp_int(cmd_army->readiness + 10, 0, 100);
+        letter->reason = data ? data->label + ". " + data->effects_summary : std::string("Orders clarified: preserve the company; screen only.");
+        apply_data(0, 10, 0);
     } else if (action == "counterorder" || action == "contest_crossing") {
         cmd.objective = "contest_crossing";
         cmd.risk = "balanced";
         letter->status = "approved";
-        letter->reason = "Counterorder: contest the crossing when powder allows.";
-        if (cmd_army) {
-            cmd_army->morale = detail::clamp_int(cmd_army->morale + 5, 0, 100);
-            cmd_army->readiness = detail::clamp_int(cmd_army->readiness - 5, 0, 100);
-        }
+        letter->reason = data ? data->label + ". " + data->effects_summary : std::string("Counterorder: contest the crossing when powder allows.");
+        apply_data(5, -5, 0);
     } else if (action == "escalate") {
         cmd.objective = "hold_stores";
         cmd.risk = "aggressive";
-        const int support_before = s.local_support;
-        s.local_support = detail::clamp_int(s.local_support - 5, 0, 100);
-        {
-            ResourceChange ch;
-            ch.reason = "Escalate: Support " + std::to_string(s.local_support - support_before);
-            ch.local_support = s.local_support - support_before;
-            detail::record_resource_change(s, ch);
-        }
         letter->status = "approved";
-        letter->reason =
-            "Political escalation through town authorities. If this company loses the field, the town "
-            "is forfeit even without the post. Boston stays outside that risk.";
-        if (cmd_army) cmd_army->morale = detail::clamp_int(cmd_army->morale + 5, 0, 100);
+        letter->reason = data ? data->label + ". " + data->effects_summary
+                              : std::string("Political escalation through town authorities. If this company loses the field, the town "
+                                            "is forfeit even without the post. Boston stays outside that risk.");
+        apply_data(5, 0, -5);
     } else {
         letter->status = "dismissed";
         letter->reason = "No new orders sent.";

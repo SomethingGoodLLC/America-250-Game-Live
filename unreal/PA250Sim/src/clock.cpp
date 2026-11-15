@@ -78,7 +78,7 @@ bool edge_path_ok(const CampaignState& s, const Army& army, const std::vector<st
             error = "path_broken";
             return false;
         }
-        if ((e.type == "ferry" || e.type == "boat") && !harbor) {
+        if ((e.type == "ferry" || e.type == "boat") && !harbor && !detail::army_has_boats(s, army.id)) {
             error = "requires_harbor_control";
             return false;
         }
@@ -140,11 +140,11 @@ void apply_move_command(CampaignState& s, const CommandPayload& p) {
 }
 
 void apply_halt(CampaignState& s, const CommandPayload& p) {
-    auto ait = s.armies.find(p.army_id);
-    if (ait == s.armies.end()) return;
-    ait->second.path.clear();
-    ait->second.hours_into_edge = 0;
-    detail::add_log(s, "army " + p.army_id + " halted");
+    std::string error;
+    CampaignState after = halt_army(s, p.army_id, error);
+    if (error.empty()) s = std::move(after);
+    else
+        detail::add_log(s, "halt ignored: " + error + " " + p.army_id);
 }
 
 void apply_one_command(CampaignState& s, const Command& c) {
@@ -171,6 +171,14 @@ void apply_one_command(CampaignState& s, const Command& c) {
             } catch (const std::exception& e) {
                 detail::add_log(s, std::string("mission effect command failed: ") + e.what());
             }
+            break;
+        }
+        case CommandKind::CampaignOrder: {
+            std::string error;
+            CampaignState after = apply_campaign_order(s, c.payload.result_json, error);
+            if (error.empty()) s = std::move(after);
+            else
+                detail::add_log(s, "order refused (" + error + ")");
             break;
         }
         case CommandKind::ApplyDiplomacy: {
@@ -289,6 +297,15 @@ std::vector<MoveStep> advance_movement(CampaignState& s) {
 
     for (auto& kv : s.armies) {
         Army& a = kv.second;
+        if (a.returning_hours > 0) {
+            // Turned about by a halt: this march hour is spent getting back to where the leg began.
+            if (--a.returning_hours <= 0) {
+                a.returning_hours = 0;
+                a.returning_edge.clear();
+                detail::add_log(s, "army " + a.id + " is back at " + a.province);
+            }
+            continue;
+        }
         if (a.path.empty()) continue;
         const std::string edge_id = a.path.front();
         auto eit = s.edges.find(edge_id);
@@ -340,6 +357,77 @@ std::vector<MoveStep> advance_movement(CampaignState& s) {
 
 }  // namespace
 
+CampaignState halt_army(const CampaignState& in, const std::string& army_id, std::string& error) {
+    error.clear();
+    auto ait = in.armies.find(army_id);
+    if (ait == in.armies.end()) {
+        error = "unknown_army";
+        return in;
+    }
+    CampaignState s = in;
+    Army& a = s.armies.at(army_id);
+    if (!a.path.empty() && a.hours_into_edge > 0 && a.returning_hours <= 0) {
+        a.returning_edge = a.path.front();
+        a.returning_hours = a.hours_into_edge;
+        detail::add_log(s, "army " + army_id + " halted on the road: " + std::to_string(a.returning_hours) +
+                               " march hours back to " + a.province);
+    } else {
+        detail::add_log(s, "army " + army_id + " halted");
+    }
+    a.path.clear();
+    a.hours_into_edge = 0;
+    return s;
+}
+
+PathPlan march_plan(const CampaignState& s, const std::string& army_id) {
+    PathPlan out;
+    auto ait = s.armies.find(army_id);
+    if (ait == s.armies.end()) {
+        out.error = "unknown_army";
+        return out;
+    }
+    const Army& a = ait->second;
+    std::vector<std::string> edges = a.path;
+    int spent = a.hours_into_edge;
+    if (edges.empty()) {
+        // No march yet: the newest queued order for this army is the march it will begin.
+        for (const Command& c : s.pending_commands)
+            if (c.payload.kind == CommandKind::MoveArmy && c.payload.army_id == army_id) edges = c.payload.edge_path;
+        for (const Command& c : s.pending_commands)
+            if (c.payload.kind == CommandKind::HaltArmy && c.payload.army_id == army_id) edges.clear();
+        spent = 0;
+    }
+    if (edges.empty()) {
+        out.error = "not_marching";
+        return out;
+    }
+    out.provinces = {a.province};
+    std::string cur = a.province;
+    int hours = 0;
+    for (const std::string& id : edges) {
+        auto eit = s.edges.find(id);
+        if (eit == s.edges.end() || (eit->second.a != cur && eit->second.b != cur)) {
+            out.error = "path_broken";
+            return out;
+        }
+        cur = other_end(eit->second, cur);
+        out.provinces.push_back(cur);
+        hours += std::max(1, eit->second.march_hours);
+    }
+    out.edges = edges;
+    out.total_march_hours = std::max(0, hours - spent) + std::max(0, a.returning_hours);
+    const int mph = std::max(1, s.march_hours_per_day);
+    int remaining = out.total_march_hours;
+    GameTime arrive = s.now;
+    while (remaining > 0) {
+        arrive.hour_index += 1;
+        if (static_cast<int>(to_ymdh(arrive).h) < mph) --remaining;
+    }
+    out.arrival = arrive;
+    out.ok = true;
+    return out;
+}
+
 CampaignState enqueue_command(const CampaignState& in, CommandPayload p) {
     CampaignState s = in;
     Command c;
@@ -366,6 +454,12 @@ TickOutput advance_hour(const CampaignState& in) {
     if (s.pending_battle.active) {
         detail::add_log(s, "hour blocked: battle pending at " + s.pending_battle.province);
         out.state = s;
+        return out;
+    }
+    if (!s.pass.pending_decision.empty()) {
+        // A decision is before the player: the clock waits for the answer.
+        out.state = s;
+        out.interrupts.push_back(Interrupt::Decision);
         return out;
     }
 
@@ -397,6 +491,7 @@ TickOutput advance_hour(const CampaignState& in) {
     draw_guns(s);
     tick_sieges(s);
     tick_campaign(s, out.interrupts);
+    detail::pass_tick(s, out.interrupts);
 
     // Snapshot provinces before movement for opposite-edge contact.
     std::map<std::string, std::string> province_before;
@@ -538,7 +633,7 @@ std::vector<std::string> validate_order(const CampaignState& state, const Order&
         bool connects = (e.a == army.province && e.b == order.to_province) ||
                         (e.b == army.province && e.a == order.to_province);
         if (!connects) continue;
-        if ((e.type == "ferry" || e.type == "boat")) {
+        if ((e.type == "ferry" || e.type == "boat") && !detail::army_has_boats(state, army.id)) {
             auto fit = state.factions.find(army.faction);
             if (fit == state.factions.end() || !fit->second.controls_harbor)
                 return {err("requires_harbor_control", e.id)};

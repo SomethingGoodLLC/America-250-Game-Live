@@ -427,6 +427,10 @@ Budget monthly_budget(const CampaignState& s, const std::string& faction) {
         }
     }
     b.pay = militia * t.pay_militia + regulars * t.pay_regular;
+    // A side whose body has taken the army into its pay carries only its own share.
+    const int carried_pct = detail::upkeep_share_pct(s, faction);
+    const int carried = b.pay * carried_pct / 100;
+    b.pay -= carried;
     const int debt = player ? std::max(0, s.progress.treasury_debt) : 0;  // only the player has credit
     b.interest = (debt * t.loan_interest_pct + 99) / 100;  // rounded up: a debt always costs something
     b.subsidy = supplied_by_sea(s, faction) ? t.sea_subsidy_gold : 0;
@@ -436,7 +440,8 @@ Budget monthly_budget(const CampaignState& s, const std::string& faction) {
     if (b.subsidy > 0) b.income.push_back({"Subsidy landed by sea", b.subsidy});
     if (b.pay > 0)
         b.expenses.push_back({"Army pay (" + std::to_string(militia) + " militia, " +
-                                  std::to_string(regulars) + " regulars)",
+                                  std::to_string(regulars) + " regulars" +
+                                  (carried > 0 ? "; Congress pays " + std::to_string(carried) + " of it" : std::string()) + ")",
                               -b.pay});
     if (b.upkeep > 0) b.expenses.push_back({"Building upkeep", -b.upkeep});
     if (b.interest > 0)
@@ -1077,7 +1082,11 @@ std::string city_view_json(const CampaignState& state, const std::string& provin
         if (a.province != province_id) continue;
         const bool yours = a.faction == state.player_faction;
         json f = {{"army_id", a.id}, {"name", a.name}, {"yours", yours}, {"marching", !a.path.empty()}};
+        // The general is known to both sides; the men only to their own.
+        f["general"] = person_name(general_of(state, a.id));
         if (yours) {
+            f["men"] = detail::total_units(a) * battle_rules().soldiers_per_unit;
+            f["unit_cap"] = detail::army_unit_cap(state, a);
             int sick = 0, wounded = 0;
             for (const auto& u : a.sick) sick += u.second;
             for (const auto& u : a.wounded) wounded += u.second;
@@ -1200,7 +1209,8 @@ CampaignState start_recruitment(const CampaignState& state, const std::string& p
     job.unit_id = d->id;
     job.unit_class = d->unit_class;
     job.men = d->men;
-    job.hours_total = d->days * 24;
+    // An organizer in the town has the men under arms sooner.
+    job.hours_total = detail::organizer_muster_hours(state, province_id, state.player_faction, d->days * 24);
     job.hours_remaining = job.hours_total;
     job.paid_gold = d->gold;
     job.paid_muskets = d->muskets;
@@ -1277,6 +1287,11 @@ void tick_recruitment_jobs(CampaignState& s) {
             continue;
         }
         std::string army_id = idle_player_army_at(s, job.province_id);
+        // A detachment (no general) holds only so many units: past its cap the company stands by itself.
+        if (!army_id.empty()) {
+            const int cap = detail::army_unit_cap(s, s.armies.at(army_id));
+            if (cap > 0 && detail::total_units(s.armies.at(army_id)) + job.men > cap) army_id.clear();
+        }
         ResourceChange ch;
         ch.province_id = job.province_id;
         if (army_id.empty()) {
@@ -1328,7 +1343,15 @@ void merge_idle_player_armies(CampaignState& s) {
         const std::string& keep = survivor_at.at(a.province);
         // Only companies the player raised are absorbed. Two scripted armies in one town (the
         // defected garrison beside the militia) stay separate: letters and treaties name them.
-        if (keep != kv.first && kv.first.rfind("raised_", 0) == 0) merges.push_back({kv.first, keep});
+        if (keep != kv.first && kv.first.rfind("raised_", 0) == 0) {
+            // Never past the cap of the army that would take them in (a detachment's is low).
+            const int cap = detail::army_unit_cap(s, s.armies.at(keep));
+            int joining = detail::total_units(a);
+            for (const auto& m : merges)
+                if (m.second == keep) joining += detail::total_units(s.armies.at(m.first));
+            if (cap > 0 && detail::total_units(s.armies.at(keep)) + joining > cap) continue;
+            merges.push_back({kv.first, keep});
+        }
     }
     for (const auto& m : merges) {
         const Army gone = s.armies.at(m.first);

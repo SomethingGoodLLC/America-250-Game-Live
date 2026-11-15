@@ -29,10 +29,14 @@
    "surrender_radius_m": 4.0
   },
   "squad": {
-   "note": "The player's own file. He always leads file_min to file_max men of his class, taken from the men on the field (made up with other men when his class has too few). follow_behind_m: on 'Follow me' the line forms this far behind him. line_ahead_m: 'Form line here' puts it this far in front. order_seconds: how long a squad that is not his own file obeys an officer's order before it judges for itself again. aim_snap_m: the enemy this close to the point he aims at is his target; aim_ray_m: so is the nearest enemy this close to the line he is looking along. ensure_seconds: how often the file is made up again from the field.",
+   "note": "The player's own file. He always leads file_min to file_max men of his class, taken from the men on the field (made up with other men when his class has too few). On 'Follow me' the file forms at his shoulders, half to each side of him, follow_spacing_m apart and follow_behind_m behind his own line, so he is in the middle of his men and can see them (playtest 2026-11-15: a line three metres behind his back was out of his sight, and read as an order ignored). The line turns with him when he moves, or when he has turned more than follow_turn_degrees. A man of his file more than run_when_behind_m from his place runs to it. with_you_m: a man this close to him counts as 'with you' on the HUD. line_ahead_m: 'Form line here' puts it this far in front. order_seconds: how long a squad that is not his own file obeys an officer's order before it judges for itself again. aim_snap_m: the enemy this close to the point he aims at is his target; aim_ray_m: so is the nearest enemy this close to the line he is looking along. ensure_seconds: how often the file is made up again from the field.",
    "file_min": 6,
    "file_max": 8,
-   "follow_behind_m": 3.0,
+   "follow_behind_m": 0.5,
+  "follow_spacing_m": 1.2,
+  "follow_turn_degrees": 45.0,
+  "run_when_behind_m": 4.0,
+  "with_you_m": 10.0,
    "line_ahead_m": 4.0,
    "order_seconds": 45.0,
    "aim_snap_m": 8.0,

@@ -21,7 +21,8 @@
    "reward": {
     "local_support": 5,
     "army_morale": 3,
-    "summary": "The country sees the stores saved: +5 Support, +3 morale"
+    "gold": 25,
+    "summary": "The country sees the stores saved: +5 Support, +3 morale, +25 gold sent in by the towns"
    },
    "failure": {
     "local_support": -3,
@@ -91,7 +92,8 @@
    "reward": {
     "local_support": 3,
     "british_attitude": -5,
-    "summary": "The garrison goes hungry: +3 Support"
+    "gold": 20,
+    "summary": "The garrison goes hungry: +3 Support, +20 gold from the stock driven off and sold"
    },
    "failure": {
     "local_support": -3,
@@ -115,7 +117,8 @@
    },
    "reward": {
     "army_morale": 5,
-    "summary": "The army can stand a day's firing: +5 morale"
+    "gold": 20,
+    "summary": "The army can stand a day's firing: +5 morale, +20 gold voted for the powder committee"
    }
   },
   {
@@ -142,7 +145,8 @@
    "reward": {
     "army_morale": 5,
     "local_support": 3,
-    "summary": "The guns are in camp: +5 morale, +3 Support"
+    "gold": 40,
+    "summary": "The guns are in camp: +5 morale, +3 Support, +40 gold voted on the news"
    }
   },
   {

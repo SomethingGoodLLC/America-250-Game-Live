@@ -147,6 +147,15 @@ json army_to_json(const Army& a) {
     for (const auto& kv : a.men_down) any = any || kv.second.total() > 0;
     if (any) j["men_down"] = men_down_to_json(a.men_down);
     if (a.guns > 0) j["guns"] = a.guns;
+    {
+        bool allied = false;
+        for (const auto& kv : a.allied) allied = allied || kv.second > 0;
+        if (allied) j["allied"] = a.allied;  // written only when it has units from other colonies
+    }
+    if (a.returning_hours > 0) {  // written only while the army is turning back from a halt
+        j["returning_edge"] = a.returning_edge;
+        j["returning_hours"] = a.returning_hours;
+    }
     return j;
 }
 Army army_from_json(const json& j) {
@@ -169,6 +178,9 @@ Army army_from_json(const json& j) {
     a.rounds_per_man = j.value("rounds_per_man", -1);
     if (j.contains("men_down")) a.men_down = men_down_from_json(j.at("men_down"));
     a.guns = j.value("guns", 0);
+    a.allied = j.value("allied", std::map<std::string, int>{});
+    a.returning_edge = j.value("returning_edge", "");
+    a.returning_hours = j.value("returning_hours", 0);
     return a;
 }
 json stores_to_json(const FactionStores& st) {
@@ -475,6 +487,7 @@ json battle_report_to_json(const BattleReport& r) {
     if (!r.casualties.empty()) j["casualties"] = casualties_to_json(r.casualties);
     if (!r.colours_captured.empty()) j["colours_captured"] = r.colours_captured;
     if (!r.guns_taken.empty()) j["guns_taken"] = r.guns_taken;
+    if (!r.commander_events.empty()) j["commander_events"] = r.commander_events;
     if (!r.mode.empty()) j["mode"] = r.mode;  // written only for an assault or a landing
     return j;
 }
@@ -515,6 +528,7 @@ BattleReport battle_report_from_json(const json& j) {
     if (j.contains("casualties")) r.casualties = casualties_from_json(j.at("casualties"));
     r.colours_captured = j.value("colours_captured", std::map<std::string, int>{});
     r.guns_taken = j.value("guns_taken", std::map<std::string, int>{});
+    r.commander_events = j.value("commander_events", std::map<std::string, std::string>{});
     r.mode = j.value("mode", std::string());
     return r;
 }
@@ -607,6 +621,25 @@ json progress_to_json(const CampaignProgress& p) {
               {"last_request", p.commander.last_request}}}};
     // Written only once the train's light pieces have been issued (a save from before has no such key).
     if (p.knox.field_guns_issued) j["knox"]["field_guns_issued"] = true;
+    // Written only once a mission of the player's has ended (a save from before has no such key).
+    if (!p.mission_results.empty()) {
+        json results = json::array();
+        for (const MissionResult& m : p.mission_results) {
+            json r{{"mission_id", m.mission_id}, {"title", m.title}, {"outcome", m.outcome}, {"hour_index", m.hour_index},
+                   {"gold", m.gold}, {"local_support", m.local_support}, {"army_morale", m.army_morale},
+                   {"army_readiness", m.army_readiness}, {"british_attitude", m.british_attitude}, {"summary", m.summary}};
+            if (!m.stores_province.empty()) {
+                r["stores_province"] = m.stores_province;
+                r["powder"] = m.powder;
+                r["cartridges"] = m.cartridges;
+                r["muskets"] = m.muskets;
+                r["provisions"] = m.provisions;
+            }
+            if (m.start_evacuation) r["start_evacuation"] = true;
+            results.push_back(r);
+        }
+        j["mission_results"] = results;
+    }
     return j;
 }
 CampaignProgress progress_from_json(const json& j) {
@@ -653,6 +686,27 @@ CampaignProgress progress_from_json(const json& j) {
         p.knox.army_id = k.value("army_id", "");
         p.knox.field_guns_issued = k.value("field_guns_issued", false);
     }
+    if (j.contains("mission_results"))
+        for (const auto& r : j.at("mission_results")) {
+            MissionResult m;
+            m.mission_id = r.value("mission_id", "");
+            m.title = r.value("title", "");
+            m.outcome = r.value("outcome", "");
+            m.hour_index = r.value("hour_index", int64_t{0});
+            m.gold = r.value("gold", 0);
+            m.local_support = r.value("local_support", 0);
+            m.army_morale = r.value("army_morale", 0);
+            m.army_readiness = r.value("army_readiness", 0);
+            m.british_attitude = r.value("british_attitude", 0);
+            m.stores_province = r.value("stores_province", "");
+            m.powder = r.value("powder", 0);
+            m.cartridges = r.value("cartridges", 0);
+            m.muskets = r.value("muskets", 0);
+            m.provisions = r.value("provisions", 0);
+            m.start_evacuation = r.value("start_evacuation", false);
+            m.summary = r.value("summary", "");
+            p.mission_results.push_back(m);
+        }
     if (j.contains("missions"))
         for (auto it = j.at("missions").begin(); it != j.at("missions").end(); ++it) {
             MissionState m;
@@ -889,6 +943,7 @@ CampaignState state_from_json(const json& j, bool is_save) {
             for (const auto& c : j.at("pending_commands")) s.pending_commands.push_back(command_from_json(c));
         if (j.contains("resource_changes"))
             for (const auto& c : j.at("resource_changes")) s.resource_changes.push_back(resource_change_from_json(c));
+        if (j.contains("pass")) s.pass = detail::pass_from_json(j.at("pass").dump());
     }
     for (const auto& kv : s.armies)
         if (!s.provinces.count(kv.second.province)) throw std::runtime_error("army in unknown province: " + kv.first);
@@ -976,6 +1031,9 @@ std::string serialize(const CampaignState& s) {
     j["log"] = s.log;
     j["resource_changes"] = json::array();
     for (const auto& c : s.resource_changes) j["resource_changes"].push_back(resource_change_to_json(c));
+    // Campaign pass (people, lobbying, decisions): written only once there is any of it, so a
+    // campaign run without those data files saves as it always did.
+    if (s.pass.any()) j["pass"] = json::parse(detail::pass_to_json(s.pass));
     return j.dump();
 }
 
@@ -1264,6 +1322,20 @@ std::string setup_to_json(const BattleSetup& b) {
                                 {"magazine_province", kv.second.magazine_province},
                                 {"guns", kv.second.guns},
                                 {"factors", factors}};
+        // Campaign pass: written only when there is something to say, so a setup without a general
+        // reads as it always did.
+        json& side = j["sides"][kv.first];
+        if (!kv.second.commander_id.empty())
+            side["commander"] = {{"id", kv.second.commander_id},
+                                 {"name", kv.second.commander_name},
+                                 {"traits", kv.second.commander_traits},
+                                 {"aura_radius_m", kv.second.commander_aura_radius_m}};
+        if (kv.second.alarmed) side["alarmed"] = true;
+        if (kv.second.intel != "exact")
+            side["intel"] = {{"known", false},
+                             {"men_low", kv.second.intel_men_low},
+                             {"men_high", kv.second.intel_men_high},
+                             {"source", kv.second.intel_source}};
     }
     return j.dump();
 }
@@ -1313,6 +1385,21 @@ BattleSetup setup_from_json(const std::string& text) {
             if (it.value().contains("factors"))
                 for (const auto& f : it.value().at("factors"))
                     s.factors.push_back({f.value("label", ""), f.value("value", 0), f.value("source", "")});
+            if (it.value().contains("commander")) {
+                const json& c = it.value().at("commander");
+                s.commander_id = c.value("id", "");
+                s.commander_name = c.value("name", "");
+                s.commander_traits = c.value("traits", std::vector<std::string>{});
+                s.commander_aura_radius_m = c.value("aura_radius_m", 0.f);
+            }
+            s.alarmed = it.value().value("alarmed", false);
+            if (it.value().contains("intel")) {
+                const json& in = it.value().at("intel");
+                s.intel = in.value("known", true) ? "exact" : "estimate";
+                s.intel_men_low = in.value("men_low", 0);
+                s.intel_men_high = in.value("men_high", 0);
+                s.intel_source = in.value("source", "");
+            }
             b.sides[it.key()] = s;
         }
         return b;
@@ -1340,6 +1427,7 @@ std::string result_to_json(const BattleResult& r) {
            {"prisoners", r.prisoners},
            {"colours_captured", r.colours_captured},
            {"guns_taken", r.guns_taken}};
+    if (!r.commander_events.empty()) j["commander_events"] = r.commander_events;
     return j.dump();
 }
 
@@ -1371,6 +1459,11 @@ BattleResult result_from_json(const std::string& text) {
         r.colours_captured = j.value("colours_captured", std::map<std::string, int>{});
         for (const auto& ck : r.colours_captured)
             if (ck.second < 0) throw std::runtime_error("result parse error: negative colours for " + ck.first);
+        r.commander_events = j.value("commander_events", std::map<std::string, std::string>{});
+        for (const auto& ck : r.commander_events)
+            if ((ck.first != kBritish && ck.first != kContinental) ||
+                (ck.second != "wounded" && ck.second != "killed" && ck.second != "captured"))
+                throw std::runtime_error("result parse error: unknown commander event " + ck.first + " " + ck.second);
         r.guns_taken = j.value("guns_taken", std::map<std::string, int>{});
         for (const auto& ck : r.guns_taken)
             if (ck.second < 0) throw std::runtime_error("result parse error: negative guns for " + ck.first);

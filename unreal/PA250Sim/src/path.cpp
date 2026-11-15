@@ -26,6 +26,7 @@ PathPlan plan_path(const CampaignState& s, const std::string& army_id, const std
     }
 
     const bool harbor = [&] {
+        if (detail::army_has_boats(s, army.id)) return true;  // an agent found boats for this army
         auto fit = s.factions.find(army.faction);
         return fit != s.factions.end() && fit->second.controls_harbor;
     }();
@@ -110,7 +111,8 @@ PathPlan plan_path(const CampaignState& s, const std::string& army_id, const std
     // Arrival matches advance_hour: the order applies on the next tick, and that tick marches
     // only when the clock hour is in [0, march_hours_per_day). Rest hours still pass.
     const int mph = std::max(1, s.march_hours_per_day);
-    int remaining = out.total_march_hours;
+    // An army turned about by a halt first marches back to where its leg began.
+    int remaining = out.total_march_hours + std::max(0, army.returning_hours);
     GameTime arrive = s.now;
     while (remaining > 0) {
         arrive.hour_index += 1;

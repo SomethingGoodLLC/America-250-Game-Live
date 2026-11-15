@@ -45,6 +45,78 @@ FString PA250ArcPanels::LiveScoreboard(const pa250::CampaignState& State)
 						   *TimeLeft(W.hours_remaining));
 }
 
+TArray<FString> PA250ArcPanels::SiegeNotices(const pa250::CampaignState& State)
+{
+	TArray<FString> Out;
+	bool bAny = false;
+	for (const auto& Ak : State.armies)
+	{
+		const pa250::Army& A = Ak.second;
+		if (A.faction != State.player_faction) continue;
+		// Where it stands, and where its march ends.
+		std::string Dest = A.province;
+		for (const std::string& EdgeId : A.path)
+		{
+			const auto E = State.edges.find(EdgeId);
+			if (E == State.edges.end()) break;
+			Dest = E->second.a == Dest ? E->second.b : E->second.a;
+		}
+		for (const std::string& Town : {A.province, Dest})
+		{
+			const std::string Why = pa250::why_cannot_besiege(State, Ak.first, Town);
+			if (Why.empty()) continue;
+			Out.AddUnique(ToF(Why));
+			bAny = true;
+		}
+	}
+	if (bAny)
+	{
+		const std::string How = pa250::how_to_form_army(State, State.player_faction);
+		if (!How.empty()) Out.Add(ToF(How));
+	}
+	return Out;
+}
+
+PA250ArcPanels::FMissionCard PA250ArcPanels::MissionCard(const pa250::MissionResult& Result, const pa250::CampaignState& State)
+{
+	FMissionCard C;
+	C.bDone = Result.outcome == "complete";
+	C.Heading = C.bDone ? TEXT("MISSION DONE") : TEXT("MISSION FAILED");
+	C.Title = ToF(Result.title);
+	C.Summary = ToF(Result.summary);
+	auto Signed = [](int32 V) { return FString::Printf(TEXT("%s%d"), V > 0 ? TEXT("+") : TEXT(""), V); };
+	if (Result.gold != 0) C.Lines.Add(FString::Printf(TEXT("Treasury %s gold (now %d)"), *Signed(Result.gold), State.player_gold));
+	if (Result.local_support != 0) C.Lines.Add(FString::Printf(TEXT("Support %s (now %d)"), *Signed(Result.local_support), State.local_support));
+	if (Result.army_morale != 0) C.Lines.Add(FString::Printf(TEXT("Morale of your armies %s"), *Signed(Result.army_morale)));
+	if (Result.army_readiness != 0) C.Lines.Add(FString::Printf(TEXT("Readiness of your armies %s"), *Signed(Result.army_readiness)));
+	if (Result.british_attitude != 0) C.Lines.Add(FString::Printf(TEXT("The British envoy's attitude %s"), *Signed(Result.british_attitude)));
+	if (!Result.stores_province.empty())
+	{
+		TArray<FString> Stores;
+		if (Result.powder != 0) Stores.Add(FString::Printf(TEXT("%s powder"), *Signed(Result.powder)));
+		if (Result.cartridges != 0) Stores.Add(FString::Printf(TEXT("%s cartridges"), *Signed(Result.cartridges)));
+		if (Result.muskets != 0) Stores.Add(FString::Printf(TEXT("%s muskets"), *Signed(Result.muskets)));
+		if (Result.provisions != 0) Stores.Add(FString::Printf(TEXT("%s provisions"), *Signed(Result.provisions)));
+		if (Stores.Num() > 0) C.Lines.Add(FString::Printf(TEXT("Magazine at %s: %s"), *TownName(State, Result.stores_province), *FString::Join(Stores, TEXT(", "))));
+	}
+	if (Result.start_evacuation) C.Lines.Add(TEXT("The British begin to embark: hold the heights and Boston is yours"));
+	if (C.Lines.Num() == 0) C.Lines.Add(C.bDone ? TEXT("Nothing else changed") : TEXT("It cost you nothing but the chance"));
+	// What is open now, or opens next.
+	const pa250::MissionDef* Current = nullptr;
+	const pa250::MissionDef* Upcoming = nullptr;
+	for (const pa250::MissionDef& M : pa250::mission_defs())
+	{
+		if (M.faction != State.player_faction) continue;
+		const std::string Status = StatusOf(State, M.id);
+		if (Status == "active" && !Current) Current = &M;
+		if (Status == "locked" && !Upcoming) Upcoming = &M;
+	}
+	if (Current) C.Next = FString::Printf(TEXT("Now: %s. %s"), *ToF(Current->title), *ToF(Current->goal));
+	else if (Upcoming) C.Next = FString::Printf(TEXT("Next: %s. %s"), *ToF(Upcoming->title), *ToF(Upcoming->goal));
+	else C.Next = TEXT("No mission is waiting: the campaign is yours to finish.");
+	return C;
+}
+
 PA250ArcPanels::FTracker PA250ArcPanels::Tracker(const pa250::CampaignState& State, const FString& SelectedArmyId)
 {
 	FTracker T;
@@ -132,6 +204,8 @@ PA250ArcPanels::FTracker PA250ArcPanels::Tracker(const pa250::CampaignState& Sta
 			T.bCanReenlist = T.ReenlistCost > 0;
 		}
 	}
+	// An army that cannot take the fort it stands before, or is marching on.
+	T.Notices.Append(SiegeNotices(State));
 	// The siege guns.
 	const pa250::CampaignProject& K = P.knox;
 	for (const pa250::MissionDef& M : Defs)

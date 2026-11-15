@@ -31,6 +31,10 @@ int32 UPA250BattleCommandlet::Main(const FString& Params)
 	PA250BattleCases::RunGunnery(Log);
 	PA250BattleCases::RunModes(Log);
 	PA250BattleCases::RunFeel(Log);
+	PA250BattleCases::RunPlaytest(Log);
+	PA250BattleCases::RunMarch(Log);
+	PA250BattleCases::RunPeople(Log);
+	PA250BattleCases::RunStory(Log);
 
 	const int32 Fails = Log.Failures.Num();
 	FString Failed;

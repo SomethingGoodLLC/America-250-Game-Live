@@ -84,6 +84,15 @@ public:
 	void HandleRightClick();
 	void FrameCamera();
 
+	/** Probe/tests: what the march layer draws now (strokes on the map, of them faded, arrival labels). */
+	void GetRouteDrawCounts(int32& OutStrokes, int32& OutFaded, int32& OutLabels) const
+	{
+		OutStrokes = RouteStrokesShown;
+		OutFaded = RouteStrokesFaded;
+		OutLabels = RouteLabelsShown;
+	}
+	FString GetRouteLabelText(int32 Index) const { return RouteLabelTexts.IsValidIndex(Index) ? RouteLabelTexts[Index] : FString(); }
+
 	/** Framing helpers for tests / camera. */
 	FVector GetLabelWorld(const FString& ProvinceId) const;
 	FVector GetTokenWorld(const FString& ProvinceId) const;
@@ -169,6 +178,8 @@ protected:
 	/** "S 3 days" over every town under siege, either side. */
 	void RefreshSiegeMarkers();
 	void RefreshRoutes();
+	/** The selected army's possible next roads, as faint ink dots (replaces the debug lines). */
+	void AddRouteHints(const pa250::CampaignState& St, const pa250::Army& Army, float PxPerUU, TArray<struct FPA250RouteStrokeDraw>& Out) const;
 	void ApplyCameraPostProcess();
 	UTexture2D* LoadPngToTexture(const FString& AbsPath);
 	UTexture2D* LoadJpegToTexture(const FString& AbsPath);
@@ -277,4 +288,28 @@ protected:
 	TMap<FString, FVector> ArmyTargetAnchor;
 	/** Traced road polylines (UV) by sim edge id, as stored (first point = one end's hotspot). */
 	TMap<FString, TArray<FVector2D>> RouteUVByEdge;
+
+	// ---- The planned march (display only; the route is the sim's march_plan) ----
+	/** The route an army set out on: the sim keeps only the edges still ahead, so the map remembers
+	 *  the ones behind it to draw them faded. Forgotten when the army stops or changes destination. */
+	struct FRouteMemory
+	{
+		FString Dest;
+		TArray<FString> EdgeIds;	  // whole route, first leg first
+		TArray<FString> FromProvince; // town each leg starts in
+	};
+	TMap<FString, FRouteMemory> RouteMemoryByArmy;
+	UPROPERTY()
+	TArray<TObjectPtr<UStaticMeshComponent>> RouteStrokeMeshes;
+	UPROPERTY()
+	TArray<TObjectPtr<UTextRenderComponent>> RouteLabels;
+	UPROPERTY()
+	TArray<TObjectPtr<UStaticMeshComponent>> RouteLabelPlates;
+	TArray<FString> RouteLabelTexts;
+	FString RouteSignature;
+	int32 RouteStrokesShown = 0;
+	int32 RouteStrokesFaded = 0;
+	int32 RouteLabelsShown = 0;
+	/** Polyline of one leg in world XY, oriented from the town it starts in. */
+	TArray<FVector2D> LegWorldPath(const FString& EdgeId, const FString& FromProvince, const FString& ToProvince) const;
 };

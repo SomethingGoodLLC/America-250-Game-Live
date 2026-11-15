@@ -1,0 +1,13 @@
+{
+ "name": "halt_at_rest",
+ "description": "an army ordered to march and halted before it has marched an hour stays where it is; the order and the progress are cleared",
+ "start_ymdh": {"y": 1775, "m": 4, "d": 19, "h": 0},
+ "army": "continental_militia",
+ "army_province": "concord",
+ "march_to": "lexington",
+ "march_hours_before_halt": 0,
+ "order": {"order": "halt", "army_id": "continental_militia"},
+ "expect_after_order": {"province": "concord", "path_edges": 0, "hours_into_edge": 0, "returning_hours": 0},
+ "hours_after": 3,
+ "expect": {"province": "concord", "path_edges": 0, "hours_into_edge": 0, "returning_hours": 0}
+}

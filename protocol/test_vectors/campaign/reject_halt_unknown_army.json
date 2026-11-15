@@ -1,0 +1,7 @@
+{
+ "name": "reject_halt_unknown_army",
+ "description": "a halt for an army that does not exist is refused before it is queued",
+ "start_ymdh": {"y": 1775, "m": 4, "d": 19, "h": 0},
+ "order": {"order": "halt", "army_id": "nobody"},
+ "expect_error": "unknown_army"
+}

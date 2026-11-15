@@ -476,7 +476,7 @@ void tick_sieges(CampaignState& s) {
         bool besieger_present = false;
         for (const auto& ak : s.armies)
             if (ak.second.province == pk.first && ak.second.faction == p.siege_by &&
-                detail::total_units(ak.second) > 0)
+                detail::total_units(ak.second) > 0 && detail::army_can_besiege(s, ak.second))
                 besieger_present = true;
         if (p.owner == p.siege_by || !besieger_present) {
             if (p.owner != p.siege_by)
@@ -713,8 +713,12 @@ BattleSetup build_battle_setup(const CampaignState& state, const std::string& pr
                        std::to_string(crews) + (crews == 1 ? " crew to serve them" : " crews to serve them"));
         }
         s.retreat_province = choose_retreat(state, province, a->faction);
+        // Campaign pass: the general and his traits, an agent's alarm or works, a letter's or a
+        // decision's factor at this town. Each is a row with its source.
+        detail::pass_side_setup(state, ground, *a, is_attacker, owns_ground, s);
         b.sides[a->faction] = s;
     }
+    detail::pass_setup_done(state, b);
     // Fort: defender who owns the ground starts holding the primary post + cover note.
     if (pit->second.fort_level > 0 && b.defender_faction == pit->second.owner) {
         const std::string post = "green";
@@ -999,6 +1003,8 @@ CampaignState apply_battle_result(const CampaignState& in, const BattleResult& r
         if (it == s.armies.end()) continue;
         it->second.path.clear();
         it->second.hours_into_edge = 0;
+        it->second.returning_edge.clear();  // a battle ends any turning back: the army is where it fought
+        it->second.returning_hours = 0;
     }
 
     // Cartridge boxes. Each side leaves with what it formed up with, less the rounds its own
@@ -1124,17 +1130,23 @@ CampaignState apply_battle_result(const CampaignState& in, const BattleResult& r
         const bool takes = stores_forfeit || !needs_posts || r.objective_holder == r.winner;
         // A siege needs a besieger: a winner whose army was wiped out on the field takes the
         // town outright instead of besieging it with nobody.
-        bool besieger_standing = false;
+        // And a siege needs a general: a detachment that wins before a fort cannot sit down to it.
+        bool besieger_standing = false, besieger_can = false;
         for (const auto& ak : s.armies)
             if (ak.second.province == r.province_id && ak.second.faction == r.winner &&
-                detail::total_units(ak.second) > 0)
+                detail::total_units(ak.second) > 0) {
                 besieger_standing = true;
+                besieger_can = besieger_can || detail::army_can_besiege(s, ak.second);
+            }
         if (ground.owner == r.winner) {
             if (!ground.siege_by.empty()) {
                 siege_lifted = true;
                 ground.siege_by.clear();
                 ground.siege_hours_remaining = 0;
             }
+        } else if (takes && ground.fort_level > 0 && ground.owner == loser && besieger_standing && !besieger_can) {
+            ownership_reason = "no_general_no_siege";
+            detail::add_log(s, "no siege at " + r.province_id + ": the victors are a detachment with no general");
         } else if (takes && ground.fort_level > 0 && ground.owner == loser && besieger_standing) {
             if (ground.siege_by != r.winner || ground.siege_hours_remaining <= 0) {
                 ground.siege_by = r.winner;
@@ -1292,6 +1304,12 @@ CampaignState apply_battle_result(const CampaignState& in, const BattleResult& r
     } else if (ownership_reason == "stores_forfeit") {
         ownership_line = "Stores exposed after field lost: " + s.provinces.at(r.province_id).name +
                          " now " + detail::faction_word(r.winner);
+    } else if (ownership_reason == "no_general_no_siege") {
+        // The field is won and the town is not: say why, and what to do about it.
+        const Province& g = s.provinces.at(r.province_id);
+        ownership_line = "Fort L" + std::to_string(g.fort_level) + " holds: " + g.name +
+                         " is not taken by a won battle. Its works must be besieged, and the victors have no general to conduct a siege";
+        detail::add_log(s, ownership_line);
     } else {
         ownership_line = "Ownership unchanged at " + s.provinces.at(r.province_id).name;
     }
@@ -1347,6 +1365,11 @@ CampaignState apply_battle_result(const CampaignState& in, const BattleResult& r
         } else if (siege_hours > 0) {
             report.map_changes.push_back(g.name + " is besieged: it falls in " + std::to_string(siege_hours) +
                                          " hours unless relieved");
+        } else if (ownership_reason == "no_general_no_siege") {
+            report.map_changes.push_back(g.name + " stays " + detail::faction_word(g.owner) + ": its works (Fort L" + std::to_string(g.fort_level) +
+                                         ") must be besieged, and the victors have no general to conduct a siege");
+            const std::string how = how_to_form_army(s, r.winner);
+            if (!how.empty() && r.winner == s.player_faction) report.map_changes.push_back(how);
         } else {
             report.map_changes.push_back(g.name + " stays " + detail::faction_word(g.owner));
         }
@@ -1427,6 +1450,8 @@ CampaignState apply_battle_result(const CampaignState& in, const BattleResult& r
         {s.now.hour_index, r.winner, "Battle of " + s.provinces.at(r.province_id).name + " won by " + r.winner});
     s.pending_battle = PendingBattle{};
     detail::add_log(s, "battle at " + r.province_id + " won by " + r.winner);
+
+    detail::pass_after_battle(s, in, r, pb);
 
     ++s.progress.battles_fought;
     ++s.progress.battles_won[r.winner];

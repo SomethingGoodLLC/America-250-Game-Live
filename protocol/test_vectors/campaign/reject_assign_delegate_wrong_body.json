@@ -1,0 +1,17 @@
+{
+ "name": "reject_assign_delegate_wrong_body",
+ "description": "the Continental Congress is not sitting in April: its blocs cannot be given a delegate yet",
+ "start_ymdh": {
+  "y": 1775,
+  "m": 4,
+  "d": 20,
+  "h": 0
+ },
+ "order": {
+  "order": "assign_person",
+  "person": "john_adams",
+  "role": "delegate",
+  "bloc": "southern_colonies"
+ },
+ "expect_error": "unknown_bloc"
+}

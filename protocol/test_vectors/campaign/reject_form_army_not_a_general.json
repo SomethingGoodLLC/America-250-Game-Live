@@ -1,0 +1,23 @@
+{
+ "name": "reject_form_army_not_a_general",
+ "description": "an express rider cannot command an army",
+ "start_ymdh": {
+  "y": 1775,
+  "m": 4,
+  "d": 20,
+  "h": 0
+ },
+ "setup": {
+  "armies": {
+   "continental_militia": {
+    "province": "charlestown"
+   }
+  }
+ },
+ "order": {
+  "order": "form_army",
+  "person": "paul_revere",
+  "province": "charlestown"
+ },
+ "expect_error": "not_a_general"
+}

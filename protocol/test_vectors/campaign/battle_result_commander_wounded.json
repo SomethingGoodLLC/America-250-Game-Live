@@ -1,0 +1,47 @@
+{
+ "name": "battle_result_commander_wounded",
+ "description": "a general wounded on the field is out for commander.wounded_days; his army is a detachment again and loses morale",
+ "start_ymdh": {
+  "y": 1775,
+  "m": 4,
+  "d": 20,
+  "h": 0
+ },
+ "battle": {
+  "province": "lexington",
+  "attacker": "british_regulars",
+  "defender": "continental_militia"
+ },
+ "generals": {
+  "continental_militia": "artemas_ward",
+  "british_regulars": "francis_smith"
+ },
+ "result": {
+  "province_id": "lexington",
+  "winner": "british",
+  "end_reason": "army_broke",
+  "commander_events": {
+   "continental": "wounded"
+  }
+ },
+ "expect": {
+  "schema_valid": true,
+  "applied": true,
+  "persons": {
+   "artemas_ward": {
+    "status": "wounded",
+    "role": ""
+   },
+   "francis_smith": {
+    "status": "",
+    "role": "general"
+   }
+  },
+  "away_days": {
+   "artemas_ward": 21
+  },
+  "report_commander_events": {
+   "continental": "wounded"
+  }
+ }
+}

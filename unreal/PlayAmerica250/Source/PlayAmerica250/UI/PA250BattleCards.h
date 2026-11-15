@@ -26,6 +26,21 @@ struct FRow
  *  fortification, then anything else the sim reported). */
 PLAYAMERICA250_API TArray<FRow> SideRows(const pa250::SideSetup& Side);
 
+/** Who commands a side: a general (with the plate that stands in for his portrait) or nobody. */
+struct FCommander
+{
+	bool bGeneral = false;
+	FString Name;      // "General Artemas Ward"
+	FString Initials;  // "AW"
+	FString Traits;    // "Defensive, Steadfast"
+	FString Line;      // the sim's own line: "General Artemas Ward commands Massachusetts Militia"
+};
+PLAYAMERICA250_API FCommander Commander(const pa250::SideSetup& Side);
+
+/** Pure: the enemy column when the player has not counted it: a rough count of men, the rest
+ *  unknown, and what can be seen from the road (works, guns). */
+PLAYAMERICA250_API TArray<FRow> EstimateRows(const pa250::SideSetup& Side);
+
 /** Pure: the line under the pre-battle card's title: who attacks, the kind of fight and its rule. */
 PLAYAMERICA250_API FString ModeLine(const pa250::BattleSetup& Setup);
 

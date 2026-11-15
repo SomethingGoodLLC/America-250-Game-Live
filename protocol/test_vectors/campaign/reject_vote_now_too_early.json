@@ -1,0 +1,15 @@
+{
+ "name": "reject_vote_now_too_early",
+ "description": "a measure cannot be voted before its earliest date",
+ "start_ymdh": {
+  "y": 1775,
+  "m": 4,
+  "d": 19,
+  "h": 0
+ },
+ "order": {
+  "order": "vote_now",
+  "measure": "raise_the_army"
+ },
+ "expect_error": "too_early"
+}

@@ -1,4 +1,5 @@
 #include "PA250ProvinceMapActor.h"
+#include "PA250MarchRoute.h"
 #include "PA250ArmyToken.h"
 #include "PA250CampaignGameMode.h"
 #include "PA250MapWidget.h"
@@ -1593,83 +1594,319 @@ void APA250ProvinceMapActor::RefreshBattleMarker()
 	BattleMarker->SetVisibility(true);
 }
 
+/** One stroke of the march layer as it will be drawn (world XY). */
+struct FPA250RouteStrokeDraw
+{
+	FVector2D Center = FVector2D::ZeroVector;
+	float YawDegrees = 0.f;
+	float Length = 0.f;
+	float Thickness = 0.f;
+	float Opacity = 1.f;
+	bool bFaded = false;
+};
+
+TArray<FVector2D> APA250ProvinceMapActor::LegWorldPath(const FString& EdgeId, const FString& FromProvince, const FString& ToProvince) const
+{
+	TArray<FVector2D> Out;
+	auto ToWorld2D = [this](const FVector2D& UV) { return FVector2D((UV.X - 0.5f) * MapWidthUU, (UV.Y - 0.5f) * MapHeightUU); };
+	const FVector2D* FromUV = TokenUV.Find(FromProvince);
+	const FVector2D* ToUV = TokenUV.Find(ToProvince);
+	if (const TArray<FVector2D>* Road = RouteUVByEdge.Find(EdgeId))
+	{
+		const bool bReverse = FromUV && FVector2D::Distance(Road->Last(), *FromUV) < FVector2D::Distance((*Road)[0], *FromUV);
+		for (int32 i = 0; i < Road->Num(); ++i)
+		{
+			Out.Add(ToWorld2D((*Road)[bReverse ? Road->Num() - 1 - i : i]));
+		}
+	}
+	else if (FromUV && ToUV)
+	{
+		Out.Add(ToWorld2D(*FromUV));
+		Out.Add(ToWorld2D(*ToUV));
+	}
+	return Out;
+}
+
+void APA250ProvinceMapActor::AddRouteHints(const pa250::CampaignState& St, const pa250::Army& Army, float PxPerUU, TArray<FPA250RouteStrokeDraw>& Out) const
+{
+	// Where the selected army could go next: fine ink dots along each road out of its town.
+	const float Dot = 5.f / PxPerUU;
+	const float Gap = 7.f / PxPerUU;
+	for (const auto& Kv : St.edges)
+	{
+		if (Kv.second.a != Army.province && Kv.second.b != Army.province)
+		{
+			continue;
+		}
+		const std::string& Other = Kv.second.a == Army.province ? Kv.second.b : Kv.second.a;
+		const TArray<FVector2D> Path = LegWorldPath(ToFStr(Kv.first), ToFStr(Army.province), ToFStr(Other));
+		TArray<PA250MarchRoute::FStroke> Dots;
+		PA250MarchRoute::LayDashes(Path, Dot, Gap, 0.f, 0.f, Dots);
+		for (const PA250MarchRoute::FStroke& D : Dots)
+		{
+			Out.Add({D.Center, D.YawDegrees, D.Length, 2.6f / PxPerUU, 0.7f, false});
+		}
+	}
+}
+
 void APA250ProvinceMapActor::RefreshRoutes()
 {
 	UPA250Subsystem* S = Sub();
-	if (!S || !S->GetController().has_campaign() || SelectedArmyId.IsEmpty() || !GetWorld())
+	if (!S || !S->GetController().has_campaign() || !GetWorld())
 	{
 		return;
 	}
 	const pa250::CampaignState& St = S->GetState();
-	auto It = St.armies.find(TCHAR_TO_UTF8(*SelectedArmyId));
-	if (It == St.armies.end())
+	const float PxPerUU = FMath::Max(0.05f, MeasurePxPerUU() > 0.f ? MeasurePxPerUU() : 1.f);
+
+	// 1. Which marches to draw: every army of the player that is marching or has a march queued.
+	//    (An enemy's destination stays unreported, as in the hover text.)
+	struct FMarch
+	{
+		FString ArmyId;
+		pa250::PathPlan Plan;
+		const pa250::Army* Army = nullptr;
+	};
+	TArray<FMarch> Marches;
+	TSet<FString> Live;
+	for (const auto& Kv : St.armies)
+	{
+		if (Kv.second.faction != St.player_faction)
+		{
+			continue;
+		}
+		pa250::PathPlan Plan = pa250::march_plan(St, Kv.first);
+		if (!Plan.ok || Plan.edges.empty())
+		{
+			continue;
+		}
+		const FString Id = ToFStr(Kv.first);
+		Live.Add(Id);
+		// Remember the whole route so the part behind the army can be drawn faded.
+		const FString Dest = ToFStr(Plan.provinces.back());
+		FRouteMemory* Mem = RouteMemoryByArmy.Find(Id);
+		bool bKeep = Mem && Mem->Dest == Dest && Mem->EdgeIds.Num() >= static_cast<int32>(Plan.edges.size());
+		if (bKeep)
+		{
+			const int32 Off = Mem->EdgeIds.Num() - static_cast<int32>(Plan.edges.size());
+			for (int32 i = 0; i < static_cast<int32>(Plan.edges.size()) && bKeep; ++i)
+			{
+				bKeep = Mem->EdgeIds[Off + i] == ToFStr(Plan.edges[i]);
+			}
+		}
+		if (!bKeep)
+		{
+			FRouteMemory Fresh;
+			Fresh.Dest = Dest;
+			for (int32 i = 0; i < static_cast<int32>(Plan.edges.size()); ++i)
+			{
+				Fresh.EdgeIds.Add(ToFStr(Plan.edges[i]));
+				Fresh.FromProvince.Add(ToFStr(Plan.provinces[i]));
+			}
+			RouteMemoryByArmy.Add(Id, MoveTemp(Fresh));
+		}
+		Marches.Add({Id, MoveTemp(Plan), &Kv.second});
+	}
+	for (auto It = RouteMemoryByArmy.CreateIterator(); It; ++It)
+	{
+		if (!Live.Contains(It.Key()))
+		{
+			It.RemoveCurrent();
+		}
+	}
+
+	// 2. Rebuild only when what is drawn would change.
+	FString Sig = FString::Printf(TEXT("%s|%d|"), *SelectedArmyId, FMath::RoundToInt(PxPerUU * 20.f));
+	for (const FMarch& M : Marches)
+	{
+		Sig += FString::Printf(TEXT("%s>%s:%d+%d@%lld;"), *M.ArmyId, UTF8_TO_TCHAR(M.Plan.provinces.back().c_str()), static_cast<int32>(M.Plan.edges.size()),
+							   M.Army->hours_into_edge, static_cast<long long>(M.Plan.arrival.hour_index));
+	}
+	if (const auto Sel = St.armies.find(TCHAR_TO_UTF8(*SelectedArmyId)); Sel != St.armies.end())
+	{
+		Sig += ToFStr(Sel->second.province);
+	}
+	if (Sig == RouteSignature)
 	{
 		return;
 	}
-	const pa250::Army& Army = It->second;
-	TSet<FString> Planned;
-	for (const auto& Eid : Army.path)
-	{
-		Planned.Add(ToFStr(Eid));
-	}
-	for (const auto& Cmd : St.pending_commands)
-	{
-		if (Cmd.payload.kind == pa250::CommandKind::MoveArmy && Cmd.payload.army_id == Army.id)
-		{
-			for (const auto& Eid : Cmd.payload.edge_path)
-			{
-				Planned.Add(ToFStr(Eid));
-			}
-		}
-	}
-	const FString ArmyProv = ToFStr(Army.province);
+	RouteSignature = Sig;
 
-	for (const FEdgeVis& E : Edges)
+	// 3. Lay the strokes. Sizes are in screen pixels, so the line reads the same at every zoom.
+	const float Dash = 13.f / PxPerUU;
+	const float Gap = 8.f / PxPerUU;
+	const float Thick = 3.2f / PxPerUU;
+	const float Head = 15.f / PxPerUU;
+	TArray<FPA250RouteStrokeDraw> Draw;
+	struct FLabel
 	{
-		bool bOnPlan = false;
-		for (const auto& Kv : St.edges)
+		FVector2D At;
+		FString Text;
+	};
+	TArray<FLabel> Labels;
+	for (const FMarch& M : Marches)
+	{
+		const FRouteMemory& Mem = RouteMemoryByArmy.FindChecked(M.ArmyId);
+		const int32 Behind = Mem.EdgeIds.Num() - static_cast<int32>(M.Plan.edges.size());
+		TArray<FVector2D> Whole;
+		float Marched = 0.f;
+		for (int32 i = 0; i < Mem.EdgeIds.Num(); ++i)
 		{
-			const bool bMatch = (ToFStr(Kv.second.a) == E.From && ToFStr(Kv.second.b) == E.To) ||
-								(ToFStr(Kv.second.a) == E.To && ToFStr(Kv.second.b) == E.From);
-			if (bMatch && Planned.Contains(ToFStr(Kv.first)))
+			const FString To = i + 1 < Mem.EdgeIds.Num() ? Mem.FromProvince[i + 1] : Mem.Dest;
+			const TArray<FVector2D> Leg = LegWorldPath(Mem.EdgeIds[i], Mem.FromProvince[i], To);
+			const float LegLen = PA250MarchRoute::PathLength(Leg);
+			if (i < Behind)
 			{
-				bOnPlan = true;
-				break;
+				Marched += LegLen;
 			}
-		}
-		const bool bIncident = (E.From == ArmyProv || E.To == ArmyProv);
-		if (!bIncident && !bOnPlan)
-		{
-			continue;
-		}
-		if (E.PolyUV.Num() < 2)
-		{
-			continue;
-		}
-		const bool bWater =
-			E.Type.Equals(TEXT("ferry"), ESearchCase::IgnoreCase) || E.Type.Equals(TEXT("boat"), ESearchCase::IgnoreCase);
-		const FColor Col = bOnPlan ? FColor(220, 180, 40) : FColor(90, 70, 40);
-		const float Thickness = bOnPlan ? 6.f : 2.5f;
-		for (int32 i = 0; i + 1 < E.PolyUV.Num(); ++i)
-		{
-			const FVector A = UVToWorld(E.PolyUV[i], 6.f);
-			const FVector B = UVToWorld(E.PolyUV[i + 1], 6.f);
-			if (bWater && !bOnPlan)
+			else if (i == Behind && !M.Army->path.empty())
 			{
-				const FVector Delta = B - A;
-				const float Len = Delta.Size();
-				const FVector Dir = Delta.GetSafeNormal();
-				for (float T = 0.f; T < Len; T += 40.f)
+				const auto E = St.edges.find(M.Army->path.front());
+				if (E != St.edges.end() && E->second.march_hours > 0)
 				{
-					DrawDebugLine(GetWorld(), A + Dir * T, A + Dir * FMath::Min(T + 18.f, Len), Col, false, -1.f, 0, Thickness);
+					Marched += LegLen * FMath::Clamp(static_cast<float>(M.Army->hours_into_edge) / static_cast<float>(E->second.march_hours), 0.f, 1.f);
 				}
 			}
-			else
+			for (int32 k = (Whole.Num() > 0 ? 1 : 0); k < Leg.Num(); ++k) // the towns between legs are shared points
 			{
-				DrawDebugLine(GetWorld(), A, B, Col, false, -1.f, 0, Thickness);
+				Whole.Add(Leg[k]);
 			}
 		}
+		if (Whole.Num() < 2)
+		{
+			continue;
+		}
+		TArray<PA250MarchRoute::FStroke> Strokes;
+		PA250MarchRoute::LayDashes(Whole, Dash, Gap, Marched, Head * 0.6f, Strokes);
+		for (const PA250MarchRoute::FStroke& D : Strokes)
+		{
+			Draw.Add({D.Center, D.YawDegrees, D.Length, Thick, D.bMarched ? 0.4f : 0.95f, D.bMarched});
+		}
+		TArray<PA250MarchRoute::FStroke> Arrow;
+		PA250MarchRoute::LayArrowhead(Whole, Head, 28.f, Arrow);
+		for (const PA250MarchRoute::FStroke& D : Arrow)
+		{
+			Draw.Add({D.Center, D.YawDegrees, D.Length, Thick * 1.15f, 0.95f, false});
+		}
+		const pa250::YMDH When = pa250::to_ymdh(M.Plan.arrival);
+		Labels.Add({Whole.Last(), PA250MarchRoute::ArrivalLabel(When.d, When.m, When.h)});
 	}
+	if (const auto Sel = St.armies.find(TCHAR_TO_UTF8(*SelectedArmyId));
+		Sel != St.armies.end() && Sel->second.faction == St.player_faction && !Live.Contains(SelectedArmyId) && !St.pending_battle.active)
+	{
+		AddRouteHints(St, Sel->second, PxPerUU, Draw);
+	}
+
+	// 4. Show them: pooled flat quads in the map's unlit ink, and the labels on parchment plates.
+	UStaticMesh* PlaneMesh = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Plane.Plane"));
+	UMaterialInterface* ShapeMat = LoadObject<UMaterialInterface>(nullptr, TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
+	UMaterialInterface* InkMat = LoadObject<UMaterialInterface>(nullptr, TEXT("/Game/PA250/Materials/M_MapSprite.M_MapSprite"));
+	UTexture2D* WhiteTex = LoadObject<UTexture2D>(nullptr, TEXT("/Engine/EngineResources/WhiteSquareTexture.WhiteSquareTexture"));
+	UTexture2D* PlateTex = LoadObject<UTexture2D>(nullptr, TEXT("/Game/PA250/Textures/Army/T_Army_GroundOval.T_Army_GroundOval"));
+	if (!PlaneMesh || !ShapeMat)
+	{
+		return;
+	}
+	const FLinearColor Ink = FLinearColor::FromSRGBColor(FColor(52, 36, 22)); // iron-gall brown, as the plate's own lettering
+	RouteStrokesFaded = 0;
+	for (int32 i = 0; i < Draw.Num(); ++i)
+	{
+		if (!RouteStrokeMeshes.IsValidIndex(i))
+		{
+			UStaticMeshComponent* C = NewObject<UStaticMeshComponent>(this);
+			C->SetupAttachment(MapMesh);
+			C->RegisterComponent();
+			C->SetAbsolute(true, true, true);
+			C->SetStaticMesh(PlaneMesh);
+			C->SetMaterial(0, ShapeMat);
+			C->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+			C->ComponentTags.Add(TEXT("march_stroke"));
+			UseInkMaterial(C, InkMat, WhiteTex, 1);
+			ApplyShapeColor(C, Ink);
+			RouteStrokeMeshes.Add(C);
+		}
+		UStaticMeshComponent* C = RouteStrokeMeshes[i];
+		const FPA250RouteStrokeDraw& D = Draw[i];
+		C->SetWorldLocation(FVector(D.Center.X, D.Center.Y, MapPlaneZ + 4.2f));
+		C->SetWorldRotation(FRotator(0.f, D.YawDegrees, 0.f));
+		C->SetWorldScale3D(FVector(D.Length / 100.f, D.Thickness / 100.f, 1.f));
+		if (UMaterialInstanceDynamic* MID = Cast<UMaterialInstanceDynamic>(C->GetMaterial(0)))
+		{
+			MID->SetScalarParameterValue(TEXT("Opacity"), D.Opacity);
+		}
+		C->SetVisibility(true);
+		RouteStrokesFaded += D.bFaded ? 1 : 0;
+	}
+	for (int32 i = Draw.Num(); i < RouteStrokeMeshes.Num(); ++i)
+	{
+		RouteStrokeMeshes[i]->SetVisibility(false);
+	}
+	RouteStrokesShown = Draw.Num();
+
+	RouteLabelTexts.Reset();
+	const float TextUU = 13.f / PxPerUU;
+	for (int32 i = 0; i < Labels.Num(); ++i)
+	{
+		if (!RouteLabels.IsValidIndex(i))
+		{
+			UTextRenderComponent* T = NewObject<UTextRenderComponent>(this);
+			T->SetupAttachment(MapMesh);
+			T->RegisterComponent();
+			T->SetAbsolute(true, true, true);
+			T->SetWorldRotation(FlatMapTextRotation());
+			T->SetHorizontalAlignment(EHTA_Left);
+			T->SetVerticalAlignment(EVRTA_TextCenter);
+			T->SetTextRenderColor(FColor(52, 36, 22));
+			if (MapTextMaterial)
+			{
+				T->SetTextMaterial(MapTextMaterial);
+			}
+			T->SetTranslucentSortPriority(6);
+			RouteLabels.Add(T);
+			UStaticMeshComponent* Plate = NewObject<UStaticMeshComponent>(this);
+			Plate->SetupAttachment(MapMesh);
+			Plate->RegisterComponent();
+			Plate->SetAbsolute(true, true, true);
+			Plate->SetStaticMesh(PlaneMesh);
+			Plate->SetMaterial(0, ShapeMat);
+			Plate->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+			Plate->SetCastShadow(false);
+			if (InkMat && PlateTex)
+			{
+				Plate->SetMaterial(0, InkMat);
+				if (UMaterialInstanceDynamic* MID = Plate->CreateAndSetMaterialInstanceDynamic(0))
+				{
+					MID->SetTextureParameterValue(TEXT("Sprite"), PlateTex);
+					MID->SetVectorParameterValue(TEXT("UVRect"), FLinearColor(0.f, 0.f, 1.f, 1.f));
+					MID->SetScalarParameterValue(TEXT("Opacity"), 0.9f);
+				}
+			}
+			Plate->SetTranslucentSortPriority(5);
+			RouteLabelPlates.Add(Plate);
+		}
+		UTextRenderComponent* T = RouteLabels[i];
+		// Below and to the right of the town, clear of its caption (which sits above and to the right).
+		const FVector2D At = Labels[i].At + FVector2D(14.f / PxPerUU, 22.f / PxPerUU);
+		const float Width = Labels[i].Text.Len() * TextUU * 0.5f;
+		T->SetText(FText::FromString(Labels[i].Text));
+		T->SetWorldSize(TextUU);
+		T->SetWorldLocation(FVector(At.X, At.Y, MapPlaneZ + 6.4f));
+		T->SetVisibility(true);
+		UStaticMeshComponent* Plate = RouteLabelPlates[i];
+		Plate->SetWorldLocation(FVector(At.X + Width * 0.5f, At.Y, MapPlaneZ + 6.2f));
+		Plate->SetWorldRotation(FRotator::ZeroRotator);
+		Plate->SetWorldScale3D(FVector((Width + TextUU * 1.6f) / 100.f, TextUU * 1.9f / 100.f, 1.f));
+		Plate->SetVisibility(true);
+		RouteLabelTexts.Add(Labels[i].Text);
+	}
+	for (int32 i = Labels.Num(); i < RouteLabels.Num(); ++i)
+	{
+		RouteLabels[i]->SetVisibility(false);
+		RouteLabelPlates[i]->SetVisibility(false);
+	}
+	RouteLabelsShown = Labels.Num();
+	UE_LOG(LogTemp, Display, TEXT("PA250 march route: %d marches, %d strokes (%d faded), %d labels%s%s"), Marches.Num(), RouteStrokesShown, RouteStrokesFaded,
+		   RouteLabelsShown, Labels.Num() > 0 ? TEXT(": ") : TEXT(""), Labels.Num() > 0 ? *Labels[0].Text : TEXT(""));
 }
 
 float APA250ProvinceMapActor::FitOrthoWidth(float ViewW, float ViewH, float MapW, float MapH)

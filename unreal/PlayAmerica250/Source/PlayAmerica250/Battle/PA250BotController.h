@@ -47,6 +47,8 @@ struct FPA250FormationOrder
 	bool bAimAtPoint = false;                  // presenting toward AimPoint (no man stands there)
 	FVector AimPoint = FVector::ZeroVector;
 	bool bHoldFire = false;                    // presented and waiting for the leader's shot
+	bool bHurry = false;                       // his leader's order: further than HurryBeyondCm from his place he runs
+	float HurryBeyondCm = 400.f;
 };
 
 /** Pure: duck behind the wall unless moving, charging, routing, or loaded with a target in sight (rise to fire). */
@@ -216,6 +218,9 @@ private:
 	 *  when there is none (or the enemy is on top of him) and he fights like any other man. */
 	bool TickSapper(ARFCharacter* Me, ARFCharacter* Enemy, float Dist, const struct FPA250BotTuningValues& T);
 	float LastSapperWork = -1.f;
+	/** A general keeps near his side's home post: drawn further than his radius he walks back, and
+	 *  with no enemy on top of him he stands at his station. False for every other man. */
+	bool TickGeneral(ARFCharacter* Me, ARFCharacter* Enemy, float Dist, const struct FPA250BotTuningValues& T);
 	/** A gunner goes to his place at one of his side's guns and stays there (the gun does the rest). */
 	bool TickGunner(ARFCharacter* Me, ARFCharacter* Enemy, float Dist, const struct FPA250BotTuningValues& T);
 	/** A surgeon goes to the nearest fallen man of his side he can still save and stays with him. */

@@ -1,0 +1,21 @@
+{
+ "name": "order_lobby_write",
+ "description": "writing to a bloc uses one clerk slot and shifts it by lobby.write_shift",
+ "start_ymdh": {
+  "y": 1775,
+  "m": 4,
+  "d": 20,
+  "h": 0
+ },
+ "order": {
+  "order": "lobby",
+  "action": "write",
+  "bloc": "seaport_merchants"
+ },
+ "expect": {
+  "bloc_lean": {
+   "seaport_merchants": -5
+  },
+  "clerk_slots_used": 1
+ }
+}

@@ -1,0 +1,15 @@
+{
+ "name": "reject_send_dispatch_not_yours",
+ "description": "the Patriot commander sends no dispatches to London",
+ "start_ymdh": {
+  "y": 1775,
+  "m": 4,
+  "d": 20,
+  "h": 0
+ },
+ "order": {
+  "order": "send_dispatch",
+  "measure": "provision_convoy"
+ },
+ "expect_error": "not_your_body"
+}

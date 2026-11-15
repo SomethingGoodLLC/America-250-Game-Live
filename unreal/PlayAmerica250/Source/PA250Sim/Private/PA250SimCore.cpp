@@ -12,4 +12,5 @@
 #include "src/serialize.cpp"
 #include "src/controller.cpp"
 #include "src/campaign.cpp"
+#include "src/campaign_pass.cpp"
 #pragma GCC visibility pop

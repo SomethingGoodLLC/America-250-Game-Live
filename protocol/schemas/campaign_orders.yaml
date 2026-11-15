@@ -1,0 +1,61 @@
+$schema: "http://json-schema.org/draft-07/schema#"
+$id: "https://playamerica250.com/schemas/campaign_orders.yaml"
+title: "CampaignOrder"
+description: >
+  Orders the player gives on the campaign map. Each order is a command: it is queued with
+  enqueue_command (CommandKind::HaltArmy for halt, CommandKind::CampaignOrder for the rest) and
+  applied by advance_hour on the next hour, never at the moment it is given. While the clock is
+  stopped for a pending battle or a pending decision no later hour comes, so the controller applies
+  an order at that hour boundary instead, as it does a battle result. The sim refuses an order it
+  cannot carry out and writes the reason to its log; the controller checks the same rules before
+  queuing (validate_campaign_order), so the UI can say why at once.
+  Every field is a string. Vectors: protocol/test_vectors/campaign.
+type: object
+required: [order]
+additionalProperties: false
+properties:
+  order:
+    type: string
+    enum: [halt, form_army, assign_person, relieve_person, use_agent, lobby, vote_now, send_dispatch, decide]
+    description: >
+      halt: the army gives up its march. Standing in a town (no hour of its current leg marched) it
+      simply stays: the order and the progress are cleared. Part-way along a leg it turns about and
+      returns to the town the leg began in, taking as many march hours as it had already spent on
+      the leg; until it is back it can start no new march. A march ordered meanwhile begins when it
+      is back.
+
+      form_army (person, province, optional army_id): a free general takes command of the player's
+      army standing in a town the player holds that has a muster (a Militia Muster or a Fort). An
+      army with a general may hold more units and may besiege; without one it is a detachment.
+
+      assign_person (person, role, and province for an organizer or bloc for a delegate): gives a
+      person at hand one role: organizer (Support each month and faster musters in that town),
+      delegate (a steady shift of that bloc while he stays), envoy (the parley).
+
+      relieve_person (person): he gives up his role and is at hand again.
+
+      use_agent (person, and army_id or province by ability): spends one use of an agent's ability.
+      alarm: only while a battle is pending in which the player defends; the defenders muster at
+      once. scout (army_id, an enemy army): its true strength is known for a time. engineer
+      (province): one more level of works for its defenders for a time. boats (army_id, the player's
+      own): it may use ferry and boat edges for a time. pen (province): Support.
+
+      lobby (action write | favor, bloc): write uses one clerk slot for a small shift; favor spends
+      one favor for a large shift.
+
+      vote_now (measure): calls the vote of a congress measure before its date.
+
+      send_dispatch (measure): sends a request to the home government; it is voted on when it
+      reaches London and answered when the reply comes back.
+
+      decide (decision, option, and person when the option commits one): answers the pending
+      decision.
+  army_id: {type: string}
+  province: {type: string}
+  person: {type: string}
+  role: {type: string, enum: [organizer, delegate, envoy]}
+  bloc: {type: string}
+  action: {type: string, enum: [write, favor]}
+  measure: {type: string}
+  decision: {type: string}
+  option: {type: string}

@@ -1,5 +1,6 @@
 #include "PA250BattleCards.h"
 #include "Battle/PA250BattleModes.h"
+#include "pa250/sim.hpp"
 #include "PA250HudStyle.h"
 #include "Widgets/Images/SImage.h"
 #include "Widgets/Layout/SBox.h"
@@ -27,6 +28,11 @@ const FLabel GLabels[] = {
 	{"fortification", TEXT("Fortification")},
 	{"reinforcement", TEXT("Reinforcements")},
 	{"militia_muster", TEXT("Militia muster")},
+	{"guns", TEXT("Field guns")},
+	{"alarm", TEXT("Alarm")},
+	{"withdraw_early", TEXT("Withdraws early")},
+	{"stand_fast", TEXT("Stands fast")},
+	{"magazine_saved", TEXT("Magazine saved")},
 };
 
 int32 Sum(const std::map<std::string, std::map<std::string, int>>& M, const std::string& Faction)
@@ -74,7 +80,8 @@ TArray<PA250BattleCards::FRow> PA250BattleCards::SideRows(const pa250::SideSetup
 				R.Label = Words;
 				R.Value = Id == "fortification" ? (Final(Id, F.value) > 0 ? FString::Printf(TEXT("L%d"), Final(Id, F.value)) : FString(TEXT("none")))
 					: Id == "reinforcement" ? FString::Printf(TEXT("+%d%%"), F.value)
-					: Id == "militia_muster" ? FString(TEXT("yes"))
+					: Id == "militia_muster" || Id == "alarm" || Id == "stand_fast" ? FString(TEXT("yes"))
+					: Id == "withdraw_early" || Id == "magazine_saved" ? FString::Printf(TEXT("%d%%"), F.value)
 					: FString::FromInt(Final(Id, F.value));
 			}
 			else
@@ -90,7 +97,7 @@ TArray<PA250BattleCards::FRow> PA250BattleCards::SideRows(const pa250::SideSetup
 	// Anything the sim explains that this card has no words for yet still shows, under its own id.
 	for (const pa250::SideFactor& F : Side.factors)
 	{
-		bool bKnown = false;
+		bool bKnown = F.label == "commander";  // the commander has his own block above the numbers
 		for (const FLabel& L : GLabels) bKnown = bKnown || F.label == L.Id;
 		if (bKnown) continue;
 		FRow R;
@@ -100,6 +107,55 @@ TArray<PA250BattleCards::FRow> PA250BattleCards::SideRows(const pa250::SideSetup
 		R.Value = FString::FromInt(F.value);
 		R.Source = ToF(F.source);
 		Rows.Add(R);
+	}
+	return Rows;
+}
+
+PA250BattleCards::FCommander PA250BattleCards::Commander(const pa250::SideSetup& Side)
+{
+	FCommander C;
+	C.bGeneral = !Side.commander_id.empty();
+	C.Name = ToF(Side.commander_name);
+	for (const pa250::SideFactor& F : Side.factors)
+	{
+		if (F.label == "commander") C.Line = ToF(F.source);
+	}
+	// "General Artemas Ward" -> "AW": the plate that stands in for his portrait.
+	TArray<FString> Words;
+	C.Name.ParseIntoArray(Words, TEXT(" "));
+	for (int32 i = FMath::Max(0, Words.Num() - 2); i < Words.Num(); ++i)
+	{
+		if (!Words[i].IsEmpty() && FChar::IsUpper(Words[i][0])) C.Initials.AppendChar(Words[i][0]);
+	}
+	for (const std::string& T : Side.commander_traits)
+	{
+		FString Word = ToF(T);
+		if (!Word.IsEmpty()) Word[0] = FChar::ToUpper(Word[0]);
+		C.Traits += (C.Traits.IsEmpty() ? TEXT("") : TEXT(", ")) + Word;
+	}
+	return C;
+}
+
+TArray<PA250BattleCards::FRow> PA250BattleCards::EstimateRows(const pa250::SideSetup& Side)
+{
+	TArray<FRow> Rows;
+	FRow Men;
+	Men.Label = TEXT("Men");
+	Men.Value = FString::Printf(TEXT("%d-%d"), Side.intel_men_low, Side.intel_men_high);
+	Men.Source = ToF(Side.intel_source);
+	Rows.Add(Men);
+	for (const TCHAR* Label : {TEXT("On the field"), TEXT("Rounds a man"), TEXT("Morale"), TEXT("Readiness")})
+	{
+		FRow R;
+		R.Label = Label;
+		R.Value = TEXT("?");
+		R.Source = TEXT("Not known: scout this army, or keep an organizer in the town");
+		Rows.Add(R);
+	}
+	// What can be seen from the road is known all the same: works, and guns drawn up.
+	for (const FRow& R : SideRows(Side))
+	{
+		if (R.Label == TEXT("Fortification") || R.Label == TEXT("Field guns")) Rows.Add(R);
 	}
 	return Rows;
 }
@@ -247,13 +303,37 @@ TSharedRef<SWidget> SideColumn(const pa250::BattleSetup& Setup, const std::strin
 		Col->AddSlot().AutoHeight()[Text(TEXT("No army"), TEXT("Italic"), 13, InkDim)];
 		return Col;
 	}
-	for (const PA250BattleCards::FRow& R : PA250BattleCards::SideRows(It->second))
+	// Who commands, beside his plate: his traits are rows below with him as their source.
+	{
+		const PA250BattleCards::FCommander C = PA250BattleCards::Commander(It->second);
+		if (!C.Line.IsEmpty())
+		{
+			TSharedRef<SHorizontalBox> Who = SNew(SHorizontalBox);
+			if (C.bGeneral)
+			{
+				Who->AddSlot().AutoWidth().Padding(0.f, 0.f, 10.f, 0.f)
+					[SNew(SBox).WidthOverride(52.f).HeightOverride(58.f)
+						 [SNew(SBorder)
+							  .BorderImage(&FPA250HudStyle::Get().Header)
+							  .HAlign(HAlign_Center)
+							  .VAlign(VAlign_Center)
+								  [Text(C.Initials, TEXT("Bold"), 15, FPA250HudStyle::Brass)]]];
+			}
+			Who->AddSlot().FillWidth(1.f).VAlign(VAlign_Center)
+				[SNew(SVerticalBox)
+				 + SVerticalBox::Slot().AutoHeight()[Text(C.Line, TEXT("Bold"), 13, Ink, 340.f)]
+				 + SVerticalBox::Slot().AutoHeight()[Text(C.bGeneral ? C.Traits : FString(TEXT("It cannot besiege, and takes in few units")), TEXT("Italic"), 12, InkDim, 340.f)]];
+			Col->AddSlot().AutoHeight().Padding(0.f, 0.f, 0.f, 6.f)[Who];
+		}
+	}
+	const bool bEstimate = !bMine && It->second.intel == "estimate";
+	for (const PA250BattleCards::FRow& R : bEstimate ? PA250BattleCards::EstimateRows(It->second) : PA250BattleCards::SideRows(It->second))
 	{
 		Col->AddSlot().AutoHeight().Padding(0.f, R.bChange ? 0.f : 5.f, 0.f, 0.f)
 			[SNew(SHorizontalBox)
-			 + SHorizontalBox::Slot().AutoWidth()[SNew(SBox).WidthOverride(112.f)[Text(R.Label, TEXT("Bold"), 13, Ink)]]
+			 + SHorizontalBox::Slot().AutoWidth()[SNew(SBox).WidthOverride(bEstimate ? 104.f : 112.f)[Text(R.Label, TEXT("Bold"), 13, Ink)]]
 			 + SHorizontalBox::Slot().AutoWidth().Padding(0.f, 0.f, 10.f, 0.f)
-				   [SNew(SBox).WidthOverride(46.f).HAlign(HAlign_Right)[Text(R.Value, R.bChange ? TEXT("Regular") : TEXT("Bold"), R.bChange ? 12 : 15, R.bChange ? InkDim : Ink)]]
+				   [SNew(SBox).WidthOverride(bEstimate ? 62.f : 46.f).HAlign(HAlign_Right)[Text(R.Value, R.bChange ? TEXT("Regular") : TEXT("Bold"), R.bChange ? 12 : 15, R.bChange ? InkDim : Ink)]]
 			 + SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Center)[Text(R.Source, TEXT("Regular"), 12, InkDim, 250.f)]];
 	}
 	return Col;
@@ -275,7 +355,16 @@ FString PA250BattleCards::ModeLine(const pa250::BattleSetup& Setup)
 {
 	const FName Mode(UTF8_TO_TCHAR(Setup.mode.c_str()));
 	const FString Kind = FString(PA250Modes::ModeWords(Mode)).ToLower();
-	return FString::Printf(TEXT("The %s attack: %s. %s"), *FactionName(Setup.attacker_faction), *Kind, PA250Modes::ModeRule(Mode));
+	FString Line = FString::Printf(TEXT("The %s attack: %s. %s"), *FactionName(Setup.attacker_faction), *Kind, PA250Modes::ModeRule(Mode));
+	// The player attacks works with no general: the field may be won, the town cannot be.
+	const auto Mine = Setup.sides.find(Setup.player_faction);
+	const auto Def = Setup.sides.find(Setup.defender_faction);
+	if (pa250::persons_loaded() && Setup.attacker_faction == Setup.player_faction && Mine != Setup.sides.end() && Def != Setup.sides.end()
+		&& Def->second.fortification_level > 0 && Mine->second.commander_id.empty())
+	{
+		Line += TEXT(" YOUR ARMY HAS NO GENERAL: even a victory here cannot begin the siege of these works, and the town will not change hands.");
+	}
+	return Line;
 }
 
 TSharedRef<SWidget> PA250BattleCards::BuildPreBattle(const pa250::BattleSetup& Setup)

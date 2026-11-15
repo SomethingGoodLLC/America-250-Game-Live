@@ -26,6 +26,14 @@ std::vector<std::string> validate_scenario_graph(const CampaignState& s);
 TickOutput advance_hour(const CampaignState& s);  // pure; consumes pending_commands due this hour
 CampaignState enqueue_command(const CampaignState& s, CommandPayload p);  // apply_on_hour=now+1
 PathPlan plan_path(const CampaignState& s, const std::string& army_id, const std::string& dest);
+// Pure: the march an army is on now (its remaining edges, the towns along them, the march hours
+// still to go and the hour it arrives), or the march a queued MoveArmy command will start. ok=false
+// with error "not_marching" when it has no march and none is queued.
+PathPlan march_plan(const CampaignState& s, const std::string& army_id);
+// Pure: the halt order (CommandKind::HaltArmy applies this). Standing in a town the order and the
+// progress are cleared; part-way along a leg the army turns about and needs the march hours it had
+// spent on the leg to be back where the leg began. error: unknown_army.
+CampaignState halt_army(const CampaignState& s, const std::string& army_id, std::string& error);
 
 // Order validation (adjacency / ceasefire) for UI hints
 std::vector<std::string> validate_order(const CampaignState& state, const Order& order);
@@ -119,6 +127,54 @@ BattleResult auto_resolve_battle(const CampaignState& state, const BattleSetup& 
 // SIM ONLY: a player who never acts. Advances up to max_hours, settling every battle with
 // auto_resolve_battle, and stops when the campaign is decided. Deterministic for a given state.
 CampaignState run_idle_campaign(const CampaignState& state, int max_hours);
+
+// ---- Campaign pass: people, lobbying, decisions --------------------------
+// Data: persons_boston_1775.json, bodies_boston_1775.json + measures_boston_1775.json,
+// decisions_boston_1775.json. Each part runs only while its file is loaded (the game loads all of
+// them). Loaders return "code: detail" errors and load nothing when there is one.
+std::vector<std::string> load_persons(const std::string& json_text);
+void unload_persons();
+bool persons_loaded();
+std::vector<std::string> load_politics(const std::string& bodies_json, const std::string& measures_json);
+void unload_politics();
+bool politics_loaded();
+std::vector<std::string> load_decisions(const std::string& json_text);
+void unload_decisions();
+bool decisions_loaded();
+// A campaign order (protocol/schemas/campaign_orders.yaml), as a JSON object. validate returns ""
+// when the order can be carried out now, else its refusal code. apply is the pure function the
+// CampaignOrder command runs; on a refusal it returns the state unchanged and sets error.
+std::string validate_campaign_order(const CampaignState& state, const std::string& order_json);
+CampaignState apply_campaign_order(const CampaignState& state, const std::string& order_json, std::string& error);
+// The general commanding an army ("" for a detachment), and his display name.
+std::string general_of(const CampaignState& state, const std::string& army_id);
+// Why this army cannot take the town by standing in it or by winning a battle there, in plain words
+// for the player ("" when it can, or when the town is not an enemy town with works). Today the one
+// reason is the people rule: an army with no general is a detachment and cannot besiege a fort.
+// Pure; display only (the rules themselves are in apply_battle_result and the occupation tick).
+std::string why_cannot_besiege(const CampaignState& state, const std::string& army_id, const std::string& province);
+// How the side gets a general for an army, in plain words: who is at hand (or when the first
+// comes), and the towns it holds where an army can be formed. "" when persons are not loaded.
+std::string how_to_form_army(const CampaignState& state, const std::string& faction);
+std::string person_name(const std::string& person_id);
+// Most units the army may take in: a detachment's cap, or an army's under a general. 0 = no cap
+// (persons not loaded, or no such army).
+int army_unit_cap(const CampaignState& state, const std::string& army_id);
+// The battle's rules for a general, and what becomes of one who falls: wounded | killed |
+// captured, drawn from the battle's seed (the same battle always gives the same fate).
+CommanderRules commander_rules();
+std::string commander_fate(uint64_t battle_seed, const std::string& faction);
+// Unity: 100 less the spread between the warmest and coolest bloc of the player's body.
+int unity(const CampaignState& state);
+// Read-only snapshots for the HUD (JSON text).
+std::string persons_json(const CampaignState& state);   // every person of the player's side: role, where, uses, traits
+std::string politics_json(const CampaignState& state);  // the floor: blocs, measures, dispatches, favors, unity, confidence
+std::string decision_json(const CampaignState& state);  // the pending decision, or {"pending":false}
+// What `viewer` knows of an army: {"known":bool,"men_low":n,"men_high":n,"source":text}.
+std::string army_intel_json(const CampaignState& state, const std::string& viewer_faction, const std::string& army_id);
+// Gold a purchase costs now (purchase_cost and the rise in prices paper money brought).
+int purchase_cost_now(const CampaignState& state, int powder, int cartridges, int muskets, int bayonets,
+                      int provisions, int lead, int paper);
 
 // ---- Logistics / correspondence / staff (pure) -------------------------
 // Ensure default stores/staff exist (called from load_scenario path).
@@ -294,6 +350,10 @@ void load_correspondence_catalog(const std::string& json_text);
 bool correspondence_catalog_loaded();
 const CorrespondenceCatalogEntry* find_correspondence_entry(const std::string& source_id);
 std::vector<CorrespondenceCatalogEntry> correspondence_catalog_entries();
+// The detached commander's letter: its answers, and the town its factors stand at (empty when the
+// catalog has no commander_letter block).
+std::vector<CommanderLetterChoice> commander_letter_choices();
+std::string commander_letter_province();
 void ensure_donor_reserve_defaults(CampaignState& s);
 void seed_opening_war_correspondence(CampaignState& s, std::vector<Interrupt>* interrupts);
 void release_due_personnel_commitments(CampaignState& s);

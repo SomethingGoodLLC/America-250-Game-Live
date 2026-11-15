@@ -1,0 +1,25 @@
+{
+ "name": "order_use_agent_engineer",
+ "description": "an engineer lays out works in a town the player holds",
+ "start_ymdh": {
+  "y": 1775,
+  "m": 4,
+  "d": 25,
+  "h": 0
+ },
+ "order": {
+  "order": "use_agent",
+  "person": "richard_gridley",
+  "province": "roxbury"
+ },
+ "expect": {
+  "town_factor": {
+   "province": "roxbury",
+   "label": "fortification",
+   "value": 1
+  },
+  "uses_left": {
+   "richard_gridley": 1
+  }
+ }
+}

@@ -300,6 +300,8 @@ CampaignState apply_diplomacy(const CampaignState& in, const DiplomacyResult& r)
             army.province = dest;
             army.path.clear();
             army.hours_into_edge = 0;  // unharmed: units and morale untouched
+            army.returning_edge.clear();
+            army.returning_hours = 0;
             if (s.pending_battle.active &&
                 (s.pending_battle.attacker_army == cl.army_id || s.pending_battle.defender_army == cl.army_id))
                 s.pending_battle = {};

@@ -54,6 +54,8 @@ public:
 	static FString BattleRulesPath();
 	static FString CampaignRulesPath();
 	static FString MissionsPath();
+	/** A file of the sim's data directory (unreal/PA250Sim/data). */
+	static FString SimDataPath(const TCHAR* FileName);
 	static FString SavePath();
 	bool EnsureCorrespondenceCatalog(FString& OutError);
 	static FString TracePath();
@@ -81,6 +83,16 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "PA250")
 	bool QueueMove(const FString& ArmyId, const FString& ToProvince, FString& OutError);
+	// ---- Campaign pass: people, lobbying, decisions ----
+	/** Issue a campaign order (protocol/schemas/campaign_orders.yaml). OutError is the sim's refusal code. */
+	bool IssueOrderJson(const FString& OrderJson, FString& OutError);
+	bool IsDecisionPending() const { return !Controller.state().pass.pending_decision.empty(); }
+	/** Halt one army (an order command, applied on the next hour). Part-way along a leg it turns
+	 *  about and marches back to where the leg began (sim: halt_army). */
+	UFUNCTION(BlueprintCallable, Category = "PA250")
+	bool HaltArmy(const FString& ArmyId, FString& OutError);
+	/** True when the army is marching, has a march queued, or is turning back from a halt. */
+	bool IsArmyOnTheMarch(const FString& ArmyId) const;
 	UFUNCTION(BlueprintCallable, Category = "PA250")
 	void ClearOrders();
 	UFUNCTION(BlueprintCallable, Category = "PA250")
@@ -245,6 +257,12 @@ public:
 	/** Display only: a battle result was applied and its report has not been shown on the map yet. */
 	bool HasUnseenBattleReport() const { return bUnseenBattleReport; }
 	void AcknowledgeBattleReport() { bUnseenBattleReport = false; }
+	/** Display only: a mission of the player's has ended and its card has not been closed yet. The
+	 *  clock stops when one ends and starts again when the card is closed (if it was running). */
+	bool HasUnseenMissionResult() const;
+	/** The oldest result not yet shown, or null. */
+	const pa250::MissionResult* PeekMissionResult() const;
+	void AcknowledgeMissionResult();
 
 	FString AutoplayStage;
 	bool WriteTrace(const FString& Extra = FString()) const;
@@ -274,8 +292,14 @@ private:
 	TArray<FString> AutosavePaths;
 	int32 HudEpoch = 0;
 	bool bUnseenBattleReport = false;
+	/** How many of the state's mission results the player has been shown. */
+	int32 MissionResultsSeen = 0;
+	/** The clock was running when a mission ended: closing its card starts the clock again. */
+	bool bPausedByMission = false;
 	/** The clock was stopped by a letter, not by the player: answering it starts the clock again. */
 	bool bPausedByLetter = false;
+	/** The clock was running when a decision was put: answering it starts the clock again. */
+	bool bPausedByDecision = false;
 	bool bDeskOpen = false;
 	int32 DispatchSerial = 0;
 	FString LastDispatch;

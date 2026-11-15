@@ -1,0 +1,24 @@
+{
+ "name": "order_assign_delegate",
+ "description": "a delegate sits with one bloc of the body that is sitting",
+ "start_ymdh": {
+  "y": 1775,
+  "m": 4,
+  "d": 20,
+  "h": 0
+ },
+ "order": {
+  "order": "assign_person",
+  "person": "john_adams",
+  "role": "delegate",
+  "bloc": "country_towns"
+ },
+ "expect": {
+  "persons": {
+   "john_adams": {
+    "role": "delegate",
+    "bloc": "country_towns"
+   }
+  }
+ }
+}

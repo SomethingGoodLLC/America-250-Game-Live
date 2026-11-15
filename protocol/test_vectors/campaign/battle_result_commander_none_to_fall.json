@@ -1,0 +1,31 @@
+{
+ "name": "battle_result_commander_none_to_fall",
+ "description": "an event for a side that had no general is ignored",
+ "start_ymdh": {
+  "y": 1775,
+  "m": 4,
+  "d": 20,
+  "h": 0
+ },
+ "battle": {
+  "province": "lexington",
+  "attacker": "british_regulars",
+  "defender": "continental_militia"
+ },
+ "generals": {
+  "british_regulars": "francis_smith"
+ },
+ "result": {
+  "province_id": "lexington",
+  "winner": "british",
+  "end_reason": "army_broke",
+  "commander_events": {
+   "continental": "killed"
+  }
+ },
+ "expect": {
+  "schema_valid": true,
+  "applied": true,
+  "report_commander_events": {}
+ }
+}

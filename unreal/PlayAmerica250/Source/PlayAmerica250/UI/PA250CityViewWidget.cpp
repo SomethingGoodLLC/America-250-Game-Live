@@ -81,6 +81,10 @@ struct FPA250CityForce
 	int32 Readiness = 0;
 	/** Rounds in each man's cartridge box (the sim's carried_rounds). */
 	int32 Rounds = 0;
+	/** The general who commands it ("" for a detachment), its men, and the units it may take in. */
+	FString General;
+	int32 Men = 0;
+	int32 UnitCap = 0;
 };
 
 // A company the town can raise.
@@ -598,9 +602,12 @@ void UPA250CityViewWidget::Refresh()
 			F.Name = Obj->GetStringField(TEXT("name"));
 			F.bYours = Obj->GetBoolField(TEXT("yours"));
 			F.bMarching = Obj->GetBoolField(TEXT("marching"));
+			Obj->TryGetStringField(TEXT("general"), F.General);
 			if (F.bYours)
 			{
 				F.Fit = Obj->GetIntegerField(TEXT("fit"));
+				Obj->TryGetNumberField(TEXT("men"), F.Men);
+				Obj->TryGetNumberField(TEXT("unit_cap"), F.UnitCap);
 				F.Sick = Obj->GetIntegerField(TEXT("sick"));
 				F.Wounded = Obj->GetIntegerField(TEXT("wounded"));
 				F.Morale = Obj->GetIntegerField(TEXT("morale"));
@@ -859,9 +866,16 @@ TSharedRef<SWidget> UPA250CityViewWidget::BuildForceList()
 		TSharedRef<SVerticalBox> Text = SNew(SVerticalBox) +
 			SVerticalBox::Slot().AutoHeight()
 				[SNew(STextBlock).Font(Font(TEXT("Bold"), 12)).ColorAndOpacity(F.bYours ? KCream : KRed).Text(FText::FromString(F.Name))];
+		// Who commands it (known for either side); a force of yours with no general is a detachment.
+		if (!F.General.IsEmpty() || F.bYours)
+		{
+			Text->AddSlot().AutoHeight()
+				[SNew(STextBlock).Font(Font(TEXT("Italic"), 10)).ColorAndOpacity(KGold).Text(FText::FromString(
+					 !F.General.IsEmpty() ? F.General + TEXT(" commands") : FString::Printf(TEXT("No general: a detachment (takes in up to %d units, cannot besiege)"), F.UnitCap)))];
+		}
 		if (F.bYours)
 		{
-			FString Line = FString::Printf(TEXT("%d fit"), F.Fit);
+			FString Line = FString::Printf(TEXT("%d men in %d units"), F.Men, F.Fit);
 			if (!F.Composition.IsEmpty()) Line += TEXT("  (") + F.Composition + TEXT(")");
 			if (F.Sick + F.Wounded > 0) Line += FString::Printf(TEXT("  ·  %d sick, %d wounded"), F.Sick, F.Wounded);
 			Text->AddSlot().AutoHeight()

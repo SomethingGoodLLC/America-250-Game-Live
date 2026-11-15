@@ -2609,6 +2609,127 @@ void RunSupport(FLog& Log)
 	}
 }
 
+void RunPlaytest(FLog& Log)
+{
+	Log.Check(PA250UnitClasses::LoadFromFile(PA250UnitClasses::DataPath()), TEXT("playtest: unit_classes.json loads"));
+	const FPA250ClassVerbs& V = PA250UnitClasses::Verbs();
+	// 1) "The commands for men to follow are not obeyed": the file used to form three metres behind
+	//    the leader's back, out of his sight. Now it stands at his shoulders.
+	{
+		Log.Check(V.SquadFollowBehindM <= 1.f && V.SquadFollowSpacingM >= 0.8f && V.SquadFollowSpacingM <= 2.f && V.SquadRunWhenBehindM > 0.f && V.SquadWithYouM > V.SquadRunWhenBehindM
+			&& V.SquadFollowTurnDegrees > 15.f, TEXT("playtest: the follow values come from unit_classes.json (at his shoulders, not behind his back)"));
+		TArray<FVector2D> Six, Seven, One, None;
+		PA250Squad::AbreastOffsets(6, 120.f, Six);
+		PA250Squad::AbreastOffsets(7, 120.f, Seven);
+		PA250Squad::AbreastOffsets(1, 120.f, One);
+		PA250Squad::AbreastOffsets(0, 120.f, None);
+		int32 Left = 0, Right = 0;
+		bool bClearOfHim = true, bOneRank = true, bLeftToRight = true;
+		for (int32 i = 0; i < Six.Num(); ++i)
+		{
+			Left += Six[i].X < 0.f ? 1 : 0;
+			Right += Six[i].X > 0.f ? 1 : 0;
+			bClearOfHim &= FMath::Abs(Six[i].X) >= 119.f;
+			bOneRank &= Six[i].Y == 0.f;
+			bLeftToRight &= i == 0 || Six[i].X > Six[i - 1].X;
+		}
+		Log.Check(Six.Num() == 6 && Left == 3 && Right == 3 && bClearOfHim && bOneRank && bLeftToRight,
+			TEXT("playtest: six men following stand three to each side of their leader, in one rank, none where he stands"));
+		Log.Check(Seven.Num() == 7 && One.Num() == 1 && One[0].X == 120.f && None.Num() == 0, TEXT("playtest: an odd man goes to the right; one man stands at his right hand; no men, no places"));
+		const FVector Line(1.f, 0.f, 0.f);
+		const FVector Turned30 = FRotator(0.f, 30.f, 0.f).Vector(), Turned60 = FRotator(0.f, 60.f, 0.f).Vector();
+		Log.Check(PA250Squad::FollowTurns(Line, Turned30, true, V.SquadFollowTurnDegrees) && !PA250Squad::FollowTurns(Line, Turned30, false, V.SquadFollowTurnDegrees)
+			&& PA250Squad::FollowTurns(Line, Turned60, false, V.SquadFollowTurnDegrees),
+			TEXT("playtest: the line turns with him on the move; standing, he may look about 30 degrees without wheeling it, not 60"));
+		const FString All = APA250BattleGameMode::FileLineText(6, 5, 0, PA250Squad::OrderWords(EPA250SquadOrder::FollowMe), true, 6);
+		const FString Some = APA250BattleGameMode::FileLineText(6, 5, 0, PA250Squad::OrderWords(EPA250SquadOrder::FollowMe), true, 4);
+		Log.Check(All.Contains(TEXT("6 men (all with you), 5 loaded")) && Some.Contains(TEXT("(4 with you, 2 coming up)")),
+			FString::Printf(TEXT("playtest: the HUD says how many of his file are at his side (%s)"), *Some.Left(60)));
+		FPA250FormationOrder O;
+		Log.Check(!O.bHurry && O.HurryBeyondCm > 0.f, TEXT("playtest: a line walks to its places unless its own leader's order hurries it"));
+	}
+	// 2) "Winning a mission needs a popup with a result, and a reward."
+	pa250::load_campaign_rules(pa250::read_text_file(TCHAR_TO_UTF8(*UPA250Subsystem::CampaignRulesPath())));
+	pa250::load_missions(pa250::read_text_file(TCHAR_TO_UTF8(*UPA250Subsystem::MissionsPath())));
+	{
+		const pa250::CampaignState St = pa250::load_scenario(pa250::read_text_file(TCHAR_TO_UTF8(*UPA250Subsystem::ScenarioPath())));
+		const pa250::CampaignState Won = pa250::apply_mission_effect(St, "p1_save_the_stores", "complete");
+		Log.Check(Won.progress.mission_results.size() == 1 && Won.player_gold == St.player_gold + 25, TEXT("playtest: the first mission done pays 25 gold and leaves a result for the card"));
+		if (Won.progress.mission_results.size() == 1)
+		{
+			const PA250ArcPanels::FMissionCard Card = PA250ArcPanels::MissionCard(Won.progress.mission_results[0], Won);
+			bool bGold = false, bSupport = false, bMorale = false, bIds = false;
+			for (const FString& L : Card.Lines)
+			{
+				bGold |= L == FString::Printf(TEXT("Treasury +25 gold (now %d)"), Won.player_gold);
+				bSupport |= L.StartsWith(TEXT("Support +"));
+				bMorale |= L == TEXT("Morale of your armies +3");
+				bIds |= L.Contains(TEXT("_"));
+			}
+			Log.Check(Card.bDone && Card.Heading == TEXT("MISSION DONE") && Card.Title == TEXT("Save the stores") && Card.Summary.Contains(TEXT("+25 gold")) && bGold && bSupport && bMorale && !bIds,
+				FString::Printf(TEXT("playtest: the card says the mission is done and what it paid (%s)"), *FString::Join(Card.Lines, TEXT("; "))));
+			Log.Check(!Card.Next.IsEmpty() && !Card.Next.Contains(TEXT("_")), FString::Printf(TEXT("playtest: the card names what comes next (%s)"), *Card.Next.Left(70)));
+		}
+		const pa250::CampaignState Lost = pa250::apply_mission_effect(St, "p1_save_the_stores", "failed");
+		if (Lost.progress.mission_results.size() == 1)
+		{
+			const PA250ArcPanels::FMissionCard Card = PA250ArcPanels::MissionCard(Lost.progress.mission_results[0], Lost);
+			Log.Check(!Card.bDone && Card.Heading == TEXT("MISSION FAILED") && Card.Lines.Num() >= 1 && Card.Lines[0].StartsWith(TEXT("Support -")),
+				TEXT("playtest: a mission lost says so and what it cost"));
+		}
+		pa250::MissionResult Bare;
+		Bare.title = "Nothing";
+		Bare.outcome = "failed";
+		Log.Check(PA250ArcPanels::MissionCard(Bare, St).Lines.Num() == 1, TEXT("playtest: a mission that changed nothing still says so, in one line"));
+	}
+	// 3) "I won at Boston and could not take it" / "marching to Charlestown did nothing": an army
+	//    with no general cannot besiege, and now every place that matters says so.
+	{
+		pa250::load_persons(pa250::read_text_file(TCHAR_TO_UTF8(*UPA250Subsystem::SimDataPath(TEXT("persons_boston_1775.json")))));
+		pa250::CampaignState St = pa250::load_scenario(pa250::read_text_file(TCHAR_TO_UTF8(*UPA250Subsystem::ScenarioPath())));
+		Log.Check(PA250ArcPanels::SiegeNotices(St).Num() == 0, TEXT("playtest: no notice while no army stands before, or marches on, an enemy fort"));
+		St.provinces.at("charlestown").owner = "british";
+		St.armies.at("continental_militia").province = "charlestown";
+		const TArray<FString> Standing = PA250ArcPanels::SiegeNotices(St);
+		Log.Check(Standing.Num() == 2 && Standing[0].Contains(TEXT("no general")) && Standing[0].Contains(TEXT("Charlestown")) && Standing[1].Contains(TEXT("People")) && !Standing[0].Contains(TEXT("_")),
+			FString::Printf(TEXT("playtest: standing in British Charlestown the tracker says why nothing happens and what to do (%s)"), Standing.Num() > 0 ? *Standing[0] : TEXT("no notice")));
+		// On the march to it as well.
+		St.armies.at("continental_militia").province = "cambridge";
+		St.armies.at("continental_militia").path = {"charlestown-cambridge"};
+		const TArray<FString> Marching = PA250ArcPanels::SiegeNotices(St);
+		Log.Check(Marching.Num() == 2 && Marching[0].Contains(TEXT("Charlestown")), TEXT("playtest: the same notice while the army is still marching on the fort"));
+		// The battle cards: before, a warning; after, the reason.
+		St.armies.at("continental_militia").path.clear();
+		St.armies.at("continental_militia").province = "boston";
+		St.armies.at("continental_militia").previous_province = "roxbury";
+		St.armies.at("british_regulars").province = "chelsea";
+		St.pending_battle = {true, "boston", "continental_militia", "british_garrison"};
+		const pa250::BattleSetup Setup = pa250::build_battle_setup(St, "boston");
+		const FString Before = PA250BattleCards::ModeLine(Setup);
+		Log.Check(Setup.mode == "assault" && Before.Contains(TEXT("YOUR ARMY HAS NO GENERAL")) && Before.Contains(TEXT("will not change hands")),
+			FString::Printf(TEXT("playtest: the pre-battle card at Boston warns that a victory cannot take the town (%s)"), *Before.Right(110)));
+		pa250::BattleResult Res;
+		Res.province_id = "boston";
+		Res.winner = "continental";
+		Res.end_reason = "posts_swept";
+		Res.objective_holder = "continental";
+		const pa250::CampaignState After = pa250::apply_battle_result(St, Res);
+		const PA250BattleCards::FAfter Card = PA250BattleCards::AfterBattle(After.progress.last_battle_report, After);
+		bool bWhy = false, bHow = false;
+		for (const FString& L : Card.MapChanges)
+		{
+			bWhy |= L.Contains(TEXT("must be besieged")) && L.Contains(TEXT("no general"));
+			bHow |= L.Contains(TEXT("People"));
+		}
+		Log.Check(After.provinces.at("boston").owner == "british" && bWhy && bHow, TEXT("playtest: the after-battle card says Boston stays British because the victors have no general, and how to get one"));
+		// With no people file there is no such rule and no such warning.
+		pa250::unload_persons();
+		Log.Check(!PA250BattleCards::ModeLine(Setup).Contains(TEXT("NO GENERAL")) && PA250ArcPanels::SiegeNotices(St).Num() == 0, TEXT("playtest: without the people file nothing is said about generals"));
+	}
+	pa250::unload_missions();
+	pa250::unload_campaign_rules();
+}
+
 void RunFeel(FLog& Log)
 {
 	const std::string RulesText = pa250::read_text_file(TCHAR_TO_UTF8(*UPA250Subsystem::BattleRulesPath()));

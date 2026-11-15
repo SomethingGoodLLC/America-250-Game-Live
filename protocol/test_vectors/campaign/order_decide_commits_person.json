@@ -1,0 +1,37 @@
+{
+ "name": "order_decide_commits_person",
+ "description": "the general sent with the expedition leaves the map for the option's days and comes back at hand",
+ "start_ymdh": {
+  "y": 1775,
+  "m": 9,
+  "d": 5,
+  "h": 1
+ },
+ "setup": {
+  "pending_decision": "canada_expedition",
+  "decisions_taken": {
+   "which_heights": "charlestown"
+  }
+ },
+ "order": {
+  "order": "decide",
+  "decision": "canada_expedition",
+  "option": "send_expedition",
+  "person": "benedict_arnold"
+ },
+ "expect": {
+  "decision": {
+   "canada_expedition": "send_expedition"
+  },
+  "persons": {
+   "benedict_arnold": {
+    "status": "away",
+    "role": ""
+   }
+  },
+  "away_days": {
+   "benedict_arnold": 120
+  },
+  "favors": 3
+ }
+}

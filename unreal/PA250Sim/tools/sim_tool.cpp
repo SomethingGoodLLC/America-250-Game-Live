@@ -58,6 +58,16 @@ int idle_run(int argc, char** argv) {
         std::fprintf(stderr, "campaign rules or missions did not load\n");
         return 2;
     }
+    // The campaign pass, as the game loads it: people, lobbying, decisions (--no-pass leaves them out).
+    bool pass = true;
+    for (int i = 1; i < argc; ++i) pass = pass && std::string(argv[i]) != "--no-pass";
+    if (pass) {
+        std::vector<std::string> bad = load_persons(read_text_file(dir + "/persons_boston_1775.json"));
+        for (const auto& e : load_politics(read_text_file(dir + "/bodies_boston_1775.json"), read_text_file(dir + "/measures_boston_1775.json"))) bad.push_back(e);
+        for (const auto& e : load_decisions(read_text_file(dir + "/decisions_boston_1775.json"))) bad.push_back(e);
+        for (const auto& e : bad) std::fprintf(stderr, "campaign pass data: %s\n", e.c_str());
+        if (!bad.empty()) return 2;
+    }
     CampaignState s = load_scenario(read_text_file(dir + "/boston1775.json"));
     const std::string seed = arg(argc, argv, "--seed", "");
     if (!seed.empty()) s.seed = std::strtoull(seed.c_str(), nullptr, 10);

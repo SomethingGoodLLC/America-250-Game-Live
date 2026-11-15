@@ -1,0 +1,30 @@
+{
+ "name": "order_decide",
+ "description": "answering the pending decision applies the option's cost and gain at once and queues its consequence",
+ "start_ymdh": {
+  "y": 1775,
+  "m": 6,
+  "d": 13,
+  "h": 1
+ },
+ "setup": {
+  "pending_decision": "which_heights",
+  "gold": 100
+ },
+ "order": {
+  "order": "decide",
+  "decision": "which_heights",
+  "option": "dorchester"
+ },
+ "expect": {
+  "decision": {
+   "which_heights": "dorchester"
+  },
+  "fort_level": {
+   "dorchester": 1
+  },
+  "gold": 85,
+  "pending_decision": "",
+  "delayed": 1
+ }
+}

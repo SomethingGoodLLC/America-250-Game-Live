@@ -1,0 +1,174 @@
+# Persons of a campaign (Play America 250): generals, delegates, organizers, envoys and agents.
+# File: unreal/PA250Sim/data/persons_boston_1775.json, read by PA250Sim `load_persons`.
+# A person holds one role at a time. Roles, traits and abilities are CLOSED sets. Every claim about a
+# person is marked `documented` or `invented`; trait assignments and every number are the game's.
+$schema: "http://json-schema.org/draft-07/schema#"
+$id: "persons.v1"
+title: PersonsFile
+type: object
+additionalProperties: false
+required: [rules, abilities, traits, persons]
+properties:
+  note: {type: string}
+  rules:
+    type: object
+    additionalProperties: false
+    required: [detachment_unit_cap, army_unit_cap, muster_buildings, organizer, delegate, envoy, commander, estimates, informer]
+    properties:
+      detachment_unit_cap: {type: integer, minimum: 1, description: "Most units an army with no general may take in."}
+      army_unit_cap: {type: integer, minimum: 1, description: "Most units an army under a general may take in."}
+      muster_buildings:
+        type: array
+        items: {enum: [militia_muster, fort, church]}
+        description: "A town with one of these is a town with a muster: an army may be formed there."
+      organizer:
+        type: object
+        additionalProperties: false
+        required: [support_per_month, muster_hours_pct]
+        properties:
+          support_per_month: {type: integer}
+          muster_hours_pct: {type: integer, minimum: 1, maximum: 100}
+      delegate:
+        type: object
+        additionalProperties: false
+        required: [shift_per_week]
+        properties: {shift_per_week: {type: integer}}
+      envoy:
+        type: object
+        additionalProperties: false
+        required: [attitude_once]
+        properties: {attitude_once: {type: integer}}
+      commander:
+        type: object
+        additionalProperties: false
+        required: [aura_radius_m, home_post_radius_m, fall_pressure, fall_pressure_seconds, fall_fate_pct, wounded_days, army_morale_on_fall]
+        properties:
+          aura_radius_m: {type: number, minimum: 0}
+          home_post_radius_m: {type: number, minimum: 0}
+          fall_pressure: {type: number, minimum: 0}
+          fall_pressure_seconds: {type: number, minimum: 0}
+          fall_fate_pct:
+            type: object
+            additionalProperties: false
+            required: [wounded, killed, captured]
+            properties:
+              wounded: {type: integer, minimum: 0}
+              killed: {type: integer, minimum: 0}
+              captured: {type: integer, minimum: 0}
+          wounded_days: {type: integer, minimum: 1}
+          army_morale_on_fall: {type: integer}
+      estimates:
+        type: object
+        additionalProperties: false
+        required: [step_men, error_pct]
+        properties:
+          step_men: {type: integer, minimum: 1}
+          error_pct: {type: integer, minimum: 0, maximum: 90}
+      informer:
+        type: object
+        additionalProperties: false
+        required: [exposed_local_support]
+        properties: {exposed_local_support: {type: integer}}
+  abilities:
+    type: object
+    additionalProperties: false
+    properties:
+      alarm: {$ref: "#/definitions/ability"}
+      scout: {$ref: "#/definitions/ability"}
+      engineer: {$ref: "#/definitions/ability"}
+      boats: {$ref: "#/definitions/ability"}
+      pen: {$ref: "#/definitions/ability"}
+  traits:
+    type: object
+    additionalProperties: false
+    required: [defensive, aggressive, steadfast, adroit, engineer, popular]
+    properties:
+      defensive: {$ref: "#/definitions/trait"}
+      aggressive: {$ref: "#/definitions/trait"}
+      steadfast: {$ref: "#/definitions/trait"}
+      adroit: {$ref: "#/definitions/trait"}
+      engineer: {$ref: "#/definitions/trait"}
+      popular: {$ref: "#/definitions/trait"}
+  persons:
+    type: array
+    minItems: 1
+    items: {$ref: "#/definitions/person"}
+definitions:
+  ymd:
+    type: object
+    additionalProperties: false
+    required: [y, m, d]
+    properties:
+      y: {type: integer}
+      m: {type: integer, minimum: 1, maximum: 12}
+      d: {type: integer, minimum: 1, maximum: 31}
+  ability:
+    type: object
+    additionalProperties: false
+    required: [label, where, text]
+    properties:
+      label: {type: string}
+      where: {enum: [pre_battle, map_army, map_town]}
+      text: {type: string}
+      morale: {type: integer}
+      muster_at_once: {type: boolean}
+      days: {type: integer, minimum: 1}
+      fortification: {type: integer}
+      local_support: {type: integer}
+  trait:
+    type: object
+    additionalProperties: false
+    required: [label, text, effects]
+    properties:
+      label: {type: string}
+      text: {type: string}
+      effects:
+        type: array
+        minItems: 1
+        items:
+          type: object
+          additionalProperties: false
+          required: [when, label, value]
+          properties:
+            when: {enum: [always, attacking, defending, defending_own_ground]}
+            label: {enum: [morale, readiness, reinforcement, fortification]}
+            value: {type: integer}
+  person:
+    type: object
+    additionalProperties: false
+    required: [id, name, side, roles, note, basis]
+    properties:
+      id: {type: string, pattern: "^[a-z_]+$"}
+      name: {type: string}
+      rank: {type: string}
+      side: {enum: [british, continental]}
+      roles:
+        type: array
+        minItems: 1
+        items: {enum: [general, delegate, organizer, envoy, agent]}
+      available_from: {$ref: "#/definitions/ymd"}
+      requires_measure: {type: string, description: "He is at hand only once this measure (measures data id) has made him so."}
+      traits:
+        type: array
+        items: {enum: [defensive, aggressive, steadfast, adroit, engineer, popular]}
+        description: "A general has exactly two. Every assignment is invented."
+      ability: {enum: [alarm, scout, engineer, boats, pen]}
+      uses: {type: integer, minimum: 1}
+      starts_as:
+        type: object
+        additionalProperties: false
+        required: [role]
+        properties:
+          role: {enum: [general, delegate, organizer, envoy]}
+          army_id: {type: string}
+      commander_in_chief: {type: boolean}
+      informer:
+        type: object
+        additionalProperties: false
+        required: [for]
+        description: "While he holds any role the other side knows the true strength of his side's armies; on the exposed date he is found out and removed."
+        properties:
+          for: {enum: [british, continental]}
+          exposed: {$ref: "#/definitions/ymd"}
+      note: {type: string, minLength: 1}
+      basis: {enum: [documented, invented]}

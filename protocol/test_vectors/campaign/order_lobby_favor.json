@@ -1,0 +1,21 @@
+{
+ "name": "order_lobby_favor",
+ "description": "calling in a favor spends it and shifts the bloc by lobby.favor_shift",
+ "start_ymdh": {
+  "y": 1775,
+  "m": 4,
+  "d": 20,
+  "h": 0
+ },
+ "order": {
+  "order": "lobby",
+  "action": "favor",
+  "bloc": "seaport_merchants"
+ },
+ "expect": {
+  "bloc_lean": {
+   "seaport_merchants": 5
+  },
+  "favors": 0
+ }
+}

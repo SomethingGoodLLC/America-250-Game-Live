@@ -1,0 +1,82 @@
+# Battle stories (Play America 250): the history card shown before a battle while the field loads.
+# File: unreal/PA250Sim/data/battle_stories.json, read by the Unreal campaign (UI/PA250BattleStory).
+# Display only: nothing here changes campaign state. A story is matched by town, then by scenario,
+# then by the town's terrain (one fallback for each terrain tag). Pictures are public-domain works,
+# each with its credit; none is shipped until its status is "imported".
+$schema: "http://json-schema.org/draft-07/schema#"
+$id: "battle_stories.v1"
+title: BattleStoriesFile
+type: object
+additionalProperties: false
+required: [pan, narration, images, stories, fallbacks]
+properties:
+  note: {type: string}
+  pan:
+    type: object
+    additionalProperties: false
+    required: [seconds, zoom, travel]
+    properties:
+      seconds: {type: number, exclusiveMinimum: 0, description: "One slow pass across the picture."}
+      zoom: {type: number, minimum: 1, description: "How far the picture is enlarged so it can travel."}
+      travel: {type: number, minimum: 0, description: "Share of the picture's width it drifts."}
+  narration:
+    type: object
+    additionalProperties: false
+    required: [voice, asset_dir, source_dir]
+    properties:
+      voice: {type: string}
+      asset_dir: {type: string}
+      source_dir: {type: string}
+  images:
+    type: array
+    items:
+      type: object
+      additionalProperties: false
+      required: [key, status, work, artist, year, collection, licence]
+      properties:
+        key: {type: string, pattern: "^[a-z0-9_]+$"}
+        status: {enum: [wanted, imported]}
+        work: {type: string, minLength: 1}
+        artist: {type: string, minLength: 1}
+        year: {type: string, minLength: 1}
+        collection: {type: string, minLength: 1}
+        licence: {enum: ["public domain"]}
+  stories:
+    type: array
+    minItems: 1
+    items:
+      allOf:
+        - {$ref: "#/definitions/story"}
+        - required: [match]
+  fallbacks:
+    type: array
+    minItems: 1
+    items:
+      allOf:
+        - {$ref: "#/definitions/story"}
+        - required: [terrain]
+definitions:
+  story:
+    type: object
+    additionalProperties: false
+    required: [key, title, date, image, narration, text, basis]
+    properties:
+      key: {type: string, pattern: "^[a-z0-9_]+$"}
+      match:
+        type: object
+        additionalProperties: false
+        minProperties: 1
+        properties:
+          province: {type: string}
+          scenario: {enum: [lexington_common, concord_bridge, battle_road]}
+      terrain: {type: string}
+      title: {type: string, minLength: 1}
+      date: {type: string, minLength: 1}
+      image: {type: string, description: "Key of an entry in images."}
+      narration: {type: string, pattern: "^story_[a-z0-9_]+$", description: "Name of the pre-rendered narration (WAV in narration.source_dir, asset in narration.asset_dir); played if it has been imported."}
+      text:
+        type: array
+        minItems: 3
+        maxItems: 4
+        items: {type: string, minLength: 1}
+      basis: {enum: [documented, invented]}

@@ -80,6 +80,44 @@ std::vector<std::string> CampaignController::enqueue_halt(const std::string& arm
     return {};
 }
 
+std::string CampaignController::stamp_general(const std::string& army_id, const std::string& person_id) {
+    if (!started_) return "not_in_campaign";
+    if (!state_.armies.count(army_id)) return "unknown_army";
+    if (person_name(person_id).empty()) return "unknown_person";
+    for (auto& pk : state_.pass.persons)
+        if (pk.second.role == "general" && pk.second.army_id == army_id) {
+            pk.second.role.clear();
+            pk.second.army_id.clear();
+        }
+    PersonState& st = state_.pass.persons[person_id];
+    st = PersonState{};
+    st.role = "general";
+    st.army_id = army_id;
+    st.unlocked = true;
+    state_.pass.seeded = true;
+    record("stamp_general", army_id + ":" + person_id);
+    return "";
+}
+
+std::vector<std::string> CampaignController::issue_order(const std::string& order_json) {
+    if (!started_ || flow_ != Flow::Campaign) return {detail::err("not_in_campaign")};
+    const std::string refusal = validate_campaign_order(state_, order_json);
+    if (!refusal.empty()) return {refusal};
+    CommandPayload p;
+    p.kind = CommandKind::CampaignOrder;
+    p.result_json = order_json;
+    if (state_.pending_battle.active || !state_.pass.pending_decision.empty()) {
+        std::string error;
+        state_ = apply_campaign_order(state_, order_json, error);
+        if (!error.empty()) return {error};
+        record("order_applied", order_json);
+        return {};
+    }
+    state_ = enqueue_command(state_, p);
+    record("order_queued", order_json);
+    return {};
+}
+
 TickOutput CampaignController::advance_one_hour() {
     TickOutput out;
     if (!started_ || flow_ != Flow::Campaign) {

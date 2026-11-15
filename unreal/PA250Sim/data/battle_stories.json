@@ -1,0 +1,210 @@
+{
+  "note": "The history card shown before a battle. A story is matched by town first, then by scenario, then by the first terrain tag of the town that has a fallback. Text is documented history (basis: documented) unless marked. No picture is shipped: every image below is 'wanted', a public-domain work to be supplied and imported as /Game/PA250/Stories/T_Story_<image>; until then a generated placeholder wash is shown. Credits are as the works are commonly catalogued and must be checked against the holding collection before a picture ships. Contract: protocol/schemas/battle_stories.yaml.",
+  "pan": {"seconds": 40, "zoom": 1.12, "travel": 0.06},
+  "narration": {"voice": "continental_officer", "asset_dir": "/Game/PA250/Audio/Story", "source_dir": "SourceAudio/story"},
+  "images": [
+    {"key": "lexington_common", "status": "wanted", "work": "The Battle of Lexington, April 19th 1775 (plate I)", "artist": "Amos Doolittle, after Ralph Earl", "year": "1775", "collection": "Connecticut Historical Society; impressions also at the New York Public Library", "licence": "public domain"},
+    {"key": "concord_bridge", "status": "wanted", "work": "The Engagement at the North Bridge in Concord (plate III)", "artist": "Amos Doolittle, after Ralph Earl", "year": "1775", "collection": "Connecticut Historical Society; impressions also at the New York Public Library", "licence": "public domain"},
+    {"key": "battle_road", "status": "wanted", "work": "A View of the South Part of Lexington (plate IV)", "artist": "Amos Doolittle, after Ralph Earl", "year": "1775", "collection": "Connecticut Historical Society; impressions also at the New York Public Library", "licence": "public domain"},
+    {"key": "bunker_hill", "status": "wanted", "work": "The Death of General Warren at the Battle of Bunker's Hill, June 17, 1775", "artist": "John Trumbull", "year": "1786", "collection": "Yale University Art Gallery", "licence": "public domain"},
+    {"key": "heights_1775", "status": "wanted", "work": "View of the Attack on Bunker's Hill, with the Burning of Charles Town, June 17, 1775", "artist": "John Lodge, after Millar", "year": "about 1783", "collection": "Library of Congress, Prints and Photographs", "licence": "public domain"},
+    {"key": "town_burning", "status": "wanted", "work": "View of the Attack on Bunker's Hill, with the Burning of Charles Town, June 17, 1775 (a detail of the town)", "artist": "John Lodge, after Millar", "year": "about 1783", "collection": "Library of Congress, Prints and Photographs", "licence": "public domain"},
+    {"key": "dorchester_heights", "status": "wanted", "work": "Washington at Dorchester Heights", "artist": "Gilbert Stuart", "year": "1806", "collection": "Museum of Fine Arts, Boston", "licence": "public domain"},
+    {"key": "boston_harbour", "status": "wanted", "work": "A View of Part of the Town of Boston in New-England and Brittish Ships of War Landing Their Troops, 1768", "artist": "Paul Revere", "year": "1770", "collection": "American Antiquarian Society", "licence": "public domain"},
+    {"key": "harbour_fleet", "status": "wanted", "work": "A View of Part of the Town of Boston in New-England and Brittish Ships of War Landing Their Troops, 1768 (the ships)", "artist": "Paul Revere", "year": "1770", "collection": "American Antiquarian Society", "licence": "public domain"},
+    {"key": "council_of_war", "status": "wanted", "work": "Washington Taking Command of the American Army, at Cambridge, Mass., July 3rd, 1775", "artist": "Currier & Ives", "year": "1876", "collection": "Library of Congress, Prints and Photographs", "licence": "public domain"},
+    {"key": "wilderness_march", "status": "wanted", "work": "A nineteenth-century engraving of Arnold's march to Quebec (to be chosen)", "artist": "to be chosen", "year": "before 1900", "collection": "to be chosen", "licence": "public domain"},
+    {"key": "winter_camp", "status": "wanted", "work": "A period view of the American camp before Boston in winter (to be chosen)", "artist": "to be chosen", "year": "before 1900", "collection": "to be chosen", "licence": "public domain"},
+    {"key": "country_1775", "status": "wanted", "work": "A Plan of the Town and Harbour of Boston and the Country Adjacent with the Road from Boston to Concord (a detail)", "artist": "J. De Costa; engraved by C. Hall", "year": "1775", "collection": "Library of Congress, Geography and Map Division", "licence": "public domain"}
+  ],
+  "stories": [
+    {
+      "key": "lexington",
+      "match": {"province": "lexington"},
+      "title": "Lexington Common",
+      "date": "19 April 1775",
+      "image": "lexington_common",
+      "narration": "story_lexington",
+      "text": [
+        "Before sunrise on 19 April 1775 some seventy militiamen under Captain John Parker stood on Lexington Common as the leading companies of a British column of about seven hundred regulars came up the road from Boston.",
+        "Major John Pitcairn of the Marines ordered them to lay down their arms and disperse.",
+        "A shot was fired, by whom has never been settled, and the regulars fired without orders and went in with the bayonet.",
+        "Eight militiamen were killed and ten wounded; one regular was hurt."
+      ],
+      "basis": "documented"
+    },
+    {
+      "key": "concord",
+      "match": {"province": "concord", "scenario": "concord_bridge"},
+      "title": "The North Bridge",
+      "date": "19 April 1775",
+      "image": "concord_bridge",
+      "narration": "story_concord",
+      "text": [
+        "On the morning of 19 April 1775 some four hundred militia and minute men of Concord and the towns about it gathered on the high ground above the North Bridge, while three companies of regulars held the bridge and others searched the town for stores.",
+        "Seeing smoke rise over the town, the militia marched down on the bridge in column.",
+        "The regulars fired first; Major John Buttrick of Concord gave the order to fire back.",
+        "Two of the militia and three of the regulars were killed or mortally hurt, and the regulars fell back on the town."
+      ],
+      "basis": "documented"
+    },
+    {
+      "key": "battle_road",
+      "match": {"scenario": "battle_road"},
+      "title": "The Road to Boston",
+      "date": "19 April 1775",
+      "image": "battle_road",
+      "narration": "story_battle_road",
+      "text": [
+        "The British column left Concord about noon on 19 April 1775.",
+        "From Meriam's Corner onward, militia of more than twenty towns fired on it from behind walls, trees and houses along sixteen miles of road.",
+        "Lord Percy's brigade met it at Lexington with two field guns and brought it back through Menotomy, where the fighting went from house to house, to Charlestown by nightfall.",
+        "The regulars had 73 killed and 174 wounded that day; the provincials 49 killed and about 40 wounded."
+      ],
+      "basis": "documented"
+    },
+    {
+      "key": "charlestown",
+      "match": {"province": "charlestown"},
+      "title": "Breed's Hill",
+      "date": "17 June 1775",
+      "image": "bunker_hill",
+      "narration": "story_charlestown",
+      "text": [
+        "On the night of 16 June 1775 about a thousand provincials under Colonel William Prescott dug a redoubt on Breed's Hill, above Charlestown.",
+        "The next afternoon General William Howe landed some 2,200 regulars and sent them up the hill; two assaults were beaten back, and the third carried the works when the defenders' powder gave out.",
+        "Charlestown was set on fire by the ships and burned.",
+        "The British lost more than a thousand killed and wounded, the provincials about 450, Dr. Joseph Warren among the dead."
+      ],
+      "basis": "documented"
+    },
+    {
+      "key": "dorchester",
+      "match": {"province": "dorchester"},
+      "title": "Dorchester Heights",
+      "date": "4 March 1776",
+      "image": "dorchester_heights",
+      "narration": "story_dorchester",
+      "text": [
+        "On the night of 4 March 1776, under cover of a cannonade, some two thousand men under General John Thomas carried bundled fascines and timber frames up Dorchester Heights, the ground being frozen too hard to dig.",
+        "By morning two forts looked down on the town and the harbour, armed with guns Henry Knox had hauled from Ticonderoga.",
+        "General Howe made ready to attack them; a storm scattered his boats.",
+        "On 17 March 1776 the British army sailed from Boston."
+      ],
+      "basis": "documented"
+    },
+    {
+      "key": "boston",
+      "match": {"province": "boston"},
+      "title": "The Siege of Boston",
+      "date": "April 1775 to March 1776",
+      "image": "boston_harbour",
+      "narration": "story_boston",
+      "text": [
+        "From 19 April 1775 the British army was shut up in Boston by a line of provincial camps that ran from Roxbury round to Charlestown Neck.",
+        "General Washington proposed more than once to storm the town, by boat or over the ice, and each time his council of war advised against it.",
+        "Boston was never assaulted.",
+        "The army that held it sailed away on 17 March 1776."
+      ],
+      "basis": "documented"
+    },
+    {
+      "key": "chelsea",
+      "match": {"province": "chelsea"},
+      "title": "Chelsea Creek",
+      "date": "27 May 1775",
+      "image": "country_1775",
+      "narration": "story_chelsea",
+      "text": [
+        "On 27 May 1775 provincials under John Stark and Israel Putnam crossed to Hog Island and Noddle's Island to drive off the livestock and burn the hay the garrison of Boston lived on.",
+        "Marines and the armed schooner Diana came up Chelsea Creek against them.",
+        "The Diana went aground and was abandoned in the night.",
+        "The provincials stripped her of her guns and burned her the next morning, the first vessel the Royal Navy lost in the war."
+      ],
+      "basis": "documented"
+    }
+  ],
+  "fallbacks": [
+    {
+      "terrain": "town", "key": "fallback_town", "title": "A Town in Arms", "date": "1775", "image": "country_1775", "narration": "story_fallback_town",
+      "text": [
+        "In 1775 every Massachusetts town kept its own militia company and chose its own officers.",
+        "From the autumn of 1774 a part of each company, the minute men, was to turn out at a minute's warning.",
+        "When the alarm went round on 19 April some twenty thousand men were on the roads to Boston within two days."
+      ],
+      "basis": "documented"
+    },
+    {
+      "terrain": "farmland", "key": "fallback_farmland", "title": "Walls and Fields", "date": "1775", "image": "country_1775", "narration": "story_fallback_farmland",
+      "text": [
+        "The country between Boston and Concord in 1775 was small farms: fields and pastures bounded by stone walls and rail fences, with orchards and woodlots between.",
+        "A wall is cover for a man with a musket and an obstacle to a line of battle.",
+        "Both armies learned on 19 April how much that mattered."
+      ],
+      "basis": "documented"
+    },
+    {
+      "terrain": "hills", "key": "fallback_hills", "title": "The High Ground", "date": "1775", "image": "heights_1775", "narration": "story_fallback_hills",
+      "text": [
+        "Boston in 1775 stood on a peninsula overlooked by hills on two sides: those of Charlestown to the north and of Dorchester to the south.",
+        "Cannon on either could reach the town and the ships at anchor.",
+        "Both commanders knew it from the first week of the siege; the question was who would dig first."
+      ],
+      "basis": "documented"
+    },
+    {
+      "terrain": "woods", "key": "fallback_woods", "title": "Woods and Woodlots", "date": "1775", "image": "country_1775", "narration": "story_fallback_woods",
+      "text": [
+        "Regular infantry of 1775 fought in line, shoulder to shoulder, where their volleys and bayonets told.",
+        "In woods a line could not keep its order, and men who fired from behind trees could not be closed with.",
+        "British officers wrote after 19 April of an enemy they could seldom see."
+      ],
+      "basis": "documented"
+    },
+    {
+      "terrain": "marsh", "key": "fallback_marsh", "title": "Salt Marsh", "date": "1775", "image": "country_1775", "narration": "story_fallback_marsh",
+      "text": [
+        "The shores about Boston harbour in 1775 were salt marsh and tidal creeks, mown for hay in summer.",
+        "The garrison of Boston needed that hay and the livestock that grazed there, and sent boats for them.",
+        "Through May and June of 1775 the two sides fought over islands and marshes for fodder."
+      ],
+      "basis": "documented"
+    },
+    {
+      "terrain": "harbor", "key": "fallback_harbor", "title": "By Water", "date": "1775", "image": "boston_harbour", "narration": "story_fallback_harbor",
+      "text": [
+        "The Royal Navy held Boston harbour throughout the siege.",
+        "Its boats could put the army ashore anywhere the tide allowed, as they did at Lechmere Point on 18 April and at Charlestown on 17 June 1775.",
+        "The provincials had only whaleboats, and used them at night."
+      ],
+      "basis": "documented"
+    },
+    {
+      "terrain": "river", "key": "fallback_river", "title": "River Crossings", "date": "1775", "image": "country_1775", "narration": "story_fallback_river",
+      "text": [
+        "Few bridges crossed the rivers round Boston in 1775, and an army with wagons and guns had to use them.",
+        "On 19 April the planks of the bridge at Cambridge were taken up to stop Lord Percy's brigade.",
+        "They had been left stacked on the bank, and his men laid them again."
+      ],
+      "basis": "documented"
+    },
+    {
+      "terrain": "crossroads", "key": "fallback_crossroads", "title": "Where the Roads Meet", "date": "1775", "image": "country_1775", "narration": "story_fallback_crossroads",
+      "text": [
+        "An army of 1775 marched by road and gathered where roads met.",
+        "At Meriam's Corner, a mile east of Concord, the companies of several towns came in by different roads on 19 April and met the returning column together.",
+        "From there to Charlestown it was under fire."
+      ],
+      "basis": "documented"
+    },
+    {
+      "terrain": "falls", "key": "fallback_falls", "title": "Mills at the Falls", "date": "1775", "image": "country_1775", "narration": "story_fallback_falls",
+      "text": [
+        "The army before Boston was short of gunpowder from its first day.",
+        "Massachusetts had made little powder of its own for years, and in 1775 the colony set about building powder mills where falling water could drive them.",
+        "Until they worked, every cartridge was counted."
+      ],
+      "basis": "documented"
+    }
+  ]
+}

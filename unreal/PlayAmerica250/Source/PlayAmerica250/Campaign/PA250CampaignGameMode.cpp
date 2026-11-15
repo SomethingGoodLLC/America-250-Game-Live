@@ -191,6 +191,182 @@ void APA250CampaignGameMode::BeginPlay()
 		}), 16.f, false);
 	}
 
+	if (FParse::Param(FCommandLine::Get(), TEXT("PA250MarchProbe")))
+	{
+		// M1 of the campaign pass, in a real window: the militia is ordered Concord to Menotomy,
+		// three hours are marched (the British column is still a day away), the route is captured (dashed
+		// line through Lincoln and Lexington, the part behind it faded, arrowhead, arrival label), then
+		// it is halted on the road with the panel's own handler and captured turning back. Never saves.
+		Sub->SetPaused(true);
+		auto Shot = [this](const TCHAR* What) {
+			if (APlayerController* PC = GetWorld()->GetFirstPlayerController()) PC->ConsoleCommand(TEXT("Shot showui"));
+			UE_LOG(LogTemp, Display, TEXT("MARCH_PROBE: shot %s"), What);
+		};
+		auto Line = [this](const TCHAR* What) {
+			UPA250Subsystem* PS = UPA250Subsystem::Get(this);
+			if (!PS || !MapActor) return;
+			const pa250::Army& A = PS->GetState().armies.at("continental_militia");
+			int32 Strokes = 0, Faded = 0, Labels = 0;
+			MapActor->GetRouteDrawCounts(Strokes, Faded, Labels);
+			UE_LOG(LogTemp, Display, TEXT("MARCH_PROBE: %s: at %s, %d edges left, %d h into the leg, turning back %d h; drawn %d strokes (%d faded), %d labels '%s'; status '%s'"),
+				What, UTF8_TO_TCHAR(A.province.c_str()), static_cast<int32>(A.path.size()), A.hours_into_edge, A.returning_hours, Strokes, Faded, Labels,
+				*MapActor->GetRouteLabelText(0), MapWidget ? *MapWidget->GetLastMessage() : TEXT(""));
+		};
+		FTimerHandle Order, March, Shot1, Halt, Shot2, Back, QuitHandle;
+		GetWorldTimerManager().SetTimer(Order, FTimerDelegate::CreateLambda([this, Line]() {
+			UPA250Subsystem* PS = UPA250Subsystem::Get(this);
+			if (!PS || !MapWidget || !MapActor) return;
+			PS->SetPaused(true);
+			MapWidget->PressSelectArmy(TEXT("continental_militia"));
+			UE_LOG(LogTemp, Display, TEXT("MARCH_PROBE: order: %s"), *MapWidget->OrderProvince(TEXT("menotomy")));
+		}), 10.f, false);
+		// A second later, so the map has seen the route from its start (as it does in play, every frame).
+		GetWorldTimerManager().SetTimer(March, FTimerDelegate::CreateLambda([this, Line]() {
+			UPA250Subsystem* PS = UPA250Subsystem::Get(this);
+			if (!PS) return;
+			FString Err;
+			// The opening evening: nobody marches after the tenth hour of the day, so the clock runs to
+			// midnight first. Stop three march hours in: past Lincoln, one hour along the Lexington road.
+			for (int32 i = 0; i < 16; ++i)
+			{
+				const pa250::Army& A = PS->GetState().armies.at("continental_militia");
+				if (A.province == "lincoln" && A.hours_into_edge == 1) break;
+				PS->AdvanceHours(1, Err);
+			}
+			PS->BumpHudEpoch();
+			Line(TEXT("marching"));
+		}), 11.f, false);
+		GetWorldTimerManager().SetTimer(Shot1, FTimerDelegate::CreateLambda([Shot, Line]() { Line(TEXT("before the shot")); Shot(TEXT("march_route")); }), 13.f, false);
+		GetWorldTimerManager().SetTimer(Halt, FTimerDelegate::CreateLambda([this, Line]() {
+			UPA250Subsystem* PS = UPA250Subsystem::Get(this);
+			if (!PS || !MapWidget) return;
+			UE_LOG(LogTemp, Display, TEXT("MARCH_PROBE: halt button shown=%d"), MapWidget->CanHaltSelected() ? 1 : 0);
+			MapWidget->PressHalt();
+			FString Err;
+			PS->AdvanceHours(1, Err); // the halt is an order: it applies on the next hour
+			PS->BumpHudEpoch();
+			Line(TEXT("halted"));
+		}), 15.f, false);
+		GetWorldTimerManager().SetTimer(Shot2, FTimerDelegate::CreateLambda([Shot]() { Shot(TEXT("march_halted")); }), 17.f, false);
+		GetWorldTimerManager().SetTimer(Back, FTimerDelegate::CreateLambda([this, Line]() {
+			UPA250Subsystem* PS = UPA250Subsystem::Get(this);
+			if (!PS) return;
+			FString Err;
+			for (int32 i = 0; i < 12 && PS->GetState().armies.at("continental_militia").returning_hours > 0; ++i) PS->AdvanceHours(1, Err);
+			Line(TEXT("back"));
+		}), 18.5f, false);
+		GetWorldTimerManager().SetTimer(QuitHandle, FTimerDelegate::CreateLambda([this]() {
+			UKismetSystemLibrary::QuitGame(this, nullptr, EQuitPreference::Quit, false);
+		}), 20.f, false);
+	}
+
+	if (FParse::Param(FCommandLine::Get(), TEXT("PA250PassProbe")))
+	{
+		// The campaign pass in a real window: the people panel, the floor of the Provincial Congress,
+		// the pre-battle card of the first contact with a general on each side (the militia's is
+		// stamped on for the picture), and the decision of 13 June reached by loading a quiet copy of
+		// the campaign at that date. Four stills, the decision answered through its own button's
+		// order, then quit. The save is never written.
+		Sub->SetPaused(true);
+		auto Shot = [this](const TCHAR* What) {
+			if (APlayerController* PC = GetWorld()->GetFirstPlayerController()) PC->ConsoleCommand(TEXT("Shot showui"));
+			UE_LOG(LogTemp, Display, TEXT("PASS_PROBE: shot %s"), What);
+		};
+		FTimerHandle T1, T2, T3, T4, T5, T6, T7, T8, T9;
+		GetWorldTimerManager().SetTimer(T1, FTimerDelegate::CreateLambda([this]() {
+			UPA250Subsystem* PS = UPA250Subsystem::Get(this);
+			if (!PS || !MapWidget) return;
+			FString Err;
+			for (int32 i = 0; i < 6; ++i) PS->AdvanceHours(1, Err); // past midnight: the starting roles are in place
+			MapWidget->HandleTownClicked(TEXT("charlestown"));
+			MapWidget->CloseCityView();
+			MapWidget->PressPeopleToggle();
+			UE_LOG(LogTemp, Display, TEXT("PASS_PROBE: people open=%d; persons loaded=%d politics=%d decisions=%d"), MapWidget->IsPeopleOpen() ? 1 : 0,
+				pa250::persons_loaded() ? 1 : 0, pa250::politics_loaded() ? 1 : 0, pa250::decisions_loaded() ? 1 : 0);
+		}), 10.f, false);
+		GetWorldTimerManager().SetTimer(T2, FTimerDelegate::CreateLambda([Shot]() { Shot(TEXT("people_panel")); }), 12.5f, false);
+		GetWorldTimerManager().SetTimer(T3, FTimerDelegate::CreateLambda([this]() {
+			if (!MapWidget) return;
+			MapWidget->PressFloorToggle();
+			UE_LOG(LogTemp, Display, TEXT("PASS_PROBE: floor open=%d people open=%d"), MapWidget->IsFloorOpen() ? 1 : 0, MapWidget->IsPeopleOpen() ? 1 : 0);
+		}), 13.5f, false);
+		GetWorldTimerManager().SetTimer(T4, FTimerDelegate::CreateLambda([Shot]() { Shot(TEXT("congress_floor")); }), 15.5f, false);
+		GetWorldTimerManager().SetTimer(T5, FTimerDelegate::CreateLambda([this]() {
+			UPA250Subsystem* PS = UPA250Subsystem::Get(this);
+			if (!PS || !MapWidget) return;
+			MapWidget->PressFloorToggle();
+			FString Err;
+			for (int32 i = 0; i < 72 && !PS->IsBattlePending(); ++i) PS->AdvanceHours(1, Err);
+			PS->GetControllerMutable().stamp_general(PS->GetState().pending_battle.defender_army, "william_heath");
+			PS->BumpHudEpoch();
+			const pa250::BattleSetup Setup = pa250::build_battle_setup(PS->GetState(), PS->GetState().pending_battle.province);
+			for (const auto& Side : Setup.sides)
+			{
+				UE_LOG(LogTemp, Display, TEXT("PASS_PROBE: card %s: commander '%s', intel %s (%d-%d men), %d rows"), UTF8_TO_TCHAR(Side.first.c_str()),
+					UTF8_TO_TCHAR(Side.second.commander_name.c_str()), UTF8_TO_TCHAR(Side.second.intel.c_str()), Side.second.intel_men_low, Side.second.intel_men_high,
+					static_cast<int32>(Side.second.factors.size()));
+			}
+		}), 16.5f, false);
+		GetWorldTimerManager().SetTimer(T6, FTimerDelegate::CreateLambda([Shot]() { Shot(TEXT("pre_battle_commander")); }), 19.f, false);
+		GetWorldTimerManager().SetTimer(T7, FTimerDelegate::CreateLambda([this]() {
+			UPA250Subsystem* PS = UPA250Subsystem::Get(this);
+			if (!PS) return;
+			// A quiet copy of the campaign on the eve of 13 June (probe only; written beside the logs).
+			pa250::CampaignState St = PS->GetState();
+			St.pending_battle = pa250::PendingBattle{};
+			St.treaties.push_back({"ceasefire", 24 * 300, "", ""});
+			St.now = pa250::GameTime{pa250::from_ymdh(pa250::YMDH{1775, 6, 13, 0}).hour_index - 1};
+			const std::string Path = TCHAR_TO_UTF8(*FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("PA250"), TEXT("pass_probe_state.json")));
+			std::string LoadErr;
+			const bool bWrote = pa250::write_text_file(Path, pa250::serialize(St));
+			const bool bLoaded = bWrote && PS->GetControllerMutable().load(Path, LoadErr);
+			FString Err;
+			PS->AdvanceHours(1, Err);
+			PS->BumpHudEpoch();
+			UE_LOG(LogTemp, Display, TEXT("PASS_PROBE: quiet June copy loaded=%d; decision pending=%d (%s); %s"), bLoaded ? 1 : 0, PS->IsDecisionPending() ? 1 : 0,
+				UTF8_TO_TCHAR(PS->GetState().pass.pending_decision.c_str()), *PS->FormatDate());
+			const FString Before = PS->FormatDate();
+			PS->AdvanceHours(3, Err);
+			UE_LOG(LogTemp, Display, TEXT("PASS_PROBE: clock held by the decision: %s -> %s"), *Before, *PS->FormatDate());
+		}), 20.f, false);
+		GetWorldTimerManager().SetTimer(T8, FTimerDelegate::CreateLambda([this, Shot]() {
+			Shot(TEXT("decision_heights"));
+		}), 23.f, false);
+		GetWorldTimerManager().SetTimer(T9, FTimerDelegate::CreateLambda([this]() {
+			UPA250Subsystem* PS = UPA250Subsystem::Get(this);
+			if (PS && MapWidget)
+			{
+				const int32 Fort = PS->GetState().provinces.at("dorchester").fort_level;
+				MapWidget->IssueOrder(TEXT("{\"order\":\"decide\",\"decision\":\"which_heights\",\"option\":\"dorchester\"}"));
+				UE_LOG(LogTemp, Display, TEXT("PASS_PROBE: decided: pending=%d; Dorchester fort %d -> %d; status '%s'"), PS->IsDecisionPending() ? 1 : 0, Fort,
+					PS->GetState().provinces.at("dorchester").fort_level, *MapWidget->GetLastMessage());
+			}
+			FTimerHandle QuitHandle;
+			GetWorldTimerManager().SetTimer(QuitHandle, FTimerDelegate::CreateLambda([this]() { UKismetSystemLibrary::QuitGame(this, nullptr, EQuitPreference::Quit, false); }), 1.5f, false);
+		}), 25.f, false);
+	}
+
+	if (FParse::Param(FCommandLine::Get(), TEXT("PA250StoryProbe")))
+	{
+		// M6 in a real window: the campaign runs to its first contact, "To arms!" is pressed through
+		// the button's own handler, the story is captured, Continue is pressed for the probe once the
+		// field is ready, and the battle level takes its own still and quits (PA250BattleGameMode).
+		FTimerHandle Go, Still, State;
+		GetWorldTimerManager().SetTimer(Go, FTimerDelegate::CreateLambda([this]() {
+			UPA250Subsystem* PS = UPA250Subsystem::Get(this);
+			if (!PS || !MapWidget) return;
+			FString Err;
+			for (int32 i = 0; i < 72 && !PS->IsBattlePending(); ++i) PS->AdvanceHours(1, Err);
+			UE_LOG(LogTemp, Display, TEXT("STORY_PROBE: contact at %s; pressing To arms!"), UTF8_TO_TCHAR(PS->GetState().pending_battle.province.c_str()));
+			MapWidget->PressFight();
+			UE_LOG(LogTemp, Display, TEXT("STORY_PROBE: story up=%d"), MapWidget->IsStoryUp() ? 1 : 0);
+		}), 10.f, false);
+		GetWorldTimerManager().SetTimer(Still, FTimerDelegate::CreateLambda([this]() {
+			if (APlayerController* PC = GetWorld()->GetFirstPlayerController()) PC->ConsoleCommand(TEXT("Shot showui"));
+			UE_LOG(LogTemp, Display, TEXT("STORY_PROBE: shot battle_story; ready=%d"), MapWidget && MapWidget->IsStoryReady() ? 1 : 0);
+		}), 13.5f, false);
+	}
+
 	if (FParse::Param(FCommandLine::Get(), TEXT("PA250MapSliceProbe")))
 	{
 		// Siege mark, scoreboard and the left-inspect / right-order split, in a real window.

@@ -50,6 +50,8 @@ for f, m in men.items():
     print(f"  ledger {f}: killed + wounded {m['killed'] + m['wounded']} = deaths {dead}:", "OK" if m["killed"] + m["wounded"] == dead else "MISMATCH")
 if t.get("support"):
     print(f"  support {t['support']}")
+if t.get("generals") and (t["generals"]["british"] or t["generals"]["continental"] or t["generals"]["alarmed"]["british"] or t["generals"]["alarmed"]["continental"]):
+    print(f"  generals {t['generals']} | result commander_events {r.get('commander_events', {})}")
 if t.get("held"):
     h = t["held"]
     print(f"  held: first post flip at {h['first_flip_seconds']:.0f} s | down to half their field: {h['half_strength_seconds']} (-1 = never)")

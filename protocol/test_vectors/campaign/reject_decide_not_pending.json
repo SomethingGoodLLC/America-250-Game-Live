@@ -1,0 +1,16 @@
+{
+ "name": "reject_decide_not_pending",
+ "description": "a decision that has not been put cannot be answered",
+ "start_ymdh": {
+  "y": 1775,
+  "m": 4,
+  "d": 20,
+  "h": 0
+ },
+ "order": {
+  "order": "decide",
+  "decision": "which_heights",
+  "option": "dorchester"
+ },
+ "expect_error": "not_pending"
+}

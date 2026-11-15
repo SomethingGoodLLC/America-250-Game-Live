@@ -1,0 +1,39 @@
+{
+ "name": "order_form_army",
+ "description": "a free general takes command of the army standing in a town with a muster (Charlestown's fort); the detachment becomes an army",
+ "start_ymdh": {
+  "y": 1775,
+  "m": 4,
+  "d": 20,
+  "h": 0
+ },
+ "setup": {
+  "armies": {
+   "continental_militia": {
+    "province": "charlestown"
+   }
+  }
+ },
+ "order": {
+  "order": "form_army",
+  "person": "william_heath",
+  "province": "charlestown"
+ },
+ "expect": {
+  "persons": {
+   "william_heath": {
+    "role": "general",
+    "army_id": "continental_militia"
+   }
+  },
+  "general_of": {
+   "continental_militia": "william_heath"
+  },
+  "unit_cap": {
+   "continental_militia": 40
+  },
+  "can_besiege": {
+   "continental_militia": true
+  }
+ }
+}

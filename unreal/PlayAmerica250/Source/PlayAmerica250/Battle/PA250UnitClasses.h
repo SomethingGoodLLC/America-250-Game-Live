@@ -135,7 +135,11 @@ struct FPA250ClassVerbs
 	// The leader's file (unit_classes.json verbs.squad).
 	int32 SquadFileMin = 6;            // the player leads at least this many men when the side has them
 	int32 SquadFileMax = 8;
-	float SquadFollowBehindM = 3.f;    // "follow me": the line forms this far behind him
+	float SquadFollowBehindM = 0.5f;   // "follow me": his men stand this far behind his own line...
+	float SquadFollowSpacingM = 1.2f;  // ...at his shoulders, this far apart, half to each side of him
+	float SquadFollowTurnDegrees = 45.f; // standing still, the line turns with him only past this
+	float SquadRunWhenBehindM = 4.f;   // a man of his file further than this from his place runs to it
+	float SquadWithYouM = 10.f;        // HUD: a man this close to him is "with you"
 	float SquadLineAheadM = 4.f;       // "form line here": this far in front of him
 	float SquadOrderSeconds = 45.f;    // how long another squad obeys an officer's order
 	float SquadAimSnapM = 8.f;         // the enemy within this distance of his aim point is "his target"

@@ -427,10 +427,13 @@ compile_commands.json
 !unreal/PA250Sim/data/**
 
 # Generated stills and rebuildable art (regenerate instead of committing).
-# Battle-level preview captures written by scripts/capture_preview.sh (<level>_<label>_*.png).
-# Stills committed before this rule stay tracked.
-docs/preview/lexington_*.png
-docs/preview/concord_*.png
+# Screenshots taken as evidence for PROGRESS.md: battle-level captures from
+# scripts/capture_preview.sh, class-card sheets, room stills, UI card stills. The game never
+# loads them and each re-shot would stay in history for good. They stay on disk; the ones
+# committed before 2026-11-14 were untracked that day (git rm --cached), not deleted.
+docs/preview/*.png
+docs/preview/*.jpg
+docs/cards/
 # Battlefield kit: Blender output of tools/art/battlefield_kit.py and textures processed from raw/
 # (~670 MB). raw/ holds the paid OpenAI images and stays in git so processing reruns offline.
 unreal/PlayAmerica250/SourceArt/battlefield/*.blend

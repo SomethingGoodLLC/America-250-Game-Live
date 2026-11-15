@@ -1,0 +1,37 @@
+{
+ "name": "battle_setup_detachment",
+ "description": "an army with no general says so on the card and gets no trait rows",
+ "start_ymdh": {
+  "y": 1775,
+  "m": 4,
+  "d": 20,
+  "h": 0
+ },
+ "battle": {
+  "province": "lexington",
+  "attacker": "british_regulars",
+  "defender": "continental_militia"
+ },
+ "generals": {
+  "british_regulars": "francis_smith"
+ },
+ "expect_setup": {
+  "commander": {
+   "british": "francis_smith"
+  },
+  "no_commander": [
+   "continental"
+  ],
+  "factor_rows": [
+   {
+    "faction": "continental",
+    "label": "commander",
+    "value": 0,
+    "source_has": "detachment"
+   }
+  ],
+  "morale": {
+   "continental": 70
+  }
+ }
+}

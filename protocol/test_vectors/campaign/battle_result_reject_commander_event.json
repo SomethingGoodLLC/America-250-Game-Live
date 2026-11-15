@@ -1,0 +1,30 @@
+{
+ "name": "battle_result_reject_commander_event",
+ "description": "an event outside the contract makes the result unreadable",
+ "start_ymdh": {
+  "y": 1775,
+  "m": 4,
+  "d": 20,
+  "h": 0
+ },
+ "battle": {
+  "province": "lexington",
+  "attacker": "british_regulars",
+  "defender": "continental_militia"
+ },
+ "generals": {
+  "continental_militia": "artemas_ward"
+ },
+ "result": {
+  "province_id": "lexington",
+  "winner": "british",
+  "end_reason": "army_broke",
+  "commander_events": {
+   "continental": "promoted"
+  }
+ },
+ "expect": {
+  "schema_valid": false,
+  "applied": false
+ }
+}

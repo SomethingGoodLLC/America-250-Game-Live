@@ -67,6 +67,18 @@ properties:
       side brought (BattleSetup sides.*.guns). They leave the loser's army and join the winner's. A
       beaten army that is destroyed or dispersed leaves all its guns to the winner whatever is
       reported here.
+  commander_events:
+    type: object
+    additionalProperties: false
+    description: >-
+      What became of a side's general on the field (campaign pass): faction -> wounded | killed |
+      captured. Absent for a side whose general came through, or that had none (the sim ignores an
+      event for a side without a general). Wounded: he is out for persons rules
+      commander.wounded_days. Killed: he is gone. Captured: he joins the other side's prisoner pool.
+      In each case his army is a detachment again and loses commander.army_morale_on_fall morale.
+    properties:
+      british: {enum: [wounded, killed, captured]}
+      continental: {enum: [wounded, killed, captured]}
   cartridges_spent: {$ref: "#/definitions/by_faction"}
   powder_spent: {$ref: "#/definitions/by_faction"}
   shots_fired: {$ref: "#/definitions/by_faction", description: "Successful discharges; preferred over cartridges_spent when present."}

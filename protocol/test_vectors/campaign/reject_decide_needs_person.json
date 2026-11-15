@@ -1,0 +1,22 @@
+{
+ "name": "reject_decide_needs_person",
+ "description": "an option that commits a person needs one named",
+ "start_ymdh": {
+  "y": 1775,
+  "m": 9,
+  "d": 5,
+  "h": 1
+ },
+ "setup": {
+  "pending_decision": "canada_expedition",
+  "decisions_taken": {
+   "which_heights": "charlestown"
+  }
+ },
+ "order": {
+  "order": "decide",
+  "decision": "canada_expedition",
+  "option": "send_expedition"
+ },
+ "expect_error": "needs_person"
+}

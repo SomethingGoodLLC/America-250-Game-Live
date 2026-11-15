@@ -1,0 +1,17 @@
+{
+ "name": "reject_assign_wrong_role",
+ "description": "a person holds only the roles his data allows",
+ "start_ymdh": {
+  "y": 1775,
+  "m": 4,
+  "d": 20,
+  "h": 0
+ },
+ "order": {
+  "order": "assign_person",
+  "person": "artemas_ward",
+  "role": "organizer",
+  "province": "cambridge"
+ },
+ "expect_error": "wrong_role"
+}

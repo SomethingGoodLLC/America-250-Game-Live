@@ -1,0 +1,15 @@
+{
+ "name": "reject_vote_now_other_body",
+ "description": "a measure of a body that is not sitting cannot be called",
+ "start_ymdh": {
+  "y": 1775,
+  "m": 4,
+  "d": 20,
+  "h": 0
+ },
+ "order": {
+  "order": "vote_now",
+  "measure": "adopt_the_army"
+ },
+ "expect_error": "not_your_body"
+}

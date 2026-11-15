@@ -1,4 +1,13 @@
 #include "PA250MapWidget.h"
+#include "PA250MarchRoute.h"
+#include "UI/PA250CampaignPassPanels.h"
+#include "UI/PA250StoryArt.h"
+#include "UI/PA250BattleStory.h"
+#include "MoviePlayer.h"
+#include "Sound/SoundBase.h"
+#include "Kismet/GameplayStatics.h"
+#include "UObject/UObjectGlobals.h"
+#include "Widgets/SViewport.h"
 #include "Campaign/PA250Subsystem.h"
 #include "PA250ProvinceMapActor.h"
 #include "UI/PA250CityViewWidget.h"
@@ -283,9 +292,9 @@ FText UPA250MapWidget::ArmyButtonText(int32 Index) const
 	const pa250::CampaignState& St = S->GetState();
 	const pa250::Army& A = St.armies.at(ToStd(Id));
 	const bool bSel = Id == SelectedArmyId;
-	return FText::FromString(FString::Printf(TEXT("%s %s — %s · %d fit · %s"), bSel ? TEXT(">") : TEXT(""),
-											 *ToFStr(A.name), *ProvName(St, A.province), FitCount(A),
-											 *OrdersText(St, A)));
+	// Each army's general and its men (a detachment says so).
+	return FText::FromString(FString::Printf(TEXT("%s%s, %s (%s)\n%s"), bSel ? TEXT("> ") : TEXT(""), *ToFStr(A.name), *ProvName(St, A.province),
+											 *OrdersText(St, A), *PA250PassPanels::ForceLine(St, A)));
 }
 
 FText UPA250MapWidget::SelectedArmyBannerText() const
@@ -303,18 +312,266 @@ FText UPA250MapWidget::SelectedArmyBannerText() const
 	}
 	const pa250::Army& A = It->second;
 	FString Route;
-	if (!A.path.empty())
+	const pa250::PathPlan Plan = pa250::march_plan(St, A.id);
+	if (Plan.ok && Plan.provinces.size() > 1)
 	{
 		Route = TEXT(" · Route: ");
-		const TArray<FString> Names = RouteNames(St, A);
-		for (int32 i = 0; i < Names.Num(); ++i)
+		for (size_t i = 0; i < Plan.provinces.size(); ++i)
 		{
-			Route += (i ? TEXT(" → ") : TEXT("")) + Names[i];
+			Route += (i ? TEXT(" → ") : TEXT("")) + ProvName(St, Plan.provinces[i]);
+		}
+		const pa250::YMDH When = pa250::to_ymdh(Plan.arrival);
+		Route += TEXT(" · ") + PA250MarchRoute::ArrivalLabel(When.d, When.m, When.h);
+	}
+	FString Orders = Plan.ok && Plan.provinces.size() > 1 ? FString::Printf(TEXT("→ %s"), *ProvName(St, Plan.provinces.back())) : OrdersText(St, A);
+	if (A.returning_hours > 0)
+	{
+		Orders = FString::Printf(TEXT("turning back, %d march %s to %s"), A.returning_hours, A.returning_hours == 1 ? TEXT("hour") : TEXT("hours"),
+								 *ProvName(St, A.province));
+	}
+	const FString Where = (!A.path.empty() && A.hours_into_edge > 0) || A.returning_hours > 0 ? TEXT("on the road from ") : TEXT("at ");
+	return FText::FromString(FString::Printf(
+		TEXT("%s — %s%s · %d fit · %s%s\nRight-click a town to march · Esc cancels"),
+		*ToFStr(A.name), *Where, *ProvName(St, A.province), FitCount(A), *Orders, *Route));
+}
+
+void UPA250MapWidget::StartBattleStory()
+{
+	UPA250Subsystem* S = Sub();
+	if (!S)
+	{
+		return;
+	}
+	const pa250::BattleSetup& Setup = S->GetBattleSetup();
+	FString Why;
+	if (!PA250BattleStory::Load(Why))
+	{
+		UE_LOG(LogTemp, Error, TEXT("PA250 story: %s: going straight to the field"), *Why);
+		S->TravelToFlowLevel(this);
+		return;
+	}
+	const PA250BattleStory::FStory Story = PA250BattleStory::StoryFor(Setup);
+	const FString Situation = PA250BattleStory::SituationLine(Setup);
+	FString Level = UPA250Subsystem::BattleLevelFor(UTF8_TO_TCHAR(Setup.scenario_preset.c_str()), UTF8_TO_TCHAR(Setup.mode.c_str())).ToString();
+	if (!Level.StartsWith(TEXT("/"))) Level = TEXT("/Game/PA250/Maps/") + Level;
+	StoryLevelPackage = Level;
+	const bool bHeadless = !FApp::CanEverRender() || !StoryBox.IsValid();
+	UE_LOG(LogTemp, Display, TEXT("PA250 story: '%s' (%s, %s%s) for the battle of %s; %d sentences; situation: %s"), *Story.Title, *Story.Key, *Story.Date,
+		   Story.bFallback ? TEXT(", terrain fallback") : TEXT(""), UTF8_TO_TCHAR(Setup.province_name.c_str()), Story.Sentences.Num(), *Situation);
+	if (bHeadless)
+	{
+		// No window to show it in (a headless autoplay run): the story is passed through and the field loads at once.
+		UE_LOG(LogTemp, Display, TEXT("PA250 story: no renderer: continue at once"));
+		S->TravelToFlowLevel(this);
+		return;
+	}
+	bool bPlaceholder = false;
+	UTexture2D* Tex = PA250StoryArt::TextureFor(this, Story.Image, bPlaceholder);
+	FSlateBrush Brush;
+	Brush.SetResourceObject(Tex);
+	Brush.ImageSize = FVector2D(1920.f, 1080.f);
+	Brush.DrawAs = ESlateBrushDrawType::Image;
+	bStoryUp = true;
+	bStoryReady = false;
+	bStoryLeaving = false;
+	StoryStartSeconds = FPlatformTime::Seconds();
+	TWeakObjectPtr<UPA250MapWidget> Weak(this);
+	StoryBox->SetContent(SNew(SPA250BattleStoryScreen)
+							 .Story(Story)
+							 .Situation(Situation)
+							 .Picture(Brush)
+							 .bPlaceholder(bPlaceholder)
+							 .StartSeconds(StoryStartSeconds)
+							 .IsReady([Weak]() { return Weak.IsValid() && Weak->IsStoryReady(); })
+							 .OnContinue(FSimpleDelegate::CreateLambda([Weak]() {
+								 if (Weak.IsValid()) Weak->ContinueToBattle();
+							 })));
+	// Narration, if it has been rendered and imported; the text stands by itself otherwise.
+	const FString NarrationPath = PA250BattleStory::NarrationAssetPath(Story);
+	USoundBase* Narration = NarrationPath.IsEmpty() ? nullptr : LoadObject<USoundBase>(nullptr, *NarrationPath, nullptr, LOAD_NoWarn | LOAD_Quiet);
+	if (Narration) UGameplayStatics::PlaySound2D(this, Narration);
+	UE_LOG(LogTemp, Display, TEXT("PA250 story: shown; picture %s%s; narration %s; loading %s behind it"), *Story.Image, bPlaceholder ? TEXT(" (placeholder)") : TEXT(""),
+		   Narration ? TEXT("playing") : TEXT("not imported: text only"), *Level);
+	// The field loads behind the story; Continue appears when it is in memory.
+	LoadPackageAsync(Level, FLoadPackageAsyncDelegate::CreateLambda([Weak](const FName& Name, UPackage* Package, EAsyncLoadingResult::Type Result) {
+		if (!Weak.IsValid()) return;
+		Weak->bStoryReady = true;
+		UE_LOG(LogTemp, Display, TEXT("PA250 story: the field is ready (%s, %s) after %.1f s: Continue is offered"), *Name.ToString(),
+			   Result == EAsyncLoadingResult::Succeeded ? TEXT("loaded") : TEXT("not preloaded: it loads on Continue"), FPlatformTime::Seconds() - Weak->StoryStartSeconds);
+	}));
+}
+
+void UPA250MapWidget::ContinueToBattle()
+{
+	UPA250Subsystem* S = Sub();
+	if (!S || !bStoryUp || bStoryLeaving)
+	{
+		return;
+	}
+	bStoryLeaving = true;
+	// The same picture stays up through what is left of the load: the engine's loading screen
+	// (MoviePlayer) paints it on its own thread while the level opens, and goes when the level is in.
+	if (IGameMoviePlayer* Movie = GetMoviePlayer())
+	{
+		const pa250::BattleSetup& Setup = S->GetBattleSetup();
+		const PA250BattleStory::FStory Story = PA250BattleStory::StoryFor(Setup);
+		bool bPlaceholder = false;
+		FSlateBrush Brush;
+		Brush.SetResourceObject(PA250StoryArt::TextureFor(this, Story.Image, bPlaceholder));
+		Brush.ImageSize = FVector2D(1920.f, 1080.f);
+		Brush.DrawAs = ESlateBrushDrawType::Image;
+		FLoadingScreenAttributes Attr;
+		Attr.bAutoCompleteWhenLoadingCompletes = true;
+		Attr.bMoviesAreSkippable = false;
+		Attr.MinimumLoadingScreenDisplayTime = 0.5f;
+		Attr.WidgetLoadingScreen = SNew(SPA250BattleStoryScreen)
+									   .Story(Story)
+									   .Situation(PA250BattleStory::SituationLine(Setup))
+									   .Picture(Brush)
+									   .bPlaceholder(bPlaceholder)
+									   .StartSeconds(StoryStartSeconds);
+		Movie->SetupLoadingScreen(Attr);
+		UE_LOG(LogTemp, Display, TEXT("PA250 story: Continue after %.1f s; the loading screen keeps the picture up while the level opens (prepared=%d)"),
+			   FPlatformTime::Seconds() - StoryStartSeconds, Movie->LoadingScreenIsPrepared() ? 1 : 0);
+	}
+	S->TravelToFlowLevel(this);
+}
+
+void UPA250MapWidget::PressPeopleToggle()
+{
+	bShowPeople = !bShowPeople;
+	if (bShowPeople) bShowFloor = false;
+	PeopleKey.Reset();
+}
+
+void UPA250MapWidget::PressFloorToggle()
+{
+	bShowFloor = !bShowFloor;
+	if (bShowFloor) bShowPeople = false;
+	FloorKey.Reset();
+}
+
+void UPA250MapWidget::IssueOrder(const FString& OrderJson)
+{
+	UPA250Subsystem* S = Sub();
+	if (!S)
+	{
+		return;
+	}
+	const bool bImmediate = S->IsBattlePending() || S->IsDecisionPending();
+	FString Err;
+	if (!S->IssueOrderJson(OrderJson, Err))
+	{
+		SetStatusMessage(PA250PassPanels::OrderRefusal(Err));
+		return;
+	}
+	// At a stopped clock the order is carried out at once and the ledger has its line; otherwise it
+	// is on its way and takes effect within the hour, as a march order does.
+	SetStatusMessage(bImmediate ? S->GetLastResourceChangeReason() : FString(TEXT("Order given: it takes effect within the hour.")));
+	PeopleKey.Reset();
+	FloorKey.Reset();
+	DecisionKey.Reset();
+}
+
+void UPA250MapWidget::RefreshPassPanels()
+{
+	UPA250Subsystem* S = Sub();
+	if (!S || !S->GetController().has_campaign())
+	{
+		return;
+	}
+	const pa250::CampaignState& St = S->GetState();
+	TWeakObjectPtr<UPA250MapWidget> Weak(this);
+	auto Issue = [Weak](const FString& Order) {
+		if (Weak.IsValid()) Weak->IssueOrder(Order);
+	};
+	const FString Base = FString::Printf(TEXT("%d|%s|%s"), S->GetHudEpoch(), *SelectedArmyId, *SelectedProvinceId);
+	const FString WantPeople = bShowPeople && !S->IsBattlePending() ? Base : FString();
+	if (PeopleBox.IsValid() && WantPeople != PeopleKey)
+	{
+		PeopleKey = WantPeople;
+		PeopleBox->SetContent(WantPeople.IsEmpty() ? SNullWidget::NullWidget
+												   : PA250PassPanels::BuildPeople(St, SelectedArmyId, SelectedProvinceId, Issue, [Weak]() {
+														 if (Weak.IsValid()) Weak->PressPeopleToggle();
+													 }));
+	}
+	const FString WantFloor = bShowFloor && !S->IsBattlePending() ? Base : FString();
+	if (FloorBox.IsValid() && WantFloor != FloorKey)
+	{
+		FloorKey = WantFloor;
+		FloorBox->SetContent(WantFloor.IsEmpty() ? SNullWidget::NullWidget : PA250PassPanels::BuildFloor(St, Issue, [Weak]() {
+			if (Weak.IsValid()) Weak->PressFloorToggle();
+		}));
+	}
+	const FString WantDecision = ToFStr(St.pass.pending_decision);
+	if (DecisionBox.IsValid() && WantDecision != DecisionKey)
+	{
+		DecisionKey = WantDecision;
+		if (WantDecision.IsEmpty())
+		{
+			DecisionBox->SetContent(SNullWidget::NullWidget);
+		}
+		else
+		{
+			const PA250PassPanels::FDecision D = PA250PassPanels::Decision(St);
+			bool bPlaceholder = false;
+			DecisionTexture = PA250StoryArt::TextureFor(this, D.Painting, bPlaceholder);
+			DecisionBrush = FSlateBrush();
+			DecisionBrush.SetResourceObject(DecisionTexture);
+			DecisionBrush.ImageSize = FVector2D(1920.f, 1080.f);
+			DecisionBrush.DrawAs = ESlateBrushDrawType::Image;
+			DecisionBox->SetContent(PA250PassPanels::BuildDecision(St, Issue, DecisionTexture ? &DecisionBrush : nullptr));
+			UE_LOG(LogTemp, Display, TEXT("PA250 decision shown: %s (%s, painting %s%s); the clock is stopped"), *D.Title, *D.Id, *D.Painting,
+				   bPlaceholder ? TEXT(", placeholder") : TEXT(""));
 		}
 	}
-	return FText::FromString(FString::Printf(
-		TEXT("%s selected — at %s · %d fit · %s%s\nRight-click a town to march · Esc cancels"),
-		*ToFStr(A.name), *ProvName(St, A.province), FitCount(A), *OrdersText(St, A), *Route));
+}
+
+FString UPA250MapWidget::HaltMessage(const FString& ArmyName, const FString& TownName, int32 HoursIntoLeg)
+{
+	if (HoursIntoLeg <= 0)
+	{
+		return FString::Printf(TEXT("%s halts at %s."), *ArmyName, *TownName);
+	}
+	return FString::Printf(TEXT("%s turns about: %d march %s back to %s."), *ArmyName, HoursIntoLeg, HoursIntoLeg == 1 ? TEXT("hour") : TEXT("hours"), *TownName);
+}
+
+bool UPA250MapWidget::CanHaltSelected() const
+{
+	UPA250Subsystem* S = Sub();
+	return S && !SelectedArmyId.IsEmpty() && !S->IsBattlePending() && S->IsArmyOnTheMarch(SelectedArmyId);
+}
+
+void UPA250MapWidget::PressHalt()
+{
+	UPA250Subsystem* S = Sub();
+	if (!S || SelectedArmyId.IsEmpty() || !S->GetController().has_campaign())
+	{
+		return;
+	}
+	const pa250::CampaignState& St = S->GetState();
+	const auto It = St.armies.find(ToStd(SelectedArmyId));
+	if (It == St.armies.end())
+	{
+		return;
+	}
+	if (!S->IsArmyOnTheMarch(SelectedArmyId))
+	{
+		SetStatusMessage(ToFStr(It->second.name) + TEXT(" is not marching."));
+		return;
+	}
+	const FString Name = ToFStr(It->second.name);
+	const FString Town = ProvName(St, It->second.province);
+	const int32 Into = It->second.path.empty() ? 0 : It->second.hours_into_edge;
+	FString Err;
+	if (S->HaltArmy(SelectedArmyId, Err))
+	{
+		SetStatusMessage(HaltMessage(Name, Town, Into));
+	}
+	else
+	{
+		SetStatusMessage(TEXT("Halt refused: ") + Err);
+	}
 }
 
 void UPA250MapWidget::PressSelectArmy(const FString& ArmyId)
@@ -813,7 +1070,14 @@ void UPA250MapWidget::RefreshBattleCards()
 		}
 		else
 		{
-			PreBattleBox->SetContent(PA250BattleCards::BuildPreBattle(pa250::build_battle_setup(St, St.pending_battle.province)));
+			TWeakObjectPtr<UPA250MapWidget> Weak(this);
+			PreBattleBox->SetContent(
+				SNew(SVerticalBox)
+				+ SVerticalBox::Slot().AutoHeight()[PA250BattleCards::BuildPreBattle(pa250::build_battle_setup(St, St.pending_battle.province))]
+				+ SVerticalBox::Slot().AutoHeight().Padding(0.f, 10.f, 0.f, 0.f)
+					  [PA250PassPanels::BuildCardAgents(St, [Weak](const FString& Order) {
+						  if (Weak.IsValid()) Weak->IssueOrder(Order);
+					  })]);
 		}
 	}
 	// After: the sim's report of the last battle.
@@ -850,6 +1114,19 @@ void UPA250MapWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 		NotifyMapSelectionChanged();
 	}
 	RefreshBattleCards();
+	RefreshPassPanels();
+	// Nobody is there to press Continue in an autoplay or probe run: it is pressed once the field is
+	// ready (a probe waits long enough for its still to be taken first).
+	if (bStoryUp && bStoryReady && !bStoryLeaving)
+	{
+		const bool bProbe = FParse::Param(FCommandLine::Get(), TEXT("PA250StoryProbe"));
+		const bool bAuto = FParse::Param(FCommandLine::Get(), TEXT("PA250Autoplay"));
+		if ((bAuto || bProbe) && FPlatformTime::Seconds() - StoryStartSeconds >= (bProbe ? 7.0 : 1.0))
+		{
+			UE_LOG(LogTemp, Display, TEXT("PA250 story: Continue pressed by the %s"), bProbe ? TEXT("probe") : TEXT("autoplay"));
+			ContinueToBattle();
+		}
+	}
 	// Desk news (a delivery, a refusal, a new letter) goes to the message line; it never pauses.
 	if (S->GetDispatchSerial() != SeenDispatchSerial)
 	{
@@ -989,6 +1266,9 @@ FString UPA250MapWidget::OrderProvince(const FString& ProvinceId)
 		LastMessage = ArmyName + TEXT(" → ") + DestName +
 					  (When.IsEmpty() ? TEXT(".") : TEXT(". Arrives ") + When + TEXT(".")) +
 					  (Route.IsEmpty() ? FString() : TEXT(" Route: ") + Route);
+		// Marching on a fort it cannot besiege (no general): say so now, not after the battle.
+		const std::string Why = pa250::why_cannot_besiege(Now, ToStd(SelectedArmyId), Pid);
+		if (!Why.empty()) LastMessage += TEXT("  WARNING: ") + ToFStr(Why) + TEXT(" ") + ToFStr(pa250::how_to_form_army(Now, Now.player_faction));
 		SelectedProvinceId = ProvinceId;
 	}
 	else
@@ -1050,6 +1330,11 @@ FReply UPA250MapWidget::NativeOnKeyDown(const FGeometry& InGeometry, const FKeyE
 		S->SetSpeedIndex(S->GetSpeedIndex() - 1);
 		return FReply::Handled();
 	}
+	if (Key == EKeys::H)
+	{
+		PressHalt();
+		return FReply::Handled();
+	}
 	if (Key == EKeys::Escape)
 	{
 		// Layered: close transient panels first, then clear selection. Pause is
@@ -1057,6 +1342,11 @@ FReply UPA250MapWidget::NativeOnKeyDown(const FGeometry& InGeometry, const FKeyE
 		if (IsCityViewOpen())
 		{
 			CloseCityView();
+			return FReply::Handled();
+		}
+		if (bShowPeople || bShowFloor)
+		{
+			bShowPeople = bShowFloor = false;
 			return FReply::Handled();
 		}
 		if (bShowAbout)
@@ -1288,10 +1578,39 @@ TSharedRef<SWidget> UPA250MapWidget::RebuildWidget()
 																						: EVisibility::Collapsed;
 	});
 
+	// The detached commander's letter: each answer with what it costs and gains printed on it, as the
+	// source letters do (the words are the sim's: catalog "commander_letter").
+	const std::vector<pa250::CommanderLetterChoice> CommanderChoices = pa250::commander_letter_choices();
+	auto CommanderChoice = [this, &Hud, CommanderChoices](int32 Index) -> TSharedRef<SWidget> {
+		static const TCHAR* Fallback[] = {TEXT("preserve_force"), TEXT("contest_crossing"), TEXT("escalate")};
+		const bool bData = Index < static_cast<int32>(CommanderChoices.size());
+		const FString Action = bData ? ToFStr(CommanderChoices[Index].id) : FString(Fallback[Index]);
+		const FString Label = bData ? ToFStr(CommanderChoices[Index].label) : Action.Replace(TEXT("_"), TEXT(" "));
+		const FString Summary = bData ? ToFStr(CommanderChoices[Index].effects_summary) : FString();
+		return SNew(SBox).WidthOverride(420.f)
+			[SNew(SButton)
+				 .ButtonStyle(&Hud.Button)
+				 .IsFocusable(false)
+				 .ContentPadding(FMargin(10.f, 5.f))
+				 .OnClicked_Lambda([this, Action]() {
+					 PressCommander(Action);
+					 return FReply::Handled();
+				 })
+					 [SNew(SVerticalBox) +
+					  SVerticalBox::Slot().AutoHeight()
+						  [SNew(STextBlock).Font(FPA250HudStyle::Font(TEXT("Bold"), 12)).ColorAndOpacity(FPA250HudStyle::Cream).Text(FText::FromString(Label))] +
+					  SVerticalBox::Slot().AutoHeight()
+						  [SNew(STextBlock).Font(FPA250HudStyle::Font(TEXT("Regular"), 10)).ColorAndOpacity(FPA250HudStyle::Brass).AutoWrapText(true).Text(FText::FromString(Summary))]]];
+	};
 	TAttribute<EVisibility> ForcesVis = TAttribute<EVisibility>::CreateLambda([this]() {
 		// An open letter and battles take the screen; the forces list returns after.
 		UPA250Subsystem* S2 = Sub();
 		if (S2 && (S2->IsBattlePending() || S2->IsStaffPanelOpen())) return EVisibility::Collapsed;
+		return EVisibility::Visible;
+	});
+	TAttribute<EVisibility> TownsVis = TAttribute<EVisibility>::CreateLambda([this]() {
+		UPA250Subsystem* S2 = Sub();
+		if (bShowPeople || bShowFloor || (S2 && (S2->IsBattlePending() || S2->IsStaffPanelOpen()))) return EVisibility::Collapsed;
 		return EVisibility::Visible;
 	});
 	TAttribute<EVisibility> ArmyBannerVis = TAttribute<EVisibility>::CreateLambda([this]() {
@@ -1511,7 +1830,7 @@ TSharedRef<SWidget> UPA250MapWidget::RebuildWidget()
 			  .VAlign(VAlign_Top)
 			  .HAlign(HAlign_Left)
 			  .Padding(FMargin(16.f, 84.f, 0.f, 0.f))
-				  [SNew(SBox).WidthOverride(300.f)
+				  [SNew(SBox).WidthOverride(350.f)
 					   [SNew(SBorder)
 							.Visibility(ForcesVis)
 							.BorderImage(&Hud.Panel)
@@ -1526,25 +1845,82 @@ TSharedRef<SWidget> UPA250MapWidget::RebuildWidget()
 			  .Padding(FMargin(0.f, 84.f, 16.f, 0.f))
 				  [SNew(SBox).WidthOverride(TownsPanelWidth)
 					   [SNew(SBorder)
-							.Visibility(ForcesVis)
+							.Visibility(TownsVis)
 							.BorderImage(&Hud.Panel)
 							.Padding(FMargin(10.f, 8.f))
 								[SNew(SVerticalBox) +
 								 SVerticalBox::Slot().AutoHeight()[SectionHeader(TEXT("YOUR TOWNS"))] +
 								 SVerticalBox::Slot().AutoHeight()[TownsList]]]]
+		// Campaign pass: a second row of the top bar, at its right end (the bar itself is full at
+		// the sizes the game is played at): the body's button with Unity and favors, and People.
 		+ SOverlay::Slot()
 			  .VAlign(VAlign_Top)
-			  .HAlign(HAlign_Center)
-			  .Padding(FMargin(0.f, 84.f, 0.f, 0.f))
-				  [SNew(SBorder)
-					   .Visibility(ArmyBannerVis)
-					   .BorderImage(&Hud.Banner)
-					   .Padding(FMargin(16.f, 8.f))
-						   [SNew(STextBlock)
-								.Font(FPA250HudStyle::Font(TEXT("Bold"), 14))
-								.ColorAndOpacity(FLinearColor(1.f, 0.95f, 0.80f))
-								.AutoWrapText(true)
-								.Text_Lambda([this]() { return SelectedArmyBannerText(); })]]
+			  .HAlign(HAlign_Right)
+			  .Padding(FMargin(0.f, 49.f, 16.f, 0.f))
+				  [SNew(SHorizontalBox).Visibility_Lambda([this]() {
+					  UPA250Subsystem* S2 = Sub();
+					  return S2 && S2->GetController().has_campaign() && !S2->IsBattlePending() && !S2->IsCampaignOver() ? EVisibility::Visible : EVisibility::Collapsed;
+				  }) +
+				   SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 6, 0)
+					   [SNew(SButton)
+							.ButtonStyle(&Hud.Button)
+							.IsFocusable(false)
+							.ContentPadding(FMargin(11.f, 3.f))
+							.ToolTipText(FText::FromString(TEXT("The body you answer to: its blocs, the measures before it, and what you can do about them. Unity is how close its three blocs stand: under its floor the troops of other colonies begin to go home. Favors are spent on the floor.")))
+							.Visibility_Lambda([this]() {
+								UPA250Subsystem* S2 = Sub();
+								return S2 && S2->GetController().has_campaign() && !PA250PassPanels::FloorButton(S2->GetState()).IsEmpty() ? EVisibility::Visible : EVisibility::Collapsed;
+							})
+							.OnClicked_Lambda([this]() {
+								PressFloorToggle();
+								return FReply::Handled();
+							})
+								[SNew(STextBlock).Font(BodyFont).ColorAndOpacity(FPA250HudStyle::Cream).Text_Lambda([this]() {
+									UPA250Subsystem* S2 = Sub();
+									if (!S2 || !S2->GetController().has_campaign()) return FText::GetEmpty();
+									return FText::FromString(PA250PassPanels::FloorButton(S2->GetState()) + TEXT(" · ") + PA250PassPanels::UnityChip(S2->GetState()));
+								})]] +
+				   SHorizontalBox::Slot().AutoWidth()
+					   [MakeButton(TEXT("People"), [this]() { PressPeopleToggle(); }, EVisibility::Visible,
+								   FText::FromString(TEXT("Your generals, delegates, organizers and agents, and what each can do.")))]]
+		// The people panel and the floor, docked right under that row.
+		+ SOverlay::Slot()
+			  .VAlign(VAlign_Fill)
+			  .HAlign(HAlign_Right)
+			  .Padding(FMargin(0.f, 88.f, 16.f, BottomStripHeightPx + 64.f))
+				  [SAssignNew(PeopleBox, SBox).WidthOverride(580.f).Visibility_Lambda([this]() {
+					  UPA250Subsystem* S2 = Sub();
+					  return bShowPeople && S2 && !S2->IsBattlePending() ? EVisibility::Visible : EVisibility::Collapsed;
+				  })]
+		+ SOverlay::Slot()
+			  .VAlign(VAlign_Fill)
+			  .HAlign(HAlign_Right)
+			  .Padding(FMargin(0.f, 88.f, 16.f, BottomStripHeightPx + 64.f))
+				  [SAssignNew(FloorBox, SBox).WidthOverride(700.f).Visibility_Lambda([this]() {
+					  UPA250Subsystem* S2 = Sub();
+					  return bShowFloor && S2 && !S2->IsBattlePending() ? EVisibility::Visible : EVisibility::Collapsed;
+				  })]
+		// The selected army's panel: bottom left, clear of the town panel, the mission tracker (top
+		// centre, which used to cover it) and the toolbar.
+		+ SOverlay::Slot()
+			  .VAlign(VAlign_Bottom)
+			  .HAlign(HAlign_Left)
+			  .Padding(FMargin(ArmyPanelLeft, 0.f, 0.f, BottomStripHeightPx + 8.f))
+				  [SAssignNew(ArmyPanelBox, SBox).WidthOverride(ArmyPanelWidth).Visibility(ArmyBannerVis)
+					   [SNew(SBorder)
+							.BorderImage(&Hud.Banner)
+							.Padding(FMargin(14.f, 8.f))
+								[SNew(SVerticalBox) +
+								 SVerticalBox::Slot().AutoHeight()
+									 [SNew(STextBlock)
+										  .Font(FPA250HudStyle::Font(TEXT("Bold"), 13))
+										  .ColorAndOpacity(FLinearColor(1.f, 0.95f, 0.80f))
+										  .AutoWrapText(true)
+										  .Text_Lambda([this]() { return SelectedArmyBannerText(); })] +
+								 SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Left).Padding(0.f, 6.f, 0.f, 0.f)
+									 [MakeButton(TEXT("Halt  (H)"), [this]() { PressHalt(); },
+												 TAttribute<EVisibility>::CreateLambda([this]() { return CanHaltSelected() ? EVisibility::Visible : EVisibility::Collapsed; }),
+												 FText::FromString(TEXT("Halt this army. On the road it turns about and marches back to the town it left.")))]]]]
 		+ SOverlay::Slot()
 			  .VAlign(VAlign_Top)
 			  .HAlign(HAlign_Center)
@@ -1612,7 +1988,7 @@ TSharedRef<SWidget> UPA250MapWidget::RebuildWidget()
 			  .VAlign(VAlign_Top)
 			  .HAlign(HAlign_Left)
 			  .Padding(FMargin(16.f, 196.f, 0.f, 0.f))
-				  [SNew(SBox).WidthOverride(300.f)
+				  [SNew(SBox).WidthOverride(350.f)
 					   [SNew(SBorder)
 							.Visibility(LedgerVis)
 							.BorderImage(&Hud.Panel)
@@ -1697,14 +2073,9 @@ TSharedRef<SWidget> UPA250MapWidget::RebuildWidget()
 														  [this]() { return AftermathTip(TEXT("dismiss")); }))]] +
 								 SVerticalBox::Slot().AutoHeight().Padding(0, 10, 0, 0)
 									 [SNew(SWrapBox).PreferredSize(420.f).InnerSlotPadding(FVector2D(6.f, 6.f)).Visibility(CommanderChoicesVis) +
-									  SWrapBox::Slot()
-										  [MakeButton(TEXT("Clarify: preserve"),
-													  [this]() { PressCommander(TEXT("preserve_force")); })] +
-									  SWrapBox::Slot()
-										  [MakeButton(TEXT("Counterorder: contest"),
-													  [this]() { PressCommander(TEXT("contest_crossing")); })] +
-									  SWrapBox::Slot()
-										  [MakeButton(TEXT("Escalate"), [this]() { PressCommander(TEXT("escalate")); })] +
+									  SWrapBox::Slot()[CommanderChoice(0)] +
+									  SWrapBox::Slot()[CommanderChoice(1)] +
+									  SWrapBox::Slot()[CommanderChoice(2)] +
 									  SWrapBox::Slot()
 										  [MakeButton(TEXT("Dismiss"), [this]() { PressLogistics(TEXT("dismiss")); })]] +
 								 SVerticalBox::Slot().AutoHeight().Padding(0, 10, 0, 0)
@@ -1853,6 +2224,48 @@ TSharedRef<SWidget> UPA250MapWidget::RebuildWidget()
 									 [MakeButton(TEXT("Continue"), [this]() {
 										 if (UPA250Subsystem* S2 = Sub()) S2->AcknowledgeBattleReport();
 									 })]]]]
+		// A mission that has ended: what happened and what it paid or cost, until it is closed.
+		+ SOverlay::Slot()
+			  .VAlign(VAlign_Center)
+			  .HAlign(HAlign_Center)
+				  [SNew(SBox).WidthOverride(560.f)
+					   [SNew(SBorder)
+							.Visibility(TAttribute<EVisibility>::CreateLambda([this]() { return IsMissionCardShown() ? EVisibility::Visible : EVisibility::Collapsed; }))
+							.BorderImage(&Hud.Parchment)
+							.Padding(FMargin(22.f, 16.f))
+								[SNew(SVerticalBox) +
+								 SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center)
+									 [SNew(STextBlock)
+										  .Font(FPA250HudStyle::Font(TEXT("Bold"), 13))
+										  .ColorAndOpacity(TAttribute<FSlateColor>::CreateLambda([this]() {
+											  return FSlateColor(MissionCardNow().bDone ? FPA250HudStyle::SRGB(0.10f, 0.34f, 0.14f) : FPA250HudStyle::SRGB(0.55f, 0.10f, 0.08f));
+										  }))
+										  .Text_Lambda([this]() { return FText::FromString(MissionCardNow().Heading); })] +
+								 SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center).Padding(0, 2, 0, 6)
+									 [SNew(STextBlock)
+										  .Font(FPA250HudStyle::Font(TEXT("Bold"), 22))
+										  .ColorAndOpacity(FPA250HudStyle::Ink)
+										  .Text_Lambda([this]() { return FText::FromString(MissionCardNow().Title); })] +
+								 SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 8)
+									 [SNew(STextBlock)
+										  .Font(FPA250HudStyle::Font(TEXT("Italic"), 14))
+										  .ColorAndOpacity(FPA250HudStyle::Ink)
+										  .AutoWrapText(true)
+										  .Text_Lambda([this]() { return FText::FromString(MissionCardNow().Summary); })] +
+								 SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 8)
+									 [SNew(STextBlock)
+										  .Font(FPA250HudStyle::Font(TEXT("Regular"), 14))
+										  .ColorAndOpacity(FPA250HudStyle::Ink)
+										  .AutoWrapText(true)
+										  .Text_Lambda([this]() { return FText::FromString(FString::Join(MissionCardNow().Lines, TEXT("\n"))); })] +
+								 SVerticalBox::Slot().AutoHeight()
+									 [SNew(STextBlock)
+										  .Font(FPA250HudStyle::Font(TEXT("Regular"), 12))
+										  .ColorAndOpacity(FPA250HudStyle::Ink)
+										  .AutoWrapText(true)
+										  .Text_Lambda([this]() { return FText::FromString(MissionCardNow().Next); })] +
+								 SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Right).Padding(0, 12, 0, 0)
+									 [MakeButton(TEXT("Continue"), [this]() { PressMissionCardContinue(); })]]]]
 		+ SOverlay::Slot()
 			  .VAlign(VAlign_Bottom)
 			  .HAlign(HAlign_Right)
@@ -1957,7 +2370,15 @@ TSharedRef<SWidget> UPA250MapWidget::RebuildWidget()
 									  SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center).Padding(0.f, 18.f, 0.f, 0.f)
 										  [SNew(SHorizontalBox) +
 										   SHorizontalBox::Slot().AutoWidth().Padding(0.f, 0.f, 10.f, 0.f)[MakeButton(TEXT("New campaign"), [this]() { PressNewCampaign(); })] +
-										   SHorizontalBox::Slot().AutoWidth()[MakeButton(TEXT("Quit"), [this]() { PressQuitGame(); })]]]]]];
+										   SHorizontalBox::Slot().AutoWidth()[MakeButton(TEXT("Quit"), [this]() { PressQuitGame(); })]]]]]]
+		// The battle story covers everything from "To arms!" until the field is ready.
+		+ SOverlay::Slot()[SAssignNew(StoryBox, SBox).Visibility_Lambda([this]() { return bStoryUp ? EVisibility::Visible : EVisibility::Collapsed; })]
+		// A decision takes the whole screen; the clock is stopped until it is answered.
+		+ SOverlay::Slot()
+			  [SAssignNew(DecisionBox, SBox).Visibility_Lambda([this]() {
+				  UPA250Subsystem* S2 = Sub();
+				  return S2 && S2->GetController().has_campaign() && S2->IsDecisionPending() && !S2->IsBattlePending() ? EVisibility::Visible : EVisibility::Collapsed;
+			  })];
 }
 
 void UPA250MapWidget::PressEndTurn()
@@ -1994,9 +2415,13 @@ void UPA250MapWidget::PressFight()
 {
 	UPA250Subsystem* S = Sub();
 	FString Err;
+	if (bStoryUp)
+	{
+		return; // the story is already up: Continue takes the player to the field
+	}
 	if (S && S->BeginBattle(Err))
 	{
-		S->TravelToFlowLevel(this);
+		StartBattleStory();
 	}
 	else
 	{
@@ -2049,7 +2474,33 @@ bool UPA250MapWidget::IsTrackerShown() const
 	RefreshTrackerCache();
 	UPA250Subsystem* S2 = Sub();
 	return TrackerCache.IsValid() && TrackerCache->Tracker.bVisible && S2 && !S2->IsBattlePending() && !S2->HasUnseenBattleReport() &&
-		   !TrackerCache->End.bDecided;
+		   !IsMissionCardShown() && !TrackerCache->End.bDecided;
+}
+
+bool UPA250MapWidget::IsMissionCardShown() const
+{
+	// One thing at a time: the battle's cards first, then the mission's.
+	const UPA250Subsystem* S2 = Sub();
+	return S2 && S2->HasUnseenMissionResult() && !S2->IsBattlePending() && !(S2->HasUnseenBattleReport() && !BattleReportText().IsEmpty());
+}
+
+PA250ArcPanels::FMissionCard UPA250MapWidget::MissionCardNow() const
+{
+	const UPA250Subsystem* S2 = Sub();
+	const pa250::MissionResult* R = S2 ? S2->PeekMissionResult() : nullptr;
+	return R ? PA250ArcPanels::MissionCard(*R, S2->GetState()) : PA250ArcPanels::FMissionCard();
+}
+
+void UPA250MapWidget::PressMissionCardContinue()
+{
+	if (UPA250Subsystem* S2 = Sub())
+	{
+		if (const pa250::MissionResult* R = S2->PeekMissionResult())
+		{
+			UE_LOG(LogTemp, Display, TEXT("PA250 mission card closed: %s (%s)"), UTF8_TO_TCHAR(R->title.c_str()), UTF8_TO_TCHAR(R->outcome.c_str()));
+		}
+		S2->AcknowledgeMissionResult();
+	}
 }
 
 void UPA250MapWidget::PressDevToggle()
@@ -2062,6 +2513,22 @@ bool UPA250MapWidget::IsCityViewOpen() const
 {
 	return CityView && CityView->GetVisibility() != ESlateVisibility::Collapsed &&
 		   CityView->GetVisibility() != ESlateVisibility::Hidden;
+}
+
+bool UPA250MapWidget::IsViewportPointOver(const TSharedPtr<SWidget>& Widget, FVector2D ViewportPx)
+{
+	if (!Widget.IsValid() || !Widget->GetVisibility().IsVisible() || !GEngine || !GEngine->GameViewport)
+	{
+		return false;
+	}
+	const TSharedPtr<SViewport> Viewport = GEngine->GameViewport->GetGameViewportWidget();
+	if (!Viewport.IsValid())
+	{
+		return false;
+	}
+	const FGeometry& VG = Viewport->GetTickSpaceGeometry();
+	const FVector2D Abs = VG.LocalToAbsolute(ViewportPx / FMath::Max(VG.Scale, KINDA_SMALL_NUMBER));
+	return Widget->GetTickSpaceGeometry().IsUnderLocation(Abs);
 }
 
 bool UPA250MapWidget::IsPointOverHud(FVector2D ScreenPos) const
@@ -2082,6 +2549,24 @@ bool UPA250MapWidget::IsPointOverHud(FVector2D ScreenPos) const
 	}
 	// The mission tracker's heading row (top centre), where its Hide / Show button sits.
 	if (IsTrackerShown() && FMath::Abs(ScreenPos.X - Size.X * 0.5f) <= 183.f && ScreenPos.Y <= 40.f + 38.f)
+	{
+		return true;
+	}
+	// A decision or the battle story owns the whole screen; the people panel and the floor block their own rectangles.
+	if (bStoryUp)
+	{
+		return true;
+	}
+	if (UPA250Subsystem* PassSub = Sub(); PassSub && PassSub->GetController().has_campaign() && PassSub->IsDecisionPending())
+	{
+		return true;
+	}
+	if (IsViewportPointOver(PeopleBox, ScreenPos) || IsViewportPointOver(FloorBox, ScreenPos))
+	{
+		return true;
+	}
+	// The selected army's panel (bottom left, beside the town panel), where its Halt button sits.
+	if (IsViewportPointOver(ArmyPanelBox, ScreenPos))
 	{
 		return true;
 	}

@@ -1,0 +1,15 @@
+{
+ "name": "reject_use_agent_alarm_no_battle",
+ "description": "the alarm is raised only when a battle is pending and the player defends",
+ "start_ymdh": {
+  "y": 1775,
+  "m": 4,
+  "d": 20,
+  "h": 0
+ },
+ "order": {
+  "order": "use_agent",
+  "person": "paul_revere"
+ },
+ "expect_error": "no_battle_pending"
+}

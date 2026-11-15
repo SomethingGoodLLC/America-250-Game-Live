@@ -43,6 +43,21 @@ namespace PA250Squad
 PLAYAMERICA250_API const TCHAR* OrderWords(EPA250SquadOrder Order);
 /** The shouted line for an order ("follow_me", "charge_bayonets", ...), or null when it has none. */
 PLAYAMERICA250_API const TCHAR* OrderVoiceKey(EPA250SquadOrder Order);
+/** Places for a file that follows its leader: one rank at his shoulders, half the men to each side
+ *  of him (none where he stands), SpacingCm apart, left to right. X is to his right; Y (behind) is 0. */
+inline void AbreastOffsets(int32 N, float SpacingCm, TArray<FVector2D>& Out)
+{
+	Out.Reset();
+	const int32 Left = N / 2;
+	for (int32 i = Left; i >= 1; --i) Out.Add(FVector2D(-i * SpacingCm, 0.f));
+	for (int32 i = 1; i <= N - Left; ++i) Out.Add(FVector2D(i * SpacingCm, 0.f));
+}
+/** Whether a following line turns to its leader's new facing: always while he moves; standing still,
+ *  only once he has turned more than TurnDegrees from the line (so looking about does not wheel it). */
+inline bool FollowTurns(const FVector& LineFacing, const FVector& LeaderFacing, bool bLeaderMoving, float TurnDegrees)
+{
+	return bLeaderMoving || FVector::DotProduct(LineFacing.GetSafeNormal2D(), LeaderFacing.GetSafeNormal2D()) < FMath::Cos(FMath::DegreesToRadians(TurnDegrees));
+}
 /** The drummer's beating for an order (SFX bank "drum_call_<name>"), told apart by ear. */
 PLAYAMERICA250_API const TCHAR* OrderDrumCall(EPA250SquadOrder Order);
 /** Where a led squad's line stands: behind the leader (FollowMe), on the point given (FormLine, Hold,
@@ -149,7 +164,9 @@ public:
 	/** The leader's own shot. A presented line fires with him. True when a volley was fired. */
 	bool LeaderFired(ARFCharacter* Leader);
 	/** The file's state for the HUD. False when Leader has no file. */
-	bool GetFileStatus(const ARFCharacter* Leader, int32& OutMen, int32& OutLoaded, int32& OutPresented, EPA250SquadOrder& OutOrder) const;
+	bool GetFileStatus(const ARFCharacter* Leader, int32& OutMen, int32& OutLoaded, int32& OutPresented, EPA250SquadOrder& OutOrder, int32* OutWithLeader = nullptr) const;
+	/** The living men of the leader's file (for probes and tests). */
+	TArray<ARFCharacter*> GetFileMembers(const ARFCharacter* Leader) const;
 	/** The man of his file nearest the fallen leader (the player steps into him), or null. */
 	ARFCharacter* PickSuccessor(const ARFCharacter* FallenLeader) const;
 	/** Successor (a man of the file) becomes its leader. */
@@ -261,6 +278,8 @@ private:
 		/** This squad defends a post from behind its field works: it keeps to them (no advance, no
 		 *  pursuit) and every man looks for a place behind a bank, whatever his drill. */
 		bool bAtWorks = false;
+		/** Following its leader at his shoulders (one rank, half to each side of him). */
+		bool bAbreast = false;
 		/** The post whose works it mans. While that post is its side's and a work still stands by it,
 		 *  the squad stays there instead of going out after a post the enemy has taken (a garrison
 		 *  that sallied from its works was shot down in the open: works matchup, 2026-11-14). */

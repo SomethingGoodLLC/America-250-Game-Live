@@ -1439,6 +1439,28 @@ void APA250BattleGameMode::BeginPlay()
 		FPA250BattleAudio::StartAmbience(this);
 	}
 	StartTime = GetWorld()->GetTimeSeconds();
+	// The story screen gives way to the field: it fades in from black (a played battle only).
+	if (!bAutoplayBots && FApp::CanEverRender())
+	{
+		if (APlayerController* PC = GetWorld()->GetFirstPlayerController(); PC && PC->PlayerCameraManager)
+		{
+			PC->PlayerCameraManager->StartCameraFade(1.f, 0.f, StoryFadeInSeconds, FLinearColor::Black, false, false);
+			UE_LOG(LogTemp, Display, TEXT("PA250 story: the field fades in over %.1f s"), StoryFadeInSeconds);
+		}
+	}
+	if (FParse::Param(FCommandLine::Get(), TEXT("PA250StoryProbe")))
+	{
+		// The story probe's second half: the field after the fade, then quit.
+		UE_LOG(LogTemp, Display, TEXT("STORY_PROBE: the battle level is open: %s"), *GetWorld()->GetMapName());
+		FTimerHandle Still, QuitHandle;
+		GetWorldTimerManager().SetTimer(Still, FTimerDelegate::CreateLambda([this]() {
+			if (APlayerController* PC = GetWorld()->GetFirstPlayerController()) PC->ConsoleCommand(TEXT("Shot showui"));
+			UE_LOG(LogTemp, Display, TEXT("STORY_PROBE: shot battle_story_field"));
+		}), 10.f, false);
+		GetWorldTimerManager().SetTimer(QuitHandle, FTimerDelegate::CreateLambda([this]() {
+			UKismetSystemLibrary::QuitGame(this, nullptr, EQuitPreference::Quit, false);
+		}), 13.f, false);
+	}
 	Banner = FString::Printf(TEXT("Battle of %s"), UTF8_TO_TCHAR(Setup.province_name.c_str()));
 	if (PA250Modes::IsOrdered(ScenarioFight.Mode))
 	{
@@ -1463,6 +1485,7 @@ void APA250BattleGameMode::BeginPlay()
 			bBotsOverride ? TEXT(" (-PA250Bots)") : TEXT(""));
 		SpawnInitialForces(KV.Key, GetFieldStrength(KV.Key));
 	}
+	SpawnGenerals();
 	SetUpLanding();
 	// Debug matchups: -PA250HoldAt=<metres> draws the two sides up that far apart on open ground and
 	// has them hold it; -PA250NoReserve fights with the men on the field only.
@@ -2208,7 +2231,7 @@ void APA250BattleGameMode::MaybeOpenClassPick(APlayerController* PC)
 	if (!bForce)
 	{
 		for (const TCHAR* Probe : {TEXT("PA250NoClassPick"), TEXT("PA250Preview="), TEXT("PA250BattleShots="), TEXT("PA250HurtProbe"),
-				 TEXT("PA250TakeoverProbe"), TEXT("PA250FpsSample"), TEXT("PA250MeleeProbe"), TEXT("PA250ClassPortraits"), TEXT("PA250GunStill"), TEXT("PA250LandingStill")})
+				 TEXT("PA250TakeoverProbe"), TEXT("PA250FpsSample"), TEXT("PA250MeleeProbe"), TEXT("PA250ClassPortraits"), TEXT("PA250GunStill"), TEXT("PA250LandingStill"), TEXT("PA250OrderProbe")})
 		{
 			if (Cmd.Contains(Probe)) return;
 		}
@@ -2274,9 +2297,14 @@ void APA250BattleGameMode::TickOfficers(float DeltaSeconds)
 		bool bNear = false;
 		for (const ARFCharacter* O : Officers)
 		{
-			if (O != C && O->FactionId == C->FactionId && PA250UnitClasses::InOfficerRange(C->GetActorLocation(), O->GetActorLocation()))
+			// A general's aura reaches further than a company officer's (BattleSetup commander.aura_radius_m).
+			const float GeneralCm = IsGeneral(O) ? GeneralAuraCm(O->FactionId) : 0.f;
+			const bool bInReach = GeneralCm > 0.f ? FVector::DistSquared(C->GetActorLocation(), O->GetActorLocation()) <= FMath::Square(GeneralCm)
+												  : PA250UnitClasses::InOfficerRange(C->GetActorLocation(), O->GetActorLocation());
+			if (O != C && O->FactionId == C->FactionId && bInReach)
 			{
 				bNear = true;
+				if (GeneralCm > 0.f) ++GeneralAuraChecks;
 				break;
 			}
 		}
@@ -2445,6 +2473,76 @@ ARFCharacter* APA250BattleGameMode::SpawnBot(FName Faction, FName UnitClass, APA
 	return SpawnBotAt(Faction, Charged, At, ClothingSeed);
 }
 
+int32 APA250BattleGameMode::SideOrder(FName Faction, const char* Label) const
+{
+	const auto Side = Setup.sides.find(ToStd(Faction));
+	if (Side == Setup.sides.end()) return 0;
+	for (const pa250::SideFactor& F : Side->second.factors)
+	{
+		if (F.label == Label) return F.value;
+	}
+	return 0;
+}
+
+bool APA250BattleGameMode::IsGeneral(const ARFCharacter* Man) const
+{
+	if (!Man) return false;
+	const TWeakObjectPtr<ARFCharacter>* G = Generals.Find(Man->FactionId);
+	return G && G->Get() == Man;
+}
+
+bool APA250BattleGameMode::GeneralStation(const ARFCharacter* Man, FVector& OutStation, float& OutRadiusCm) const
+{
+	if (!IsGeneral(Man)) return false;
+	const FVector* At = GeneralStations.Find(Man->FactionId);
+	if (!At) return false;
+	OutStation = *At;
+	OutRadiusCm = pa250::commander_rules().home_post_radius_m * 100.f;
+	return true;
+}
+
+float APA250BattleGameMode::GeneralAuraCm(FName Faction) const
+{
+	const TWeakObjectPtr<ARFCharacter>* G = Generals.Find(Faction);
+	if (!G || !G->IsValid() || G->Get()->IsDead()) return 0.f;
+	const auto Side = Setup.sides.find(ToStd(Faction));
+	return Side == Setup.sides.end() ? 0.f : Side->second.commander_aura_radius_m * 100.f;
+}
+
+void APA250BattleGameMode::SpawnGenerals()
+{
+	// The general is not one of the army's men in the ranks: he costs no ticket and is no part of the
+	// reserve or the casualty ledger. What becomes of him goes into the result on its own line.
+	for (const auto& Sk : Setup.sides)
+	{
+		if (Sk.second.commander_id.empty()) continue;
+		const FName Faction(UTF8_TO_TCHAR(Sk.first.c_str()));
+		SpawnClassHint = TEXT("officer");
+		FTransform At = PickSpawnTransform(Faction, nullptr);
+		SpawnClassHint = NAME_None;
+		// A few paces behind where the men come on, so he stands at the rear of his own post.
+		At.SetLocation(At.GetLocation() - At.GetRotation().GetForwardVector() * 250.f);
+		ARFCharacter* C = GetWorld()->SpawnActorDeferred<ARFCharacter>(ARFCharacter::StaticClass(), At, nullptr, nullptr,
+			ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn);
+		if (!C) continue;
+		C->SetClothingSeed(HashCombine(GetTypeHash(static_cast<uint64>(Setup.seed)), GetTypeHash(Faction)));
+		C->AIControllerClass = APA250BotController::StaticClass();
+		C->FinishSpawning(At);
+		C->SpawnDefaultController();
+		ConfigureSoldier(C, Faction, TEXT("officer"));
+		C->Tags.AddUnique(TEXT("PA250General"));
+		if (AController* Ctl = C->GetController())
+		{
+			ControllerFaction.Add(Ctl, Faction);
+			ControllerClass.Add(Ctl, TEXT("officer"));
+		}
+		Generals.Add(Faction, C);
+		GeneralStations.Add(Faction, C->GetActorLocation());
+		UE_LOG(LogTemp, Display, TEXT("PA250 general: %s commands the %s side from his post (aura %.0f m, a company officer's is %.0f m)"),
+			UTF8_TO_TCHAR(Sk.second.commander_name.c_str()), *Faction.ToString(), Sk.second.commander_aura_radius_m, PA250UnitClasses::OfficerRadiusCm / 100.f);
+	}
+}
+
 ARFCharacter* APA250BattleGameMode::SpawnBotAt(FName Faction, FName Charged, const FTransform& T, uint32 ClothingSeed)
 {
 	if (!Ledger.CanReinforce(Faction) || MenInReserve(Faction) <= 0)
@@ -2504,6 +2602,14 @@ void APA250BattleGameMode::SpawnInitialForces(FName Faction, int32 Count)
 		Cap += FMath::Max(1, BT->Values.MusterWaveSize);
 		UE_LOG(LogTemp, Display, TEXT("PA250 muster: Militia Muster building adds +%d cap for %s"),
 			   BT->Values.MusterWaveSize, *Faction.ToString());
+	}
+	// An agent raised the alarm (BattleSetup alarmed): nobody is still mustering when the enemy comes.
+	if (const auto AlarmSide = Setup.sides.find(ToStd(Faction)); AlarmSide != Setup.sides.end() && AlarmSide->second.alarmed)
+	{
+		AlarmMusteredAtOnce += FMath::Max(0, (Count - Others) - Initial);
+		UE_LOG(LogTemp, Display, TEXT("PA250 muster: the alarm was raised: all %d militia places of the %s side are filled at the start (%d would have come later)"),
+			   Count - Others, *Faction.ToString(), FMath::Max(0, (Count - Others) - Initial));
+		Initial = Count - Others;
 	}
 	const int32 MilitiaPlaces = Count - Others;
 	// Non-militia classes, in proportion.
@@ -2768,10 +2874,12 @@ bool APA250BattleGameMode::TakeOverSoldier(APlayerController* PC)
 	return true;
 }
 
-FString APA250BattleGameMode::FileLineText(int32 Men, int32 Loaded, int32 Presented, const TCHAR* OrderWords, bool bVolleyRole)
+FString APA250BattleGameMode::FileLineText(int32 Men, int32 Loaded, int32 Presented, const TCHAR* OrderWords, bool bVolleyRole, int32 WithYou)
 {
 	if (Men <= 0) return TEXT("Your file: no men left");
-	FString S = FString::Printf(TEXT("Your file: %d %s, %d loaded  -  %s"), Men, Men == 1 ? TEXT("man") : TEXT("men"), Loaded, OrderWords);
+	// How many are at his side now: the proof an order is being obeyed (or that they are still coming up).
+	const FString With = WithYou < 0 ? FString() : (WithYou >= Men ? FString(TEXT(" (all with you)")) : FString::Printf(TEXT(" (%d with you, %d coming up)"), WithYou, Men - WithYou));
+	FString S = FString::Printf(TEXT("Your file: %d %s%s, %d loaded  -  %s"), Men, Men == 1 ? TEXT("man") : TEXT("men"), *With, Loaded, OrderWords);
 	if (Presented > 0) S += FString::Printf(TEXT("  -  %d PRESENTED: your shot fires them"), Presented);
 	else S += bVolleyRole ? TEXT("  -  hold aim to make ready") : TEXT("  -  hold aim: they fire at will on your man");
 	return S + TEXT("\n1 follow   2 line here   3 hold   4 cover   5 charge   6 fall back");
@@ -2799,9 +2907,10 @@ FString APA250BattleGameMode::GetFileLine(const ARFCharacter* Soldier) const
 {
 	int32 Men = 0, Loaded = 0, Presented = 0;
 	EPA250SquadOrder Order = EPA250SquadOrder::None;
-	if (!Volleys || !Soldier || !Volleys->GetFileStatus(Soldier, Men, Loaded, Presented, Order)) return FString();
+	int32 WithYou = 0;
+	if (!Volleys || !Soldier || !Volleys->GetFileStatus(Soldier, Men, Loaded, Presented, Order, &WithYou)) return FString();
 	const bool bVolleyRole = CombatProfilesAsset ? !CombatProfilesAsset->RoleFor(Soldier->FactionId, Soldier->UnitClass).bIndividualFire : true;
-	return FileLineText(Men, Loaded, Presented, PA250Squad::OrderWords(Order), bVolleyRole);
+	return FileLineText(Men, Loaded, Presented, PA250Squad::OrderWords(Order), bVolleyRole, WithYou);
 }
 
 void APA250BattleGameMode::GivePlayerOrder(ARFCharacter* Soldier, int32 OrderIndex)
@@ -3809,6 +3918,19 @@ void APA250BattleGameMode::TickEndConditions(float DeltaSeconds)
 			}
 		}
 	}
+	// A letter's orders: a side told to withdraw early quits the field when that share of the clock
+	// has run, and the ground is the enemy's (the sim then saves what the orders said of the magazine).
+	for (const FName F : {FName(TEXT("british")), FName(TEXT("continental"))})
+	{
+		const int32 Pct = SideOrder(F, "withdraw_early");
+		if (Pct > 0 && Elapsed >= TimeLimitSeconds * FMath::Clamp(Pct, 1, 100) / 100.f)
+		{
+			UE_LOG(LogTemp, Display, TEXT("PA250 orders: the %s side withdraws early as ordered (%.0f s of %.0f)"), *F.ToString(), Elapsed, TimeLimitSeconds);
+			PushKillFeed(F == PlayerFaction ? TEXT("Your company falls back as ordered.") : TEXT("The enemy falls back."));
+			EndBattle(F == TEXT("british") ? FName(TEXT("continental")) : FName(TEXT("british")), TEXT("time_limit"));
+			return;
+		}
+	}
 	// army_broke: most of a side's squads are withdrawing or routing. Either side, the player's too
 	// (user decision 2026-11-14); guarded against the opening minutes and against a handful of squads.
 	if (!Volleys) return;
@@ -3819,6 +3941,11 @@ void APA250BattleGameMode::TickEndConditions(float DeltaSeconds)
 		int32& Peak = PeakSquads.FindOrAdd(F);
 		Peak = FMath::Max(Peak, Squads);
 		float& T = BrokeTime.FindOrAdd(F);
+		if (SideOrder(F, "stand_fast") > 0)
+		{
+			T = 0.f; // ordered to stand to the end: this side does not break off
+			continue;
+		}
 		if (!PA250EndRules::ArmyIsBreaking(Squads, Broken, Peak, Elapsed, Rules))
 		{
 			// A squad that steadies for a moment does not wipe the slate: the clock runs back down at
@@ -3960,6 +4087,20 @@ void APA250BattleGameMode::OnCharacterDied(ARFCharacter* Victim, AController* Vi
 {
 	if (bBattleOver || !Victim)
 	{
+		return;
+	}
+	// The general falls: no ticket and no place in the casualty ledger (he is not one of the men),
+	// but his side takes a morale check and the result says what became of him.
+	if (HasAuthority() && IsGeneral(Victim))
+	{
+		const pa250::CommanderRules GeneralRules = pa250::commander_rules();
+		const std::string Fate = pa250::commander_fate(Setup.seed, ToStd(Victim->FactionId));
+		GeneralFate.Add(Victim->FactionId, UTF8_TO_TCHAR(Fate.c_str()));
+		if (Volleys) Volleys->PressSide(Victim->FactionId, GeneralRules.fall_pressure, GeneralRules.fall_pressure_seconds, TEXT("GeneralFell"));
+		const auto Side = Setup.sides.find(ToStd(Victim->FactionId));
+		const FString Name = Side != Setup.sides.end() ? FString(UTF8_TO_TCHAR(Side->second.commander_name.c_str())) : FString(TEXT("The general"));
+		PushKillFeed(FString::Printf(TEXT("%s is down!"), *Name));
+		UE_LOG(LogTemp, Display, TEXT("PA250 general: %s falls (%s); morale check on the %s side"), *Name, UTF8_TO_TCHAR(Fate.c_str()), *Victim->FactionId.ToString());
 		return;
 	}
 	// M6: tickets spent on death (and bleed), not spawn.
@@ -4209,6 +4350,7 @@ void APA250BattleGameMode::Tick(float DeltaSeconds)
 	TickSupport(DeltaSeconds);
 	TickPlayerFile(DeltaSeconds);
 	TickLedVolleyProbe(DeltaSeconds);
+	TickOrderProbe(DeltaSeconds);
 	TickLanding(DeltaSeconds);
 	TickBattleMode();
 	CheckTicketExhaustion();
@@ -4294,6 +4436,11 @@ void APA250BattleGameMode::EndBattle(FName Winner, const FString& Reason)
 	for (const FName F : {FName(TEXT("british")), FName(TEXT("continental"))})
 	{
 		if (const int32 N = GetGunsTakenBy(F); N > 0) Result.guns_taken[ToStd(F)] = N;
+	}
+	// What became of a general who fell (the sim ignores a side that had none).
+	for (const auto& Kv : GeneralFate)
+	{
+		Result.commander_events[ToStd(Kv.Key)] = TCHAR_TO_UTF8(*Kv.Value);
 	}
 	Result.personal_kills = PersonalKills;
 	for (const auto& FK : Result.casualties)
@@ -4450,6 +4597,19 @@ void APA250BattleGameMode::WriteBattleFile(const FString& Reason) const
 	Json += FString::Printf(TEXT(",\"support\":{\"colours_fell\":{\"british\":%d,\"continental\":%d},\"colours_taken_by\":{\"british\":%d,\"continental\":%d},\"saved_by_surgeon\":{\"british\":%d,\"continental\":%d},\"spawned_on_colours\":%d,\"cadence_man_checks\":%d}"),
 		ColoursFell.FindRef(TEXT("british")), ColoursFell.FindRef(TEXT("continental")), ColoursTaken.FindRef(TEXT("british")), ColoursTaken.FindRef(TEXT("continental")),
 		GetSavedBySurgeon(TEXT("british")), GetSavedBySurgeon(TEXT("continental")), SpawnedOnColours, CadenceManChecks);
+	{
+		auto Who = [this](const TCHAR* F) {
+			const auto Side = Setup.sides.find(TCHAR_TO_UTF8(F));
+			return Side == Setup.sides.end() ? FString() : FString(UTF8_TO_TCHAR(Side->second.commander_id.c_str()));
+		};
+		auto Alarmed = [this](const TCHAR* F) {
+			const auto Side = Setup.sides.find(TCHAR_TO_UTF8(F));
+			return Side != Setup.sides.end() && Side->second.alarmed;
+		};
+		Json += FString::Printf(TEXT(",\"generals\":{\"british\":\"%s\",\"continental\":\"%s\",\"fell\":{\"british\":\"%s\",\"continental\":\"%s\"},\"aura_checks\":%d,\"alarmed\":{\"british\":%s,\"continental\":%s},\"muster_at_once\":%d}"),
+			*Who(TEXT("british")), *Who(TEXT("continental")), *GeneralFate.FindRef(TEXT("british")), *GeneralFate.FindRef(TEXT("continental")), GeneralAuraChecks,
+			Alarmed(TEXT("british")) ? TEXT("true") : TEXT("false"), Alarmed(TEXT("continental")) ? TEXT("true") : TEXT("false"), AlarmMusteredAtOnce);
+	}
 	Json += FString::Printf(TEXT(",\"held\":{\"first_flip_seconds\":%.0f,\"half_strength_seconds\":{\"british\":%.0f,\"continental\":%.0f}}"), FirstFlipAt,
 		HalfStrengthAt.Contains(TEXT("british")) ? HalfStrengthAt.FindRef(TEXT("british")) : -1.f,
 		HalfStrengthAt.Contains(TEXT("continental")) ? HalfStrengthAt.FindRef(TEXT("continental")) : -1.f);

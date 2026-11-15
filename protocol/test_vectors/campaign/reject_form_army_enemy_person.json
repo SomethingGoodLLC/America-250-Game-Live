@@ -1,0 +1,23 @@
+{
+ "name": "reject_form_army_enemy_person",
+ "description": "the other side's people take no orders from the player",
+ "start_ymdh": {
+  "y": 1775,
+  "m": 4,
+  "d": 20,
+  "h": 0
+ },
+ "setup": {
+  "armies": {
+   "continental_militia": {
+    "province": "charlestown"
+   }
+  }
+ },
+ "order": {
+  "order": "form_army",
+  "person": "john_pitcairn",
+  "province": "charlestown"
+ },
+ "expect_error": "not_your_person"
+}
