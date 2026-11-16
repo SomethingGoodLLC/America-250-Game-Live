@@ -50,6 +50,7 @@
 #include "PA250FieldWork.h"
 #include "PA250Support.h"
 #include "PA250FieldGun.h"
+#include "PA250AICommander.h"
 #include "PA250BattleModes.h"
 #include "PA250RowBoat.h"
 #include "Engine/TargetPoint.h"
@@ -835,7 +836,7 @@ void APA250BattleGameMode::SpawnFieldGuns()
 APA250FieldGun* APA250BattleGameMode::GunFor(ARFCharacter* Gunner, int32& OutPost) const
 {
 	OutPost = INDEX_NONE;
-	if (!Gunner || Gunner->IsDead()) return nullptr;
+	if (!Gunner || Gunner->IsDead() || Gunner->ActorHasTag(TEXT("PA250CrewFallingBack"))) return nullptr;
 	// The place he already has.
 	for (APA250FieldGun* Gun : Guns)
 	{
@@ -890,7 +891,8 @@ int32 APA250BattleGameMode::EnsureGunCrew(APA250FieldGun* Gun, ARFCharacter* Pla
 	int32 Kept = 0;
 	for (TActorIterator<ARFCharacter> It(GetWorld()); It; ++It)
 	{
-		if (It->IsDead() || *It == Player || It->FactionId != Gun->GetFaction()) continue;
+		if (It->IsDead() || *It == Player || It->FactionId != Gun->GetFaction()
+			|| It->ActorHasTag(TEXT("PA250CrewFallingBack"))) continue;
 		if (FVector::Dist2D(It->GetActorLocation(), Gun->GetActorLocation()) > Rules.cannon_crew_radius_cm) continue;
 		if (Gun->PostOf(*It) != INDEX_NONE) continue;
 		if (Gun->ClaimPost(*It) != INDEX_NONE) ++Kept;
@@ -925,24 +927,9 @@ ARFCharacter* APA250BattleGameMode::SummonGunMate(APA250FieldGun* Gun, int32 Pos
 			return Man;
 		}
 	}
-	// The army has no gunner left. A mate stands the post so the piece can be worked. He is not a
-	// ticket and he is not a man of the army (CountAlive skips the tag).
-	ARFCharacter* C = GetWorld()->SpawnActorDeferred<ARFCharacter>(ARFCharacter::StaticClass(), At, nullptr, nullptr,
-		ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
-	if (!C) return nullptr;
-	C->SetClothingSeed(0x6C11u + static_cast<uint32>(Post));
-	C->AIControllerClass = APA250BotController::StaticClass();
-	C->FinishSpawning(At);
-	C->SpawnDefaultController();
-	ConfigureSoldier(C, Gun->GetFaction(), CrewClass);
-	C->Tags.AddUnique(TEXT("PA250GunMate"));
-	if (AController* Ctl = C->GetController())
-	{
-		ControllerFaction.Add(Ctl, Gun->GetFaction());
-		ControllerClass.Add(Ctl, CrewClass);
-	}
-	UE_LOG(LogTemp, Display, TEXT("PA250 guns: summoned a mate at a %s gun (no gunner left in reserve)"), *Gun->GetFaction().ToString());
-	return C;
+	// A crewman must come from the army. Conjuring a ticket-free mate let a depleted
+	// army keep firing and produced POW that had never existed in its opening strength.
+	return nullptr;
 }
 
 FString APA250BattleGameMode::GeneralFallWords(bool bOurs, const FString& RankName, const FString& Fate, int32 Variant, FString& OutKey)
@@ -1029,10 +1016,49 @@ void APA250BattleGameMode::NotifyGunTaken(APA250FieldGun* Gun, FName From)
 	if (Volleys) Volleys->PressSide(From, Rules.cannon_pressure, Rules.cannon_pressure_seconds, TEXT("GunLost"));
 }
 
+void APA250BattleGameMode::FallBackGunCrew(const TArray<ARFCharacter*>& Crew, FName Faction, APA250FieldGun* LostGun)
+{
+	APA250ControlPoint* Haven = NearestHeldPost(Faction, LostGun ? LostGun->GetActorLocation() : FVector::ZeroVector);
+	for (ARFCharacter* Man : Crew)
+	{
+		if (!Man || Man->IsDead() || Man->FactionId != Faction || Man->ActorHasTag(TEXT("PA250Prisoner"))) continue;
+		if (Man->IsPlayerControlled()) continue;
+		Man->Tags.AddUnique(TEXT("PA250CrewFallingBack"));
+		bool bEnemyClose = false;
+		for (TActorIterator<ARFCharacter> It(GetWorld()); It; ++It)
+		{
+			if (It->IsDead() || It->FactionId == Faction || It->FactionId.IsNone()) continue;
+			if (FVector::Dist2D(It->GetActorLocation(), Man->GetActorLocation()) <= 2000.f)
+			{
+				bEnemyClose = true;
+				break;
+			}
+		}
+		if (bEnemyClose && Man->Musket == nullptr)
+		{
+			// Tools-only crew cannot fight their way out. A man who still has his firelock
+			// falls back instead: standing near the piece is not a surrender.
+			TakePrisoner(Man, nullptr);
+			continue;
+		}
+		if (Haven)
+		{
+			if (APA250BotController* Bot = Cast<APA250BotController>(Man->GetController()))
+			{
+				Bot->SetObjective(Haven);
+			}
+
+		}
+	}
+}
+
 void APA250BattleGameMode::NotifyGunFired(APA250FieldGun* Gun, EPA250Shot Shot)
 {
 	if (!Gun) return;
 	GunShots.FindOrAdd(Gun->GetFaction())++;
+	// The round is charged to the side's magazine here, once, when it is fired. Until then it
+	// was only a claim on the magazine (in the chest, the loader's hands or the barrel).
+	Ammo.Draw(Gun->GetFaction(), 1, /*bHuman*/ true);
 	if (Shot == EPA250Shot::Grape) CanisterShots.FindOrAdd(Gun->GetFaction())++;
 }
 
@@ -1076,6 +1102,10 @@ bool APA250BattleGameMode::PlayerCycleGunShot(ARFCharacter* Soldier, int32 Delta
 void APA250BattleGameMode::NotifyRoundShot(ARFCharacter* Man, bool bStruck)
 {
 	(bStruck ? RoundShotStruck : RoundShotKnockedDown)++;
+	if (bStruck && Man && !Man->FactionId.IsNone())
+	{
+		ArmyResolve.Shock(Man->FactionId, ArmyResolve.Tuning.CannonShock);
+	}
 	if (Man) PA250Intensity::RoundShotStrike(GetWorld(), Man->GetActorLocation());
 }
 
@@ -1244,6 +1274,7 @@ void APA250BattleGameMode::TreatFallen(int32 Index, float Seconds, const ARFChar
 	if (M.Treated < Verbs.SurgeonTreatSeconds) return;
 	M.bSaved = true;
 	SavedBySurgeon.FindOrAdd(M.Faction).FindOrAdd(M.UnitClass)++;
+	Ledger.ConvertKillToWound(M.Faction, M.UnitClass);
 	if (M.Faction == PlayerFaction) PushKillFeed(TEXT("The surgeon has reached a fallen man: he will live"));
 	UE_LOG(LogTemp, Display, TEXT("PA250 surgeon: a %s %s is carried off wounded, not left for dead (%d saved by that side)"), *M.Faction.ToString(), *M.UnitClass.ToString(),
 		GetSavedBySurgeon(M.Faction));
@@ -1580,7 +1611,8 @@ void APA250BattleGameMode::EnsureInitialized()
 			*Faction.ToString(), KV.second.rounds_per_man, Ammo.Remaining(Faction), KV.second.cartridge_budget,
 			KV.second.magazine_province.empty() ? TEXT("what the men carry") : UTF8_TO_TCHAR(KV.second.magazine_province.c_str()));
 	}
-	// Tickets = reinforcement pool in soldiers. Spent on death + bleed (M6), not spawn.
+	// Tickets = men. Spent on recorded kia/wia/pow only (Artillery pass); CP bleed drains Army Resolve.
+	OpeningTicketPool.Reset();
 	for (const auto& FK : InitialPool)
 	{
 		int32 Units = 0;
@@ -1591,8 +1623,21 @@ void APA250BattleGameMode::EnsureInitialized()
 			Total += CK.Value * SoldiersPerUnit;
 		}
 		Ledger.Pool.Add(FK.Key, Total);
+		OpeningTicketPool.Add(FK.Key, Total);
 		UE_LOG(LogTemp, Display, TEXT("PA250 tickets %s: %d units -> %d soldiers"), *FK.Key.ToString(), Units,
 			Total);
+	}
+	{
+		FPA250ArmyResolveTuning RT;
+		RT.Start = Rules.resolve_start;
+		RT.DrainPerBleedUnit = Rules.resolve_drain_per_bleed_unit;
+		RT.CasualtyScale = Rules.resolve_casualty_scale;
+		RT.OfficerShock = Rules.resolve_officer_shock;
+		RT.ColoursShock = Rules.resolve_colours_shock;
+		RT.CannonShock = Rules.resolve_cannon_shock;
+		RT.MajorityRecoverPerSecond = Rules.resolve_majority_recover_per_second;
+		ArmyResolve.Init(TEXT("british"), TEXT("continental"),
+			OpeningTicketPool.FindRef(TEXT("british")), OpeningTicketPool.FindRef(TEXT("continental")), RT);
 	}
 
 	for (TActorIterator<APlayerStart> It(GetWorld()); It; ++It)
@@ -2235,9 +2280,11 @@ AActor* APA250BattleGameMode::PickStart(FName Faction) const
 	{
 		return nullptr;
 	}
+	FRandomStream StartRng(HashCombine(GetTypeHash(static_cast<uint64>(Setup.seed)),
+		FCrc::StrCrc32(*Faction.ToString()) + SpawnSlotSerial));
 	for (int32 Try = 0; Try < 8; ++Try)
 	{
-		AActor* A = (*List)[FMath::RandRange(0, List->Num() - 1)].Get();
+		AActor* A = (*List)[StartRng.RandRange(0, List->Num() - 1)].Get();
 		if (A) return A;
 	}
 	return nullptr;
@@ -2271,57 +2318,97 @@ bool APA250BattleGameMode::PostIsSafeSpawn(const APA250ControlPoint* Post, FName
 
 FTransform APA250BattleGameMode::PickSpawnTransform(FName Faction, APA250ControlPoint* PreferredPost) const
 {
-	auto AtPost = [this](const APA250ControlPoint* Post) {
-		FVector Loc = Post->GetActorLocation();
-		Loc += FVector(FMath::FRandRange(-Post->Radius * 0.35f, Post->Radius * 0.35f),
-			FMath::FRandRange(-Post->Radius * 0.35f, Post->Radius * 0.35f), 0.f);
-		// On ground a man can stand on: the navmesh under the point, else the post itself.
+	// Artillery pass M2: score candidates (base + owned CPs); seeded RNG; formation slots ≥1.5 m.
+	FRandomStream Rng(HashCombine(GetTypeHash(static_cast<uint64>(Setup.seed)), FCrc::StrCrc32(*Faction.ToString()) + SpawnSlotSerial));
+	const FName Enemy = Faction == TEXT("british") ? FName(TEXT("continental")) : FName(TEXT("british"));
+
+	auto* MutableThis = const_cast<APA250BattleGameMode*>(this);
+	const float Stamp = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.f;
+	MutableThis->RecentSpawnSlots.RemoveAll([Stamp](const auto& Row) { return Stamp - Row.Value > 10.f; });
+	MutableThis->RecentDeathSites.RemoveAll([Stamp](const auto& Row) { return Stamp - Row.Value > 30.f; });
+	TArray<FVector> RecentDeaths;
+	const float Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.f;
+	for (const auto& D : RecentDeathSites)
+	{
+		if (Now - D.Value <= 30.f) RecentDeaths.Add(D.Key);
+	}
+	TArray<FVector> EnemyGuns, EnemyLocs;
+	for (APA250FieldGun* Gun : Guns)
+	{
+		if (Gun && Gun->GetFaction() == Enemy) EnemyGuns.Add(Gun->GetMuzzle());
+	}
+	for (TActorIterator<ARFCharacter> It(GetWorld()); It; ++It)
+	{
+		if (!It->IsDead() && It->FactionId == Enemy) EnemyLocs.Add(It->GetActorLocation());
+	}
+
+	FVector Front = FVector::ZeroVector;
+	int32 FrontN = 0;
+	for (const TWeakObjectPtr<APA250ControlPoint>& WP : Posts)
+	{
+		if (APA250ControlPoint* P = WP.Get())
+		{
+			Front += P->GetActorLocation();
+			++FrontN;
+		}
+	}
+	if (FrontN > 0) Front /= float(FrontN);
+
+	TArray<APA250ControlPoint*> Candidates;
+	if (PostIsSafeSpawn(PreferredPost, Faction)) Candidates.Add(PreferredPost);
+	for (const TWeakObjectPtr<APA250ControlPoint>& WP : Posts)
+	{
+		if (APA250ControlPoint* P = WP.Get(); P && PostIsSafeSpawn(P, Faction) && !Candidates.Contains(P))
+			Candidates.Add(P);
+	}
+	AActor* StartActor = PickStart(Faction);
+	FVector BestLoc = StartActor ? StartActor->GetActorLocation() : FVector::ZeroVector;
+	FRotator BestRot = StartActor ? StartActor->GetActorRotation() : FRotator::ZeroRotator;
+	float BestScore = -TNumericLimits<float>::Max();
+
+	auto Project = [this](FVector Loc) {
 		if (UNavigationSystemV1* Nav = FNavigationSystem::GetCurrent<UNavigationSystemV1>(GetWorld()))
 		{
 			FNavLocation OnNav;
 			if (Nav->ProjectPointToNavigation(Loc, OnNav, FVector(250.f, 250.f, 400.f)))
-			{
 				Loc = OnNav.Location + FVector(0.f, 0.f, 100.f);
-			}
-			else
-			{
-				Loc = Post->GetActorLocation();
-			}
 		}
-		return FTransform(FRotator::ZeroRotator, ClearSpawnLocation(GetWorld(), Loc + FVector(0.f, 0.f, 40.f)));
+		return ClearSpawnLocation(GetWorld(), Loc + FVector(0.f, 0.f, 40.f));
 	};
-	if (PostIsSafeSpawn(PreferredPost, Faction))
-	{
-		return AtPost(PreferredPost);
-	}
-	TArray<APA250ControlPoint*> Safe;
-	for (const TWeakObjectPtr<APA250ControlPoint>& WP : Posts)
-	{
-		if (APA250ControlPoint* P = WP.Get(); P && PostIsSafeSpawn(P, Faction))
+
+	auto Consider = [&](const FVector& Base, const FRotator& Rot, int32 Slot) {
+		const FVector Off = UPA250AICommander::FormationOffset(Slot, Rot.Vector(), 150.f);
+		const FVector Loc = Project(Base + Off);
+		// Slot cool-down: never two pawns in the same slot within 10 s.
+		for (const auto& Used : RecentSpawnSlots)
 		{
-			Safe.Add(P);
+			if (Now - Used.Value <= 10.f && FVector::Dist2D(Used.Key, Loc) < 140.f) return;
 		}
-	}
-	if (Safe.Num() > 0)
-	{
-		return AtPost(Safe[FMath::RandRange(0, Safe.Num() - 1)]);
-	}
-	// No post is ours and quiet: the side's own start ground at the edge of the field.
-	if (AActor* Start = PickStart(Faction))
-	{
-		FTransform T = Start->GetActorTransform();
-		T.AddToTranslation(FVector(FMath::FRandRange(-400.f, 400.f), FMath::FRandRange(-400.f, 400.f), 0.f));
-		T.SetLocation(ClearSpawnLocation(GetWorld(), T.GetLocation()));
-		return T;
-	}
-	for (const TWeakObjectPtr<APA250ControlPoint>& WP : Posts)
-	{
-		if (APA250ControlPoint* P = WP.Get(); P && P->GetHolder() == Faction)
+		float Score = UPA250AICommander::ScoreSpawn(Loc, Front, RecentDeaths, EnemyGuns, EnemyLocs, GetWorld());
+		Score += Rng.FRand() * 10.f; // seeded tie-break
+		if (Score > BestScore)
 		{
-			return AtPost(P);
+			BestScore = Score;
+			BestLoc = Loc;
+			BestRot = Rot;
 		}
+	};
+
+	int32 Slot = SpawnSlotSerial % 12;
+	for (APA250ControlPoint* P : Candidates)
+	{
+		const FRotator Face = (Front - P->GetActorLocation()).GetSafeNormal2D().Rotation();
+		Consider(P->GetActorLocation(), Face, Slot);
 	}
-	return FTransform::Identity;
+	if (StartActor) Consider(StartActor->GetActorLocation(), StartActor->GetActorRotation(), Slot);
+
+	if (BestScore <= -TNumericLimits<float>::Max() * 0.5f && Candidates.Num() > 0)
+	{
+		BestLoc = Project(Candidates[0]->GetActorLocation());
+	}
+	const_cast<APA250BattleGameMode*>(this)->RecentSpawnSlots.Add(TPair<FVector, float>(BestLoc, Now));
+	++const_cast<APA250BattleGameMode*>(this)->SpawnSlotSerial;
+	return FTransform(BestRot, BestLoc);
 }
 
 FName APA250BattleGameMode::ChooseClassFor(FName Faction, FName Preferred) const
@@ -2501,7 +2588,7 @@ int32 APA250BattleGameMode::CountAlive(FName Faction) const
 	int32 N = 0;
 	for (TActorIterator<ARFCharacter> It(GetWorld()); It; ++It)
 	{
-		if (!It->IsDead() && It->FactionId == Faction && !It->ActorHasTag(TEXT("PA250GunMate"))) ++N;
+		if (!It->IsDead() && It->FactionId == Faction && !It->ActorHasTag(TEXT("PA250Prisoner"))) ++N;
 	}
 	return N;
 }
@@ -2723,8 +2810,169 @@ bool APA250BattleGameMode::CanSpawn(FName Faction) const
 
 void APA250BattleGameMode::SpendDeathTicket(FName Faction, FName UnitClass)
 {
-	// A class may cost less than a whole ticket (militia: half; unit_classes.json ticket_cost).
-	Ledger.SpendDeath(Faction, UnitClass, PA250UnitClasses::KitFor(Faction, UnitClass).TicketCost);
+	// One man = one ticket (Artillery pass). Half-ticket militia math is retired.
+	if (Ledger.SpendKilled(Faction, UnitClass)) ArmyResolve.OnManDown(Faction);
+}
+
+void APA250BattleGameMode::SpendWoundTicket(FName Faction, FName UnitClass)
+{
+	if (Ledger.SpendWounded(Faction, UnitClass)) ArmyResolve.OnManDown(Faction);
+}
+
+void APA250BattleGameMode::WoundOut(ARFCharacter* Man, const ARFCharacter* By, AActor* Causer)
+{
+	if (!Man || Man->IsDead() || Man->Tags.Contains(TEXT("PA250Wounded")) || Man->Tags.Contains(TEXT("PA250Prisoner")))
+	{
+		return;
+	}
+	// The tag is set before the damage so OnCharacterDied records a WIA, not a second KIA.
+	// If the blow does not put him down, the tag comes off and no ticket is spent.
+	Man->Tags.Add(TEXT("PA250Wounded"));
+	FHitResult Hit;
+	Hit.ImpactPoint = Man->GetActorLocation();
+	Hit.Location = Hit.ImpactPoint;
+	AController* Credit = By ? By->GetController() : nullptr;
+	UGameplayStatics::ApplyPointDamage(Man, 999.f, FVector::UpVector, Hit, Credit, Causer ? Causer : this, nullptr);
+	if (!Man->IsDead())
+	{
+		Man->Tags.Remove(TEXT("PA250Wounded"));
+		UE_LOG(LogTemp, Warning, TEXT("PA250 wound: %s stayed up; no ticket spent"), *Man->GetName());
+	}
+}
+
+float APA250BattleGameMode::GetArmyResolve(FName Faction) const
+{
+	return ArmyResolve.Get(Faction);
+}
+
+void APA250BattleGameMode::ShockArmyResolve(FName Faction, float Amount)
+{
+	if (Faction.IsNone() || Amount <= 0.f) return;
+	ArmyResolve.Shock(Faction, Amount);
+}
+
+void APA250BattleGameMode::ApplyBlastKnockdown(ARFCharacter* Man, const FVector& Impulse, EPA250BlastDir Dir)
+{
+	if (!Man || Man->IsDead()) return;
+	const pa250::BattleRules& R = pa250::battle_rules();
+	const uint32 Seed = HashCombine(GetTypeHash(Man), static_cast<uint32>(Dir) + 17u);
+	if (Man->IsPlayerControlled())
+	{
+		Man->LockMovement(R.blast_player_control_loss_seconds);
+		Man->ApplySuppression(R.blast_player_control_loss_seconds, 6.f);
+		Man->PunchFOV(8.f);
+		PA250AnimClips::PlayCombatClip(Man, TEXT("AM_React_BlastKnockdown"), Seed);
+		return;
+	}
+	TryBlastRagdoll(Man, Impulse, /*bDead*/ false);
+}
+
+void APA250BattleGameMode::ApplyBlastStagger(ARFCharacter* Man, EPA250BlastDir Dir)
+{
+	if (!Man || Man->IsDead()) return;
+	const pa250::BattleRules& R = pa250::battle_rules();
+	Man->LockMovement(R.blast_settle_max_seconds * 0.6f);
+	Man->ApplySuppression(R.cannon_knockdown_seconds, 4.f);
+	PA250AnimClips::PlayCombatClip(Man, TEXT("AM_React_BlastStagger"),
+		HashCombine(GetTypeHash(Man), static_cast<uint32>(Dir) + 31u));
+}
+
+void APA250BattleGameMode::ApplyBlastFlinch(ARFCharacter* Man, EPA250BlastDir Dir)
+{
+	if (!Man || Man->IsDead()) return;
+	Man->ApplySuppression(pa250::battle_rules().blast_player_control_loss_seconds, 2.f);
+	if (Man->IsPlayerControlled()) Man->PunchFOV(4.f);
+	PA250AnimClips::PlayCombatClip(Man, TEXT("AM_React_BlastFlinch"),
+		HashCombine(GetTypeHash(Man), static_cast<uint32>(Dir) + 53u));
+}
+
+void APA250BattleGameMode::TryBlastRagdoll(ARFCharacter* Man, const FVector& Impulse, bool bDead)
+{
+	if (!Man) return;
+	const pa250::BattleRules& R = pa250::battle_rules();
+	APlayerController* PC = GetWorld() ? GetWorld()->GetFirstPlayerController() : nullptr;
+	const FVector Viewer = PC && PC->GetPawn() ? PC->GetPawn()->GetActorLocation() : FVector::ZeroVector;
+	const float Dist = Viewer.IsNearlyZero() ? 0.f : FVector::Dist(Viewer, Man->GetActorLocation());
+	const bool bOverCap = BlastRagdollActive >= R.blast_ragdoll_cap;
+	const bool bTooFar = Dist > R.blast_ragdoll_max_distance_cm;
+	const uint32 Seed = HashCombine(GetTypeHash(Man), GetTypeHash(static_cast<uint64>(Impulse.Size())));
+	if (bOverCap || bTooFar || Man->IsPlayerControlled())
+	{
+		// Over the cap: death clip or React_BlastKnockdown in place (no ragdoll).
+		if (bDead) PA250AnimClips::PlayCombatClip(Man, TEXT("AM_Death_Blast"), Seed);
+		else
+		{
+			Man->LockMovement(R.blast_settle_max_seconds);
+			PA250AnimClips::PlayCombatClip(Man, TEXT("AM_React_BlastKnockdown"), Seed);
+		}
+		return;
+	}
+	if (bDead && !Man->IsDead()) return; // the blow did not kill him: a living man is not left limp
+	if (Man->IsDead())
+	{
+		// Killed by the blast: impulse on the corpse still counts against the ragdoll cap.
+		if (USkeletalMeshComponent* Mesh = Man->GetMesh())
+		{
+			if (!Mesh->IsSimulatingPhysics())
+			{
+				Mesh->SetSimulatePhysics(true);
+				Mesh->SetCollisionProfileName(TEXT("Ragdoll"));
+			}
+			Mesh->AddImpulseToAllBodiesBelow(Impulse, NAME_None, true, true);
+		}
+		// Dead bodies do not get up: this timer alone frees the slot after the settle window.
+		// No PA250BlastRagdoll tag here. That tag means "a living man who will free his slot when
+		// he gets up or dies", and a corpse that carried it (a thrown rider killed by the blast)
+		// freed two slots for one.
+		++BlastRagdollActive;
+		if (UWorld* World = GetWorld())
+		{
+			FTimerHandle Handle;
+			World->GetTimerManager().SetTimer(Handle, this, &APA250BattleGameMode::NotifyBlastRagdollEnded,
+				FMath::Max(0.1f, R.blast_settle_max_seconds), false);
+		}
+		return;
+	}
+	if (Man->KnockDown(Impulse))
+	{
+		++BlastRagdollActive;
+		Man->Tags.AddUnique(TEXT("PA250BlastRagdoll"));
+	}
+	else
+	{
+		Man->LockMovement(R.blast_settle_max_seconds);
+		PA250AnimClips::PlayCombatClip(Man, TEXT("AM_React_BlastKnockdown"), Seed);
+	}
+}
+
+void APA250BattleGameMode::NotifyBlastRagdollEnded()
+{
+	BlastRagdollActive = FMath::Max(0, BlastRagdollActive - 1);
+}
+
+void APA250BattleGameMode::NoteFriendlyBlastCasualties(FName SourceFaction, int32 Killed, int32 Wounded)
+{
+	if (SourceFaction.IsNone()) return;
+	if (Killed > 0) FriendlyBlastKilled.FindOrAdd(SourceFaction) += Killed;
+	if (Wounded > 0) FriendlyBlastWounded.FindOrAdd(SourceFaction) += Wounded;
+}
+
+int32 APA250BattleGameMode::MagazineSpareForChests(FName Faction) const
+{
+	int32 InChests = 0;
+	for (APA250FieldGun* Gun : Guns)
+	{
+		if (!Gun || Gun->GetFaction() != Faction) continue;
+		InChests += Gun->RoundsHeld();
+	}
+	return FMath::Max(0, Ammo.Remaining(Faction) - InChests);
+}
+
+void APA250BattleGameMode::ChargeChestLossToMagazine(FName Faction, int32 Rounds)
+{
+	if (Faction.IsNone() || Rounds <= 0) return;
+	// They sat in the chest as a claim on the magazine and will never be fired: charge them now.
+	Ammo.Draw(Faction, Rounds, /*bHuman*/ true);
 }
 
 void APA250BattleGameMode::RegisterConsoleCommands()
@@ -2778,7 +3026,15 @@ void APA250BattleGameMode::ConfigureSoldier(ARFCharacter* Soldier, FName Faction
 		Soldier->MeleeComponent->Tuning = MeleeTuningAsset;
 		Soldier->MeleeComponent->DamageScale = Kit.MeleeScale;
 	}
-	if (Soldier->Musket)
+	// NPC gun crew: tools only — no firearm in hand or on the body (Artillery pass M3).
+	// The player's artilleryman keeps his kit; while serving, the gun holsters it.
+	const bool bNpcGunCrew = Kit.bServesGuns && !Soldier->IsPlayerControlled();
+	if (bNpcGunCrew && Soldier->Musket)
+	{
+		Soldier->Musket->Destroy();
+		Soldier->Musket = nullptr;
+	}
+	else if (Soldier->Musket)
 	{
 		if (Tuning) Soldier->Musket->Tuning = Tuning;
 		Soldier->Musket->WeaponTuning = WeaponTuningAsset;
@@ -2952,6 +3208,10 @@ ARFCharacter* APA250BattleGameMode::SpawnBotAt(FName Faction, FName Charged, con
 	{
 		ControllerFaction.Add(Ctl, Faction);
 		ControllerClass.Add(Ctl, Charged);
+	}
+	if (UPA250AICommander* Cmd = GetWorld()->GetSubsystem<UPA250AICommander>())
+	{
+		Cmd->OnSquadMemberSpawned(C);
 	}
 	return C;
 }
@@ -3593,7 +3853,7 @@ int32 APA250BattleGameMode::CountAlive(FName Faction, FName UnitClass) const
 	int32 N = 0;
 	for (TActorIterator<ARFCharacter> It(GetWorld()); It; ++It)
 	{
-		if (!It->IsDead() && It->FactionId == Faction && It->UnitClass == UnitClass && !It->ActorHasTag(TEXT("PA250GunMate")))
+		if (!It->IsDead() && It->FactionId == Faction && It->UnitClass == UnitClass && !It->ActorHasTag(TEXT("PA250Prisoner")))
 		{
 			++N;
 		}
@@ -3829,15 +4089,29 @@ int32 APA250BattleGameMode::GetBleedPerInterval(FName Faction) const
 
 void APA250BattleGameMode::BleedTickets(float DeltaSeconds)
 {
+	for (const FName Side : {FName(TEXT("british")), FName(TEXT("continental"))})
+	{
+		if (!bBattleOver && ArmyResolve.IsBroken(Side))
+		{
+			EndBattle(Side == TEXT("british") ? FName(TEXT("continental")) : FName(TEXT("british")), TEXT("army_broke"));
+			return;
+		}
+	}
 	if (!UsesPostBleed(ScenarioFight))
 	{
 		return;
 	}
 	// A landing is not worn down for posts it has had no chance to reach.
 	if (PA250Modes::IsLanding(ScenarioFight.Mode) && !bLanded) return;
-	// Battlefront-style: the bleed grows with the post advantage, fastest when one side holds them all.
-	Ledger.Bleed(DeltaSeconds, BleedIntervalSeconds,
+	// CP pressure drains Army Resolve, not tickets (Artillery pass — Cambridge tickets≠casualties fix).
+	const FName Broke = ArmyResolve.TickPosts(DeltaSeconds, BleedIntervalSeconds, Ledger,
 		TEXT("british"), PostsOwned(TEXT("british")), TEXT("continental"), PostsOwned(TEXT("continental")), CountPosts());
+	if (!Broke.IsNone() && !bBattleOver)
+	{
+		const FName Winner = Broke == TEXT("british") ? FName(TEXT("continental")) : FName(TEXT("british"));
+		UE_LOG(LogTemp, Display, TEXT("PA250 resolve: %s broke (Resolve 0); end_reason army_broke"), *Broke.ToString());
+		EndBattle(Winner, TEXT("army_broke"));
+	}
 }
 
 void APA250BattleGameMode::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -3927,12 +4201,17 @@ void APA250BattleGameMode::TakePrisoner(ARFCharacter* Prisoner, const ARFCharact
 {
 	// Destroy() waits until the end of the frame, so a second dragoon in the same pass would
 	// count this man again. The tag is the mark that he has already surrendered.
-	if (!Prisoner || Prisoner->IsDead() || Prisoner->Tags.Contains(TEXT("PA250Prisoner"))) return;
-	Prisoner->Tags.Add(TEXT("PA250Prisoner"));
+	if (!Prisoner || Prisoner->IsDead() || IsGeneral(Prisoner)
+		|| Prisoner->Tags.Contains(TEXT("PA250Prisoner"))) return;
 	const FName F = Prisoner->FactionId;
+	if (!Ledger.SpendCaptured(F)) return;
+	Prisoner->Tags.Add(TEXT("PA250Prisoner"));
 	Prisoners.FindOrAdd(F).FindOrAdd(Prisoner->UnitClass)++;
-	// He leaves the field alive: a man gone from the side's strength, not a death, and nobody takes his place.
-	if (int32* Pool = Ledger.Pool.Find(F); Pool && *Pool > Ledger.HeldFor(F)) --(*Pool);
+	// POW is its own term in the EndBattle invariant (tickets_start − tickets_end == kia + wia + pow).
+	// It decrements Pool and is summed from Prisoners by CasualtiesFromLedger. It does not go
+	// through SpendKilled or SpendWounded; those would count him twice. RunTickets mirrors this.
+	// SpendCaptured above debits exactly once, including the last held ticket.
+	ArmyResolve.OnManDown(F);
 	PushKillFeed(F == PlayerFaction
 		? FString::Printf(TEXT("One of ours surrenders to %s"), Captor ? PA250UnitClasses::KitFor(Captor->FactionId, Captor->UnitClass).Label : TEXT("the enemy"))
 		: FString::Printf(TEXT("A routing %s surrenders"), PA250UnitClasses::KitFor(F, Prisoner->UnitClass).Label));
@@ -4541,7 +4820,10 @@ void APA250BattleGameMode::OnCharacterDied(ARFCharacter* Victim, AController* Vi
 	// M6: tickets spent on death (and bleed), not spawn.
 	if (HasAuthority())
 	{
-		// A surgeon may still reach him (the surgeon's verb).
+		// A surgeon may still reach a man who was killed. A wound-out is already a recorded WIA;
+		// putting him on the fallen list would let the surgeon try to convert a kill that was never written.
+		const bool bWoundOut = Victim->ActorHasTag(TEXT("PA250Wounded"));
+		if (!bWoundOut)
 		{
 			FFallenMan Down;
 			Down.Where = Victim->GetActorLocation();
@@ -4557,6 +4839,7 @@ void APA250BattleGameMode::OnCharacterDied(ARFCharacter* Victim, AController* Vi
 			Flag->Drop();
 			ColoursFell.FindOrAdd(Victim->FactionId)++;
 			if (Volleys) Volleys->PressSide(Victim->FactionId, SV.ColoursFallPressure, SV.ColoursFallSeconds, TEXT("ColoursFell"));
+			ArmyResolve.Shock(Victim->FactionId, ArmyResolve.Tuning.ColoursShock);
 			PushKillFeed(Victim->FactionId == PlayerFaction ? TEXT("Our colours are down!") : TEXT("Their colours are down!"));
 			UE_LOG(LogTemp, Display, TEXT("PA250 colours: the %s colours fall with their bearer; morale check on that side"), *Victim->FactionId.ToString());
 		}
@@ -4565,8 +4848,19 @@ void APA250BattleGameMode::OnCharacterDied(ARFCharacter* Victim, AController* Vi
 		{
 			Volleys->ShoutEvent(TEXT("officer_down"), Victim->FactionId, Victim->GetActorLocation());
 		}
-		if (!Victim->ActorHasTag(TEXT("PA250GunMate"))) SpendDeathTicket(Victim->FactionId, Victim->UnitClass);
-		else UE_LOG(LogTemp, Display, TEXT("PA250 guns: a summoned mate is down (no ticket)"));
+		if (bWoundOut)
+		{
+			SpendWoundTicket(Victim->FactionId, Victim->UnitClass);
+		}
+		else
+		{
+			SpendDeathTicket(Victim->FactionId, Victim->UnitClass);
+		}
+		RecentDeathSites.Add(TPair<FVector, float>(Victim->GetActorLocation(), GetWorld()->GetTimeSeconds()));
+		if (PA250UnitClasses::KitFor(Victim->FactionId, Victim->UnitClass).bOfficer)
+		{
+			ArmyResolve.Shock(Victim->FactionId, ArmyResolve.Tuning.OfficerShock);
+		}
 		// The rifleman's verb: an officer he picks off leaves that officer's squad shaken.
 		if (const ARFCharacter* Marksman = Killer ? Cast<ARFCharacter>(Killer->GetPawn()) : nullptr)
 		{
@@ -4884,7 +5178,7 @@ void APA250BattleGameMode::EndBattle(FName Winner, const FString& Reason)
 	// Casualties in men, from the battle's own ledger (until 2026-11-14 they were rounded to units
 	// of SoldiersPerUnit and capped at the ticket pool, so nineteen men could fall for a reported
 	// loss of one unit). The sim turns men into units and keeps the men left over on the army.
-	Result.casualties = CasualtiesFromLedger(Ledger.Deaths, Prisoners, SavedBySurgeon);
+	Result.casualties = CasualtiesFromLedger(Ledger.Killed, Ledger.Wounded, Prisoners);
 	for (const auto& Kv : ColoursTaken)
 	{
 		if (Kv.Value > 0) Result.colours_captured[ToStd(Kv.Key)] = Kv.Value;
@@ -4900,6 +5194,33 @@ void APA250BattleGameMode::EndBattle(FName Winner, const FString& Reason)
 		Result.commander_events[ToStd(Kv.Key)] = TCHAR_TO_UTF8(*Kv.Value);
 	}
 	Result.personal_kills = PersonalKills;
+	if (ChestRoundsBlown > 0)
+	{
+		UE_LOG(LogTemp, Display, TEXT("Ammunition chest blown: %d rounds lost"), ChestRoundsBlown);
+	}
+	for (const FName F : {FName(TEXT("british")), FName(TEXT("continental"))})
+	{
+		const int32 Start = OpeningTicketPool.FindRef(F);
+		const int32 End = Ledger.Remaining(F);
+		int32 Losses = 0;
+		const auto Side = Result.casualties.find(ToStd(F));
+		if (Side != Result.casualties.end())
+		{
+			for (const auto& CK : Side->second) Losses += CK.second.killed + CK.second.wounded + CK.second.prisoners;
+		}
+		UE_LOG(LogTemp, Display, TEXT("PA250 men in the field: %s %d → %d (−%d)  resolve=%.0f  tickets_start=%d tickets_end=%d"),
+			*F.ToString(), Start, End, Losses, ArmyResolve.Get(F), Start, Ledger.Remaining(F));
+		checkf(Start - Ledger.Remaining(F) == Losses,
+			TEXT("PA250 invariant: tickets_start − tickets_end == kia+wia+pow (%s start=%d end=%d losses=%d)"),
+			*F.ToString(), Start, Ledger.Remaining(F), Losses);
+		const int32 FFK = FriendlyBlastKilled.FindRef(F);
+		const int32 FFW = FriendlyBlastWounded.FindRef(F);
+		if (FFK + FFW > 0)
+		{
+			UE_LOG(LogTemp, Display, TEXT("PA250 friendly fire (%s): %d killed, %d wounded (no personal_kills; no enemy Resolve credit)"),
+				*F.ToString(), FFK, FFW);
+		}
+	}
 	// The hero report (battle_result.yaml hero): only when the player fought as his general. It
 	// changes nothing in the campaign; commander_events above says what became of him.
 	if (Hero.Takeovers > 0)
@@ -4971,23 +5292,22 @@ void APA250BattleGameMode::EndBattle(FName Winner, const FString& Reason)
 }
 
 std::map<std::string, std::map<std::string, pa250::MenDown>> APA250BattleGameMode::CasualtiesFromLedger(
-	const TMap<FName, TMap<FName, int32>>& Deaths, const TMap<FName, TMap<FName, int32>>& Surrendered,
-	const TMap<FName, TMap<FName, int32>>& SavedBySurgeon)
+	const TMap<FName, TMap<FName, int32>>& Killed, const TMap<FName, TMap<FName, int32>>& Wounded,
+	const TMap<FName, TMap<FName, int32>>& Surrendered)
 {
 	std::map<std::string, std::map<std::string, pa250::MenDown>> Out;
-	for (const auto& FK : Deaths)
+	for (const auto& FK : Killed)
 	{
 		for (const auto& CK : FK.Value)
 		{
-			if (CK.Value <= 0) continue;
-			// A man the surgeon reached in time is wounded whatever the ratio says; the ratio shares
-			// out the rest.
-			const TMap<FName, int32>* SavedSide = SavedBySurgeon.Find(FK.Key);
-			const int32 Saved = FMath::Clamp(SavedSide ? SavedSide->FindRef(CK.Key) : 0, 0, CK.Value);
-			const pa250::MenDown Split = pa250::split_fallen(CK.Value - Saved);
-			pa250::MenDown& M = Out[ToStd(FK.Key)][ToStd(CK.Key)];
-			M.killed += Split.killed;
-			M.wounded += Split.wounded + Saved;
+			if (CK.Value > 0) Out[ToStd(FK.Key)][ToStd(CK.Key)].killed += CK.Value;
+		}
+	}
+	for (const auto& FK : Wounded)
+	{
+		for (const auto& CK : FK.Value)
+		{
+			if (CK.Value > 0) Out[ToStd(FK.Key)][ToStd(CK.Key)].wounded += CK.Value;
 		}
 	}
 	for (const auto& FK : Surrendered)

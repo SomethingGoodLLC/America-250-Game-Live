@@ -205,6 +205,17 @@ void load_battle_rules(const std::string& json_text) {
         }
         if (j.contains("casualties"))
             r.wounded_pct_of_fallen = j.at("casualties").value("wounded_pct_of_fallen", r.wounded_pct_of_fallen);
+        if (j.contains("resolve")) {
+            const json& f = j.at("resolve");
+            r.resolve_start = f.value("start", r.resolve_start);
+            r.resolve_drain_per_bleed_unit = f.value("drain_per_bleed_unit", r.resolve_drain_per_bleed_unit);
+            r.resolve_casualty_scale = f.value("casualty_scale", r.resolve_casualty_scale);
+            r.resolve_officer_shock = f.value("officer_shock", r.resolve_officer_shock);
+            r.resolve_colours_shock = f.value("colours_shock", r.resolve_colours_shock);
+            r.resolve_cannon_shock = f.value("cannon_shock", r.resolve_cannon_shock);
+            r.resolve_majority_recover_per_second =
+                f.value("majority_recover_per_second", r.resolve_majority_recover_per_second);
+        }
         if (j.contains("siege"))
             r.siege_hours_per_fort_level =
                 j.at("siege").value("hours_per_fort_level", r.siege_hours_per_fort_level);
@@ -275,11 +286,19 @@ void load_battle_rules(const std::string& json_text) {
             r.cannon_elevation_min_deg = f.value("elevation_min_deg", r.cannon_elevation_min_deg);
             r.cannon_elevation_max_deg = f.value("elevation_max_deg", r.cannon_elevation_max_deg);
             r.cannon_elevation_deg_per_second = f.value("elevation_deg_per_second", r.cannon_elevation_deg_per_second);
+            r.cannon_quoin_steps = std::max(2, f.value("quoin_steps", r.cannon_quoin_steps));
+            r.cannon_shot_gravity_cm = f.value("shot_gravity_cm", r.cannon_shot_gravity_cm);
+            r.cannon_shot_drag_k = f.value("shot_drag_k", r.cannon_shot_drag_k);
             r.cannon_round_range_m = f.value("round_shot_range_m", r.cannon_round_range_m);
             r.cannon_round_speed_m = f.value("round_shot_speed_m", r.cannon_round_speed_m);
             r.cannon_round_damage = f.value("round_shot_damage", r.cannon_round_damage);
             r.cannon_round_spread_degrees = f.value("round_shot_spread_degrees", r.cannon_round_spread_degrees);
             r.cannon_round_pierce = f.value("round_shot_pierce_men", r.cannon_round_pierce);
+            r.cannon_round_kill_mps = f.value("round_shot_kill_mps", r.cannon_round_kill_mps);
+            r.cannon_round_wound_mps = f.value("round_shot_wound_mps", r.cannon_round_wound_mps);
+            r.cannon_graze_max_deg = f.value("graze_max_deg", r.cannon_graze_max_deg);
+            r.cannon_graze_restitution = f.value("graze_restitution", r.cannon_graze_restitution);
+            r.cannon_graze_retention = f.value("graze_retention", r.cannon_graze_retention);
             r.cannon_knockdown_radius_cm = f.value("knockdown_radius_cm", r.cannon_knockdown_radius_cm);
             r.cannon_knockdown_seconds = f.value("knockdown_seconds", r.cannon_knockdown_seconds);
             r.cannon_works_damage = f.value("works_damage", r.cannon_works_damage);
@@ -289,6 +308,10 @@ void load_battle_rules(const std::string& json_text) {
             r.cannon_grape_range_m = f.value("grape_range_m", f.value("canister_range_m", r.cannon_grape_range_m));
             r.cannon_grape_balls = f.value("grape_balls", f.value("canister_balls", r.cannon_grape_balls));
             r.cannon_grape_cone_degrees = f.value("grape_cone_degrees", f.value("canister_cone_degrees", r.cannon_grape_cone_degrees));
+            r.cannon_grape_damage = f.value("grape_damage", r.cannon_grape_damage);
+            r.cannon_grape_speed_m = f.value("grape_speed_m", r.cannon_grape_speed_m);
+            r.cannon_grape_falloff_start_m = f.value("grape_falloff_start_m", r.cannon_grape_falloff_start_m);
+            r.cannon_grape_falloff_floor = f.value("grape_falloff_floor", r.cannon_grape_falloff_floor);
             r.cannon_shell_range_m = f.value("shell_range_m", r.cannon_shell_range_m);
             r.cannon_shell_speed_m = f.value("shell_speed_m", r.cannon_shell_speed_m);
             r.cannon_shell_fuse_min_m = f.value("shell_fuse_min_m", r.cannon_shell_fuse_min_m);
@@ -304,6 +327,48 @@ void load_battle_rules(const std::string& json_text) {
             r.cannon_length_cm = f.value("length_cm", r.cannon_length_cm);
             r.cannon_knockdown_push_cm = f.value("knockdown_push_cm", r.cannon_knockdown_push_cm);
             r.cannon_dirt_burst_scale = f.value("dirt_burst_scale", r.cannon_dirt_burst_scale);
+        }
+        if (j.contains("blast")) {
+            const json& f = j.at("blast");
+            if (f.contains("shell")) {
+                const json& s = f.at("shell");
+                r.blast_shell_radius_cm = s.value("radius_cm", r.blast_shell_radius_cm);
+                r.blast_shell_impulse_cm = s.value("impulse_cm", r.blast_shell_impulse_cm);
+            }
+            if (f.contains("premature")) {
+                const json& p = f.at("premature");
+                r.blast_premature_radius_cm = p.value("radius_cm", r.blast_premature_radius_cm);
+                r.blast_premature_impulse_cm = p.value("impulse_cm", r.blast_premature_impulse_cm);
+            }
+            if (f.contains("chest")) {
+                const json& c = f.at("chest");
+                r.blast_chest_radius_cm = c.value("radius_cm", r.blast_chest_radius_cm);
+                r.blast_chest_impulse_cm = c.value("impulse_cm", r.blast_chest_impulse_cm);
+                r.blast_chest_ready_rounds = std::max(0, c.value("ready_rounds", r.blast_chest_ready_rounds));
+                r.blast_chest_refill_seconds = c.value("refill_seconds", r.blast_chest_refill_seconds);
+                r.blast_chest_resupply_radius_cm = c.value("resupply_radius_cm", r.blast_chest_resupply_radius_cm);
+                r.blast_chest_detonate_chance_round = c.value("detonate_chance_round", r.blast_chest_detonate_chance_round);
+                r.blast_chest_detonate_chance_shell = c.value("detonate_chance_shell", r.blast_chest_detonate_chance_shell);
+                r.blast_chest_resolve_own = c.value("resolve_own", r.blast_chest_resolve_own);
+                r.blast_chest_resolve_enemy = c.value("resolve_enemy", r.blast_chest_resolve_enemy);
+            }
+            if (f.contains("rings")) {
+                const json& rings = f.at("rings");
+                r.blast_ring_killed_frac = rings.value("killed_frac", r.blast_ring_killed_frac);
+                r.blast_ring_wounded_frac = rings.value("wounded_frac", r.blast_ring_wounded_frac);
+                r.blast_ring_knockdown_frac = rings.value("knockdown_frac", r.blast_ring_knockdown_frac);
+                r.blast_ring_stagger_frac = rings.value("stagger_frac", r.blast_ring_stagger_frac);
+                r.blast_ring_flinch_frac = rings.value("flinch_frac", r.blast_ring_flinch_frac);
+            }
+            r.blast_ragdoll_cap = std::max(0, f.value("ragdoll_cap", r.blast_ragdoll_cap));
+            r.blast_ragdoll_max_distance_cm = f.value("ragdoll_max_distance_cm", r.blast_ragdoll_max_distance_cm);
+            r.blast_settle_speed_cm = f.value("settle_speed_cm", r.blast_settle_speed_cm);
+            r.blast_settle_max_seconds = f.value("settle_max_seconds", r.blast_settle_max_seconds);
+            r.blast_player_control_loss_seconds = f.value("player_control_loss_seconds", r.blast_player_control_loss_seconds);
+            r.blast_near_miss_path_cm = f.value("near_miss_path_cm", r.blast_near_miss_path_cm);
+            r.blast_dirt_spray_cm = f.value("dirt_spray_cm", r.blast_dirt_spray_cm);
+            r.blast_leg_wound_crawl_seconds = f.value("leg_wound_crawl_seconds", r.blast_leg_wound_crawl_seconds);
+            r.blast_volley_stage_jitter_ms = f.value("volley_stage_jitter_ms", r.blast_volley_stage_jitter_ms);
         }
         if (j.contains("cover")) {
             const json& c = j.at("cover");

@@ -92,6 +92,17 @@ public:
 	void Init(APA250BattleGameMode* InGM);
 	void Tick(float DeltaSeconds);
 	void NotifyShot(ARFCharacter* Shooter, const FVector& Dir, bool bHit);
+	/** Anim notify hook: fire this man's pending volley shot on the recoil frame (no-op until clips arrive). */
+	void NotifyVolleyDischarge(ARFCharacter* Shooter);
+	/** Pure: one man's stage jitter in seconds, in [0, MaxMs] ms. It replaces VolleyShotDelay's
+	 *  jitter (the two are never added). Keyed by squad, volley and place in the line, so it does
+	 *  not depend on where an actor happens to sit in memory. */
+	static float StageJitterSeconds(int32 SquadId, int32 VolleyEpoch, int32 OrderFromRight, float MaxMs);
+	/** Pure: a pending shot's whole offset from the word of command (rolling file delay + stage jitter). */
+	static float VolleyTotalOffset(int32 SquadId, int32 VolleyEpoch, int32 OrderFromRight, float RollingFileSeconds, float MaxMs)
+	{
+		return VolleyShotDelay(OrderFromRight, RollingFileSeconds, 0.f, 0.f) + StageJitterSeconds(SquadId, VolleyEpoch, OrderFromRight, MaxMs);
+	}
 
 	FString GetCallout() const;
 	int32 GetVolleyCount() const { return VolleyCount; }
@@ -371,6 +382,8 @@ private:
 	ARFCharacter* EnemyNear(FName Faction, const FVector& Point, float RadiusCm) const;
 	void SetOrder(FSquad& Sq, EPA250SquadOrder Order, const ARFCharacter* Giver, const FVector& AimPoint, float Until);
 	void TickPendingVolley(FSquad& Sq);
+	/** Fire one pending shot if it is still good (epoch, alive, lane). The caller has removed it. */
+	void FirePendingShot(FSquad& Sq, const FPendingVolleyShot& P);
 	void DischargeOne(ARFCharacter* Shooter, ARFCharacter* Enemy, const FVector& AimAt);
 	TArray<FSquad> Squads;
 	float SquadRebuildTimer = 0.f;

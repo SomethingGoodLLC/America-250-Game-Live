@@ -14,6 +14,7 @@ int32 UPA250BattleCommandlet::Main(const FString& Params)
 	PA250BattleCases::RunFaction(Log);
 	PA250BattleCases::RunMelee(Log);
 	PA250BattleCases::RunConquest(Log);
+	PA250BattleCases::RunTickets(Log);
 	PA250BattleCases::RunSpacing(Log);
 	PA250BattleCases::RunTraining(Log);
 	PA250BattleCases::RunMorale(Log);
@@ -35,6 +36,15 @@ int32 UPA250BattleCommandlet::Main(const FString& Params)
 	PA250BattleCases::RunMarch(Log);
 	PA250BattleCases::RunPeople(Log);
 	PA250BattleCases::RunStory(Log);
+	PA250BattleCases::RunSpawn(Log);
+	PA250BattleCases::RunCannonCrew(Log);
+	PA250BattleCases::RunMusketReload(Log);
+	PA250BattleCases::RunCannonReloadHUD(Log);
+	PA250BattleCases::RunRoundShot(Log);
+	PA250BattleCases::RunCannonAim(Log);
+	PA250BattleCases::RunCanister(Log);
+	PA250BattleCases::RunBlast(Log);
+	PA250BattleCases::RunVolleySync(Log);
 
 	const int32 Fails = Log.Failures.Num();
 	FString Failed;

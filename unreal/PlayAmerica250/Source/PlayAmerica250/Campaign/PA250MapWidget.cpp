@@ -597,11 +597,63 @@ void UPA250MapWidget::PressReorganizeToggle()
 {
 	if (!CanReorganizeSelected())
 	{
-		SetStatusMessage(TEXT("Reorganize needs another of your armies idle in the same town (allied companies stay their own)."));
+		SetStatusMessage(TEXT("Reorganize needs another of your armies idle in the same town."));
 		return;
 	}
 	bShowReorganize = !bShowReorganize;
 	ReorganizeKey.Reset();
+}
+
+bool UPA250MapWidget::CanSplitSelected() const
+{
+	UPA250Subsystem* S = Sub();
+	if (!S || SelectedArmyId.IsEmpty() || !S->GetController().has_campaign() || S->IsBattlePending()) return false;
+	const pa250::CampaignState& St = S->GetState();
+	const auto It = St.armies.find(ToStd(SelectedArmyId));
+	if (It == St.armies.end() || It->second.faction != St.player_faction || !ArmyStanding(It->second)) return false;
+	int32 Total = 0;
+	int32 Allied = 0;
+	for (const auto& U : It->second.units) Total += U.second;
+	for (const auto& U : It->second.allied) Allied += std::min(U.second, It->second.units.count(U.first) ? It->second.units.at(U.first) : 0);
+	if (Allied > 0) return Total - Allied >= 1;
+	return Total > 1;
+}
+
+void UPA250MapWidget::PressSplit()
+{
+	UPA250Subsystem* S = Sub();
+	if (!S || !CanSplitSelected()) return;
+	const pa250::CampaignState& St = S->GetState();
+	const auto It = St.armies.find(ToStd(SelectedArmyId));
+	if (It == St.armies.end()) return;
+	std::string Cls;
+	int32 Count = 1;
+	for (const auto& U : It->second.allied)
+	{
+		const int32 Have = It->second.units.count(U.first) ? It->second.units.at(U.first) : 0;
+		if (U.second > 0 && Have > 0)
+		{
+			Cls = U.first;
+			Count = std::min(U.second, Have);
+			break;
+		}
+	}
+	if (Cls.empty())
+	{
+		for (const auto& U : It->second.units)
+		{
+			if (U.second > 0)
+			{
+				Cls = U.first;
+				Count = 1;
+				break;
+			}
+		}
+	}
+	if (Cls.empty()) return;
+	const FString Order = FString::Printf(TEXT("{\"order\":\"detach_company\",\"army_id\":\"%s\",\"units\":{\"%s\":%d}}"),
+										  *SelectedArmyId, UTF8_TO_TCHAR(Cls.c_str()), Count);
+	IssueOrder(Order);
 }
 
 bool UPA250MapWidget::CanReorganizeSelected() const
@@ -2491,6 +2543,10 @@ TSharedRef<SWidget> UPA250MapWidget::RebuildWidget()
 										  [MakeButton(TEXT("Halt  (H)"), [this]() { PressHalt(); },
 													  TAttribute<EVisibility>::CreateLambda([this]() { return CanHaltSelected() ? EVisibility::Visible : EVisibility::Collapsed; }),
 													  FText::FromString(TEXT("Halt this army. On the road it turns about and marches back to the town it left.")))] +
+									  SHorizontalBox::Slot().AutoWidth().Padding(0.f, 0.f, 6.f, 0.f)
+										  [MakeButton(TEXT("Split off"), [this]() { PressSplit(); },
+													  TAttribute<EVisibility>::CreateLambda([this]() { return CanSplitSelected() ? EVisibility::Visible : EVisibility::Collapsed; }),
+													  FText::FromString(TEXT("Take a company out as its own detachment. Allied men, such as the Stockbridge company, come out together. It joins again when it marches into a town where this army is standing.")))] +
 									  SHorizontalBox::Slot().AutoWidth()
 										  [MakeButton(TEXT("Reorganize"), [this]() { PressReorganizeToggle(); },
 													  TAttribute<EVisibility>::CreateLambda([this]() {

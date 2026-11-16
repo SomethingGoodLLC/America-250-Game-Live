@@ -595,6 +595,17 @@ TickOutput advance_hour(const CampaignState& in) {
         }
     }
 
+    // A company that has just marched in joins the army already standing there, including one
+    // the player had split off. Then any allied or raised company left idle beside an army joins it.
+    // Skipped while a battle is pending: those armies are the ones the battle names.
+    if (!s.pending_battle.active) {
+        for (const MoveStep& st : steps) {
+            if (!st.completed_edge || !s.armies.count(st.army_id)) continue;
+            if (s.armies.at(st.army_id).path.empty()) fold_player_army_into_neighbor(s, st.army_id, true);
+        }
+        merge_idle_player_armies(s);
+    }
+
     // Decay after contact so a treaty with hours left still covers this hour's march.
     tick_treaties(s);
 

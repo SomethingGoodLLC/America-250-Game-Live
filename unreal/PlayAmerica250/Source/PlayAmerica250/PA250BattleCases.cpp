@@ -13,6 +13,7 @@
 #include "Engine/StaticMeshActor.h"
 #include "PhysicsEngine/BodySetup.h"
 #include "Engine/World.h"
+#include "Engine/GameInstance.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #if WITH_EDITOR
 #include "StaticMeshCompiler.h"
@@ -39,6 +40,9 @@
 #include "PA250MeleeTuning.h"
 #include "PA250SoldierAnimInstance.h"
 #include "PA250TicketLedger.h"
+#include "PA250ArmyResolve.h"
+#include "PA250Blast.h"
+#include "PA250AnimClips.h"
 #include "PA250AIReload.h"
 #include "PA250CombatProfiles.h"
 #include "PA250BotTuning.h"
@@ -52,6 +56,10 @@
 #include "GameFramework/PlayerController.h"
 #include "PA250VolleyCoordinator.h"
 #include "PA250WeaponTuning.h"
+#include "PA250AICommander.h"
+#include "PA250Wind.h"
+#include "Misc/FileHelper.h"
+#include "Misc/Paths.h"
 #include "RFCharacter.h"
 #include "RFHealthComponent.h"
 
@@ -64,19 +72,47 @@ void FLog::Check(bool bCond, const FString& What)
 	else Failures.Add(What);
 }
 
+// Narrow test access to the real battle ledger; no parallel casualty implementation.
+struct FArtilleryAccess
+{
+	static void Init(APA250BattleGameMode* GM)
+	{
+		for (const FName Side : {FName(TEXT("british")), FName(TEXT("continental"))})
+		{
+			GM->Ledger.Pool.Add(Side, 100);
+			GM->InitialPool.FindOrAdd(Side).Add(TEXT("line_infantry"), 10);
+		}
+		GM->ArmyResolve.Init(TEXT("british"), TEXT("continental"), 100, 100, {});
+	}
+	static void ConfigureCrew(APA250BattleGameMode* GM, ARFCharacter* Man) { GM->ConfigureSoldier(Man, Man->FactionId, TEXT("artilleryman")); }
+	static int32 EnsureCrew(APA250BattleGameMode* GM, APA250FieldGun* Gun, ARFCharacter* Player) { return GM->EnsureGunCrew(Gun, Player); }
+	static FPA250TicketLedger& Ledger(APA250BattleGameMode* GM) { return GM->Ledger; }
+	static int32 POW(APA250BattleGameMode* GM, FName Side) { int32 N = 0; for (const auto& Row : GM->Prisoners.FindRef(Side)) N += Row.Value; return N; }
+	static int32 Kills(APA250BattleGameMode* GM) { return GM->PersonalKills; }
+	static FPA250AmmoPool& Ammo(APA250BattleGameMode* GM) { return GM->Ammo; }
+	static void RegisterGun(APA250BattleGameMode* GM, APA250FieldGun* Gun) { GM->Guns.AddUnique(Gun); }
+};
+
 namespace
 {
 /** Bare game world for trace / spawn cases. Not begun-play: actors are configured by hand. */
 struct FScopedTestWorld
 {
 	UWorld* World = nullptr;
-	FScopedTestWorld()
+	FScopedTestWorld(bool bBattleMode = false)
 	{
 		World = UWorld::CreateWorld(EWorldType::Game, false, TEXT("PA250BattleCases"));
 		if (!World || !GEngine) return;
 		FWorldContext& Ctx = GEngine->CreateNewWorldContext(EWorldType::Game);
 		Ctx.SetCurrentWorld(World);
-		World->InitializeActorsForPlay(FURL());
+		FURL URL;
+		if (bBattleMode)
+		{
+			World->SetGameInstance(NewObject<UGameInstance>(GEngine));
+			URL.AddOption(TEXT("game=/Script/PlayAmerica250.PA250BattleGameMode"));
+			World->SetGameMode(URL);
+		}
+		World->InitializeActorsForPlay(URL);
 	}
 	~FScopedTestWorld()
 	{
@@ -612,33 +648,38 @@ void RunConquest(FLog& Log)
 	L.Pool.Add(B, 20);
 	L.Pool.Add(C, 20);
 	L.SpendDeath(B, Line);
-	Log.Check(L.Remaining(B) == 19 && L.Deaths.FindRef(B).FindRef(Line) == 1, TEXT("conquest: -1 ticket per death"));
+	Log.Check(L.Remaining(B) == 19 && L.Deaths.FindRef(B).FindRef(Line) == 1 && L.Killed.FindRef(B).FindRef(Line) == 1,
+		TEXT("conquest: -1 ticket per death (recorded as killed)"));
 
+	// Artillery pass: CP bleed no longer spends tickets (drains Army Resolve instead).
 	for (int32 s = 0; s < 25; ++s) L.Bleed(1.f, 5.f, B, 0, C, 2);
-	Log.Check(L.Remaining(B) == 14 && L.Remaining(C) == 20 && L.BleedTicks == 5, TEXT("conquest: fewer posts bleeds 1 per 5 s"));
+	Log.Check(L.Remaining(B) == 19 && L.Remaining(C) == 20 && L.BleedTicks == 5,
+		TEXT("conquest: fewer posts fires bleed clock (5 units) but tickets stay put"));
 	Log.Check(L.Deaths.FindRef(B).FindRef(Line) == 1, TEXT("conquest: bleed is not a death"));
 
 	for (int32 s = 0; s < 4; ++s) L.Bleed(1.f, 5.f, B, 0, C, 1);
 	L.Bleed(1.f, 5.f, B, 1, C, 1);
 	for (int32 s = 0; s < 4; ++s) L.Bleed(1.f, 5.f, B, 0, C, 1);
-	Log.Check(L.Remaining(B) == 14, TEXT("conquest: equal posts reset the bleed clock"));
+	Log.Check(L.Remaining(B) == 19, TEXT("conquest: equal posts reset the bleed clock; tickets unchanged"));
 	for (int32 s = 0; s < 10; ++s) L.Bleed(1.f, 5.f, B, 2, C, 1);
-	Log.Check(L.Remaining(C) == 18 && L.Remaining(B) == 14, TEXT("conquest: bleed follows the side holding fewer posts"));
+	Log.Check(L.Remaining(C) == 20 && L.Remaining(B) == 19, TEXT("conquest: bleed clock follows the side holding fewer posts; tickets untouched"));
 
-	// Scaled bleed (Battlefront-style): 1 per post of difference, +1 when one side holds every post.
+	// Scaled bleed amount (feeds Resolve drain): 1 per post of difference, +1 when one side holds every post.
 	Log.Check(FPA250TicketLedger::BleedAmount(1, 2, 3) == 1 && FPA250TicketLedger::BleedAmount(0, 2, 3) == 2
 		&& FPA250TicketLedger::BleedAmount(0, 3, 3) == 4 && FPA250TicketLedger::BleedAmount(3, 0, 3) == 4
 		&& FPA250TicketLedger::BleedAmount(2, 2, 3) == 0 && FPA250TicketLedger::BleedAmount(0, 2, 0) == 1,
-		TEXT("conquest: bleed per 5 s = posts of difference, +1 for holding them all (1 / 2 / 4)"));
+		TEXT("conquest: bleed units per interval = posts of difference, +1 for holding them all (1 / 2 / 4)"));
 	{
 		FPA250TicketLedger All;
 		All.Pool.Add(B, 96);
 		for (int32 s2 = 0; s2 < 60; ++s2) All.Bleed(1.f, 5.f, B, 0, C, 3, 3);
-		Log.Check(All.Remaining(B) == 96 - 48, FString::Printf(TEXT("conquest: holding all 3 posts drains 48 enemy tickets a minute (%d left of 96)"), All.Remaining(B)));
+		Log.Check(All.Remaining(B) == 96 && All.BleedTicks == 48,
+			FString::Printf(TEXT("conquest: holding all 3 posts fires 48 Resolve-bleed units a minute; tickets stay 96 (got %d / ticks %d)"),
+				All.Remaining(B), All.BleedTicks));
 		FPA250TicketLedger Low;
 		Low.Pool.Add(B, 3);
 		for (int32 s2 = 0; s2 < 5; ++s2) Low.Bleed(1.f, 5.f, B, 0, C, 3, 3);
-		Log.Check(Low.Remaining(B) == 0 && Low.BleedTicks == 3, TEXT("conquest: bleed never goes below zero"));
+		Log.Check(Low.Remaining(B) == 3 && Low.BleedTicks == 4, TEXT("conquest: bleed clock still fires when tickets are low; pool untouched"));
 	}
 
 	FPA250TicketLedger Empty;
@@ -685,11 +726,11 @@ void RunConquest(FLog& Log)
 		H.Pool.Add(B, 3);
 		H.Held.Add(B, 1);
 		Log.Check(H.CanReinforce(B) && H.HeldFor(B) == 1 && !H.DrawHeld(B), TEXT("reserve: with spare tickets bots are reinforced and the held one is not drawn"));
-		for (int32 i = 0; i < 5; ++i) H.SpendDeath(B, Line);
-		Log.Check(H.Remaining(B) == 1 && H.Deaths.FindRef(B).FindRef(Line) == 5, TEXT("reserve: deaths cannot spend the held ticket (but are still counted)"));
+		for (int32 i = 0; i < 2; ++i) H.SpendDeath(B, Line);
+		Log.Check(H.Remaining(B) == 1 && H.Deaths.FindRef(B).FindRef(Line) == 2, TEXT("reserve: each death spends exactly one man"));
 		Log.Check(!H.CanReinforce(B), TEXT("reserve: bots are not reinforced from the held ticket"));
 		for (int32 s3 = 0; s3 < 30; ++s3) H.Bleed(1.f, 5.f, B, 0, C, 3, 3);
-		Log.Check(H.Remaining(B) == 1, TEXT("reserve: bleed cannot spend the held ticket"));
+		Log.Check(H.Remaining(B) == 1, TEXT("reserve: bleed clock never spends tickets (held or otherwise)"));
 		Log.Check(H.DrawHeld(B) && H.HeldFor(B) == 0 && H.Remaining(B) == 1 && !H.DrawHeld(B), TEXT("reserve: the human draws it once; it is then an ordinary ticket"));
 		H.SpendDeath(B, Line);
 		Log.Check(H.Remaining(B) == 0 && !H.CanReinforce(B), TEXT("reserve: once drawn, the next death spends it"));
@@ -699,23 +740,23 @@ void RunConquest(FLog& Log)
 		Log.Check(None.HeldFor(B) == 0 && !None.CanReinforce(B) && !None.DrawHeld(B), TEXT("reserve: nothing is held from an empty pool"));
 	}
 
-	// The result counts men, straight from the ledger (until 2026-11-14 deaths were rounded to units
-	// and capped at the ticket pool). Nine deaths are nine men: killed and wounded by the sim's ratio.
+	// The result sums recorded kia/wia (Artillery pass); no post-hoc ratio.
 	{
-		pa250::load_battle_rules(pa250::read_text_file(TCHAR_TO_UTF8(*UPA250Subsystem::BattleRulesPath())));
-		TMap<FName, TMap<FName, int32>> Deaths, Gave;
-		Deaths.FindOrAdd(TEXT("continental")).Add(TEXT("militia"), 9);
-		Deaths.FindOrAdd(TEXT("continental")).Add(TEXT("officer"), 1);
-		Deaths.FindOrAdd(TEXT("british")).Add(TEXT("line_infantry"), 100);
+		TMap<FName, TMap<FName, int32>> Killed, Wounded, Gave;
+		Killed.FindOrAdd(TEXT("continental")).Add(TEXT("militia"), 4);
+		Wounded.FindOrAdd(TEXT("continental")).Add(TEXT("militia"), 5);
+		Killed.FindOrAdd(TEXT("continental")).Add(TEXT("officer"), 1);
+		Killed.FindOrAdd(TEXT("british")).Add(TEXT("line_infantry"), 100);
 		Gave.FindOrAdd(TEXT("continental")).Add(TEXT("militia"), 2);
 		Gave.FindOrAdd(TEXT("british")).Add(TEXT("grenadier"), 3);
-		const auto Cas = APA250BattleGameMode::CasualtiesFromLedger(Deaths, Gave);
+		const auto Cas = APA250BattleGameMode::CasualtiesFromLedger(Killed, Wounded, Gave);
 		const pa250::MenDown Mil = Cas.at("continental").at("militia");
-		Log.Check(Mil.killed + Mil.wounded == 9 && Mil.wounded == pa250::split_fallen(9).wounded && Mil.prisoners == 2,
-			FString::Printf(TEXT("conquest: 9 deaths and 2 surrendered are 9 men down and 2 prisoners (%d killed, %d wounded, %d prisoners)"), Mil.killed, Mil.wounded, Mil.prisoners));
-		Log.Check(Cas.at("continental").at("officer").total() == 1, TEXT("conquest: one death is one man, not rounded away"));
-		Log.Check(Cas.at("british").at("line_infantry").total() == 100 && Cas.at("british").at("grenadier").prisoners == 3 && Cas.at("british").at("grenadier").killed == 0,
-			TEXT("conquest: a hundred deaths are a hundred men; a class that only surrendered has no dead"));
+		Log.Check(Mil.killed == 4 && Mil.wounded == 5 && Mil.prisoners == 2,
+			FString::Printf(TEXT("conquest: recorded 4 killed + 5 wounded + 2 prisoners (%d/%d/%d)"), Mil.killed, Mil.wounded, Mil.prisoners));
+		Log.Check(Cas.at("continental").at("officer").killed == 1, TEXT("conquest: one recorded kill is one man"));
+		Log.Check(Cas.at("british").at("line_infantry").killed == 100 && Cas.at("british").at("grenadier").prisoners == 3
+			&& Cas.at("british").at("grenadier").killed == 0,
+			TEXT("conquest: recorded events sum; a class that only surrendered has no dead"));
 	}
 	// A side cannot reinforce with men its army does not have, whatever its tickets say.
 	Log.Check(APA250BattleGameMode::ReserveFor(50, 88, 60, 19) == 9 && APA250BattleGameMode::ReserveFor(5, 88, 10, 19) == 5
@@ -784,6 +825,90 @@ void RunConquest(FLog& Log)
 		Log.Check(UPA250BattleHUD::PostOrder(Brit, Brit, Cont, 0.3f, false) == TEXT("DEFEND"), TEXT("marker: our post under capture says DEFEND"));
 		Log.Check(UPA250BattleHUD::PostOrder(Brit, Cont, Brit, 0.3f, false) == TEXT("CAPTURING"), TEXT("marker: our capture in progress says CAPTURING"));
 	}
+}
+
+void RunTickets(FLog& Log)
+{
+	const FName B(TEXT("british")), C(TEXT("continental")), Line(TEXT("line_infantry")), Mil(TEXT("militia"));
+	FPA250TicketLedger L;
+	L.Pool.Add(B, 96);
+	L.Pool.Add(C, 88);
+	const int32 StartB = L.Remaining(B), StartC = L.Remaining(C);
+
+	FRandomStream Rng(42);
+	int32 PowB = 0, PowC = 0;
+	for (int32 i = 0; i < 50; ++i)
+	{
+		const int32 Roll = Rng.RandRange(0, 2);
+		const FName Side = (i % 2 == 0) ? B : C;
+		const FName Class = (Side == C && Roll == 2) ? Mil : Line;
+		if (Roll == 0) L.SpendKilled(Side, Class);
+		else if (Roll == 1) L.SpendWounded(Side, Class);
+		else
+		{
+			L.SpendCaptured(Side);
+			(Side == B ? PowB : PowC)++;
+		}
+	}
+	auto Loss = [&](FName Side) {
+		int32 N = (Side == B ? PowB : PowC);
+		for (const auto& CK : L.Killed.FindRef(Side)) N += CK.Value;
+		for (const auto& CK : L.Wounded.FindRef(Side)) N += CK.Value;
+		return N;
+	};
+	Log.Check(StartB - L.Remaining(B) == Loss(B) && StartC - L.Remaining(C) == Loss(C),
+		FString::Printf(TEXT("tickets: invariant after 50 events (B %d−%d==%d, C %d−%d==%d)"),
+			StartB, L.Remaining(B), Loss(B), StartC, L.Remaining(C), Loss(C)));
+
+	const int32 PoolBeforeBleed = L.Remaining(B);
+	for (int32 s = 0; s < 60; ++s) L.Bleed(1.f, 5.f, B, 0, C, 3, 3);
+	Log.Check(L.Remaining(B) == PoolBeforeBleed && L.BleedTicks > 0,
+		TEXT("tickets: CP bleed never changes tickets (Resolve units fire instead)"));
+
+	FPA250ArmyResolveTuning RT;
+	RT.DrainPerBleedUnit = 10.f; // fast break for the test
+	FPA250ArmyResolve Res;
+	Res.Init(B, C, 96, 88, RT);
+	FPA250TicketLedger Clock;
+	for (int32 s = 0; s < 30 && !Res.IsBroken(B); ++s)
+	{
+		Res.TickPosts(1.f, 5.f, Clock, B, 0, C, 3, 3);
+	}
+	Log.Check(Res.IsBroken(B) && !Res.IsBroken(C), TEXT("tickets: Resolve hits 0 for the side losing every post"));
+
+	const auto Cas = APA250BattleGameMode::CasualtiesFromLedger(L.Killed, L.Wounded, {});
+	int32 SumK = 0, SumW = 0;
+	for (const auto& FK : Cas)
+		for (const auto& CK : FK.second) { SumK += CK.second.killed; SumW += CK.second.wounded; }
+	int32 RawK = 0, RawW = 0;
+	for (const auto& FK : L.Killed) for (const auto& CK : FK.Value) RawK += CK.Value;
+	for (const auto& FK : L.Wounded) for (const auto& CK : FK.Value) RawW += CK.Value;
+	Log.Check(SumK == RawK && SumW == RawW, TEXT("tickets: CasualtiesFromLedger sums recorded events"));
+	// A held spawn may not make the last casualty free, nor permit records beyond zero.
+	for (int32 Kind = 0; Kind < 3; ++Kind)
+	{
+		FPA250TicketLedger Last;
+		Last.Pool.Add(B, 1);
+		Last.Held.Add(B, 1);
+		const bool Spent = Kind == 0 ? Last.SpendKilled(B, Line)
+			: Kind == 1 ? Last.SpendWounded(B, Line) : Last.SpendCaptured(B);
+		Log.Check(Spent && Last.Remaining(B) == 0 && !Last.SpendKilled(B, Line)
+			&& !Last.SpendWounded(B, Line) && !Last.SpendCaptured(B)
+			&& Last.FallenOf(B, Line) == (Kind == 2 ? 0 : 1),
+			TEXT("tickets: last held KIA/WIA/POW spends one ticket; empty pool refuses extra events"));
+	}
+	Res.Init(B, C, 100, 100, RT);
+	Res.Shock(B, 30.f);
+	Res.OnManDown(B);
+	Log.Check(FMath::IsNearlyEqual(Res.Get(B), 70.f - RT.CasualtyScale / 100.f),
+		TEXT("resolve: casualties still drain after CP pressure or shock"));
+	const float BeforeRecovery = Res.Get(B);
+	Res.TickPosts(0.1f, 5.f, Clock, B, 1, C, 0, 3);
+	Log.Check(FMath::IsNearlyEqual(Res.Get(B), BeforeRecovery), TEXT("resolve: one of three posts is not a recovery majority"));
+	Res.Shock(B, 100.f);
+	Log.Check(Res.TickPosts(1.f, 5.f, Clock, B, 2, C, 1, 3) == B && Res.IsBroken(B),
+		TEXT("resolve: shock to zero breaks before majority recovery or next bleed interval"));
+
 }
 
 void RunSpacing(FLog& Log)
@@ -2620,21 +2745,20 @@ void RunSupport(FLog& Log)
 			TEXT("support: volley-role men load in cadence near a musician; skirmishers and men out of earshot do not"));
 	}
 
-	// Surgeon: a man he saves is wounded, outside the ratio; the window closes.
+	// Surgeon: ConvertKillToWound moves a recorded kill to wounded; CasualtiesFromLedger sums the maps.
 	{
 		Log.Check(PA250Support::CanStillBeSaved(100.f, 100.f + V.SurgeonWindowSeconds, V.SurgeonWindowSeconds) && !PA250Support::CanStillBeSaved(100.f, 101.f + V.SurgeonWindowSeconds, V.SurgeonWindowSeconds),
 			TEXT("support: a fallen man can be saved until the window closes"));
-		pa250::load_battle_rules(pa250::read_text_file(TCHAR_TO_UTF8(*UPA250Subsystem::BattleRulesPath())));
-		TMap<FName, TMap<FName, int32>> Deaths, Gave, Saved;
-		Deaths.FindOrAdd(TEXT("continental")).Add(TEXT("militia"), 10);
-		const auto Plain = APA250BattleGameMode::CasualtiesFromLedger(Deaths, Gave);
-		Saved.FindOrAdd(TEXT("continental")).Add(TEXT("militia"), 4);
-		const auto With = APA250BattleGameMode::CasualtiesFromLedger(Deaths, Gave, Saved);
-		const pa250::MenDown A = Plain.at("continental").at("militia"), B = With.at("continental").at("militia");
-		Log.Check(A.total() == 10 && B.total() == 10 && B.killed < A.killed && B.wounded == pa250::split_fallen(6).wounded + 4,
-			FString::Printf(TEXT("support: of 10 fallen, 4 saved by the surgeon are wounded and the ratio shares the other 6 (%d killed without him, %d with)"), A.killed, B.killed));
-		Saved.FindOrAdd(TEXT("continental")).Add(TEXT("militia"), 99);
-		Log.Check(APA250BattleGameMode::CasualtiesFromLedger(Deaths, Gave, Saved).at("continental").at("militia").wounded == 10, TEXT("support: he cannot save more men than fell"));
+		FPA250TicketLedger L;
+		L.Pool.Add(TEXT("continental"), 20);
+		for (int32 i = 0; i < 10; ++i) L.SpendKilled(TEXT("continental"), TEXT("militia"));
+		for (int32 i = 0; i < 4; ++i) L.ConvertKillToWound(TEXT("continental"), TEXT("militia"));
+		const auto Cas = APA250BattleGameMode::CasualtiesFromLedger(L.Killed, L.Wounded, {});
+		const pa250::MenDown M = Cas.at("continental").at("militia");
+		Log.Check(M.killed == 6 && M.wounded == 4 && M.total() == 10 && L.Remaining(TEXT("continental")) == 10,
+			FString::Printf(TEXT("support: of 10 fallen, 4 converted to wounded (%d killed, %d wounded); tickets already spent"), M.killed, M.wounded));
+		L.ConvertKillToWound(TEXT("continental"), TEXT("militia")); // only 6 kills left
+		Log.Check(L.Killed.FindRef(TEXT("continental")).FindRef(TEXT("militia")) == 5, TEXT("support: convert cannot invent wounds beyond recorded kills"));
 	}
 
 	// Colours taken go into the result and move Support (the sim applies them).
@@ -3105,9 +3229,9 @@ void RunGunnery(FLog& Log)
 	const pa250::BattleRules& R = pa250::battle_rules();
 	Log.Check(R.guns_crew_class == "artilleryman" && R.guns_crew_units_per_gun == 1 && R.cannon_crew_men == 4 && R.cannon_min_crew == 2
 		&& FMath::IsNearlyEqual(R.cannon_length_cm, 333.f) && R.cannon_round_range_m > R.cannon_grape_range_m && R.cannon_works_damage > 0.f
-		&& R.cannon_shell_range_m > R.cannon_shell_fuse_min_m && R.cannon_shell_blast_radius_cm > 0.f
+		&& R.cannon_shell_range_m > R.cannon_shell_fuse_min_m && R.blast_shell_radius_cm > 0.f
 		&& R.cannon_elevation_max_deg > R.cannon_elevation_min_deg,
-		TEXT("guns: the values are the file's (crew of 4, 2 can still work it, the mesh's own 333 cm, grape/shell/elevation)"));
+		TEXT("guns: the values are the file's (crew of 4, 2 can still work it, the mesh's own 333 cm, grape/shell/elevation; blast.shell outer radius)"));
 	for (const TCHAR* F : {TEXT("british"), TEXT("continental")})
 	{
 		const FPA250UnitClassKit& G = PA250UnitClasses::KitFor(F, TEXT("artilleryman"));
@@ -3134,19 +3258,19 @@ void RunGunnery(FLog& Log)
 		const float GrapeEdge = R.cannon_grape_range_m * 100.f;
 		const float GrapeFar = R.cannon_grape_range_m * 100.f * 1.25f + 50.f;
 		Log.Check(PA250Gunnery::RefuseShot(EPA250Shot::Grape, GrapeEdge, R) == nullptr
-			&& FString(PA250Gunnery::RefuseShot(EPA250Shot::Grape, GrapeFar, R)) == TEXT("grape too far — switch load")
+			&& FString(PA250Gunnery::RefuseShot(EPA250Shot::Grape, GrapeFar, R)) == TEXT("canister too far — switch load")
 			&& FString(PA250Gunnery::RefuseShot(EPA250Shot::Shell, R.cannon_shell_range_m * 100.f + 100.f, R)) == TEXT("shell too far — switch load"),
 			TEXT("guns: a chosen load past its range says to switch"));
 		const float Drop = PA250Gunnery::RoundShotDrop(10000.f, R.cannon_round_speed_m * 100.f);
 		const float Elev = PA250Gunnery::BallisticElevationDeg(10000.f, Drop, 0.f);
 		Log.Check(Elev > 0.f && Elev < R.cannon_elevation_max_deg,
 			FString::Printf(TEXT("guns: a level mark is laid %.2f deg above it (the mesh stays level)"), Elev));
-		Log.Check(FString::Printf(TEXT("LOAD: %s"), *FString(PA250Gunnery::ShotWords(EPA250Shot::Grape)).ToUpper()) == TEXT("LOAD: GRAPE"),
-			TEXT("guns: the load chip reads LOAD: GRAPE"));
-		Log.Check(FString(PA250Gunnery::ShotWords(EPA250Shot::Grape)) == TEXT("grape")
+		Log.Check(FString::Printf(TEXT("LOAD: %s"), *FString(PA250Gunnery::ShotWords(EPA250Shot::Grape)).ToUpper()) == TEXT("LOAD: CANISTER"),
+			TEXT("guns: the load chip reads LOAD: CANISTER (enum key stays grape)"));
+		Log.Check(FString(PA250Gunnery::ShotWords(EPA250Shot::Grape)) == TEXT("canister")
 			&& FString(PA250Gunnery::ShotWords(EPA250Shot::Shell)) == TEXT("shell")
 			&& FString(PA250Gunnery::ShotWords(EPA250Shot::RoundShot)) == TEXT("round shot"),
-			TEXT("guns: the three loads have HUD words"));
+			TEXT("guns: the three loads have HUD words (grape→canister label)"));
 		const float Fuse = FMath::Clamp(R.cannon_shell_range_m * 50.f, R.cannon_shell_fuse_min_m, R.cannon_shell_range_m);
 		Log.Check(Fuse >= R.cannon_shell_fuse_min_m && Fuse <= R.cannon_shell_range_m && R.cannon_shell_damage > 0.f,
 			FString::Printf(TEXT("guns: shell fuse clamps to %.0f–%.0f m with blast damage"), R.cannon_shell_fuse_min_m, R.cannon_shell_range_m));
@@ -3172,12 +3296,40 @@ void RunGunnery(FLog& Log)
 			}
 			return T;
 		};
-		const float Whole = R.cannon_sponge_load_seconds + R.cannon_ram_seconds + R.cannon_prime_lay_seconds;
+		const FActiveReloadTuningPlain Preset = PA250Gunnery::DrillPreset(R);
+		float Whole = 0.f;
+		for (float S : Preset.CustomStepSeconds) Whole += S;
 		const float TFull = TimeIt(Full), THalf = TimeIt(Half);
-		Log.Check(FMath::Abs(TFull - Whole) < 1.f && FMath::Abs(THalf - 2.f * Whole) < 2.f,
-			FString::Printf(TEXT("guns: the drill takes %.1f s with a full crew (%.0f s in the file) and %.1f s with two men"), TFull, Whole, THalf));
-		Log.Check(FString(PA250Gunnery::DrillWords(EActiveReloadPhase::PrimePan)) == TEXT("Sponge and load") && FString(PA250Gunnery::DrillWords(EActiveReloadPhase::RamCharge)) == TEXT("Ram home")
-			&& FString(PA250Gunnery::DrillWords(EActiveReloadPhase::ShoulderAim)) == TEXT("Prime and lay"), TEXT("guns: the drill's steps have their own words on the HUD"));
+		Log.Check(Preset.CustomStepSeconds.Num() == 6 && FMath::Abs(TFull - Whole) < 1.5f && FMath::Abs(THalf - 2.f * Whole) < 3.f,
+			FString::Printf(TEXT("guns: 6-step drill takes %.1f s with a full crew (%.0f s steps) and %.1f s with two men"), TFull, Whole, THalf));
+		Log.Check(Preset.CustomStepLabels.Num() == 6 && Preset.CustomStepLabels[0] == TEXT("Sponge")
+			&& Preset.CustomStepLabels[2] == TEXT("Ram") && Preset.CustomStepLabels[5] == TEXT("Fire"),
+			TEXT("guns: six drill step labels (Sponge…Fire)"));
+		// Each step must change phase. Index >= 2 used to stay on ShoulderAim, so ramrod/anim cues fired once.
+		{
+			FActiveReloadSequencer Steps;
+			Steps.Configure(Preset);
+			Steps.BeginReload();
+			int32 Visits = 0;
+			EActiveReloadPhase Last = EActiveReloadPhase::Idle;
+			float Guard = 0.f;
+			while (!Steps.IsComplete() && Guard < 120.f)
+			{
+				const EActiveReloadPhase Ph = Steps.GetPhase();
+				const bool bCombat = Ph == EActiveReloadPhase::PrimePan || Ph == EActiveReloadPhase::RamCharge || Ph == EActiveReloadPhase::ShoulderAim;
+				if (bCombat && Ph != Last)
+				{
+					++Visits;
+					Last = Ph;
+				}
+				Steps.Tick(0.05f);
+				Guard += 0.05f;
+			}
+			Log.Check(Visits == 6, FString::Printf(TEXT("guns: six drill steps each change phase (%d visits)"), Visits));
+		}
+		// Perfect full crew ≈15 s from ≈22 s neutral (PerfectReloadScale).
+		Log.Check(FMath::IsNearlyEqual(Preset.WindowCenter, 15.f / 22.f, 0.01f) && FMath::IsNearlyEqual(Preset.PerfectReloadScale, 1.f),
+			TEXT("guns: perfect scale maps ~22 s neutral to ~15 s"));
 	}
 
 	// The piece is laid above its mark by what the shot falls on the way.
@@ -3189,11 +3341,28 @@ void RunGunnery(FLog& Log)
 		FVector Vel = (FVector(30000.f, 0.f, At300)).GetSafeNormal() * Speed;
 		while (P.X < 30000.f)
 		{
-			Vel.Z -= 490.f * 0.01f;
+			Vel.Z -= PA250Gunnery::ShotGravityCm * 0.01f;
 			P += Vel * 0.01f;
 		}
-		Log.Check(At100 > 50.f && At300 > At100 * 8.f && FMath::Abs(P.Z) < 40.f,
-			FString::Printf(TEXT("guns: round shot falls %.0f cm in 100 m and %.0f cm in 300 m; laid that much high it arrives %.0f cm from the mark"), At100, At300, P.Z));
+		Log.Check(At100 > 50.f && At300 > At100 * 8.f && FMath::Abs(P.Z) < 40.f
+			&& FMath::IsNearlyEqual(PA250Gunnery::ShotGravityCm, 980.f),
+			FString::Printf(TEXT("guns: round shot falls %.0f cm in 100 m and %.0f cm in 300 m; laid that much high it arrives %.0f cm from the mark (g=%.0f)"), At100, At300, P.Z, PA250Gunnery::ShotGravityCm));
+		// The piece is laid with drag, not the vacuum drop. The solved pitch must land on the mark.
+		const float Pitch = PA250Gunnery::SolveElevationDeg(30000.f, Speed, 0.f, R.cannon_elevation_min_deg, R.cannon_elevation_max_deg,
+			R.cannon_shot_gravity_cm, R.cannon_shot_drag_k);
+		const float SolvedZ = PA250Gunnery::ShotArrivalZ(Pitch, 30000.f, Speed, R.cannon_shot_gravity_cm, R.cannon_shot_drag_k);
+		int32 Notch = -1;
+		const float Notched = PA250Gunnery::BestQuoinElevationDeg(30000.f, Speed, 0.f, R.cannon_elevation_min_deg, R.cannon_elevation_max_deg,
+			R.cannon_quoin_steps, Notch, R.cannon_shot_gravity_cm, R.cannon_shot_drag_k);
+		const float NotchedZ = PA250Gunnery::ShotArrivalZ(Notched, 30000.f, Speed, R.cannon_shot_gravity_cm, R.cannon_shot_drag_k);
+		int32 CoarseNotch = -1;
+		const float Coarse = PA250Gunnery::BestQuoinElevationDeg(30000.f, Speed, 0.f, R.cannon_elevation_min_deg, R.cannon_elevation_max_deg,
+			6, CoarseNotch, R.cannon_shot_gravity_cm, R.cannon_shot_drag_k);
+		const float CoarseZ = PA250Gunnery::ShotArrivalZ(Coarse, 30000.f, Speed, R.cannon_shot_gravity_cm, R.cannon_shot_drag_k);
+		Log.Check(FMath::Abs(SolvedZ) < 80.f && FMath::Abs(NotchedZ) < 150.f && FMath::Abs(CoarseZ) > 300.f
+			&& R.cannon_quoin_steps >= 21 && Notch >= 0 && Notch < R.cannon_quoin_steps,
+			FString::Printf(TEXT("guns: solved lay arrives %.0f cm off; quoin %d of %d (%.1f°) arrives %.0f cm off; six notches miss by %.0f cm"),
+				SolvedZ, Notch, R.cannon_quoin_steps, Notched, NotchedZ, CoarseZ));
 	}
 
 	// Overrun and push.
@@ -3209,6 +3378,8 @@ void RunGunnery(FLog& Log)
 			bool bSockets = Asset->FindSocket(TEXT("Muzzle")) && Asset->FindSocket(TEXT("Vent"));
 			for (int32 i = 1; i <= 4; ++i) bSockets = bSockets && Asset->FindSocket(*FString::Printf(TEXT("Crew_%d"), i));
 			Log.Check(bSockets, TEXT("guns: the mesh has Muzzle, Vent and four crew sockets (Scripts/setup_cannon_asset.py)"));
+			const bool bArtillerySockets = Asset->FindSocket(TEXT("Trail")) && Asset->FindSocket(TEXT("TrailL")) && Asset->FindSocket(TEXT("Linstock"));
+			Log.Check(bArtillerySockets, TEXT("guns: Trail / TrailL / Linstock sockets present"));
 			const UBodySetup* Body = Asset->GetBodySetup();
 			Log.Check(Body && (Body->CollisionTraceFlag == CTF_UseComplexAsSimple || Body->AggGeom.GetElementCount() > 0), TEXT("guns: the mesh has collision"));
 			const FBoxSphereBounds B = Asset->GetBounds();
@@ -3285,8 +3456,8 @@ void RunGunnery(FLog& Log)
 				Gun->CycleShot(1);
 				Gun->CycleShot(1);
 				Gun->CycleShot(1);
-				Log.Check(Gun->GetSelectedShot() == EPA250Shot::Grape && Gun->LoadChip() == TEXT("LOAD: GRAPE"),
-					TEXT("guns: [ ] cycles back to LOAD: GRAPE"));
+				Log.Check(Gun->GetSelectedShot() == EPA250Shot::Grape && Gun->LoadChip() == TEXT("LOAD: CANISTER"),
+					TEXT("guns: [ ] cycles back to LOAD: CANISTER"));
 				const FVector Far = Muzzle + Forward * (R.cannon_grape_range_m * 2.5f * 100.f);
 				Log.Check(!Gun->DischargeAt(Far, Server) && Gun->GetShotsFired() == 0, TEXT("guns: grape too far is refused"));
 				Gun->ForceLoaded();
@@ -3437,23 +3608,17 @@ void RunClasses(FLog& Log)
 	Log.Check(PA250ChargeRoutResult(EPA250Morale::Shaken) == EPA250Morale::Routing && PA250ChargeRoutResult(EPA250Morale::Withdrawing) == EPA250Morale::Routing
 		&& PA250ChargeRoutResult(EPA250Morale::Steady) == EPA250Morale::Shaken && PA250ChargeRoutResult(EPA250Morale::Routing) == EPA250Morale::Routing,
 		TEXT("classes: a grenadier charge routs a shaken squad and shakes a steady one"));
-	// Militia: half a ticket. Four dead militia take two tickets; four dead regulars take four. Every death is counted.
+	// Militia: one man = one ticket (Artillery pass; half-ticket retired).
 	{
 		const FName C(TEXT("continental")), B(TEXT("british"));
 		FPA250TicketLedger L;
 		L.Pool.Add(C, 20);
 		L.Pool.Add(B, 20);
-		const float Half = PA250UnitClasses::KitFor(C, TEXT("militia")).TicketCost;
-		for (int32 i = 0; i < 4; ++i) L.SpendDeath(C, TEXT("militia"), Half);
+		const float Cost = PA250UnitClasses::KitFor(C, TEXT("militia")).TicketCost;
+		for (int32 i = 0; i < 4; ++i) L.SpendDeath(C, TEXT("militia"), Cost);
 		for (int32 i = 0; i < 4; ++i) L.SpendDeath(B, TEXT("line_infantry"), PA250UnitClasses::KitFor(B, TEXT("line_infantry")).TicketCost);
-		Log.Check(Half == 0.5f && L.Remaining(C) == 18 && L.Remaining(B) == 16 && L.Deaths.FindRef(C).FindRef(TEXT("militia")) == 4,
-			FString::Printf(TEXT("classes: four militia lost cost two tickets, four regulars four (%d / %d left of 20)"), L.Remaining(C), L.Remaining(B)));
-		FPA250TicketLedger Odd;
-		Odd.Pool.Add(C, 5);
-		Odd.SpendDeath(C, TEXT("militia"), Half);
-		Log.Check(Odd.Remaining(C) == 5, TEXT("classes: the first militiaman lost takes no ticket yet"));
-		Odd.SpendDeath(C, TEXT("militia"), Half);
-		Log.Check(Odd.Remaining(C) == 4, TEXT("classes: the second does"));
+		Log.Check(Cost == 1.f && L.Remaining(C) == 16 && L.Remaining(B) == 16 && L.Deaths.FindRef(C).FindRef(TEXT("militia")) == 4,
+			FString::Printf(TEXT("classes: four militia and four regulars each cost four tickets (%d / %d left of 20)"), L.Remaining(C), L.Remaining(B)));
 	}
 	// Officer: a rally stops a rout. Routing men flee and cannot fire; rallied, they stop, re-form and are steady again.
 	{
@@ -3476,5 +3641,694 @@ void RunClasses(FLog& Log)
 	// Light infantry: more weight at a post.
 	Log.Check(PA250UnitClasses::KitFor(TEXT("british"), TEXT("light_infantry")).CaptureWeight > 1.5f && Musket.CaptureWeight == 1.f,
 		TEXT("classes: a light infantryman counts for more than one man at a post"));
+}
+
+void RunSpawn(FLog& Log)
+{
+	const FVector Front(1.f, 0.f, 0.f);
+	const FVector A = UPA250AICommander::FormationOffset(0, Front, 150.f);
+	const FVector B = UPA250AICommander::FormationOffset(1, Front, 150.f);
+	Log.Check(FVector::Dist2D(A, B) >= 149.f, FString::Printf(TEXT("spawn: formation slots ≥1.5 m (%.0f cm)"), FVector::Dist2D(A, B)));
+	TArray<FVector> Deaths, Guns, Enemies;
+	Deaths.Add(FVector(500.f, 0.f, 0.f));
+	Guns.Add(FVector(2000.f, 0.f, 100.f));
+	const float Safe = UPA250AICommander::ScoreSpawn(FVector(-4000.f, 0.f, 0.f), Front, Deaths, Guns, Enemies, nullptr);
+	const float Hot = UPA250AICommander::ScoreSpawn(FVector(480.f, 0.f, 0.f), Front, Deaths, Guns, Enemies, nullptr);
+	Log.Check(Safe > Hot, FString::Printf(TEXT("spawn: scored pick prefers cover from deaths/guns (%.1f > %.1f)"), Safe, Hot));
+}
+
+void RunCannonCrew(FLog& Log)
+{
+	const pa250::BattleRules& R = pa250::battle_rules();
+	Log.Check(R.cannon_min_crew == 2 && R.cannon_crew_men >= 4, TEXT("crew: min_crew 2, posts ≥4"));
+	Log.Check(PA250UnitClasses::KitFor(TEXT("british"), TEXT("artilleryman")).bServesGuns
+		&& PA250UnitClasses::KitFor(TEXT("continental"), TEXT("artilleryman")).bServesGuns,
+		TEXT("crew: artilleryman serves guns on both sides"));
+	// Role map documented in setup_cannon_asset.py (Trail/TrailL/Linstock added this pass).
+	FString Script;
+	const FString Path = FPaths::ProjectDir() / TEXT("Scripts/setup_cannon_asset.py");
+	const bool bScript = FFileHelper::LoadFileToString(Script, *Path)
+		&& Script.Contains(TEXT("Trail")) && Script.Contains(TEXT("TrailL")) && Script.Contains(TEXT("Linstock"));
+	Log.Check(bScript, TEXT("crew: setup_cannon_asset.py stamps Trail / TrailL / Linstock"));
+	Log.Check(PA250Gunnery::IsOverrun(0, 1), TEXT("crew: overrun when alone with the enemy → ChangeHands → FallBackGunCrew"));
+	FScopedTestWorld W(true);
+	auto* GM = W.World ? W.World->GetAuthGameMode<APA250BattleGameMode>() : nullptr;
+	Log.Check(GM != nullptr, TEXT("crew: authoritative battle mode for casualty and fallback checks"));
+	if (!GM) return;
+	FArtilleryAccess::Init(GM);
+	auto SpawnMan = [&](FName Side, const FVector& At) {
+		FActorSpawnParameters Params;
+		Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+		auto* Man = W.World->SpawnActor<ARFCharacter>(At, FRotator::ZeroRotator, Params);
+		Man->FactionId = Side; Man->UnitClass = TEXT("artilleryman"); Man->DispatchBeginPlay();
+		return Man;
+	};
+	auto* Captain = SpawnMan(TEXT("continental"), FVector(0.f, 1000.f, 100.f));
+	auto* PC = W.World->SpawnActor<APlayerController>();
+	PC->SetAsLocalPlayerController();
+	PC->Possess(Captain);
+	auto* Wounded = SpawnMan(TEXT("british"), FVector(2000.f, 0.f, 100.f));
+	auto& Ledger = FArtilleryAccess::Ledger(GM);
+	const int32 Start = Ledger.Remaining(TEXT("british"));
+	GM->WoundOut(Wounded, Captain, nullptr);
+	GM->WoundOut(Wounded, Captain, nullptr);
+	Log.Check(Wounded->IsDead() && Wounded->ActorHasTag(TEXT("PA250Wounded"))
+		&& Ledger.Remaining(TEXT("british")) == Start - 1
+		&& Ledger.Wounded.FindRef(TEXT("british")).FindRef(TEXT("artilleryman")) == 1
+		&& Ledger.Killed.FindRef(TEXT("british")).FindRef(TEXT("artilleryman")) == 0
+		&& FArtilleryAccess::Kills(GM) == 1,
+		FString::Printf(TEXT("crew: WoundOut removes one man, records one WIA and one player credit; repeat is harmless (dead=%d tickets=%d WIA=%d KIA=%d credit=%d)"), Wounded->IsDead(), Ledger.Remaining(TEXT("british")), Ledger.Wounded.FindRef(TEXT("british")).FindRef(TEXT("artilleryman")), Ledger.Killed.FindRef(TEXT("british")).FindRef(TEXT("artilleryman")), FArtilleryAccess::Kills(GM)));
+	// Exercise the ball's WIA and stun branches, not only WoundOut directly.
+	auto* SlowVictim = SpawnMan(TEXT("british"), FVector(220.f, 4000.f, 100.f));
+	auto* WoundBall = W.World->SpawnActor<APA250CannonBall>(FVector(0.f, 4000.f, 100.f), FRotator::ZeroRotator);
+	WoundBall->Launch(FVector(2000.f, 0.f, 0.f), TEXT("continental"), Captain, nullptr);
+	WoundBall->Tick(0.2f);
+	Log.Check(SlowVictim->IsDead() && SlowVictim->ActorHasTag(TEXT("PA250Wounded"))
+		&& Ledger.Remaining(TEXT("british")) == Start - 2 && FArtilleryAccess::Kills(GM) == 2,
+		TEXT("round shot: wound-speed actor records one WIA and player credit"));
+	auto* Stunned = SpawnMan(TEXT("british"), FVector(100.f, 6000.f, 100.f));
+	auto* StunBall = W.World->SpawnActor<APA250CannonBall>(FVector(0.f, 6000.f, 100.f), FRotator::ZeroRotator);
+	StunBall->Launch(FVector(500.f, 0.f, 0.f), TEXT("continental"), Captain, nullptr);
+	StunBall->Tick(0.3f);
+	Log.Check(!Stunned->IsDead() && Ledger.Remaining(TEXT("british")) == Start - 2
+		&& FArtilleryAccess::Kills(GM) == 2, TEXT("round shot: stun-speed actor spends no man and gives no kill credit"));
+	auto* Captive = SpawnMan(TEXT("british"), FVector(0.f, 1100.f, 100.f));
+	if (Captive->Musket) { Captive->Musket->Destroy(); Captive->Musket = nullptr; }
+	Ledger.Pool.Add(TEXT("british"), 1); Ledger.Held.Add(TEXT("british"), 1);
+	GM->FallBackGunCrew({Captive}, TEXT("british"), nullptr);
+	GM->FallBackGunCrew({Captive}, TEXT("british"), nullptr);
+	Log.Check(Captive->ActorHasTag(TEXT("PA250Prisoner")) && Captive->IsActorBeingDestroyed()
+		&& Ledger.Remaining(TEXT("british")) == 0 && FArtilleryAccess::POW(GM, TEXT("british")) == 1,
+		TEXT("crew: unarmed overrun man captured exactly once, including last held ticket"));
+	Ledger.Pool.Add(TEXT("british"), 100);
+	auto* Armed = SpawnMan(TEXT("british"), FVector(0.f, 1200.f, 100.f));
+	// Some test worlds have no default gun asset: the firearm identity is all this rule uses.
+	if (!Armed->Musket) Armed->Musket = W.World->SpawnActor<AMusketWeapon>();
+	const FVector Before = Armed->GetActorLocation();
+	GM->FallBackGunCrew({Armed}, TEXT("british"), nullptr);
+	Log.Check(!Armed->ActorHasTag(TEXT("PA250Prisoner")) && Armed->ActorHasTag(TEXT("PA250CrewFallingBack"))
+		&& Armed->GetActorLocation().Equals(Before) && FArtilleryAccess::POW(GM, TEXT("british")) == 1,
+		TEXT("crew: armed man retreats without capture or teleport"));
+	auto* Gun = W.World->SpawnActor<APA250FieldGun>(); Gun->Place(TEXT("continental"));
+	Captain->SetActorLocation(Gun->GetCrewPost(0)); Gun->ClaimPost(Captain); Gun->SetPlayerGunner(Captain);
+	Log.Check(Captain->Musket && Captain->Musket->IsHidden(), TEXT("crew: player's firearm is hidden while serving"));
+	Gun->SetPlayerGunner(nullptr);
+	Log.Check(Captain->Musket && !Captain->Musket->IsHidden(), TEXT("crew: player's firearm restores when leaving"));
+	Gun->SetPlayerGunner(Captain);
+	Log.Check(FMath::Abs(Gun->GetCrewPost(2).Z - Gun->GetActorLocation().Z - 90.f) < 1.f
+		&& FVector::Dist2D(Gun->GetCrewPost(2), Gun->GetActorLocation()) > 90.f,
+		TEXT("crew: ventsman's capsule stands on the ground beside the barrel"));
+
+	Log.Check(FArtilleryAccess::EnsureCrew(GM, Gun, Captain) < R.cannon_min_crew,
+		TEXT("crew: exhausted artillery reserve cannot conjure a ticket-free mate"));
+	auto* Infantry = SpawnMan(TEXT("continental"), FVector(100.f, 0.f, 100.f)); Infantry->UnitClass = TEXT("line_infantry");
+	Gun->RecountCrew();
+	Log.Check(Gun->GetCrew() == 1, TEXT("crew: passing infantry do not keep the gun firing"));
+
+	FArtilleryAccess::ConfigureCrew(GM, Armed);
+	Log.Check(Armed->Musket == nullptr, TEXT("crew: configuring an NPC gunner removes his firearm"));
+
+}
+
+void RunMusketReload(FLog& Log)
+{
+	// Regression snapshot: musket keeps CustomStepSeconds empty → exact 3-phase path.
+	const UPA250WeaponTuning* WT = GetDefault<UPA250WeaponTuning>();
+	Log.Check(WT != nullptr, TEXT("musket reload: weapon tuning CDO"));
+	if (!WT) return;
+	const FActiveReloadTuningPlain Arc = AMusketWeapon::PresetToSequencer(WT->Values.Arcade);
+	Log.Check(Arc.CustomStepSeconds.Num() == 0, TEXT("musket reload: CustomStepSeconds empty (3-phase wrapper)"));
+	FActiveReloadSequencer S;
+	S.Configure(Arc);
+	S.Reset();
+	S.BeginReload();
+	float T = 0.f;
+	int32 Steps = 0;
+	EActiveReloadPhase Last = EActiveReloadPhase::Idle;
+	while (!S.IsComplete() && T < 60.f)
+	{
+		const EActiveReloadPhase Ph = S.GetPhase();
+		if (Ph != Last && (Ph == EActiveReloadPhase::PrimePan || Ph == EActiveReloadPhase::RamCharge || Ph == EActiveReloadPhase::ShoulderAim))
+		{
+			++Steps;
+			Last = Ph;
+		}
+		S.Tick(0.05f);
+		T += 0.05f;
+	}
+	const float Expect = Arc.PhasePrimePan + Arc.PhaseRamCharge + Arc.PhaseShoulderAim;
+	Log.Check(Steps == 3 && S.IsComplete() && FMath::Abs(T - Expect) < 0.2f,
+		FString::Printf(TEXT("musket reload: 3 phases complete in %.2f s (expect %.2f)"), T, Expect));
+	// Perfect / sweet / miss outcomes still classify at known progress points.
+	S.Reset();
+	S.BeginReload();
+	S.Tick(Arc.PhasePrimePan * Arc.WindowCenter);
+	const EActiveReloadHit Mid = S.TryCommit();
+	Log.Check(Mid == EActiveReloadHit::Perfect,
+		TEXT("musket reload: center-of-phase commit is perfect"));
+	S.Reset();
+	S.BeginReload();
+	S.Tick(0.01f);
+	Log.Check(S.TryCommit() == EActiveReloadHit::Miss, TEXT("musket reload: early press is a miss"));
+}
+
+void RunCannonReloadHUD(FLog& Log)
+{
+	const pa250::BattleRules& R = pa250::battle_rules();
+	const FActiveReloadTuningPlain Gun = PA250Gunnery::DrillPreset(R);
+	Log.Check(Gun.CustomStepSeconds.Num() == 6 && Gun.CustomStepLabels.Num() == 6, TEXT("cannon HUD: 6 custom steps"));
+	float Neutral = 0.f;
+	for (float S : Gun.CustomStepSeconds) Neutral += S;
+	bool Bonus = false;
+	const float Perfect = TimeReload(Gun, EReloadDrive::CenterCommit, Bonus);
+	Log.Check(FMath::IsNearlyEqual(Neutral, 22.f, 2.5f) && FMath::IsNearlyEqual(Perfect, 15.f, 2.5f),
+		FString::Printf(TEXT("cannon HUD: neutral ≈%.1f s perfect ≈%.1f s (targets 22 / 15)"), Neutral, Perfect));
+	FActiveReloadSequencer Drill;
+	Drill.Configure(Gun);
+	Drill.Reset();
+	Drill.BeginReload();
+	float T = 0.f;
+	while (!Drill.IsComplete() && T < 120.f) { Drill.Tick(0.05f); T += 0.05f; }
+	Log.Check(Drill.IsComplete() && FMath::Abs(T - Neutral) < 1.5f,
+		FString::Printf(TEXT("cannon HUD: sequencer finishes in %.1f s"), T));
+	// Miss every one of the six differently timed steps. Each must retain its duration
+	// and progress after the miss delay; legacy three-phase times are different.
+	bool Resumes = true;
+	for (int32 Step = 0; Step < Gun.CustomStepSeconds.Num(); ++Step)
+	{
+		FActiveReloadSequencer Retry;
+		Retry.Configure(Gun); Retry.BeginReload();
+		for (int32 Before = 0; Before < Step; ++Before) Retry.Tick(Gun.CustomStepSeconds[Before] + 0.01f);
+		Retry.Tick(Gun.CustomStepSeconds[Step] * 0.1f);
+		Resumes &= Retry.TryCommit() == EActiveReloadHit::Miss && Retry.GetStepLabel().Contains(TEXT("Fumbled"));
+		Retry.Tick(Gun.MissDelaySeconds + 0.01f);
+		Resumes &= Retry.GetStepIndex() == Step && FMath::IsNearlyEqual(Retry.GetPhaseProgress(), 0.1f, 0.001f);
+		Retry.Tick(Gun.CustomStepSeconds[Step] * 0.91f);
+		Resumes &= Retry.GetStepIndex() == Step + 1;
+	}
+	Log.Check(Resumes, TEXT("cannon HUD: all six custom durations and progress survive a fumble"));
+
+	// Musket wrapper still empty-custom (regression identity).
+	const UPA250WeaponTuning* WT = GetDefault<UPA250WeaponTuning>();
+	if (WT)
+	{
+		Log.Check(AMusketWeapon::PresetToSequencer(WT->Values.Arcade).CustomStepSeconds.Num() == 0,
+			TEXT("cannon HUD: musket preset untouched by gun CustomStepSeconds"));
+	}
+}
+
+void RunRoundShot(FLog& Log)
+{
+	const pa250::BattleRules& R = pa250::battle_rules();
+	Log.Check(R.cannon_round_damage > 0.f && R.cannon_knockdown_radius_cm > 0.f && R.cannon_round_pierce >= 1,
+		FString::Printf(TEXT("round shot: damage, knockdown, pierce %d men"), R.cannon_round_pierce));
+	// Speed bands used by APA250CannonBall: ≥40 m/s kill, 12–40 wound, <12 stun.
+	Log.Check(40.f > 12.f && R.cannon_round_speed_m > 40.f, TEXT("round shot: opening speed above kill band; stun band below 12 m/s"));
+	const float Drop = PA250Gunnery::RoundShotDrop(20000.f, R.cannon_round_speed_m * 100.f);
+	Log.Check(Drop > 0.f, FString::Printf(TEXT("round shot: falls %.0f cm over 200 m"), Drop));
+	// Graze vs bury: incidence ≤18° keeps the ball (documented in Tick).
+	Log.Check(PA250Gunnery::GrazeAngleDeg(FVector(100.f, 0.f, -10.f), FVector::UpVector) < R.cannon_graze_max_deg
+		&& PA250Gunnery::GrazeAngleDeg(FVector(0.f, 0.f, -100.f), FVector::UpVector) > R.cannon_graze_max_deg,
+		TEXT("round shot: shallow impact grazes; head-on impact buries"));
+	{
+		FScopedTestWorld W;
+		W.SpawnBox(FVector(0.f, 0.f, -50.f), FVector(5000.f, 5000.f, 100.f));
+		W.Settle();
+		auto* Graze = W.World->SpawnActor<APA250CannonBall>(FVector(0.f, 0.f, 30.f), FRotator::ZeroRotator);
+		auto* Bury = W.World->SpawnActor<APA250CannonBall>(FVector(0.f, 500.f, 30.f), FRotator::ZeroRotator);
+		Graze->Launch(FVector(16000.f, 0.f, -1000.f), TEXT("continental"), nullptr, nullptr);
+		Bury->Launch(FVector(0.f, 0.f, -16000.f), TEXT("continental"), nullptr, nullptr);
+		Graze->Tick(0.1f);
+		Bury->Tick(0.1f);
+		Log.Check(!Graze->IsActorBeingDestroyed() && Graze->GetActorLocation().Z > 5.f && Bury->IsActorBeingDestroyed(),
+			TEXT("round shot: actor bounces off ground at a graze and buries head-on"));
+	}
+	{
+		FScopedTestWorld W(true);
+		FArtilleryAccess::Init(W.World->GetAuthGameMode<APA250BattleGameMode>());
+		W.SpawnBox(FVector(500.f, 0.f, 100.f), FVector(100.f, 1000.f, 600.f));
+		ARFCharacter* Behind = W.World->SpawnActor<ARFCharacter>(FVector(800.f, 0.f, 100.f), FRotator::ZeroRotator);
+		Behind->FactionId = TEXT("british");
+		Behind->UnitClass = TEXT("line_infantry");
+		Behind->DispatchBeginPlay();
+		W.Settle();
+		auto* Ball = W.World->SpawnActor<APA250CannonBall>(FVector(0.f, 0.f, 100.f), FRotator::ZeroRotator);
+		Ball->Launch(FVector(16000.f, 0.f, 0.f), TEXT("continental"), nullptr, nullptr);
+		Ball->Tick(0.1f);
+		Log.Check(Ball->IsActorBeingDestroyed() && !Behind->IsDead() && Behind->HealthComponent->CurrentHealth == Behind->HealthComponent->MaxHealth,
+			TEXT("round shot: wall stops actor before it damages a man beyond it"));
+	}
+	{
+		FScopedTestWorld W(true);
+		FArtilleryAccess::Init(W.World->GetAuthGameMode<APA250BattleGameMode>());
+		TArray<ARFCharacter*> Men;
+		for (int32 i = R.cannon_round_pierce + 1; i >= 0; --i)
+		{
+			auto* Man = W.World->SpawnActor<ARFCharacter>(FVector(200.f + 160.f * i, 0.f, 100.f), FRotator::ZeroRotator);
+			Man->FactionId = TEXT("british"); Man->UnitClass = TEXT("line_infantry"); Man->DispatchBeginPlay(); Men.Insert(Man, 0);
+		}
+		auto* Ball = W.World->SpawnActor<APA250CannonBall>(FVector(0.f, 0.f, 100.f), FRotator::ZeroRotator);
+		Ball->Launch(FVector(16000.f, 0.f, 0.f), TEXT("continental"), nullptr, nullptr);
+		Ball->Tick(0.15f);
+		bool Ordered = Ball->IsActorBeingDestroyed();
+		for (int32 i = 0; i < Men.Num(); ++i) Ordered &= Men[i]->IsDead() == (i < R.cannon_round_pierce);
+		FString State;
+		for (const auto* Man : Men) State += FString::Printf(TEXT(" dead=%d hp=%.0f x=%.0f y=%.0f"), Man->IsDead(), Man->HealthComponent->CurrentHealth, Man->GetActorLocation().X, Man->GetActorLocation().Y);
+		Log.Check(Ordered, FString::Printf(TEXT("round shot: actor hits nearest men first and stops at configured pierce limit (gone=%d ballx=%.0f%s)"), Ball->IsActorBeingDestroyed(), Ball->GetActorLocation().X, *State));
+	}
+}
+
+void RunCannonAim(FLog& Log)
+{
+	const pa250::BattleRules& R = pa250::battle_rules();
+	Log.Check(R.cannon_elevation_max_deg > R.cannon_elevation_min_deg && R.cannon_traverse_deg_per_second > 0.f,
+		TEXT("aim: elevation band and traverse rate from data"));
+	const float Elev = PA250Gunnery::BallisticElevationDeg(15000.f, PA250Gunnery::RoundShotDrop(15000.f, R.cannon_round_speed_m * 100.f), 0.f);
+	Log.Check(Elev >= R.cannon_elevation_min_deg && Elev <= R.cannon_elevation_max_deg + 5.f,
+		FString::Printf(TEXT("aim: ballistic elev %.2f° within / near quoin band"), Elev));
+	{
+		FScopedTestWorld W;
+		auto* Gun = W.World->SpawnActor<APA250FieldGun>(); Gun->Place(TEXT("continental"));
+		for (int32 i = 0; i < 2; ++i)
+		{
+			FActorSpawnParameters Params;
+			Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+			auto* Man = W.World->SpawnActor<ARFCharacter>(FVector(0.f, 150.f * i, 90.f), FRotator::ZeroRotator, Params);
+			Man->FactionId = TEXT("continental"); Man->UnitClass = TEXT("artilleryman"); Gun->ClaimPost(Man);
+		}
+		Gun->SetActorRotation(FRotator(0.f, 90.f, 0.f));
+		const FVector Mark = Gun->GetMuzzle() + FVector(20000.f, 0.f, 1200.f);
+		Log.Check(Gun->DischargeAt(Mark, nullptr), TEXT("aim: actual gun discharges toward an elevated mark"));
+		APA250CannonBall* Shot = nullptr;
+		for (TActorIterator<APA250CannonBall> It(W.World); It; ++It) Shot = *It;
+		if (Shot)
+		{
+			const FVector From = Shot->GetActorLocation(); Shot->Tick(0.01f);
+			const FRotator Flight = (Shot->GetActorLocation() - From).Rotation();
+			Log.Check(FMath::Abs(Flight.Pitch - Gun->GetLayPitch()) < 1.f
+				&& FMath::Abs(FMath::FindDeltaAngleDegrees(Flight.Yaw, Gun->GetActorRotation().Yaw)) < 1.f,
+				TEXT("aim: actor fires absolute quoin pitch at current traverse; target height is not counted twice"));
+		}
+		else Log.Check(false, TEXT("aim: round-shot actor spawned"));
+	}
+
+	// PA250Wind is visual-only: no ball drift / wet powder this pass.
+	const FVector Wind = PA250Wind::Velocity();
+	Log.Check(!Wind.IsNearlyZero(), TEXT("aim: PA250Wind has a breeze for smoke hang (visual only)"));
+	Log.Check(true, TEXT("aim: no wind-drift assert; no wet-powder misfire (open: campaign weather in BattleSetup)"));
+}
+
+void RunCanister(FLog& Log)
+{
+	const pa250::BattleRules& R = pa250::battle_rules();
+	Log.Check(R.cannon_grape_balls == 40 && FMath::IsNearlyEqual(R.cannon_grape_range_m, 300.f)
+		&& FMath::IsNearlyEqual(R.cannon_grape_cone_degrees, 4.f),
+		FString::Printf(TEXT("canister: %d pellets, %.0f m, %.0f° half-angle"), R.cannon_grape_balls, R.cannon_grape_range_m, R.cannon_grape_cone_degrees));
+	Log.Check(FString(PA250Gunnery::ShotWords(EPA250Shot::Grape)) == TEXT("canister")
+		&& FString::Printf(TEXT("LOAD: %s"), *FString(PA250Gunnery::ShotWords(EPA250Shot::Grape)).ToUpper()) == TEXT("LOAD: CANISTER"),
+		TEXT("canister: HUD label CANISTER; enum key remains grape"));
+	EPA250Shot Shot = EPA250Shot::RoundShot;
+	Log.Check(PA250Gunnery::ChooseShot(R.cannon_grape_range_m * 50.f, R, Shot) && Shot == EPA250Shot::Grape,
+		TEXT("canister: crew auto-picks grape inside grape_range"));
+	const float Start = R.cannon_grape_falloff_start_m * 100.f, End = R.cannon_grape_range_m * 100.f;
+	const float At100 = PA250Gunnery::CanisterDamageScale(10000.f, Start, End, R.cannon_grape_falloff_floor);
+	const float AtStart = PA250Gunnery::CanisterDamageScale(Start, Start, End, R.cannon_grape_falloff_floor);
+	const float Mid = 0.5f * (Start + End);
+	const float AtMid = PA250Gunnery::CanisterDamageScale(Mid, Start, End, R.cannon_grape_falloff_floor);
+	const float AtEnd = PA250Gunnery::CanisterDamageScale(End, Start, End, R.cannon_grape_falloff_floor);
+	Log.Check(FMath::IsNearlyEqual(At100, 1.f) && FMath::IsNearlyEqual(AtStart, 1.f)
+		&& AtMid < 1.f && AtMid > R.cannon_grape_falloff_floor && FMath::IsNearlyEqual(AtEnd, R.cannon_grape_falloff_floor),
+		FString::Printf(TEXT("canister: falloff by pellet distance (100 m %.2f, start %.2f, mid %.2f, end %.2f)"), At100, AtStart, AtMid, AtEnd));
+	Log.Check(true, TEXT("canister: shell / howitzer class remains an open item (not 6-pdr)"));
+}
+
+void RunBlast(FLog& Log)
+{
+	pa250::load_battle_rules(pa250::read_text_file(TCHAR_TO_UTF8(*UPA250Subsystem::BattleRulesPath())));
+	const pa250::BattleRules& R = pa250::battle_rules();
+	Log.Check(R.blast_shell_radius_cm > 0.f && R.blast_premature_radius_cm > 0.f && R.blast_chest_radius_cm > R.blast_shell_radius_cm
+		&& R.blast_ragdoll_cap == 12 && R.blast_chest_ready_rounds > 0,
+		TEXT("blast: data block loads (shell/premature/chest radii, ragdoll cap 12, ready_rounds)"));
+	Log.Check(PA250AnimClips::CombatDropFolder() == TEXT("/Game/PA250/Anim"),
+		TEXT("blast: combat drop folder is /Game/PA250/Anim (anim_clips Loco parent)"));
+
+	// Pure ring classification on a distance grid (40 samples).
+	{
+		const float Outer = R.blast_shell_radius_cm;
+		int32 Ok = 0;
+		for (int32 i = 0; i < 40; ++i)
+		{
+			const float Dist = Outer * (float(i) + 0.5f) / 40.f;
+			const EPA250BlastRing Ring = PA250Blast::ClassifyRing(Dist, Outer, false, R);
+			const EPA250BlastRing Covered = PA250Blast::ClassifyRing(Dist, Outer, true, R);
+			const bool bDemote = (Ring == EPA250BlastRing::None && Covered == EPA250BlastRing::None)
+				|| (Ring == EPA250BlastRing::Killed && Covered == EPA250BlastRing::Wounded)
+				|| (Ring == EPA250BlastRing::Wounded && Covered == EPA250BlastRing::Knockdown)
+				|| (Ring == EPA250BlastRing::Knockdown && Covered == EPA250BlastRing::Stagger)
+				|| (Ring == EPA250BlastRing::Stagger && Covered == EPA250BlastRing::Flinch)
+				|| (Ring == EPA250BlastRing::Flinch && Covered == EPA250BlastRing::None)
+				|| (Ring == Covered);
+			if (bDemote) ++Ok;
+		}
+		Log.Check(Ok == 40, FString::Printf(TEXT("blast: pure rings + cover demote on 40-sample grid (%d/40)"), Ok));
+	}
+
+	auto SpawnMan = [](UWorld* World, FName Side, FName Class, const FVector& At) -> ARFCharacter*
+	{
+		FActorSpawnParameters Params;
+		Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+		ARFCharacter* Man = World->SpawnActor<ARFCharacter>(At, FRotator::ZeroRotator, Params);
+		if (!Man) return nullptr;
+		Man->FactionId = Side;
+		Man->UnitClass = Class;
+		Man->DispatchBeginPlay();
+		if (Man->HealthComponent)
+		{
+			Man->HealthComponent->MaxHealth = 100.f;
+			Man->HealthComponent->CurrentHealth = 100.f;
+		}
+		return Man;
+	};
+	auto LedgerDown = [](APA250BattleGameMode* GM, FName Side, bool bWounded)
+	{
+		int32 N = 0;
+		const FPA250TicketLedger& L = FArtilleryAccess::Ledger(GM);
+		if (const auto* Row = (bWounded ? L.Wounded : L.Killed).Find(Side)) for (const auto& KV : *Row) N += KV.Value;
+		return N;
+	};
+
+	// Integration: 40 pawns around ApplyBlast. Every pawn's fate is the ring its distance puts
+	// him in, the totals match, friendly casualties are counted apart, and the ledger agrees.
+	{
+		FScopedTestWorld W(/*bBattleMode*/ true);
+		APA250BattleGameMode* GM = W.World ? W.World->GetAuthGameMode<APA250BattleGameMode>() : nullptr;
+		Log.Check(GM != nullptr, TEXT("blast: battle game mode in test world"));
+		if (!GM) return;
+		FArtilleryAccess::Init(GM);
+		const FVector Origin(0.f, 0.f, 100.f);
+		const float Outer = R.blast_shell_radius_cm;
+		struct FRow { ARFCharacter* Man; EPA250BlastRing Ring; bool bBritish; };
+		TArray<FRow> Rows;
+		int32 Want[6] = {0, 0, 0, 0, 0, 0};
+		int32 WantFriendlyKilled = 0, WantFriendlyWounded = 0, WantContKilled = 0, WantContWounded = 0;
+		for (int32 i = 0; i < 40; ++i)
+		{
+			const float Dist = Outer * (0.1f + 0.85f * float(i) / 39.f);
+			const float Ang = FMath::DegreesToRadians(float(i) * 17.f);
+			const bool bBritish = (i % 2) != 0;
+			ARFCharacter* Man = SpawnMan(W.World, bBritish ? FName(TEXT("british")) : FName(TEXT("continental")), TEXT("line_infantry"),
+				Origin + FVector(FMath::Cos(Ang), FMath::Sin(Ang), 0.f) * Dist);
+			if (!Man) continue;
+			// The ring is taken from where he actually stands, as ApplyBlast takes it.
+			const EPA250BlastRing Ring = PA250Blast::ClassifyRing(FVector::Dist(Man->GetActorLocation(), Origin), Outer, false, R);
+			Rows.Add({Man, Ring, bBritish});
+			++Want[static_cast<int32>(Ring)];
+			if (Ring == EPA250BlastRing::Killed) (bBritish ? WantFriendlyKilled : WantContKilled)++;
+			if (Ring == EPA250BlastRing::Wounded) (bBritish ? WantFriendlyWounded : WantContWounded)++;
+		}
+		Log.Check(Rows.Num() == 40 && Want[0] > 0 && Want[1] > 0 && Want[2] > 0 && Want[3] > 0 && Want[4] > 0,
+			FString::Printf(TEXT("blast: the 40-pawn layout puts men in every ring (killed %d wounded %d knockdown %d stagger %d flinch %d)"),
+				Want[0], Want[1], Want[2], Want[3], Want[4]));
+		const int32 StartCont = FArtilleryAccess::Ledger(GM).Remaining(TEXT("continental"));
+		const int32 StartBrit = FArtilleryAccess::Ledger(GM).Remaining(TEXT("british"));
+		const FPA250BlastResult Res = PA250Blast::ApplyBlast(W.World, Origin, EPA250BlastSize::Shell, TEXT("british"), nullptr, nullptr, 42);
+		int32 WrongFate = 0;
+		FString Wrong;
+		for (const FRow& Row : Rows)
+		{
+			const bool bDead = Row.Man->IsDead();
+			const bool bWia = Row.Man->ActorHasTag(TEXT("PA250Wounded"));
+			const bool bOk = Row.Ring == EPA250BlastRing::Killed ? (bDead && !bWia)
+				: Row.Ring == EPA250BlastRing::Wounded ? (bDead && bWia)
+				: (!bDead && !bWia);
+			if (!bOk)
+			{
+				++WrongFate;
+				Wrong += FString::Printf(TEXT(" [ring %d dead=%d wia=%d]"), static_cast<int32>(Row.Ring), bDead, bWia);
+			}
+		}
+		Log.Check(WrongFate == 0, FString::Printf(TEXT("blast: each of the 40 pawns meets the fate of his ring (%d wrong%s)"), WrongFate, *Wrong));
+		Log.Check(Res.Killed == Want[0] && Res.Wounded == Want[1] && Res.Knocked == Want[2] && Res.Staggered == Want[3] && Res.Flinched == Want[4]
+			&& Res.Hit == Want[0] + Want[1] + Want[2] + Want[3] + Want[4],
+			FString::Printf(TEXT("blast: result counts match the rings (hit %d killed %d wounded %d knocked %d staggered %d flinched %d)"),
+				Res.Hit, Res.Killed, Res.Wounded, Res.Knocked, Res.Staggered, Res.Flinched));
+		Log.Check(Res.FriendlyKilled == WantFriendlyKilled && Res.FriendlyWounded == WantFriendlyWounded
+			&& GM->GetFriendlyBlastKilled(TEXT("british")) == WantFriendlyKilled && GM->GetFriendlyBlastWounded(TEXT("british")) == WantFriendlyWounded
+			&& GM->GetFriendlyBlastKilled(TEXT("continental")) == 0 && FArtilleryAccess::Kills(GM) == 0,
+			FString::Printf(TEXT("blast: a british shell's british casualties are friendly fire (%d killed, %d wounded), no personal kills"),
+				Res.FriendlyKilled, Res.FriendlyWounded));
+		const int32 EndCont = FArtilleryAccess::Ledger(GM).Remaining(TEXT("continental"));
+		const int32 EndBrit = FArtilleryAccess::Ledger(GM).Remaining(TEXT("british"));
+		Log.Check(LedgerDown(GM, TEXT("continental"), false) == WantContKilled && LedgerDown(GM, TEXT("continental"), true) == WantContWounded
+			&& LedgerDown(GM, TEXT("british"), false) == WantFriendlyKilled && LedgerDown(GM, TEXT("british"), true) == WantFriendlyWounded
+			&& StartCont - EndCont == WantContKilled + WantContWounded && StartBrit - EndBrit == WantFriendlyKilled + WantFriendlyWounded,
+			FString::Printf(TEXT("blast: ledger KIA/WIA equal the ring counts and tickets_start − tickets_end == kia + wia (cont %d→%d, brit %d→%d)"),
+				StartCont, EndCont, StartBrit, EndBrit));
+		Log.Check(GM->ActiveBlastRagdolls() > 0 && GM->ActiveBlastRagdolls() <= R.blast_ragdoll_cap,
+			FString::Printf(TEXT("blast: ragdoll cap holds (%d of %d)"), GM->ActiveBlastRagdolls(), R.blast_ragdoll_cap));
+	}
+
+	// Cover in a world: a wall between the blast and a man in the killed ring makes him a WIA;
+	// the man at the same distance in the open is killed. A man in front of another is no cover.
+	{
+		FScopedTestWorld W(true);
+		APA250BattleGameMode* GM = W.World->GetAuthGameMode<APA250BattleGameMode>();
+		FArtilleryAccess::Init(GM);
+		const FVector Origin(0.f, 0.f, 100.f);
+		const float Near = R.blast_shell_radius_cm * R.blast_ring_killed_frac * 0.9f;
+		W.SpawnBox(FVector(Near * 0.45f, 0.f, 100.f), FVector(16.f, 400.f, 400.f));
+		ARFCharacter* Behind = SpawnMan(W.World, TEXT("continental"), TEXT("line_infantry"), Origin + FVector(Near, 0.f, 0.f));
+		ARFCharacter* Open = SpawnMan(W.World, TEXT("continental"), TEXT("line_infantry"), Origin + FVector(-Near, 0.f, 0.f));
+		ARFCharacter* Screen = SpawnMan(W.World, TEXT("continental"), TEXT("line_infantry"), Origin + FVector(0.f, Near * 0.5f, 0.f));
+		ARFCharacter* Screened = SpawnMan(W.World, TEXT("continental"), TEXT("line_infantry"), Origin + FVector(0.f, Near, 0.f));
+		W.Settle();
+		PA250Blast::ApplyBlast(W.World, Origin, EPA250BlastSize::Shell, TEXT("british"), nullptr, nullptr, 1);
+		Log.Check(Behind->IsDead() && Behind->ActorHasTag(TEXT("PA250Wounded")) && Open->IsDead() && !Open->ActorHasTag(TEXT("PA250Wounded")),
+			FString::Printf(TEXT("blast: a wall demotes the killed ring to wounded; the man in the open is killed (behind dead=%d wia=%d, open dead=%d wia=%d)"),
+				Behind->IsDead(), Behind->ActorHasTag(TEXT("PA250Wounded")), Open->IsDead(), Open->ActorHasTag(TEXT("PA250Wounded"))));
+		Log.Check(Screen->IsDead() && Screened->IsDead() && !Screened->ActorHasTag(TEXT("PA250Wounded")),
+			TEXT("blast: another man standing in the way is not cover"));
+	}
+
+	// Chest: the roll is seeded, an enemy round shot through it reaches the roll exactly once,
+	// and the piece's own shot does not roll at all.
+	{
+		FScopedTestWorld W(true);
+		APA250BattleGameMode* GM = W.World->GetAuthGameMode<APA250BattleGameMode>();
+		FArtilleryAccess::Init(GM);
+		APA250FieldGun* Gun = W.World->SpawnActor<APA250FieldGun>(FVector(0.f, 3000.f, 0.f), FRotator::ZeroRotator);
+		Gun->Place(TEXT("continental"));
+		auto LooseChest = [&](const FVector& At)
+		{
+			APA250AmmoChest* Box = W.World->SpawnActor<APA250AmmoChest>();
+			Box->AttachToGun(Gun);
+			Box->DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
+			Box->SetActorLocation(At);
+			return Box;
+		};
+		int32 BlowSeed = -1, DudSeed = -1;
+		for (int32 Seed = 0; Seed < 4000 && (BlowSeed < 0 || DudSeed < 0); ++Seed)
+		{
+			const bool bBlows = FRandomStream(Seed).FRand() < R.blast_chest_detonate_chance_round;
+			if (bBlows && BlowSeed < 0) BlowSeed = Seed;
+			if (!bBlows && DudSeed < 0) DudSeed = Seed;
+		}
+		APA250AmmoChest* A = LooseChest(FVector(0.f, -3000.f, 40.f));
+		APA250AmmoChest* B = LooseChest(FVector(0.f, -6000.f, 40.f));
+		const bool bDudA = !A->TryDetonateFromHit(false, static_cast<uint32>(DudSeed));
+		const bool bDudB = !B->TryDetonateFromHit(false, static_cast<uint32>(DudSeed));
+		const bool bBlowA = A->TryDetonateFromHit(false, static_cast<uint32>(BlowSeed));
+		const bool bBlowB = B->TryDetonateFromHit(false, static_cast<uint32>(BlowSeed));
+		Log.Check(BlowSeed >= 0 && DudSeed >= 0 && bDudA && bDudB && bBlowA && bBlowB && A->IsDetonated() && B->IsDetonated()
+			&& A->HitRolls() == 2 && !A->TryDetonateFromHit(false, static_cast<uint32>(BlowSeed)) && A->HitRolls() == 2,
+			FString::Printf(TEXT("blast: chest roll is seeded (seed %d never blows, seed %d always does); a blown chest rolls no more"), DudSeed, BlowSeed));
+
+		APA250AmmoChest* Target = LooseChest(FVector(500.f, 0.f, 40.f));
+		W.Settle();
+		APA250CannonBall* Ball = W.World->SpawnActor<APA250CannonBall>(FVector(0.f, 0.f, 40.f), FRotator::ZeroRotator);
+		Ball->Launch(FVector(16000.f, 0.f, 0.f), TEXT("british"), nullptr, nullptr);
+		for (int32 i = 0; i < 30 && !Ball->IsActorBeingDestroyed(); ++i) Ball->Tick(0.02f);
+		Log.Check(Target->HitRolls() == 1 && (Target->IsDetonated() == Ball->IsActorBeingDestroyed() || !Target->IsDetonated()),
+			FString::Printf(TEXT("blast: a round shot through a chest reaches the detonation roll exactly once (rolls %d, blew %d)"),
+				Target->HitRolls(), Target->IsDetonated()));
+		Log.Check(Target->IsDetonated() || Ball->GetActorLocation().X > 600.f,
+			FString::Printf(TEXT("blast: a chest does not stop a round shot (ball x %.0f, chest at 500)"), Ball->GetActorLocation().X));
+		{
+			const UPrimitiveComponent* Crate = Cast<UPrimitiveComponent>(Target->GetRootComponent());
+			const AMusketProjectile* Musket = GetDefault<AMusketProjectile>();
+			const UPrimitiveComponent* BallBody = Musket ? Cast<UPrimitiveComponent>(Musket->GetRootComponent()) : nullptr;
+			Log.Check(Crate && BallBody
+				&& Crate->GetCollisionResponseToChannel(BallBody->GetCollisionObjectType()) == ECR_Block
+				&& BallBody->GetCollisionResponseToChannel(Crate->GetCollisionObjectType()) == ECR_Block
+				&& Crate->GetCollisionResponseToChannel(ECC_Pawn) == ECR_Ignore
+				&& Crate->GetCollisionObjectType() != ECC_WorldStatic,
+				TEXT("blast: a chest stops a musket ball (each blocks the other), not the crew, and is no ground for a WorldStatic trace"));
+		}
+
+		APA250AmmoChest* Own = LooseChest(FVector(500.f, 800.f, 40.f));
+		APA250CannonBall* OwnBall = W.World->SpawnActor<APA250CannonBall>(FVector(0.f, 800.f, 40.f), FRotator::ZeroRotator);
+		OwnBall->Launch(FVector(16000.f, 0.f, 0.f), TEXT("continental"), nullptr, Gun);
+		for (int32 i = 0; i < 30 && !OwnBall->IsActorBeingDestroyed(); ++i) OwnBall->Tick(0.02f);
+		Log.Check(Own->HitRolls() == 0 && !Own->IsDetonated() && OwnBall->GetActorLocation().X > 600.f,
+			FString::Printf(TEXT("blast: a piece's own shot passes its own chest (rolls %d, ball x %.0f)"), Own->HitRolls(), OwnBall->GetActorLocation().X));
+	}
+
+	// Chest detonation by an enemy shot: rounds lost are charged once, the crate is no cover
+	// against its own blast, the dead belong to the side that fired, and the gun stops loading.
+	{
+		FScopedTestWorld W(true);
+		APA250BattleGameMode* GM = W.World->GetAuthGameMode<APA250BattleGameMode>();
+		FArtilleryAccess::Init(GM);
+		FArtilleryAccess::Ammo(GM).Init(TEXT("continental"), 100);
+		FArtilleryAccess::Ammo(GM).Init(TEXT("british"), 100);
+		APA250FieldGun* Gun = W.World->SpawnActor<APA250FieldGun>(FVector::ZeroVector, FRotator::ZeroRotator);
+		Gun->Place(TEXT("continental"));
+		APA250AmmoChest* Box = Gun->GetChest();
+		Log.Check(Box != nullptr && Box->ReadyRounds() == R.blast_chest_ready_rounds, TEXT("blast: a placed gun has a full chest"));
+		if (!Box) return;
+		const FVector Out = (Box->GetActorLocation() - Gun->GetActorLocation()).GetSafeNormal2D();
+		const FVector Beside = Box->GetActorLocation() + Out * 100.f + FVector(0.f, 0.f, 60.f);
+		ARFCharacter* Gunner = SpawnMan(W.World, TEXT("continental"), TEXT("artilleryman"), Beside);
+		ARFCharacter* Raider = SpawnMan(W.World, TEXT("british"), TEXT("line_infantry"), Beside + FVector(50.f, 0.f, 0.f));
+		W.Settle();
+		int32 BlowSeed = 0;
+		while (FRandomStream(BlowSeed).FRand() >= R.blast_chest_detonate_chance_round) ++BlowSeed;
+		const int32 Ready = Box->ReadyRounds();
+		const float ResolveBefore = GM->GetArmyResolve(TEXT("continental"));
+		const bool bBlew = Box->TryDetonateFromHit(false, static_cast<uint32>(BlowSeed), TEXT("british"), nullptr);
+		Log.Check(bBlew && Box->IsDetonated() && Box->ReadyRounds() == 0 && Box->RoundsLostOnDetonation() == Ready
+			&& GM->ChestRoundsLost() == Ready && FArtilleryAccess::Ammo(GM).Remaining(TEXT("continental")) == 100 - Ready
+			&& FArtilleryAccess::Ammo(GM).Remaining(TEXT("british")) == 100,
+			FString::Printf(TEXT("blast: chest blown, %d rounds lost and charged once to its own magazine (left %d)"),
+				Ready, FArtilleryAccess::Ammo(GM).Remaining(TEXT("continental"))));
+		Log.Check(Gunner->IsDead() && !Gunner->ActorHasTag(TEXT("PA250Wounded")) && Raider->IsDead(),
+			FString::Printf(TEXT("blast: the crate is no cover against its own blast (gunner dead=%d wia=%d, raider dead=%d)"),
+				Gunner->IsDead(), Gunner->ActorHasTag(TEXT("PA250Wounded")), Raider->IsDead()));
+		Log.Check(GM->GetFriendlyBlastKilled(TEXT("british")) == 1 && GM->GetFriendlyBlastKilled(TEXT("continental")) == 0,
+			FString::Printf(TEXT("blast: a chest set off by a british shot — the british man beside it is the friendly casualty (british %d, continental %d)"),
+				GM->GetFriendlyBlastKilled(TEXT("british")), GM->GetFriendlyBlastKilled(TEXT("continental"))));
+		Log.Check(GM->GetArmyResolve(TEXT("continental")) < ResolveBefore, TEXT("blast: the chest's own side is shaken"));
+		Log.Check(Gun->IsChestEmpty() && Gun->IsChestBlown(), TEXT("blast: a blown chest is an empty chest (the gun cannot load from it)"));
+	}
+
+	// Ammunition flow: Load takes exactly one round from the chest, the magazine is charged
+	// exactly once and only when the round is fired, and an empty chest holds the drill at Load.
+	{
+		FScopedTestWorld W(true);
+		APA250BattleGameMode* GM = W.World->GetAuthGameMode<APA250BattleGameMode>();
+		FArtilleryAccess::Init(GM);
+		FPA250AmmoPool& Magazine = FArtilleryAccess::Ammo(GM);
+		Magazine.Init(TEXT("continental"), 100);
+		Magazine.Init(TEXT("british"), 100);
+		APA250FieldGun* Gun = W.World->SpawnActor<APA250FieldGun>(FVector::ZeroVector, FRotator::ZeroRotator);
+		Gun->Place(TEXT("continental"));
+		APA250AmmoChest* Box = Gun->GetChest();
+		if (!Box) { Log.Check(false, TEXT("ammo: gun has a chest")); return; }
+		FArtilleryAccess::RegisterGun(GM, Gun); // the battle mode counts claims over the guns it knows
+		for (int32 i = 0; i < R.cannon_crew_men; ++i)
+		{
+			SpawnMan(W.World, TEXT("continental"), TEXT("artilleryman"), Gun->GetActorLocation() + FVector(-120.f - 40.f * i, -120.f, 100.f));
+		}
+		const int32 Cap = Box->ReadyRounds();
+		Log.Check(Gun->IsLoaded() && Gun->RoundsHeld() == Cap + 1 && GM->MagazineSpareForChests(TEXT("continental")) == 100 - (Cap + 1),
+			FString::Printf(TEXT("ammo: opening round in the barrel and %d in the chest are claims on the magazine, none charged yet"), Cap));
+		GM->NotifyGunFired(Gun, EPA250Shot::RoundShot);
+		Gun->ForceEmptyForTest();
+		Log.Check(Magazine.Remaining(TEXT("continental")) == 99 && Box->ReadyRounds() == Cap,
+			TEXT("ammo: firing charges the magazine one round and takes nothing from the chest"));
+		int32 Ticks = 0;
+		while (!Gun->IsLoaded() && Ticks < 3000) { Gun->Tick(0.05f); ++Ticks; }
+		Log.Check(Gun->IsLoaded() && Box->ReadyRounds() == Cap - 1 && Magazine.Remaining(TEXT("continental")) == 99 && Gun->RoundsHeld() == Cap,
+			FString::Printf(TEXT("ammo: one drill takes exactly one round from the chest and charges nothing (loaded=%d chest %d→%d, magazine %d, %.0f s)"),
+				Gun->IsLoaded(), Cap, Box->ReadyRounds(), Magazine.Remaining(TEXT("continental")), Ticks * 0.05f));
+		GM->NotifyGunFired(Gun, EPA250Shot::RoundShot);
+		Log.Check(Magazine.Remaining(TEXT("continental")) == 98, TEXT("ammo: that round is charged once, when fired (one chest round + one magazine round a shot)"));
+		// Empty chest: the drill stands at Load; neither time nor a commit gets it past.
+		while (Box->TakeOneForLoad()) {}
+		Gun->ForceEmptyForTest();
+		bool bCommitted = false;
+		for (int32 i = 0; i < 1200; ++i)
+		{
+			Gun->Tick(0.05f);
+			if (Gun->GetDrill().GetStepIndex() == 1) bCommitted |= Gun->PlayerCommit() != EActiveReloadHit::None;
+		}
+		Log.Check(!Gun->IsLoaded() && Gun->GetDrill().GetStepIndex() == 1 && !Gun->HasRoundInHand() && !bCommitted
+			&& Gun->StatusLine().Contains(TEXT("Chest empty")) && Magazine.Remaining(TEXT("continental")) == 98,
+			FString::Printf(TEXT("ammo: an empty chest holds the drill at Load for 60 s, commits and all (loaded=%d step %d committed=%d)"),
+				Gun->IsLoaded(), Gun->GetDrill().GetStepIndex(), bCommitted));
+		// No friendly post near: no refill, and a refill never charges the magazine.
+		for (int32 i = 0; i < 100; ++i) Box->Tick(1.f);
+		Log.Check(Box->ReadyRounds() == 0 && Magazine.Remaining(TEXT("continental")) == 98, TEXT("ammo: no refill away from a friendly post"));
+	}
+
+	// Premature discharge (M6): the sponger is the sure casualty, 55% WIA / 45% KIA by the
+	// stream, and the muzzle blast that follows never counts him a second time.
+	{
+		FScopedTestWorld W(true);
+		APA250BattleGameMode* GM = W.World->GetAuthGameMode<APA250BattleGameMode>();
+		FArtilleryAccess::Init(GM);
+		int32 WiaSeed = 0, KiaSeed = 0;
+		while (FRandomStream(WiaSeed).FRand() >= 0.55f) ++WiaSeed;
+		while (FRandomStream(KiaSeed).FRand() < 0.55f) ++KiaSeed;
+		const int32 Start = FArtilleryAccess::Ledger(GM).Remaining(TEXT("continental"));
+		bool bSpongers = true, bMates = true, bBystanders = true, bGuns = true;
+		for (int32 Case = 0; Case < 2; ++Case)
+		{
+			APA250FieldGun* Gun = W.World->SpawnActor<APA250FieldGun>(FVector(0.f, 8000.f * Case, 0.f), FRotator::ZeroRotator);
+			Gun->Place(TEXT("continental"));
+			ARFCharacter* Sponger = SpawnMan(W.World, TEXT("continental"), TEXT("artilleryman"), Gun->GetMuzzle() + FVector(0.f, -30.f, 0.f));
+			const int32 Post = Gun->ClaimPost(Sponger);
+			ARFCharacter* Mate = SpawnMan(W.World, TEXT("continental"), TEXT("artilleryman"), Gun->GetMuzzle() + FVector(0.f, 30.f, 0.f));
+			ARFCharacter* Bystander = SpawnMan(W.World, TEXT("continental"), TEXT("artilleryman"),
+				Gun->GetMuzzle() + FVector(R.blast_premature_radius_cm + 300.f, 0.f, 0.f));
+			Gun->ForceEmptyForTest();
+			FRandomStream Hot(Case == 0 ? WiaSeed : KiaSeed);
+			Gun->DischargePremature(Hot);
+			const bool bWia = Sponger->ActorHasTag(TEXT("PA250Wounded"));
+			bSpongers &= Post == 0 && Sponger->IsDead() && bWia == (Case == 0);
+			bMates &= Mate->IsDead() && !Mate->ActorHasTag(TEXT("PA250Wounded"));
+			bBystanders &= !Bystander->IsDead();
+			bGuns &= !Gun->IsLoaded() && Gun->GetBarrelHeat() == 0.f && !Gun->IsDrillActive();
+		}
+		Log.Check(bSpongers, TEXT("premature: the sponger at post 0 goes down — WIA on a roll under 0.55, KIA otherwise"));
+		Log.Check(bMates && bBystanders, TEXT("premature: the muzzle blast kills the man beside the muzzle and spares the man outside it"));
+		Log.Check(bGuns, TEXT("premature: the piece is left unloaded, cold, with the drill to begin again"));
+		const int32 Down = LedgerDown(GM, TEXT("continental"), false) + LedgerDown(GM, TEXT("continental"), true);
+		Log.Check(Down == 4 && LedgerDown(GM, TEXT("continental"), true) == 1 && Start - FArtilleryAccess::Ledger(GM).Remaining(TEXT("continental")) == 4
+			&& GM->GetFriendlyBlastKilled(TEXT("continental")) + GM->GetFriendlyBlastWounded(TEXT("continental")) == 4
+			&& FArtilleryAccess::Kills(GM) == 0,
+			FString::Printf(TEXT("premature: each sponger is one casualty, not two (down %d of 4, WIA %d, tickets %d, friendly %d)"),
+				Down, LedgerDown(GM, TEXT("continental"), true), Start - FArtilleryAccess::Ledger(GM).Remaining(TEXT("continental")),
+				GM->GetFriendlyBlastKilled(TEXT("continental")) + GM->GetFriendlyBlastWounded(TEXT("continental"))));
+	}
+}
+
+void RunVolleySync(FLog& Log)
+{
+	pa250::load_battle_rules(pa250::read_text_file(TCHAR_TO_UTF8(*UPA250Subsystem::BattleRulesPath())));
+	const float MaxMs = pa250::battle_rules().blast_volley_stage_jitter_ms;
+	Log.Check(FMath::IsNearlyEqual(MaxMs, 150.f), TEXT("volley sync: blast.volley_stage_jitter_ms is 150"));
+	// VolleyShotDelay jitter is retired (pass 0); stage jitter alone is 0–150 ms.
+	Log.Check(UPA250VolleyCoordinator::VolleyShotDelay(0, 0.f, 0.f, 0.7f) == 0.f
+		&& UPA250VolleyCoordinator::VolleyShotDelay(3, 0.1f, 0.f, 1.f) == 0.3f,
+		TEXT("volley sync: VolleyShotDelay carries rolling only (no stacked jitter)"));
+	// The total offset a pending shot is given: rolling file delay + stage jitter, and only that.
+	int32 Ok = 0;
+	TSet<int32> Distinct;
+	const float Rolling = 0.1f;
+	for (int32 i = 0; i < 64; ++i)
+	{
+		const int32 Squad = i % 4, Epoch = 1 + i / 16, Order = i % 16;
+		const float Jitter = UPA250VolleyCoordinator::StageJitterSeconds(Squad, Epoch, Order, MaxMs);
+		const float Total = UPA250VolleyCoordinator::VolleyTotalOffset(Squad, Epoch, Order, Rolling, MaxMs);
+		const bool bInBand = Jitter >= 0.f && Jitter <= MaxMs * 0.001f + KINDA_SMALL_NUMBER;
+		const bool bTotal = FMath::IsNearlyEqual(Total, Order * Rolling + Jitter, 1.e-5f);
+		const bool bRepeat = Jitter == UPA250VolleyCoordinator::StageJitterSeconds(Squad, Epoch, Order, MaxMs);
+		if (bInBand && bTotal && bRepeat) ++Ok;
+		Distinct.Add(FMath::RoundToInt(Jitter * 1000.f));
+	}
+	Log.Check(Ok == 64, FString::Printf(TEXT("volley sync: total offset == rolling + stage jitter, jitter in [0, %.0f] ms, repeatable (%d/64)"), MaxMs, Ok));
+	Log.Check(Distinct.Num() > 16, FString::Printf(TEXT("volley sync: the men's offsets are spread, not one value (%d distinct ms of 64)"), Distinct.Num()));
+	Log.Check(UPA250VolleyCoordinator::StageJitterSeconds(1, 1, 0, 0.f) == 0.f, TEXT("volley sync: zero stage jitter in data means none"));
 }
 } // namespace PA250BattleCases

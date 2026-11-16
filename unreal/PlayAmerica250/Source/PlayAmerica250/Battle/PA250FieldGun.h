@@ -54,7 +54,7 @@ inline const TCHAR* RefuseShot(EPA250Shot Shot, float RangeCm, const pa250::Batt
 {
 	if (Shot == EPA250Shot::Grape && RangeCm > R.cannon_grape_range_m * 100.f * 1.25f)
 	{
-		return TEXT("grape too far — switch load");
+		return TEXT("canister too far — switch load");
 	}
 	if (Shot == EPA250Shot::Shell && RangeCm > R.cannon_shell_range_m * 100.f)
 	{
@@ -78,7 +78,7 @@ inline const TCHAR* ShotWords(EPA250Shot Shot)
 {
 	switch (Shot)
 	{
-	case EPA250Shot::Grape: return TEXT("grape");
+	case EPA250Shot::Grape: return TEXT("canister"); // enum key stays grape; player-facing label
 	case EPA250Shot::Shell: return TEXT("shell");
 	default: return TEXT("round shot");
 	}
@@ -94,36 +94,168 @@ inline float DrillSpeed(int32 Crew, int32 Trained, const pa250::BattleRules& R)
 	const float Skill = 1.f / FMath::Lerp(FMath::Max(1.f, R.cannon_untrained_scale), 1.f, TrainedShare);
 	return Manning * Skill;
 }
-/** The drill's times as an active-reload preset: a step left alone completes in its own time. */
+/** Six-step gun drill (Artillery pass). Perfect full crew ≈15 s; neutral ≈22 s. */
 inline FActiveReloadTuningPlain DrillPreset(const pa250::BattleRules& R)
 {
 	FActiveReloadTuningPlain T;
+	// Legacy three-phase fields kept as fallbacks; CustomStepSeconds drives the gun.
 	T.PhasePrimePan = R.cannon_sponge_load_seconds;
 	T.PhaseRamCharge = R.cannon_ram_seconds;
 	T.PhaseShoulderAim = R.cannon_prime_lay_seconds;
+	// Neutral target 22 s: scale the catalog times and add the Fire step.
+	const float Catalog = FMath::Max(0.1f, R.cannon_sponge_load_seconds + R.cannon_ram_seconds + R.cannon_prime_lay_seconds);
+	constexpr float NeutralTarget = 22.f;
+	constexpr float FireStep = 2.0f;
+	const float Scale = (NeutralTarget - FireStep) / Catalog;
+	T.CustomStepSeconds = {
+		R.cannon_sponge_load_seconds * 0.45f * Scale, // Sponge
+		R.cannon_sponge_load_seconds * 0.55f * Scale, // Load
+		R.cannon_ram_seconds * Scale,                 // Ram
+		R.cannon_prime_lay_seconds * 0.4f * Scale,    // Prime
+		R.cannon_prime_lay_seconds * 0.6f * Scale,    // Run up & Lay
+		FireStep                                      // Fire
+	};
+	T.CustomStepLabels = {
+		TEXT("Sponge"), TEXT("Load"), TEXT("Ram"), TEXT("Prime"), TEXT("Run up & Lay"), TEXT("Fire")
+	};
 	T.bTimeoutCompletesPhase = true;
 	T.bMissResumesProgress = true;
 	T.bIgnoreRepeatMiss = true;
 	T.JamChanceOnMiss = 0.f;
+	// A commit finishes its step immediately. The window itself saves time; applying
+	// 15/22 again to later phases made a perfect drill take about nine seconds.
+	T.WindowCenter = 15.f / 22.f;
+	T.PerfectReloadScale = 1.f;
 	return T;
 }
-/** The words for the drill's steps. */
+/** The words for the drill's steps (3-phase fallback labels). */
 inline const TCHAR* DrillWords(EActiveReloadPhase Phase)
 {
 	switch (Phase)
 	{
-	case EActiveReloadPhase::PrimePan: return TEXT("Sponge and load");
-	case EActiveReloadPhase::RamCharge: return TEXT("Ram home");
+	case EActiveReloadPhase::PrimePan: return TEXT("Sponge");
+	case EActiveReloadPhase::RamCharge: return TEXT("Ram");
 	case EActiveReloadPhase::ShoulderAim: return TEXT("Prime and lay");
 	case EActiveReloadPhase::MissDelay: return TEXT("Fumbled");
 	default: return TEXT("Loaded");
 	}
 }
-/** How far the shot falls over a range (cm), so the piece is laid that much above its mark. */
-inline float RoundShotDrop(float RangeCm, float SpeedCm, float GravityCm = 490.f)
+/** World gravity for round shot and shell (cm/s^2). Lay and flight both use this.
+ *  980 is the engine's gravity. The old flight used 490 ("drops a little"); that
+ *  half-gravity stayed in the lay formula after flight moved to 980, so the piece
+ *  was laid for half the drop the ball actually made. */
+inline constexpr float ShotGravityCm = 980.f;
+/** Quadratic drag: acceleration in m/s^2 is ShotDragK * v(m/s)^2. About an iron 6 lb ball.
+ *  Applied with speed in m/s. A coefficient written against cm/s and then multiplied
+ *  by 100 stops the shot in one tick. */
+inline constexpr float ShotDragK = 0.00074f;
+
+/** Drag then gravity. GravityCm and DragK come from battle_rules (the defaults match the data). */
+inline void ApplyShotAccel(FVector& Vel, float Dt, float GravityCm = ShotGravityCm, float DragK = ShotDragK)
+{
+	const float Speed = Vel.Size();
+	if (Speed > 1.f && DragK > 0.f)
+	{
+		const float Mps = Speed / 100.f;
+		const float DragCm = DragK * Mps * Mps * 100.f;
+		Vel -= Vel.GetSafeNormal() * FMath::Min(Speed, DragCm * Dt);
+	}
+	Vel.Z -= GravityCm * Dt;
+}
+
+/** One flight step: the same accel the actors use, then move. */
+inline void IntegrateShot(FVector& Pos, FVector& Vel, float Dt, float GravityCm = ShotGravityCm, float DragK = ShotDragK)
+{
+	ApplyShotAccel(Vel, Dt, GravityCm, DragK);
+	Pos += Vel * Dt;
+}
+
+/** Vacuum drop over a level range (cm): ½ g t² with t = range/speed. The piece is laid
+ *  by SolveElevationDeg, which integrates drag as well as this gravity. */
+inline float RoundShotDrop(float RangeCm, float SpeedCm, float GravityCm = ShotGravityCm)
 {
 	const float T = SpeedCm > 1.f ? RangeCm / SpeedCm : 0.f;
 	return 0.5f * GravityCm * T * T;
+}
+
+/** Height (cm) of a shot fired at PitchDeg once it has covered HorizCm. */
+inline float ShotArrivalZ(float PitchDeg, float HorizCm, float SpeedCm, float GravityCm = ShotGravityCm, float DragK = ShotDragK)
+{
+	if (HorizCm < 1.f || SpeedCm < 1.f) return 0.f;
+	const float Rad = FMath::DegreesToRadians(PitchDeg);
+	FVector Pos = FVector::ZeroVector;
+	FVector Vel(FMath::Cos(Rad) * SpeedCm, 0.f, FMath::Sin(Rad) * SpeedCm);
+	float Guard = 0.f;
+	while (Pos.X < HorizCm && Guard < 12.f && Vel.X > 50.f)
+	{
+		const FVector Before = Pos;
+		IntegrateShot(Pos, Vel, 0.01f, GravityCm, DragK);
+		if (Pos.X >= HorizCm)
+			return FMath::Lerp(Before.Z, Pos.Z, (HorizCm - Before.X) / (Pos.X - Before.X));
+		Guard += 0.01f;
+	}
+	return Pos.Z;
+}
+
+/** Pitch (degrees) so a shot fired at SpeedCm is at HeightCm when it has covered HorizCm.
+ *  Binary search over the elevation band, using IntegrateShot (gravity + drag). */
+inline float SolveElevationDeg(float HorizCm, float SpeedCm, float HeightCm, float MinDeg, float MaxDeg,
+	float GravityCm = ShotGravityCm, float DragK = ShotDragK)
+{
+	float Lo = MinDeg;
+	float Hi = MaxDeg;
+	if (HorizCm < 1.f || SpeedCm < 1.f) return 0.f;
+	for (int32 i = 0; i < 14; ++i)
+	{
+		const float Mid = 0.5f * (Lo + Hi);
+		const float Z = ShotArrivalZ(Mid, HorizCm, SpeedCm, GravityCm, DragK);
+		if (Z > HeightCm) Hi = Mid;
+		else Lo = Mid;
+	}
+	return 0.5f * (Lo + Hi);
+}
+
+/** The quoin notch whose shot lands closest to HeightCm. Nearest-angle is not nearest-impact:
+ *  six steps across this band miss a 300 m mark by several metres; the data uses a finer quoin. */
+inline float BestQuoinElevationDeg(float HorizCm, float SpeedCm, float HeightCm, float MinDeg, float MaxDeg,
+	int32 Steps, int32& OutNotch, float GravityCm = ShotGravityCm, float DragK = ShotDragK)
+{
+	Steps = FMath::Max(2, Steps);
+	const float Span = FMath::Max(0.1f, MaxDeg - MinDeg);
+	float BestErr = TNumericLimits<float>::Max();
+	float BestPitch = MinDeg;
+	OutNotch = 0;
+	const float Solved = SolveElevationDeg(HorizCm, SpeedCm, HeightCm, MinDeg, MaxDeg, GravityCm, DragK);
+	const int32 Lower = FMath::Clamp(FMath::FloorToInt((Solved - MinDeg) / Span * (Steps - 1)), 0, Steps - 1);
+	// The low trajectory is monotonic in this elevation band. Only the two notches
+	// bracketing its solution can be nearest; avoid integrating every notch each frame.
+	for (int32 i = Lower; i <= FMath::Min(Lower + 1, Steps - 1); ++i)
+	{
+		const float Pitch = MinDeg + Span * (float(i) / float(Steps - 1));
+		const float Err = FMath::Abs(ShotArrivalZ(Pitch, HorizCm, SpeedCm, GravityCm, DragK) - HeightCm);
+		if (Err < BestErr)
+		{
+			BestErr = Err;
+			BestPitch = Pitch;
+			OutNotch = i;
+		}
+	}
+	return BestPitch;
+}
+
+/** Canister damage scale from how far the pellet has flown, not from the aim mark.
+ *  Full until FallStartCm, then down to Floor at FallEndCm. */
+inline float CanisterDamageScale(float DistCm, float FallStartCm, float FallEndCm, float Floor = 0.25f)
+{
+	if (FallEndCm <= FallStartCm || DistCm <= FallStartCm) return 1.f;
+	return FMath::Lerp(1.f, FMath::Clamp(Floor, 0.f, 1.f),
+		FMath::Clamp((DistCm - FallStartCm) / (FallEndCm - FallStartCm), 0.f, 1.f));
+}
+/** Grazing angle is measured from the surface, rather than its normal. */
+inline float GrazeAngleDeg(const FVector& Velocity, const FVector& Normal)
+{
+	return FMath::RadiansToDegrees(FMath::Asin(FMath::Clamp(
+		FMath::Abs(FVector::DotProduct(Velocity.GetSafeNormal(), Normal.GetSafeNormal())), 0.f, 1.f)));
 }
 /** A gun is overrun when none of its own side stands by it and an enemy does. */
 inline bool IsOverrun(int32 OwnMenNear, int32 EnemiesNear) { return OwnMenNear <= 0 && EnemiesNear > 0; }
@@ -146,13 +278,20 @@ public:
 	FName GetOriginalFaction() const { return OriginalFaction; }
 	bool IsTaken() const { return Faction != OriginalFaction; }
 	bool IsLoaded() const { return bLoaded; }
-	/** Own living men within the crew radius (never more than the crew posts), and how many of them are gunners. */
+	/** Gunners at the piece (a claimed post, or an artilleryman inside the crew radius).
+	 *  Line infantry standing nearby are not crew. Never more than the crew posts. */
 	int32 GetCrew() const { return CrewNow; }
 	int32 GetTrainedCrew() const { return TrainedNow; }
 	/** One line for the HUD of a man serving it. The first line is the load chip. */
 	FString StatusLine() const;
-	/** "LOAD: GRAPE" and the like. */
+	/** "LOAD: CANISTER" (grape enum) and the like. */
 	FString LoadChip() const;
+	/** Drill sequencer for the bottom-center reload widget while the player serves. */
+	const FActiveReloadSequencer& GetDrill() const { return Drill; }
+	bool IsDrillActive() const { return !bLoaded && Drill.IsReloading(); }
+	/** Quoin notch index (0 = lowest elevation). */
+	int32 GetQuoinNotch() const { return QuoinNotch; }
+	float GetBarrelHeat() const { return BarrelHeat; }
 	FVector GetMuzzle() const;
 	/** Where the crew stand: two by the wheels, two by the trail. */
 	FVector GetCrewPost(int32 Index) const;
@@ -167,7 +306,8 @@ public:
 	int32 FreePostIndex() const;
 	/** Count the men at the piece now (Fire and a deploy do not wait for the next tick). */
 	void RecountCrew();
-	/** Lay onto a ground mark. The actor stays level; the angle is ballistic compensation. */
+	/** Lay onto a ground mark. The actor stays level. The shot is the quoin notch nearest
+	 *  the drag-aware ballistic pitch. */
 	float LayTo(const FVector& AimAt);
 	float GetLayPitch() const { return LayPitch; }
 	/** Probe and checks: fire the chosen load at a point. Recounts the crew first. */
@@ -188,6 +328,20 @@ public:
 	int32 GetShotsFired() const { return ShotsFired; }
 	/** Debug matchups: the gun fires at once whatever its drill says. */
 	void ForceLoaded() { bLoaded = true; }
+	APA250AmmoChest* GetChest() const { return Chest.Get(); }
+	void SetChest(APA250AmmoChest* InChest) { Chest = InChest; }
+	/** True when the Load step cannot run: the chest holds no round, or it has blown up. */
+	bool IsChestEmpty() const;
+	bool IsChestBlown() const;
+	/** The loader has taken this drill's round from the chest (it is not yet rammed home). */
+	bool HasRoundInHand() const { return bRoundInHand; }
+	/** Rounds this piece holds that the magazine has not been charged for yet: those in its chest
+	 *  and the one in the loader's hands or in the barrel. A round is charged when it is fired. */
+	int32 RoundsHeld() const;
+	/** Premature discharge (M6): the sponger first (55% WIA / 45% KIA), then the muzzle blast for the rest. */
+	void DischargePremature(FRandomStream& Hot);
+	/** Tests: an empty barrel and a drill that has not begun. */
+	void ForceEmptyForTest() { bLoaded = false; Drill.Reset(); DrillStepHeard = -1; bRoundInHand = false; }
 
 private:
 	void FitMesh();
@@ -224,6 +378,57 @@ private:
 	bool bLoggedWholePiece = false;
 	bool bLoggedLay = false;
 	bool bFollowPlayer = false;
+	/** Artillery pass M6: quoin notches, barrel heat, recoil settle. */
+	int32 QuoinNotch = 2;
+	/** Last drill step that has already had its ramrod cue, or -1 before the drill starts. */
+	int32 DrillStepHeard = -1;
+	/** Seconds before a short crew is ordered off the piece again. */
+	float CrewAbandonHold = 0.f;
+	float BarrelHeat = 0.f;
+	float RecoilLeft = 0.f;
+	float SettleWobble = 0.f;
+	FVector HolsterRestore = FVector::ZeroVector;
+	TWeakObjectPtr<APA250AmmoChest> Chest;
+	/** The Load step has its round (taken from the chest when the step began). */
+	bool bRoundInHand = false;
+};
+
+/** Ammunition chest beside a field gun: holds ready rounds. Load takes one; Fire spends through
+ *  NotifyGunFired. Refills near a friendly command post. A hit may detonate (FPA250Blast Chest). */
+UCLASS()
+class PLAYAMERICA250_API APA250AmmoChest : public AActor
+{
+	GENERATED_BODY()
+
+public:
+	APA250AmmoChest();
+	virtual void Tick(float DeltaSeconds) override;
+
+	void AttachToGun(APA250FieldGun* Gun);
+	APA250FieldGun* GetGun() const { return Gun.Get(); }
+	int32 ReadyRounds() const { return Ready; }
+	int32 Capacity() const { return Cap; }
+	bool TakeOneForLoad();
+	/** Seeded detonation roll after a round-shot or shell strike. Returns true if it blew.
+	 *  ByFaction / By are the side and gunner whose shot struck it: they own the casualties. */
+	bool TryDetonateFromHit(bool bShell, uint32 Seed, FName ByFaction = NAME_None, ARFCharacter* By = nullptr);
+	/** How many strikes have reached the detonation roll. */
+	int32 HitRolls() const { return Rolls; }
+	int32 RoundsLostOnDetonation() const { return LostOnDetonation; }
+	bool IsDetonated() const { return bDetonated; }
+
+private:
+	void Detonate(FName ByFaction, ARFCharacter* By);
+
+	UPROPERTY()
+	TObjectPtr<UStaticMeshComponent> Crate;
+	TWeakObjectPtr<APA250FieldGun> Gun;
+	int32 Ready = 0;
+	int32 Cap = 6;
+	float RefillAccum = 0.f;
+	bool bDetonated = false;
+	int32 LostOnDetonation = 0;
+	int32 Rolls = 0;
 };
 
 /** A round shot in flight: goes through a few men, knocks down those beside its path, batters a
@@ -239,6 +444,7 @@ public:
 	void Launch(const FVector& InVelocity, FName InFaction, ARFCharacter* InGunner, const AActor* InGun);
 
 private:
+	void AdvanceFlight(float DeltaSeconds);
 	UPROPERTY()
 	TObjectPtr<UStaticMeshComponent> Ball;
 	FVector Velocity = FVector::ZeroVector;
@@ -248,6 +454,7 @@ private:
 	TSet<TWeakObjectPtr<AActor>> Struck;      // men it has gone through
 	TSet<TWeakObjectPtr<AActor>> KnockedDown; // men knocked off their feet beside its path
 	TSet<int32> SquadsShaken;
+	TSet<TWeakObjectPtr<AActor>> ChestsRolled; // one detonation roll per chest per shot
 	int32 MenLeft = 0;
 	float Travelled = 0.f;
 };
@@ -264,6 +471,7 @@ public:
 	void Launch(const FVector& InVelocity, float FuseCm, FName InFaction, ARFCharacter* InGunner, const AActor* InGun);
 
 private:
+	void AdvanceFlight(float DeltaSeconds);
 	void Burst(const FVector& At);
 	UPROPERTY()
 	TObjectPtr<UStaticMeshComponent> Shell;
@@ -273,4 +481,5 @@ private:
 	TWeakObjectPtr<const AActor> Gun;
 	float FuseCm = 5000.f;
 	float Travelled = 0.f;
+	TSet<TWeakObjectPtr<AActor>> ChestsRolled; // one detonation roll per chest per shot
 };

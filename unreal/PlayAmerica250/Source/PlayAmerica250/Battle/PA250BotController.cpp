@@ -342,6 +342,11 @@ void APA250BotController::Tick(float DeltaSeconds)
 	{
 		return;
 	}
+	// Knocked or thrown: leave the drill alone until the body settles (M9).
+	if (Me->IsKnockedDown())
+	{
+		return;
+	}
 	// AI reload runs every frame (not in the 0.2-0.35 s think gate) so its press timing is exact.
 	TickReload(Me);
 	// Hand to hand has a rhythm: after a blow a man needs a moment before the next (less with training),
@@ -694,6 +699,15 @@ bool APA250BotController::TickGunner(ARFCharacter* Me, ARFCharacter* Enemy, floa
 	if (!PA250UnitClasses::KitFor(Me->FactionId, Me->UnitClass).bServesGuns) return false;
 	APA250BattleGameMode* GM = GetWorld() ? GetWorld()->GetAuthGameMode<APA250BattleGameMode>() : nullptr;
 	if (!GM) return false;
+	if (Me->ActorHasTag(TEXT("PA250CrewFallingBack")))
+	{
+		ClearFocus(EAIFocusPriority::Gameplay);
+		State = EBotState::Rout;
+		if (const APA250ControlPoint* Haven = GM->NearestHeldPost(Me->FactionId, Me->GetActorLocation()))
+			MoveToward(Me, Haven->GetActorLocation(), Haven->Radius * 0.5f);
+		else StopMovement();
+		return true;
+	}
 	int32 Post = INDEX_NONE;
 	APA250FieldGun* Gun = GM->GunFor(Me, Post);
 	if (!Gun) return false; // his side has no gun for him: he fights as infantry

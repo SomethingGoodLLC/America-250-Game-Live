@@ -5,6 +5,7 @@
 
 #include "Battle/PA250BattleAudio.h"
 #include "Battle/PA250BattleGameMode.h"
+#include "pa250/sim.hpp"
 #include "Components/CapsuleComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Engine/Engine.h"
@@ -343,6 +344,15 @@ void ARFCharacter::TickThrown(float DeltaTime)
     if (bIsDead)
     {
         // The fall (or a ball while he was down) killed him: OnDeath owns the body now.
+        // Blast corpses still release the ragdoll cap when the loose-body flag clears.
+        if (ActorHasTag(TEXT("PA250BlastRagdoll")))
+        {
+            Tags.Remove(TEXT("PA250BlastRagdoll"));
+            if (APA250BattleGameMode* GM = GetWorld() ? GetWorld()->GetAuthGameMode<APA250BattleGameMode>() : nullptr)
+            {
+                GM->NotifyBlastRagdollEnded();
+            }
+        }
         bThrownFromHorse = false;
         return;
     }
@@ -356,7 +366,13 @@ void ARFCharacter::TickThrown(float DeltaTime)
         // The camera rides with the body: the (collision-free) capsule follows the pelvis.
         SetActorLocation(Pelvis + FVector(0.f, 0.f, 30.f), false, nullptr, ETeleportType::TeleportPhysics);
         const float BodySpeed = MeshComp->GetPhysicsLinearVelocity(TEXT("pelvis")).Size();
-        if ((ThrownTime > ThrowMinLooseSeconds && BodySpeed < ThrowSettledSpeed) || ThrownTime > ThrowMaxLooseSeconds)
+        // Blast knockdowns use battle_rules blast settle (1.5 s). Horse throws keep 1.6–3.5 s.
+        const bool bBlast = ActorHasTag(TEXT("PA250BlastRagdoll"));
+        const pa250::BattleRules& BlastR = pa250::battle_rules();
+        const float MinLoose = bBlast ? 0.35f : ThrowMinLooseSeconds;
+        const float MaxLoose = bBlast ? BlastR.blast_settle_max_seconds : ThrowMaxLooseSeconds;
+        const float Settled = bBlast ? BlastR.blast_settle_speed_cm : ThrowSettledSpeed;
+        if ((ThrownTime > MinLoose && BodySpeed < Settled) || ThrownTime > MaxLoose)
         {
             // Stand the capsule on the ground where he lies, then blend the body from its fallen pose
             // up into the standing pose.
@@ -403,6 +419,14 @@ void ARFCharacter::FinishThrowRecovery()
     GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
     GetCharacterMovement()->SetMovementMode(MOVE_Walking);
     if (APlayerController* PC = Cast<APlayerController>(GetController())) PC->SetIgnoreMoveInput(false);
+    if (ActorHasTag(TEXT("PA250BlastRagdoll")))
+    {
+        Tags.Remove(TEXT("PA250BlastRagdoll"));
+        if (APA250BattleGameMode* GM = GetWorld() ? GetWorld()->GetAuthGameMode<APA250BattleGameMode>() : nullptr)
+        {
+            GM->NotifyBlastRagdollEnded();
+        }
+    }
     bThrownFromHorse = false;
     ThrowRecoverAlpha = -1.f;
     UE_LOG(LogTemp, Display, TEXT("PA250 riding: back on his feet after %.1f s"), ThrownTime);

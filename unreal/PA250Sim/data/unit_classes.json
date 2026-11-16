@@ -375,7 +375,7 @@
     "weapon": "Own firelock, no bayonet",
     "blurb": "Minutemen and militia. Best from walls and fences; fragile in the open and hand to hand.",
     "role": "Irregulars: fire at will at 40 to 70 m from walls and fences.",
-    "verb": "Home ground: steady and a truer shot behind cover, quickly shaken in the open; a militiaman lost costs half a ticket.",
+    "verb": "Home ground: steady and a truer shot behind cover, quickly shaken in the open.",
     "health": 80,
     "speed": 1.0,
     "spread": 1.0,
@@ -390,7 +390,7 @@
     "prefer_max_m": 70,
     "accurate_m": 50,
     "spread_growth": 1.5,
-    "ticket_cost": 0.5,
+    "ticket_cost": 1.0,
     "capture_weight": 1.0,
     "steady_in_cover": true
    },

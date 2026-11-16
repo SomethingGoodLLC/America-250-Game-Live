@@ -20,6 +20,7 @@
 #include "PA250BattleAudio.h"
 #include "GameFramework/PlayerController.h"
 #include "WorldCollision.h"
+#include "pa250/sim.hpp"
 
 void UPA250VolleyCoordinator::Init(APA250BattleGameMode* InGM)
 {
@@ -29,6 +30,59 @@ void UPA250VolleyCoordinator::Init(APA250BattleGameMode* InGM)
 FString UPA250VolleyCoordinator::GetCallout() const
 {
 	return CalloutTimer > 0.f ? Callout : FString();
+}
+
+void UPA250VolleyCoordinator::NotifyVolleyDischarge(ARFCharacter* Shooter)
+{
+	// The recoil frame of a volley clip (Notify_Volley_Discharge). A pending shot is fired by
+	// whichever comes first, this notify or its FireAtTime, and is removed as it fires: the
+	// other then finds nothing pending, so a man can never fire twice for one word of command.
+	// With no volley clip playing the notify never comes and the timer fires as before.
+	if (!Shooter || Shooter->IsDead() || !GameMode.IsValid()) return;
+	FSquad* Sq = FindSquad(Shooter->SquadId);
+	if (!Sq) return;
+	for (int32 i = Sq->PendingShots.Num() - 1; i >= 0; --i)
+	{
+		if (Sq->PendingShots[i].Shooter.Get() != Shooter) continue;
+		const FPendingVolleyShot P = Sq->PendingShots[i];
+		Sq->PendingShots.RemoveAtSwap(i);
+		FirePendingShot(*Sq, P);
+		break;
+	}
+	if (Sq->PendingShots.Num() == 0 && Sq->Stage == EVolleyCall::Fire)
+	{
+		Sq->Stage = EVolleyCall::None;
+		Sq->DebugReason = TEXT("idle");
+	}
+}
+
+float UPA250VolleyCoordinator::StageJitterSeconds(int32 SquadId, int32 VolleyEpoch, int32 OrderFromRight, float MaxMs)
+{
+	FRandomStream Rng(static_cast<int32>(HashCombine(HashCombine(GetTypeHash(SquadId), GetTypeHash(VolleyEpoch)), GetTypeHash(OrderFromRight))));
+	return FMath::Max(0.f, MaxMs) * 0.001f * Rng.FRand();
+}
+
+void UPA250VolleyCoordinator::FirePendingShot(FSquad& Sq, const FPendingVolleyShot& P)
+{
+	UWorld* World = GameMode.IsValid() ? GameMode->GetWorld() : nullptr;
+	if (!World) return;
+	ARFCharacter* C = P.Shooter.Get();
+	ARFCharacter* Enemy = P.Target.Get();
+	const bool bAlive = C && !C->IsDead();
+	const bool bTargetAlive = Enemy && !Enemy->IsDead();
+	const bool bCanFire = bAlive && C->Musket && C->Musket->CanFire();
+	if (P.bAtPoint)
+	{
+		// The leader's volley at ground with nobody on it: at the point he aimed at.
+		if (Sq.VolleyEpoch == P.Epoch && bCanFire) DischargeOne(C, nullptr, P.AimPoint);
+		return;
+	}
+	const FVector AimAt = bTargetAlive ? Enemy->GetActorLocation() + FVector(0.f, 0.f, 20.f) : P.AimPoint;
+	const bool bLane = bAlive && bTargetAlive && HasClearFiringLane(World, C, Enemy, AimAt);
+	if (ShouldDischargePending(Sq.VolleyEpoch, P.Epoch, bAlive, bCanFire, bLane, bTargetAlive))
+	{
+		DischargeOne(C, Enemy, AimAt);
+	}
 }
 
 void UPA250VolleyCoordinator::NotifyShot(ARFCharacter* Shooter, const FVector& Dir, bool bHit)
@@ -247,11 +301,10 @@ void UPA250VolleyCoordinator::ScheduleVolley(FSquad& Sq, const TArray<ARFCharact
 	++Sq.VolleyEpoch; // a new schedule supersedes any earlier pending shots
 	Sq.PendingShots.Reset();
 	if (!GameMode.IsValid() || !GameMode->GetWorld()) return;
-	const UPA250BotTuning* BT = GameMode->GetBotTuning();
-	// Drill shows in the sound of the volley: regulars crash together, the less trained fire raggedly.
-	const float Jitter = (BT ? FMath::Max(0.f, BT->Values.VolleyFireJitterSeconds) : 0.1f) * Sq.Training.VolleyRaggedness;
-	// The opening volley of a fight is fired together; after it a drilled line keeps up a rolling fire.
+	// Artillery M9: VolleyShotDelay jitter is replaced by seeded 0–150 ms stage jitter (do not stack).
+	// Rolling file delay stays for subsequent volleys.
 	const float Rolling = Sq.VolleysThisFight > 0 ? Sq.Training.RollingFireFileSeconds : 0.f;
+	const float StageJitterMs = pa250::battle_rules().blast_volley_stage_jitter_ms;
 	const float EngageMax = Sq.FireMaxCm; // the class's own band (unit_classes.json)
 	const float Now = GameMode->GetWorld()->GetTimeSeconds();
 	UWorld* World = GameMode->GetWorld();
@@ -276,7 +329,7 @@ void UPA250VolleyCoordinator::ScheduleVolley(FSquad& Sq, const TArray<ARFCharact
 		P.Shooter = C;
 		P.Target = Enemy;
 		P.AimPoint = AimAt;
-		P.FireAtTime = Now + VolleyShotDelay(Sq.PendingShots.Num(), Rolling, Jitter, Jitter > 0.f ? FMath::FRand() : 0.f);
+		P.FireAtTime = Now + VolleyTotalOffset(Sq.Id, Sq.VolleyEpoch, Sq.PendingShots.Num(), Rolling, StageJitterMs);
 		P.Epoch = Sq.VolleyEpoch;
 		Sq.PendingShots.Add(P);
 	}
@@ -293,30 +346,13 @@ void UPA250VolleyCoordinator::TickPendingVolley(FSquad& Sq)
 {
 	if (!GameMode.IsValid() || !GameMode->GetWorld() || Sq.PendingShots.Num() == 0) return;
 	const float Now = GameMode->GetWorld()->GetTimeSeconds();
-	UWorld* World = GameMode->GetWorld();
 	for (int32 i = Sq.PendingShots.Num() - 1; i >= 0; --i)
 	{
-		const FPendingVolleyShot& P = Sq.PendingShots[i];
-		if (P.FireAtTime > Now) continue;
-		ARFCharacter* C = P.Shooter.Get();
-		ARFCharacter* Enemy = P.Target.Get();
-		const bool bAlive = C && !C->IsDead();
-		const bool bTargetAlive = Enemy && !Enemy->IsDead();
-		const bool bCanFire = bAlive && C->Musket && C->Musket->CanFire();
-		if (P.bAtPoint)
-		{
-			// The leader's volley at ground with nobody on it: at the point he aimed at.
-			if (Sq.VolleyEpoch == P.Epoch && bCanFire) DischargeOne(C, nullptr, P.AimPoint);
-			Sq.PendingShots.RemoveAtSwap(i);
-			continue;
-		}
-		const FVector AimAt = bTargetAlive ? Enemy->GetActorLocation() + FVector(0.f, 0.f, 20.f) : P.AimPoint;
-		const bool bLane = bAlive && bTargetAlive && HasClearFiringLane(World, C, Enemy, AimAt);
-		if (ShouldDischargePending(Sq.VolleyEpoch, P.Epoch, bAlive, bCanFire, bLane, bTargetAlive))
-		{
-			DischargeOne(C, Enemy, AimAt);
-		}
+		if (Sq.PendingShots[i].FireAtTime > Now) continue;
+		// Removed before it fires, so the clip's discharge notify cannot fire it a second time.
+		const FPendingVolleyShot P = Sq.PendingShots[i];
 		Sq.PendingShots.RemoveAtSwap(i);
+		FirePendingShot(Sq, P);
 	}
 	if (Sq.PendingShots.Num() == 0 && Sq.Stage == EVolleyCall::Fire)
 	{
@@ -1599,7 +1635,9 @@ void UPA250VolleyCoordinator::TickFormation(FSquad& Sq, const TArray<ARFCharacte
 			if (VolleyReadyToCall(SafeReady, Live.Num(), Frac, Sq.NotReadyTime, T.VolleyMaxWaitSeconds))
 			{
 				Sq.Stage = EVolleyCall::MakeReady;
-				Sq.StageTimer = VT.MakeReadySeconds;
+				FRandomStream StageSeed(HashCombine(Sq.Id, GetTypeHash(Sq.Faction.GetComparisonIndex())));
+				const float JitterSec = FMath::Max(0.f, pa250::battle_rules().blast_volley_stage_jitter_ms) * 0.001f;
+				Sq.StageTimer = VT.MakeReadySeconds + JitterSec * StageSeed.FRand();
 				Sq.NotReadyTime = 0.f;
 				Sq.DebugReason = TEXT("make_ready");
 				if (bNear) Shout(Sq.Faction, TEXT("make_ready"), TEXT("Make ready!"), Sq.Anchor, VT.MakeReadySeconds);
@@ -1616,7 +1654,9 @@ void UPA250VolleyCoordinator::TickFormation(FSquad& Sq, const TArray<ARFCharacte
 			if (Sq.StageTimer <= 0.f)
 			{
 				Sq.Stage = EVolleyCall::Present;
-				Sq.StageTimer = VT.PresentSeconds;
+				FRandomStream StageSeed(HashCombine(Sq.Id + 17, GetTypeHash(Sq.Faction.GetComparisonIndex())));
+				const float JitterSec = FMath::Max(0.f, pa250::battle_rules().blast_volley_stage_jitter_ms) * 0.001f;
+				Sq.StageTimer = VT.PresentSeconds + JitterSec * StageSeed.FRand();
 				Sq.DebugReason = TEXT("present");
 				if (bNear) Shout(Sq.Faction, TEXT("present"), TEXT("Present!"), Sq.Anchor, VT.PresentSeconds);
 			}
@@ -2581,8 +2621,7 @@ void UPA250VolleyCoordinator::ScheduleLedVolley(FSquad& Sq, const TArray<ARFChar
 	UWorld* World = GameMode.IsValid() ? GameMode->GetWorld() : nullptr;
 	if (!World) return;
 	const FPA250ClassVerbs& Verbs = PA250UnitClasses::Verbs();
-	const UPA250BotTuning* BT = GameMode->GetBotTuning();
-	const float Jitter = (BT ? FMath::Max(0.f, BT->Values.VolleyFireJitterSeconds) : 0.1f) * Sq.Training.VolleyRaggedness;
+	const float StageJitterMs = pa250::battle_rules().blast_volley_stage_jitter_ms;
 	const float Now = World->GetTimeSeconds();
 	ARFCharacter* Target = EnemyNear(Sq.Faction, Sq.LeaderAimPoint, Verbs.SquadAimSnapM * 100.f);
 	const FVector Right(-Sq.Facing.Y, Sq.Facing.X, 0.f);
@@ -2613,7 +2652,7 @@ void UPA250VolleyCoordinator::ScheduleLedVolley(FSquad& Sq, const TArray<ARFChar
 			P.bAtPoint = true;
 			P.AimPoint = Sq.LeaderAimPoint;
 		}
-		P.FireAtTime = Now + VolleyShotDelay(Sq.PendingShots.Num(), 0.f, Jitter, Jitter > 0.f ? FMath::FRand() : 0.f);
+		P.FireAtTime = Now + VolleyTotalOffset(Sq.Id, Sq.VolleyEpoch, Sq.PendingShots.Num(), 0.f, StageJitterMs);
 		Sq.PendingShots.Add(P);
 	}
 	if (Sq.PendingShots.Num() == 0) return;

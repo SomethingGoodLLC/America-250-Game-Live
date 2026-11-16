@@ -266,7 +266,7 @@ bool PA250BattleLook::Apply(UWorld* World, int32 HourOfDay, bool bRelight)
 	else if (Looks)
 	{
 		const FPA250LookSettings& S = (*Looks)[Band];
-		for (TActorIterator<ADirectionalLight> It(World); It; ++It)
+		if (TActorIterator<ADirectionalLight> It(World); It) // the first one only
 		{
 			It->SetActorRotation(S.SunRot);
 			if (UDirectionalLightComponent* Sun = Cast<UDirectionalLightComponent>(It->GetLightComponent()))
@@ -274,14 +274,12 @@ bool PA250BattleLook::Apply(UWorld* World, int32 HourOfDay, bool bRelight)
 				Sun->SetIntensity(S.SunLux);
 				Sun->SetLightColor(S.SunColor);
 			}
-			break;
 		}
-		for (TActorIterator<ASkyLight> It(World); It; ++It)
+		if (TActorIterator<ASkyLight> It(World); It) // the first one only
 		{
 			if (USkyLightComponent* Sky = It->GetLightComponent()) Sky->SetIntensity(S.SkyIntensity);
-			break;
 		}
-		for (TActorIterator<AExponentialHeightFog> It(World); It; ++It)
+		if (TActorIterator<AExponentialHeightFog> It(World); It) // the first one only
 		{
 			if (UExponentialHeightFogComponent* Fog = It->GetComponent())
 			{
@@ -289,7 +287,6 @@ bool PA250BattleLook::Apply(UWorld* World, int32 HourOfDay, bool bRelight)
 				Fog->SetFogHeightFalloff(S.FogHeightFalloff);
 				Fog->SetVolumetricFog(S.bVolumetricFog);
 			}
-			break;
 		}
 		for (TActorIterator<APostProcessVolume> It(World); It; ++It)
 		{

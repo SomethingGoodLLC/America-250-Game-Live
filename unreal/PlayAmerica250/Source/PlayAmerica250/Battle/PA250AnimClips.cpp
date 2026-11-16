@@ -1,5 +1,7 @@
 #include "PA250AnimClips.h"
 
+#include "Animation/AnimInstance.h"
+#include "Animation/AnimMontage.h"
 #include "Animation/AnimSequence.h"
 
 #include "Dom/JsonObject.h"
@@ -8,6 +10,7 @@
 #include "Misc/Parse.h"
 #include "Misc/Paths.h"
 #include "PoseSearch/PoseSearchDatabase.h"
+#include "RFCharacter.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 #include "UObject/StrongObjectPtr.h"
@@ -296,4 +299,109 @@ int32 PA250AnimClips::LocomotionDatabaseCount()
 {
 	LocomotionReady();
 	return Set().Owned.Num();
+}
+
+namespace
+{
+struct FCombatClips
+{
+	bool bTried = false;
+	/** Logical name → package paths of variants (AM_X_v1..). */
+	TMap<FString, TArray<FString>> Variants;
+	TSet<FString> Warned;
+};
+
+FCombatClips& Combat()
+{
+	static FCombatClips C;
+	return C;
+}
+}
+
+FString PA250AnimClips::CombatDropFolder()
+{
+	// Found: anim_clips.json locomotion.clip_folder = /Game/PA250/Anim/Loco → drop root /Game/PA250/Anim.
+	return TEXT("/Game/PA250/Anim");
+}
+
+bool PA250AnimClips::LoadCombatManifest(TArray<FString>* OutWarnings)
+{
+	FCombatClips& C = Combat();
+	C.bTried = true;
+	C.Variants.Reset();
+	const FString Folder = CombatDropFolder();
+	const FString Disk = FPaths::ConvertRelativePathToFull(FPaths::ProjectContentDir() / TEXT("PA250/Anim/manifest.json"));
+	FString Text;
+	TArray<FString> Warnings;
+	if (!FFileHelper::LoadFileToString(Text, *Disk))
+	{
+		// Missing manifest is fine until Andrew drops clips; one soft note.
+		Warnings.Add(FString::Printf(TEXT("no combat manifest at %s (drop folder %s)"), *Disk, *Folder));
+		if (OutWarnings) *OutWarnings = Warnings;
+		return false;
+	}
+	TSharedPtr<FJsonObject> Root;
+	if (!FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(Text), Root) || !Root.IsValid())
+	{
+		Warnings.Add(TEXT("combat manifest is not valid JSON"));
+		if (OutWarnings) *OutWarnings = Warnings;
+		return false;
+	}
+	for (const auto& Pair : Root->Values)
+	{
+		const TArray<TSharedPtr<FJsonValue>>* Arr = nullptr;
+		if (Pair.Value->TryGetArray(Arr) && Arr)
+		{
+			TArray<FString> Paths;
+			for (const TSharedPtr<FJsonValue>& V : *Arr) Paths.Add(V->AsString());
+			if (Paths.Num() > 0) C.Variants.Emplace(Pair.Key, MoveTemp(Paths));
+		}
+		else
+		{
+			const FString One = Pair.Value->AsString();
+			if (!One.IsEmpty())
+			{
+				TArray<FString> Paths;
+				Paths.Add(One);
+				C.Variants.Emplace(Pair.Key, MoveTemp(Paths));
+			}
+		}
+	}
+	UE_LOG(LogTemp, Display, TEXT("PA250 anim clips: combat manifest %d names from %s"), C.Variants.Num(), *Disk);
+	if (OutWarnings) *OutWarnings = Warnings;
+	return C.Variants.Num() > 0;
+}
+
+UAnimSequence* PA250AnimClips::PickCombatClip(const FString& LogicalName, uint32 Seed)
+{
+	FCombatClips& C = Combat();
+	if (!C.bTried) LoadCombatManifest();
+	const TArray<FString>* Paths = C.Variants.Find(LogicalName);
+	if (!Paths || Paths->Num() == 0)
+	{
+		if (!C.Warned.Contains(LogicalName))
+		{
+			C.Warned.Add(LogicalName);
+			UE_LOG(LogTemp, Warning, TEXT("PA250 anim clips: missing combat clip %s (fallback)"), *LogicalName);
+		}
+		return nullptr;
+	}
+	FRandomStream Rng(Seed);
+	const FString& Package = (*Paths)[Rng.RandRange(0, Paths->Num() - 1)];
+	const FString ObjectPath = Package.Contains(TEXT(".")) ? Package : (Package + TEXT(".") + FPaths::GetBaseFilename(Package));
+	return LoadObject<UAnimSequence>(nullptr, *ObjectPath);
+}
+
+float PA250AnimClips::PlayCombatClip(ARFCharacter* Man, const FString& LogicalName, uint32 Seed,
+	float BlendIn, float BlendOut, float PlayRate)
+{
+	if (!Man || !Man->GetMesh()) return 0.f;
+	UAnimInstance* Anim = Man->GetMesh()->GetAnimInstance();
+	if (!Anim) return 0.f;
+	UAnimSequence* Seq = PickCombatClip(LogicalName, Seed);
+	if (!Seq) return 0.f;
+	UAnimMontage* Montage = UAnimMontage::CreateSlotAnimationAsDynamicMontage(
+		Seq, TEXT("DefaultSlot"), BlendIn, BlendOut, PlayRate);
+	if (!Montage) return 0.f;
+	return Anim->Montage_Play(Montage, PlayRate);
 }

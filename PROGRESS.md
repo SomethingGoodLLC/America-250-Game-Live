@@ -2,6 +2,197 @@
 
 **Vertical slice M0–M8 complete. Battle Feel B1–B4 complete.** Nothing committed or stashed; all changes are uncommitted in the working tree.
 
+## Artillery pass (2026-11)
+
+Worktree `/Users/leone/PycharmProjects/Samson-artillery`, branch `feature/artillery-pass`, from `e1a17f1`. Nothing committed. This agent runs on the Mac; **Windows timings stay unmeasured** here. Verify commands use `scripts/_ue_env.sh` (Mac host today). Stop if the branch changes under the agent.
+
+### Conflicts with CLAUDE.md (CLAUDE wins; logged)
+1. Keep the six locked `end_reason` values. Army Resolve → 0 maps to **`army_broke`**; tickets → 0 stays **`tickets_exhausted`**; remnant stays **`routed`**. Do not add `resolve_broken` / `annihilated` / `surrendered` / `time`.
+2. Tuning stays in `battle_rules.json` (`cannon` + new `resolve`). No authoritative `DA_Artillery_6pdr` for gameplay numbers.
+3. Enum keys stay `grape` / `round` / `shell`; player-facing "Grape" → "Canister". Shell open item: belongs to a howitzer class, not 6-pdr.
+4. Extend active reload only after a musket regression snapshot.
+5. Sockets via `Scripts/setup_cannon_asset.py` only (add Trail / TrailL / Linstock).
+6. Cambridge → `lexington_common` → `L_Lexington`.
+7. CP bleed must stop spending tickets (Cambridge tickets≠casualties bug).
+8. No BattleSetup weather/wind this pass; `PA250Wind` visual-only (smoke). Open: ball drift + wet powder need campaign weather.
+9. Militia half-ticket removed in M1 (one man = one ticket).
+
+### M0 — Recon (no behavior changes)
+
+| Item | Location |
+|---|---|
+| Cannon | `APA250FieldGun` — `SetPlayerGunner` / T deploy; `LayTo`; drill `FActiveReloadSequencer` via `PA250Gunnery::DrillPreset`; `PlayerFire` / `DischargeAt` |
+| Top-left text | `StatusLine` → `GetAbilityLine` → HUD `ClassLine` (pad 24,80); not the musket meter |
+| Crew | `SpawnGunCrews` / `EnsureGunCrew` / `SummonGunMate`; class `artilleryman`; muskets via `SpawnMusket` + `ConfigureSoldier`; AI `TickGunner` |
+| Active reload | `FActiveReloadSequencer` (3 phases); bottom meter in `PA250BattleHUD` is musket-only |
+| Tickets down | `SpendDeath` (death); `Bleed`/`BleedTickets` (CP — spends Pool today); `TakePrisoner` |
+| Spawn / AI | `PickSpawnTransform` + `FMath::FRandRange`; `APA250BotController` + `UPA250VolleyCoordinator` (no BT/StateTree) |
+| BattleResult | `EndBattle` → `CasualtiesFromLedger` (`split_fallen` ratio) + `personal_kills` |
+| Ball | `APA250CannonBall` — NoCollision mesh; man sweep; Destroy on first Visibility ground/work hit |
+| Fab pack | `Content/ThirdParty/PTM_Cannon` mesh+textures; sockets `Muzzle`/`Vent`/`Crew_1..4`; no tool meshes |
+| Wind | absent from schemas; `PA250Wind` visual-only |
+
+**Militia half-ticket (what it modeled, logged before M1 removes it):** Continental `militia.ticket_cost` is **0.5** in `unit_classes.json`. `FPA250TicketLedger::SpendDeath` accumulates `Owed` and only decrements a whole ticket when due ≥ 1 — so two militia deaths spend one ticket. That modeled militia as cheaper reserve pressure (two fallen townsmen ≈ one line ticket), **not** an explicit meltaway path. M1 replaces this with one man = one ticket; any meltaway must be recorded as POW or routed so the invariant holds.
+
+### M0 verified (this Mac)
+| Check | Result |
+|---|---|
+| Branch | `feature/artillery-pass` @ `e1a17f1` |
+| SIM (`cmake --build unreal/PA250Sim/build && ctest`) | **27067 checks, 0 failed** |
+| UE build (`Build.sh PlayAmerica250Editor Mac Development`, editor closed) | **Succeeded** (199.8 s) |
+| Windows timings | **unmeasured** |
+
+### M1 — Tickets = men; Army Resolve; recorded casualties
+- `FPA250TicketLedger`: one man = one ticket; `SpendKilled` / `SpendWounded`; CP `TickBleedClock` no longer changes `Pool`.
+- `FPA250ArmyResolve` + `battle_rules.json` `resolve`; Resolve 0 → `army_broke`; remnant → `routed`.
+- `CasualtiesFromLedger` sums recorded events (not post-hoc ratio). Stun spends no ticket.
+- Militia `ticket_cost` **1.0** (half-ticket retired; modeled cheaper reserve pressure, not meltaway).
+- HUD: men + Resolve; results log `Men in the field: start → end`.
+- **Goldens:** battle-case bleed expectations rewritten in `RunTickets` (Pool unchanged under bleed). No protocol clock golden change. Cause: bleed units now drain Resolve only.
+
+### M2 — Spawn scoring + AICommander
+- Cause: random spawn clustered under fire and left idle bots without an objective.
+- `UPA250AICommander`: scored seeded `PickSpawnTransform`, formation slots ≥1.5 m, order on spawn, 8 s idle reassign.
+- Tests: `PA250.Battle.Spawn`.
+
+### M3 — Crew tools + sockets + fallback
+- NPC artilleryman: musket destroyed in `ConfigureSoldier` (tools only).
+- Player artilleryman: kit unchanged; musket holstered while `SetPlayerGunner`.
+- `setup_cannon_asset.py`: `Trail` / `TrailL` / `Linstock` (+ role map). Mesh regen may still be pending on disk.
+- Gun lost / serving crew below `min_crew` (gunners and claimed posts, not infantry walking through the radius): `FallBackGunCrew` → nearest friendly post. An **unarmed** man with an enemy within 20 m is `TakePrisoner`. A man who still has his firelock is not.
+- Missing-role cover +25% step time. Tests: `PA250.Battle.CannonCrew`.
+
+### M4 — Reload HUD + musket regression
+- `PA250.Battle.MusketReload`: 3-phase snapshot (CustomStepSeconds empty).
+- Gun drill: 6 custom steps via `DrillPreset` (neutral ≈22 s, perfect ≈15 s). Each step changes phase (ramrod can fire); the musket 3-phase path is unchanged.
+- Bottom-center reload widget drives gun captain drill; StatusLine uses `GetStepLabel`.
+- Tests: `PA250.Battle.CannonReloadHUD`.
+
+### M5 — Round shot
+- `L_Lexington` backed up to `Saved/PA250/level_backups/<stamp>/L_Lexington.umap` before any PM work.
+- Bounce/graze (≤18°), plow through `round_shot_pierce_men` (then the ball stops; ~10% speed lost per man on top of that). Speed bands: ≥40 m/s KIA, 12–40 WIA (`WoundOut` — the man leaves the field, one wound ticket, player captain counts in `personal_kills`), &lt;12 stun (no ticket).
+- Lay and flight share gravity `980` cm/s² and the same drag (`ShotDragK` on m/s). The quoin notch is the elevation that is fired.
+- Tests: `PA250.Battle.RoundShot`. Landscape PM layers: not assigned this Mac pass (backup only); Windows verify open.
+
+### M6 — Aiming
+- Quoin notches **are** the elevation (nearest of six steps). Slow lay after recoil, settle wobble, windage + MV σ, barrel heat + premature discharge → recorded kia/wia (`WoundOut` for the wound).
+- `PA250Wind` visual-only → gun-smoke drift/hang. **No** ball wind drift / wet powder.
+- Open items: *"needs campaign weather in BattleSetup"* (ball drift + wet powder).
+- Tests: `PA250.Battle.CannonAim` (no wind-drift / wet-powder asserts).
+
+### M7 — Canister label + grape physics
+- Enum `grape`; HUD **LOAD: CANISTER**. `grape_balls` 40, range 300 m, cone half-angle 4°. Damage falls off by **how far that pellet has flown** (full to 150 m, 0.25 at 300 m), not by the aim mark.
+- Open item: shell belongs to a howitzer class, not 6-pdr guns.
+- Tests: `PA250.Battle.Canister`.
+
+### M8 — Wrap (checklist)
+- Playtest on `L_Lexington`: serve gun (T), cycle load ([ ]), drill (R), fire round/canister, watch Resolve bar, crew fallback if gun taken.
+- Full `PA250.Battle` via `-run=PA250Battle` + `$SIMTEST`.
+- Placeholders: tool meshes / VO; Trail sockets need `setup_cannon_asset.py` re-run if missing on mesh.
+- Open: campaign weather in BattleSetup; howitzer/shell class; Windows timings; landscape PMs on Lexington.
+- **No commits.**
+
+### Verified (this Mac, artillery pass)
+| Check | Result |
+|---|---|
+| Branch | `feature/artillery-pass` @ `e1a17f1` (unchanged under agent) |
+| SIM | **27067 checks, 0 failed** |
+| UE build | **Succeeded** (48.6 s, this Mac, after the review fixes) |
+| `-run=PA250Battle` | **checks=905 fails=6** — the same six missing-Content rows (`DA_WeaponTuning`, `DA_FactionVisuals`, `DA_MusketTuning`, `DA_CombatProfiles`, built-in class-asset row, `/Game/ThirdParty/PTM_Cannon/Mesh`). New logic rows passed: drag-aware lay arrives 0 cm off at 300 m; quoin notch 2 lays 3.0°; six drill steps change phase; canister falloff 1.00 / 1.00 / 0.50 / 0.25 at 100 / 150 / 225 / 300 m; pierce 3; ticket invariant. |
+| New tests | `Spawn`, `CannonCrew`, `MusketReload`, `CannonReloadHUD`, `RoundShot`, `CannonAim`, `Canister`, `Tickets` — pass |
+| `L_Lexington` backup | `Saved/PA250/level_backups/<stamp>/L_Lexington.umap` |
+| Windows timings | **unmeasured** |
+| Rendered playtest | **not run** (holster, smoke hang, HUD meter, overrun on the field) |
+| Landscape PMs | **not applied** (backup only) |
+| Commits | **none** |
+
+### Review fixes (2026-11-15, same worktree)
+Logic holes from the first pass, fixed in the uncommitted tree. Still not a field playtest.
+
+| Hole | What the code does now |
+|---|---|
+| Lay gravity 490, ball flight 980, shell flight 490 | One convention: `ShotGravityCm` 980 and `ApplyShotAccel` (drag in m/s) for lay, round shot, and shell |
+| `MenLeft` set from `round_shot_pierce_men` and never decremented | Each direct hit decrements it; at 0 the ball stops. ~10% speed loss per man stays |
+| `SpendWoundTicket` left the man upright | `WoundOut` tags him and puts him down. Death records **one** WIA, not a second KIA. Stun still spends nothing. A player captain's wound counts in `personal_kills` |
+| POW vs ledger | Confirmed: `TakePrisoner` decrements `Pool` only. `CasualtiesFromLedger` adds prisoners. `RunTickets` still checks start − end == kia + wia + pow. Armed men are no longer taken just for standing near a short-handed gun |
+| Quoin index computed, `LayPitch` left continuous | `LayPitch` is the notch |
+| Crew &lt; 2 counted every friendly in the radius | Serving crew is a claimed post or an artilleryman in the radius. Infantry nearby do not keep the gun firing and are not captured |
+| Drill steps ≥ 2 all `ShoulderAim` | Steps cycle phase, so a step change is visible; the gun plays `ramrod` on each new step. Musket regression still 3 phases in 10.10 s |
+| Canister damage scaled by the aim mark | `CanisterDamageScale` uses distance from the muzzle at the hit |
+
+SIM was not re-run: this review did not change `unreal/PA250Sim`. The 27067 figure above is the earlier pass.
+
+### Tuning table (shipped)
+| Key | Value |
+|---|---|
+| `resolve.start` / bleed drain | 100 / 2 per bleed unit |
+| Tickets | 1 man = 1 ticket; bleed never spends men |
+| Gun drill | 6 steps, neutral ≈22 s, perfect ≈15 s |
+| Canister | 40 pellets, 300 m, 4° half-angle, HUD CANISTER; falloff by pellet distance (full to 150 m, 0.25 at 300 m) |
+| Round shot | g = 980 cm/s² lay and flight; pierce 3; graze ≤18°; KIA≥40 m/s, WIA 12–40 (man leaves), stun &lt;12 |
+
+### M9 — Blasts, knockdowns, ragdoll get-ups and volley sync (built; commandlet green)
+
+**Recon (reuse) → shipped:**
+| Item | Location | Note |
+|---|---|---|
+| Shared blast | `PA250Blast::ApplyBlast` | Shell / premature / chest; both sides; cover demotes one ring |
+| Premature (M6) | `APA250FieldGun::Tick` | Sponger 55% WIA / 45% KIA first; then `ApplyBlast(Premature)` for others (skip set) |
+| Round shot | `APA250CannonBall::AdvanceFlight` | NearMiss / DirtSpray / leg-crawl→WoundOut; chest sweep + impact |
+| Ammo chest | `APA250AmmoChest` | Load takes one; Fire via `NotifyGunFired` / magazine; refill near friendly CP; detonation charged spent |
+| Ragdoll get-up | `KnockDown` / `TickThrown` / `TryBlastRagdoll` | Horse 1.6–3.5 s unchanged; blast settle 1.5 s; cap 12; dead bodies count |
+| Volley | `UPA250VolleyCoordinator` | Stage jitter 0–150 ms replaces `VolleyShotDelay` jitter (not stacked); `Notify_Volley_Discharge` stub until clips |
+| Clip drop path | **`/Game/PA250/Anim`** | Logged; `manifest.json`; `AM_*_vN` as dynamic montages via `PlayCombatClip` |
+
+**Ammo flow (GAME INVENTION):** `ready_rounds` 6; Load `ReadyRounds--`; empty → HUD "Chest empty"; Fire unchanged through GunShots/magazine; refill every `blast.chest.refill_seconds` within `resupply_radius_cm` of a friendly CP while magazine spare > chests; detonation → "Ammunition chest blown: N rounds lost". Drill-complete no longer restores a ready round.
+
+**Friendly fire:** blasts hit both sides; `personal_kills` only when killer faction ≠ victim; no enemy Resolve credit from friendly casualties. EndBattle logs `PA250 friendly fire (side): K killed, W wounded`. Field counts: **not yet sampled in a rendered fight** (commandlet integration hit both sides; log here after a Lexington playtest).
+
+**Tests:** `PA250.Battle.Blast` (40-pawn ApplyBlast + pure rings + chest seed); `PA250.Battle.VolleySync`. `guns:` assert uses `blast.shell` outer radius (>0), not only legacy `shell_blast_radius_cm`.
+
+**Golden:** `clock_golden_1775.json` **unchanged** (SIM 27067 / 0 failed). Friendly fire and premature live in the UE battle path only; no campaign hash change. No regenerate this milestone.
+
+**Needs from Andrew:** combat `manifest.json` + AnimSequences under `/Game/PA250/Anim` (`AM_React_*`, `AM_GetUp_*`, `AM_Death_Blast`, `AM_Volley_*` with `Notify_Volley_Discharge`). Until then montages no-op (one Warning per name) and volley discharge stays on `FireAtTime`.
+
+**Verified (this Mac, M9):** UE **Succeeded**; `-run=PA250Battle` **checks=949 fails=0**; SIM **27067 checks, 0 failed**. Nothing committed.
+
+#### M9 review pass (2026-11-15): defects found and fixed
+The notes above describe M9 as first built. This pass changed the following; where the two disagree, this list is the code.
+
+| Defect | Fix |
+|---|---|
+| Firing never drew the magazine (`NotifyGunFired` only counted `GunShots`), while a chest **refill** did: opening rounds were free, refilled rounds were the only ones paid for | A round is charged once, in `NotifyGunFired`. A round in a chest, in the loader's hands or in the barrel is a claim on the magazine (`APA250FieldGun::RoundsHeld`, summed by `MagazineSpareForChests`); refills claim and draw nothing; `DrawMagazineRoundForChest` is removed. A blown chest's rounds are still charged at once |
+| A blown chest counted as "not empty": the gun went on loading with a Warning each drill. A player commit could carry the drill past Load on an empty chest | The round is taken when Load begins (`bRoundInHand`); with none the drill stands at Load and `PlayerCommit` returns None. A blown chest is an empty chest that never refills (HUD "Chest blown"): **that gun is silent for the rest of the battle** |
+| The crate was still solid while its own blast traced for cover, so every man near a chest was demoted one ring; other soldiers' capsules also counted as cover | The crate goes first; the cover trace ignores the causer and all soldiers (the round shot's rule) |
+| A ball or shell rolled for detonation on every flight step beside a chest (up to two rolls a shot), and a traversed gun could set off its own chest | One roll per chest per shot (`ChestsRolled`); a piece's own chest is ignored by its own shot |
+| The chest blocked all channels beside the crew posts and stayed behind when the gun was run up | Trace-only (Visibility), attached to the gun |
+| Chest casualties were always logged as the owner's friendly fire, with no credit to the gunner who hit it | `TryDetonateFromHit(bShell, Seed, ByFaction, By)`: the casualties belong to the side whose shot set it off |
+| Ragdoll cap: a thrown rider killed by a blast freed two slots for one; a "killed" man who survived the damage could be left limp | Corpses carry no `PA250BlastRagdoll` tag (their timer alone frees the slot); the corpse path requires `IsDead()`. `FPA250BlastResult` counts a kill or a wound only when it happened |
+| Near miss: M9 had moved the M5 knockdown radius from `knockdown_radius_cm` (220) to `near_miss_path_cm` (200), and counted merely sprayed men as knocked down and shook their squads | M5 rule restored (knockdown, count and squad shock inside 220 cm); the spray band beyond it only suppresses and plays its clip |
+| `Notify_Volley_Discharge` was a stub; with clips it and `FireAtTime` could both have fired | The notify fires the man's pending shot and removes it; the timer removes before it fires (`FirePendingShot`). Whichever comes first is the only one |
+| Stage jitter was seeded from the actor's address (different every run) | `StageJitterSeconds(squad, volley epoch, place in line)`; `VolleyTotalOffset` is what both schedulers use and what `VolleySync` checks |
+| Premature discharge had no test at all (there was no M6 `CannonAim` premature case) | `APA250FieldGun::DischargePremature`, with a seeded case for both the WIA and the KIA roll |
+
+**Tests added (`PA250.Battle.Blast`, `VolleySync`):** each of the 40 pawns meets the fate of his ring (7 killed, 10 wounded, 9 knocked down, 9 staggered, 5 flinched) and the ledger equals those counts; a wall demotes a ring in a world and a man in the way does not; a round shot through a chest reaches the roll exactly once and a piece's own shot never; chest detonation accounting; one chest round + one magazine round a shot; an empty chest holds the drill at Load for 60 s against commits; premature sponger-first; volley total offset.
+
+**Verified (this Mac, review pass):** UE **Succeeded**; `-run=PA250Battle` **checks=973 fails=0**; SIM **27067 checks, 0 failed**; `clock_golden_1775.json` unchanged (no sim source touched). Nothing committed.
+
+**Not verified:** nothing here was run in a rendered window. Friendly-fire counts from a real fight are still not sampled. No test drives `Notify_Volley_Discharge` through a squad (the single-fire guarantee is by construction). Combat clips are not on disk, so nothing shows that the soldier anim graph has a `DefaultSlot` for `PlayCombatClip`; if it has none a clip would play unseen while the leg-crawl still delays `WoundOut` by its length, and the wound-speed crew case will need to advance timers once `AM_React_LegCrawl` exists.
+
+**Follow-up (2026-11-16, user decision): what a chest stops.** A round shot is never stopped by a chest: `APA250CannonBall` ignores every chest in its surface trace and goes on through, rolling once for detonation as it passes. A musket ball (and a canister ball, the same projectile) is stopped by it: the crate is its own object type (`ECC_Destructible`) and blocks the projectile's `WorldDynamic`; it still ignores pawns, and a ground trace by `WorldStatic` does not find it. A shell still bursts on a chest it strikes. A musket ball does not set a chest off.
+- `blast.chest.resolve_enemy` 8 → **0** in `battle_rules.json` (it lowered a side's Resolve because its enemy's chest blew). The key and the code stay; `resolve_own` 18 is unchanged.
+- A leg-wounded man still crawling when the battle ends is not added to the closed ledger.
+- **Verified (this Mac):** UE **Succeeded**; `-run=PA250Battle` **checks=975 fails=0** (new rows: `a chest does not stop a round shot (ball x 9269, chest at 500)`; `a chest stops a musket ball (each blocks the other), not the crew`); SIM **27067 checks, 0 failed**; golden unchanged. The musket-ball row checks the two collision settings against each other; no ball was flown into a chest in a ticking world, and nothing was run in a window.
+
+### Merge of origin/master `d3aaece` (2026-11-16)
+`feature/artillery-pass` was committed (`496125c`) and `origin/master` (`d3aaece`, "Traversal, input buffering, clip registry, heroes, intensity and battle look") merged into it. Conflicts resolved by keeping both sides:
+- `PA250AnimClips.h/.cpp`: the clip registry (M4) and the combat clip loader (M9) both stand.
+- `PA250BattleGameMode.cpp`: `NotifyRoundShot` keeps the Resolve shock and gains the intensity strike; a man down keeps the artillery pass's one-man-one-ticket spend (WIA or KIA) and gains the `officer_down` shout; `EndBattle` keeps the ticket invariant and friendly-fire lines and gains the hero report. The `PA250GunMate` no-ticket exception stays removed, as the artillery pass removed it.
+- `PA250FieldGun.cpp`: the round shot's strike code keeps the artillery pass's graze/bury structure; `PA250Intensity::RoundShotStrike` is called at each of its three surface strikes (work, graze, bury).
+- `MusketProjectile.cpp`: both includes.
+- `PA250BattleLook.cpp` (from master, built on Windows) did not compile on the Mac: three "first actor only" loops (`for … { …; break; }`) are an error under clang (`-Wunreachable-code-loop-increment`). Rewritten as `if (TActorIterator<…> It(World); It)`, same behaviour.
+- **Verified (this Mac, merged tree):** UE **Succeeded**; `-run=PA250Battle` **checks=975 fails=0**; SIM **27081 checks, 0 failed**. Nothing run in a window. The three `.clangd` files hold this worktree's paths and are left uncommitted.
+
 ## Animation pass: drill, volley, reactions (2026-11)
 Offline clip generation on the Windows animation server (L4, UE 5.8.4). Nothing committed. **Status 2026-11-15, end of day: M0 to M6 done; see "M6 wrap-up" at the end of this section for what is delivered, what was not done as planned, and what the game agent does next. The entries below are in the order the work happened; earlier ones are superseded where a later one says so.**
 

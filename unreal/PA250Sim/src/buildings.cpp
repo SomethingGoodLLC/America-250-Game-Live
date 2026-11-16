@@ -91,32 +91,31 @@ void ensure_default_catalog() {
     add({"farm", "Farm", "track", false, 30, 1, 0, 3, 0, 0, 0,
          "+3 provisions/month; +supply income",
          "+2 readiness/level; faster reinforcement",
-         "Fields and barns that feed the magazine."});
+         "Fields and barns that feed the magazine.", {}, {}, 0});
     add({"workshop", "Workshop", "track", false, 40, 1, 2, 3, 0, 0, 0,
          "Faster cartridge craft; +1 musket/month per level",
          "+8 cartridge budget/level (militia tickets)",
-         "A flintlock shop for cartridges."});
+         "A flintlock shop for cartridges.", {}, {}, 0});
     add({"depot", "Depot", "track", false, 35, 1, 2, 3, 0, 0, 0,
          "Shorter shipment transit into this town; +8 gold/month trade per level",
          "+2 readiness/level; faster reinforcement",
-         "Storehouse and wagons."});
+         "Storehouse and wagons.", {}, {}, 0});
     add({"fort", "Fort", "track", false, 45, 1, 3, 3, 0, 0, 0,
          "Lets the town enlist provincial regulars",
          "Defender holds a post at start; +3 morale/+2 readiness per level; extra cover",
-         "Earthworks that stiffen the defense."});
+         "Earthworks that stiffen the defense.", {}, {}, 0});
     add({"church", "Meeting House", "discrete", false, 50, 2, 1, 1, 5, 1, 2,
          "+5 Support on completion; +1 Support/month", "Defender morale +2",
-         "The parish meeting house that steadies local Support."});
+         "The parish meeting house that steadies local Support.", {}, {}, 0});
     add({"militia_muster", "Militia Muster", "discrete", false, 40, 1, 2, 1, 0, 0, 0,
          "Lets the town raise militia companies", "Extra defender militia muster waves",
-         "Drill ground for minutemen."});
+         "Drill ground for minutemen.", {}, {}, 0});
     {
         BuildingDef mill{"powder_mill", "Powder Mill", "track", false, 50, 2, 3, 3, 0, 0, 0,
                          "+2 powder/month per level into this town's magazine",
                          "Powder is made up into cartridges when an army forms up here: more rounds a man",
-                         "A stamping mill on running water that makes gunpowder."};
-        mill.requires_tags = {"river", "falls"};
-        mill.powder_per_month = 2;
+                         "A stamping mill on running water that makes gunpowder.",
+                         {"river", "falls"}, {}, 2};
         add(mill);
     }
     g_catalog.by_id["farm"].requires_tags = {"farmland"};
@@ -128,10 +127,11 @@ void ensure_default_recruits(BuildingsCatalog& cat) {
     if (cat.recruits.empty()) {
         cat.recruits["militia_company"] = {"militia_company", "Militia company", "militia", 6, 20, 0, 3, 2,
                                            "militia_muster",
-                                           "Townsmen who turn out with their own firelocks."};
+                                           "Townsmen who turn out with their own firelocks.", "", "", ""};
         cat.recruits["provincial_regulars"] = {"provincial_regulars", "Provincial regulars", "line_infantry",
                                                4, 40, 4, 4, 4, "fort",
-                                               "Enlisted men drilled in the works and armed from the magazine."};
+                                               "Enlisted men drilled in the works and armed from the magazine.",
+                                               "", "", ""};
         cat.recruits["rifle_company"] = {"rifle_company", "Rifle company", "rifleman", 3, 45, 0, 3, 5,
                                          "militia_muster",
                                          "Frontier riflemen with their own long rifles.", kContinental,
@@ -1331,54 +1331,76 @@ void tick_recruitment_jobs(CampaignState& s) {
 
 void merge_idle_player_armies(CampaignState& s) {
     if (s.pending_battle.active) return;
-    std::map<std::string, std::string> survivor_at;  // province -> army id
-    std::vector<std::pair<std::string, std::string>> merges;  // gone -> survivor
+    std::vector<std::string> ids;
+    for (const auto& kv : s.armies) ids.push_back(kv.first);
+    std::sort(ids.begin(), ids.end());
+    for (const std::string& id : ids) fold_player_army_into_neighbor(s, id, false);
+}
+
+void fold_player_army_into_neighbor(CampaignState& s, const std::string& army_id, bool allow_kept_separate) {
+    if (s.pending_battle.active) return;
+    auto jit = s.armies.find(army_id);
+    if (jit == s.armies.end()) return;
+    Army& joiner = jit->second;
+    if (joiner.faction != s.player_faction || !joiner.path.empty() || joiner.returning_hours > 0) return;
+    if (joiner.role == "garrison") return;
+    if (joiner.role == "on_its_own" && !allow_kept_separate) return;
+    if (!general_of(s, army_id).empty()) return;
+    const bool raised = army_id.rfind("raised_", 0) == 0;
+    const bool allied = joiner.role == "allied_company";
+    const bool kept = joiner.role == "on_its_own";
+    // A scripted field army with its own name stays itself unless it is an allied company,
+    // a company the player raised, or one he split off and has now marched back in.
+    if (!raised && !allied && !kept) return;
+
+    std::string host;
     for (const auto& kv : s.armies) {
+        if (kv.first == army_id) continue;
         const Army& a = kv.second;
-        if (a.faction != s.player_faction || !a.path.empty()) continue;
-        auto it = survivor_at.find(a.province);
-        if (it == survivor_at.end()) survivor_at[a.province] = kv.first;
-        else if (survivor_before(kv.first, it->second)) it->second = kv.first;
-    }
-    for (const auto& kv : s.armies) {
-        const Army& a = kv.second;
-        if (a.faction != s.player_faction || !a.path.empty()) continue;
-        const std::string& keep = survivor_at.at(a.province);
-        // Only companies the player raised are absorbed. Two scripted armies in one town (the
-        // defected garrison beside the militia) stay separate: letters and treaties name them.
-        if (keep != kv.first && kv.first.rfind("raised_", 0) == 0) {
-            // Never past the cap of the army that would take them in (a detachment's is low).
-            const int cap = detail::army_unit_cap(s, s.armies.at(keep));
-            int joining = detail::total_units(a);
-            for (const auto& m : merges)
-                if (m.second == keep) joining += detail::total_units(s.armies.at(m.first));
-            if (cap > 0 && detail::total_units(s.armies.at(keep)) + joining > cap) continue;
-            merges.push_back({kv.first, keep});
+        if (a.faction != joiner.faction || a.province != joiner.province) continue;
+        if (!a.path.empty() || a.returning_hours > 0 || a.role == "garrison" || a.role == "allied_company") continue;
+        if (host.empty()) {
+            host = kv.first;
+            continue;
         }
+        const bool host_general = !general_of(s, host).empty();
+        const bool this_general = !general_of(s, kv.first).empty();
+        if (this_general && !host_general) host = kv.first;
+        else if (this_general == host_general && survivor_before(kv.first, host)) host = kv.first;
     }
-    for (const auto& m : merges) {
-        const Army gone = s.armies.at(m.first);
-        Army& keep = s.armies.at(m.second);
-        const int a = std::max(0, detail::total_units(keep));
-        const int b = std::max(0, detail::total_units(gone));
-        for (const auto& u : gone.units) keep.units[u.first] += u.second;
-        for (const auto& u : gone.sick) keep.sick[u.first] += u.second;
-        for (const auto& u : gone.wounded) keep.wounded[u.first] += u.second;
-        if (a + b > 0) {
-            keep.morale = (keep.morale * a + gone.morale * b) / (a + b);
-            keep.readiness = (keep.readiness * a + gone.readiness * b) / (a + b);
-            keep.fatigue = (keep.fatigue * a + gone.fatigue * b) / (a + b);
-        }
-        // Anything that named the absorbed army now names the one it joined.
-        for (auto& pc : s.progress.personnel_commitments)
-            if (pc.army_id == m.first) pc.army_id = m.second;
-        for (auto& cj : s.progress.cartridge_jobs)
-            if (cj.army_id == m.first) cj.army_id = m.second;
-        const std::string where = s.provinces.count(keep.province) ? s.provinces.at(keep.province).name
-                                                                    : keep.province;
-        detail::add_log(s, gone.name + " joins " + keep.name + " at " + where);
-        s.armies.erase(m.first);
+    if (host.empty()) return;
+    Army& keep = s.armies.at(host);
+    const int cap = detail::army_unit_cap(s, keep);
+    const int joining = detail::total_units(joiner);
+    if (cap > 0 && detail::total_units(keep) + joining > cap) return;
+    if (allied)
+        for (const auto& u : joiner.units) joiner.allied[u.first] = std::max(joiner.allied[u.first], u.second);
+    const int a = std::max(0, detail::total_units(keep));
+    const int b = std::max(0, joining);
+    for (const auto& u : joiner.units) keep.units[u.first] += u.second;
+    for (const auto& u : joiner.sick) keep.sick[u.first] += u.second;
+    for (const auto& u : joiner.wounded) keep.wounded[u.first] += u.second;
+    for (const auto& u : joiner.allied) keep.allied[u.first] += u.second;
+    for (const auto& u : joiner.reenlisted) keep.reenlisted[u.first] += u.second;
+    for (const auto& u : joiner.men_down) {
+        MenDown& m = keep.men_down[u.first];
+        m.killed += u.second.killed;
+        m.wounded += u.second.wounded;
+        m.prisoners += u.second.prisoners;
     }
+    keep.guns += std::max(0, joiner.guns);
+    if (a + b > 0) {
+        keep.morale = (keep.morale * a + joiner.morale * b) / (a + b);
+        keep.readiness = (keep.readiness * a + joiner.readiness * b) / (a + b);
+        keep.fatigue = (keep.fatigue * a + joiner.fatigue * b) / (a + b);
+    }
+    for (auto& pc : s.progress.personnel_commitments)
+        if (pc.army_id == army_id) pc.army_id = host;
+    for (auto& cj : s.progress.cartridge_jobs)
+        if (cj.army_id == army_id) cj.army_id = host;
+    const std::string where = s.provinces.count(keep.province) ? s.provinces.at(keep.province).name : keep.province;
+    detail::add_log(s, joiner.name + " joins " + keep.name + " at " + where);
+    s.armies.erase(army_id);
 }
 
 int town_levy_gold(const Province& p) {

@@ -18,7 +18,8 @@ void RunAim(FLog& Log);       // dual-trace in a real world: clear shot near ret
 void RunWeapon(FLog& Log);    // falloff curve, Arcade/Authentic reload durations, jam blocks fire until cleared
 void RunFaction(FLog& Log);   // faction looks and lookup
 void RunMelee(FLog& Log);     // backstab / reloading multiplier, butt-stroke keeps reload progress
-void RunConquest(FLog& Log);  // tickets -1/death, 5 s bleed, losses in units, capture rate
+void RunConquest(FLog& Log);  // tickets -1/death, Resolve bleed clock, recorded casualties
+void RunTickets(FLog& Log);   // Artillery pass: invariant tickets==casualties; bleed never spends men; Resolve breaks
 void RunSpacing(FLog& Log);   // ring slots, sectors, one bot per slot, engagement buckets, FTEST criteria
 void RunTraining(FLog& Log);  // player loading untouched; AI reload by training: baseline, equality, stress never faster
 void RunMorale(FLog& Log);    // hysteresis, resolve by training, rally delay, withdrawal vs rout, player never ordered
@@ -40,4 +41,13 @@ void RunMarch(FLog& Log);        // campaign pass M1 (PA250CampaignPassCases.cpp
 void RunPeople(FLog& Log);       // campaign pass M2 to M4: the people panel, the floor, the decision, the commander and the estimate on the card
 void RunStory(FLog& Log);        // campaign pass M5 and M6: a letter's orders on the card; the battle story for every town, its situation line, the pan
 void RunEconomy(FLog& Log);      // Phase 4 as the game's own sim build reads it: ground rules, level costs, powder, the opening accounts
+void RunSpawn(FLog& Log);        // Artillery M2: scored spawns, formation spacing, AICommander helpers
+void RunCannonCrew(FLog& Log);   // Artillery M3: tools-only NPC, holster rules, role sockets, fallback/POW
+void RunMusketReload(FLog& Log); // Artillery M4: musket 3-phase regression snapshot before gun drill
+void RunCannonReloadHUD(FLog& Log); // Artillery M4: 6-step gun drill timings + musket wrapper identity
+void RunRoundShot(FLog& Log);    // Artillery M5: bounce/graze thresholds, speed bands for KIA/WIA/stun
+void RunCannonAim(FLog& Log);    // Artillery M6: quoin/heat/recoil helpers; no wind-drift/wet-powder asserts
+void RunCanister(FLog& Log);     // Artillery M7: grape enum → CANISTER label; pellet/range/cone
+void RunBlast(FLog& Log);        // Artillery M9: blast rings, cover demote, ragdoll cap, chest seed, invariant
+void RunVolleySync(FLog& Log);   // Artillery M9: seeded 0–150 ms stage jitter (replaces VolleyShotDelay jitter)
 }

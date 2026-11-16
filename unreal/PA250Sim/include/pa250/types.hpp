@@ -854,7 +854,15 @@ struct BattleRules {
     int rounds_min = 3;
     int rounds_max = 24;
     int rounds_carried = 12;        // a full cartridge box on the march
-    int wounded_pct_of_fallen = 60; // of the men shot or bayoneted down, this share are wounded, the rest killed
+    int wounded_pct_of_fallen = 60; // sim auto_resolve / split_fallen only; live battles record kia/wia per event
+    // Army Resolve (battle_rules.json "resolve"). Read by the Unreal battle.
+    float resolve_start = 100.f;
+    float resolve_drain_per_bleed_unit = 2.f;
+    float resolve_casualty_scale = 40.f;
+    float resolve_officer_shock = 8.f;
+    float resolve_colours_shock = 10.f;
+    float resolve_cannon_shock = 3.f;
+    float resolve_majority_recover_per_second = 0.35f;
     // Battle modes (battle_rules.json "modes").
     std::vector<std::string> mode_landing_edge_types = {"boat", "ferry"};  // arriving by one of these...
     std::string mode_landing_town_tag = "harbor";                          // ...into a town with this tag is a landing
@@ -900,11 +908,19 @@ struct BattleRules {
     float cannon_elevation_min_deg = -5.f;     // how far the piece may dip
     float cannon_elevation_max_deg = 15.f;     // how far it may raise
     float cannon_elevation_deg_per_second = 6.f;
+    int cannon_quoin_steps = 21;               // notches across the elevation band; the shot uses the one that lands closest
+    float cannon_shot_gravity_cm = 980.f;      // lay and flight, cm/s^2
+    float cannon_shot_drag_k = 0.00074f;       // accel m/s^2 = k * v(m/s)^2
     float cannon_round_range_m = 350.f;
     float cannon_round_speed_m = 160.f;        // metres a second (slow enough to be seen)
     float cannon_round_damage = 400.f;
     float cannon_round_spread_degrees = 0.5f;  // half-angle of the cone a laid round shot scatters in
     int cannon_round_pierce = 3;               // men one round shot goes through
+    float cannon_round_kill_mps = 40.f;        // at or above this: killed
+    float cannon_round_wound_mps = 12.f;       // at or above this, below kill: wounded. Below: stun, no ticket
+    float cannon_graze_max_deg = 18.f;         // shallower than this, and still fast, the ball bounces
+    float cannon_graze_restitution = 0.35f;
+    float cannon_graze_retention = 0.75f;
     float cannon_knockdown_radius_cm = 220.f;  // men this close to its path are knocked off their feet
     float cannon_knockdown_seconds = 1.2f;
     float cannon_works_damage = 160.f;         // what one round shot batters off a field work
@@ -913,6 +929,10 @@ struct BattleRules {
     float cannon_grape_range_m = 70.f;         // inside this AI fires grape (was canister)
     int cannon_grape_balls = 20;
     float cannon_grape_cone_degrees = 6.f;
+    float cannon_grape_damage = 55.f;
+    float cannon_grape_speed_m = 280.f;
+    float cannon_grape_falloff_start_m = 150.f; // full damage until here, then down to the floor at grape_range
+    float cannon_grape_falloff_floor = 0.25f;
     float cannon_shell_range_m = 300.f;        // exploding shell (GAME INVENTION)
     float cannon_shell_speed_m = 120.f;
     float cannon_shell_fuse_min_m = 40.f;
@@ -965,6 +985,34 @@ struct BattleRules {
     float duel_shove_cooldown_seconds = 1.6f;
     float cannon_knockdown_push_cm = 320.f;   // speed a near miss throws a man off his feet at
     float cannon_dirt_burst_scale = 3.f;      // a round shot's dirt against a musket ball's
+    // Blasts (battle_rules.json "blast"). Read by the Unreal battle.
+    float blast_shell_radius_cm = 400.f;
+    float blast_shell_impulse_cm = 320.f;
+    float blast_premature_radius_cm = 180.f;
+    float blast_premature_impulse_cm = 200.f;
+    float blast_chest_radius_cm = 700.f;
+    float blast_chest_impulse_cm = 480.f;
+    int blast_chest_ready_rounds = 6;              // GAME INVENTION: rounds sitting ready at the piece
+    float blast_chest_refill_seconds = 12.f;       // GAME INVENTION: one round into the chest on this clock
+    float blast_chest_resupply_radius_cm = 2500.f; // GAME INVENTION: must be this close to a friendly post
+    float blast_chest_detonate_chance_round = 0.08f;
+    float blast_chest_detonate_chance_shell = 0.15f;
+    float blast_chest_resolve_own = 18.f;
+    float blast_chest_resolve_enemy = 8.f;
+    float blast_ring_killed_frac = 0.25f;
+    float blast_ring_wounded_frac = 0.45f;
+    float blast_ring_knockdown_frac = 0.65f;
+    float blast_ring_stagger_frac = 0.85f;
+    float blast_ring_flinch_frac = 1.f;
+    int blast_ragdoll_cap = 12;
+    float blast_ragdoll_max_distance_cm = 3500.f;
+    float blast_settle_speed_cm = 60.f;
+    float blast_settle_max_seconds = 1.5f;
+    float blast_player_control_loss_seconds = 1.5f;
+    float blast_near_miss_path_cm = 200.f;
+    float blast_dirt_spray_cm = 300.f;
+    float blast_leg_wound_crawl_seconds = 3.f;
+    float blast_volley_stage_jitter_ms = 150.f;
 };
 // Why a side's number is what it is (pre-battle card). Rows with the same label belong together:
 // the first is the base value, later ones are signed changes to it.
