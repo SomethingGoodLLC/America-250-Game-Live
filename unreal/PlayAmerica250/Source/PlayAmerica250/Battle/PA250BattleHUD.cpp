@@ -1,4 +1,5 @@
 #include "PA250BattleHUD.h"
+#include "PA250HudStyle.h"
 #include "GameFramework/PlayerController.h"
 #include "InputCoreTypes.h"
 #include "Blueprint/WidgetLayoutLibrary.h"
@@ -147,6 +148,12 @@ int32 UPA250BattleHUD::NativePaint(const FPaintArgs& Args, const FGeometry& G, c
 	FSlateWindowElementList& Out, int32 LayerId, const FWidgetStyle& InWidgetStyle, bool bParentEnabled) const
 {
 	int32 Layer = Super::NativePaint(Args, G, MyCullingRect, Out, LayerId, InWidgetStyle, bParentEnabled);
+	if (const float Dirt = GetDirtAlpha(); Dirt > 0.f)
+	{
+		// Thrown earth: thick at first, clearing as it falls.
+		FSlateDrawElement::MakeBox(Out, ++Layer, G.ToPaintGeometry(), &FPA250HudStyle::Get().White, ESlateDrawEffect::None,
+			FLinearColor(0.16f, 0.11f, 0.06f, 0.75f * Dirt * Dirt));
+	}
 	const APA250BattleGameMode* GM = GameMode.Get();
 	APlayerController* PC = GetOwningPlayer();
 	if (!GM || !PC || ChromeSuppressed(GM->IsClassPickerOpen())) return Layer;
@@ -275,6 +282,13 @@ void UPA250BattleHUD::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 	HitmarkerTimer = FMath::Max(0.f, HitmarkerTimer - InDeltaTime);
 	HitTextTimer = FMath::Max(0.f, HitTextTimer - InDeltaTime);
 	DamageDirTimer = FMath::Max(0.f, DamageDirTimer - InDeltaTime);
+	DirtTimer = FMath::Max(0.f, DirtTimer - InDeltaTime);
+}
+
+void UPA250BattleHUD::ShowDirt(float Seconds)
+{
+	DirtSeconds = FMath::Max(0.1f, Seconds);
+	DirtTimer = DirtSeconds;
 }
 
 float UPA250BattleHUD::LegendFade(float /*AgeSeconds*/)
@@ -367,6 +381,9 @@ TSharedRef<SWidget> UPA250BattleHUD::RebuildWidget()
 		{
 			const FString Ability = GM->GetAbilityLine(Me);
 			if (!Ability.IsEmpty()) Line += TEXT("\n") + Ability;
+			// The general: the score toward leading him, the offer, or (as him) his meter and verbs.
+			const FString HeroLine = GM->GetHeroLine(Me);
+			if (!HeroLine.IsEmpty()) Line += TEXT("\n") + HeroLine;
 			// His file: men, loaded muskets, the standing order and the order keys.
 			const FString File = GM->GetFileLine(Me);
 			if (!File.IsEmpty()) Line += TEXT("\n") + File;
@@ -490,6 +507,7 @@ TSharedRef<SWidget> UPA250BattleHUD::RebuildWidget()
 		const float Cd = Me->MeleeComponent->GetChargeCooldownRemaining();
 		if (Cd > 0.f) return FText::FromString(FString::Printf(TEXT("Bayonet charge ready in %.1fs"), Cd));
 		if (Me->MeleeComponent->FindChargeTarget()) return FText::FromString(TEXT(">> Enemy in reach - press G to CHARGE! <<"));
+		if (Me->MeleeComponent->HasSword()) return FText::FromString(TEXT("Sword in hand - E cuts, G rushes; hold aim to draw the pistol"));
 		if (!Me->MeleeComponent->HasBayonet()) return FText::FromString(TEXT("No bayonet - E clubs with the musket, G rushes"));
 		return FText::FromString(TEXT("Bayonet charge ready  (G)"));
 	};

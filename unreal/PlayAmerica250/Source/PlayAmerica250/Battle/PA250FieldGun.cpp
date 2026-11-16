@@ -1,4 +1,5 @@
 #include "PA250FieldGun.h"
+#include "Battle/PA250Intensity.h"
 #include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
@@ -1119,6 +1120,7 @@ void APA250CannonBall::AdvanceFlight(float DeltaSeconds)
 			if (GM) GM->NotifyWorkBattered(Work, bBroken, Faction);
 			if (UPA250SmokeSubsystem* Bank = World->GetSubsystem<UPA250SmokeSubsystem>())
 				Bank->AddDirtBurst(SurfaceHit.ImpactPoint, FVector(SurfaceHit.ImpactNormal), R.cannon_dirt_burst_scale);
+			PA250Intensity::RoundShotStrike(GetWorld(), SurfaceHit.ImpactPoint);
 			Destroy();
 			return;
 		}
@@ -1139,11 +1141,13 @@ void APA250CannonBall::AdvanceFlight(float DeltaSeconds)
 			if (UPA250SmokeSubsystem* Bank = World->GetSubsystem<UPA250SmokeSubsystem>())
 				Bank->AddDirtBurst(SurfaceHit.ImpactPoint, N, R.cannon_dirt_burst_scale * 0.6f);
 			FPA250BattleAudio::PlayAt(this, TEXT("impact_ground"), SurfaceHit.ImpactPoint, EPA250SoundRange::Gunfire, 0.7f, 0.1f);
+			PA250Intensity::RoundShotStrike(GetWorld(), SurfaceHit.ImpactPoint); // the player's camera shakes; close by, earth is thrown over his view
 			return;
 		}
 		if (UPA250SmokeSubsystem* Bank = World->GetSubsystem<UPA250SmokeSubsystem>())
 			Bank->AddDirtBurst(SurfaceHit.ImpactPoint, FVector(SurfaceHit.ImpactNormal), R.cannon_dirt_burst_scale);
 		FPA250BattleAudio::PlayAt(this, TEXT("impact_ground"), SurfaceHit.ImpactPoint, EPA250SoundRange::Gunfire, 1.f, 0.1f);
+		PA250Intensity::RoundShotStrike(GetWorld(), SurfaceHit.ImpactPoint); // the player's camera shakes; close by, earth is thrown over his view
 		Destroy();
 		return;
 	}

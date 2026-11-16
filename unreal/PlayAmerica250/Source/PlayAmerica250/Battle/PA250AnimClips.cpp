@@ -3,8 +3,11 @@
 #include "Animation/AnimInstance.h"
 #include "Animation/AnimMontage.h"
 #include "Animation/AnimSequence.h"
+
 #include "Dom/JsonObject.h"
+#include "Misc/CommandLine.h"
 #include "Misc/FileHelper.h"
+#include "Misc/Parse.h"
 #include "Misc/Paths.h"
 #include "PoseSearch/PoseSearchDatabase.h"
 #include "RFCharacter.h"
@@ -35,6 +38,12 @@ const TCHAR* const GaitKeys[4] = {TEXT("idle"), TEXT("walk"), TEXT("run"), TEXT(
 
 FString PA250AnimClips::DataPath()
 {
+	// -PA250AnimClips=<file>: another registry, for trying a dropped clip before it is registered for good.
+	FString Override;
+	if (FParse::Value(FCommandLine::Get(), TEXT("PA250AnimClips="), Override) && !Override.IsEmpty())
+	{
+		return FPaths::ConvertRelativePathToFull(Override);
+	}
 	return FPaths::ConvertRelativePathToFull(FPaths::Combine(FPaths::ProjectDir(), TEXT("../PA250Sim/data/anim_clips.json")));
 }
 
@@ -120,6 +129,157 @@ bool PA250AnimClips::LoadLocomotion(const FString& Path, TArray<FString>* OutErr
 		UE_LOG(LogTemp, Error, TEXT("PA250 anim clips: FALLBACK, soldiers stay on the cheap animation path. Fix %s."), *Path);
 	}
 	return S.bReady;
+}
+
+namespace
+{
+struct FClipRegistry
+{
+	bool bTried = false;
+	TArray<FPA250ClipEntry> Entries;
+	TMap<FName, int32> Index;
+	/** Assets asked for so far (a null entry: asked, and it does not load). */
+	TMap<FName, TStrongObjectPtr<UAnimSequence>> Loaded;
+	TSet<FName> Placeholders;
+	TSet<FName> Unknown;
+};
+
+FClipRegistry& ClipRegistry()
+{
+	static FClipRegistry R;
+	return R;
+}
+}
+
+FName PA250AnimClips::DrillClipName(EActiveReloadPhase Phase, bool bKneel)
+{
+	const TCHAR* Stage = nullptr;
+	switch (Phase)
+	{
+	case EActiveReloadPhase::PrimePan: Stage = TEXT("prime_pan"); break;
+	case EActiveReloadPhase::RamCharge: Stage = TEXT("ram_charge"); break;
+	case EActiveReloadPhase::ShoulderAim: Stage = TEXT("shoulder_aim"); break;
+	case EActiveReloadPhase::MissDelay: Stage = TEXT("miss_delay"); break;
+	case EActiveReloadPhase::Jammed: Stage = TEXT("jammed"); break;
+	default: return NAME_None;
+	}
+	return FName(*FString::Printf(TEXT("reload_%s_%s"), bKneel ? TEXT("kneel") : TEXT("stand"), Stage));
+}
+
+bool PA250AnimClips::LoadRegistry(const FString& Path, TArray<FString>* OutErrors)
+{
+	FClipRegistry& R = ClipRegistry();
+	R = FClipRegistry();
+	R.bTried = true;
+	TArray<FString> Errors;
+	FString Text;
+	TSharedPtr<FJsonObject> Root;
+	const TSharedPtr<FJsonObject>* Clips = nullptr;
+	if (!FFileHelper::LoadFileToString(Text, *Path))
+	{
+		Errors.Add(FString::Printf(TEXT("cannot read %s"), *Path));
+	}
+	else if (!FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(Text), Root) || !Root.IsValid())
+	{
+		Errors.Add(FString::Printf(TEXT("%s is not valid JSON"), *Path));
+	}
+	else if (!Root->TryGetObjectField(TEXT("clips"), Clips))
+	{
+		Errors.Add(TEXT("no \"clips\" object"));
+	}
+	if (Clips)
+	{
+		for (const auto& Pair : (*Clips)->Values)
+		{
+			const TSharedPtr<FJsonObject>* J = nullptr;
+			FPA250ClipEntry E;
+			E.Name = FName(*Pair.Key);
+			FString Group, Placeholder, Stage, Stance;
+			if (!Pair.Value->TryGetObject(J) || !(*J)->TryGetStringField(TEXT("group"), Group) || !(*J)->TryGetStringField(TEXT("placeholder"), Placeholder) ||
+				!(*J)->TryGetStringField(TEXT("shows"), E.Shows) || !(*J)->TryGetBoolField(TEXT("loop"), E.bLoop))
+			{
+				Errors.Add(FString::Printf(TEXT("clip \"%s\" lacks group, placeholder, shows or loop"), *Pair.Key));
+				continue;
+			}
+			(*J)->TryGetStringField(TEXT("asset"), E.Asset); // null: no asset yet
+			(*J)->TryGetBoolField(TEXT("wired"), E.bWired);
+			(*J)->TryGetStringField(TEXT("stage"), Stage);
+			(*J)->TryGetStringField(TEXT("stance"), Stance);
+			E.Group = FName(*Group);
+			E.Placeholder = FName(*Placeholder);
+			E.Stage = Stage.IsEmpty() ? NAME_None : FName(*Stage);
+			E.Stance = Stance.IsEmpty() ? NAME_None : FName(*Stance);
+			R.Index.Add(E.Name, R.Entries.Add(MoveTemp(E)));
+		}
+	}
+	for (const FString& E : Errors) UE_LOG(LogTemp, Error, TEXT("PA250 anim clips: %s"), *E);
+	if (OutErrors) *OutErrors = Errors;
+	if (Errors.IsEmpty())
+	{
+		int32 WithAsset = 0;
+		for (const FPA250ClipEntry& E : R.Entries) WithAsset += E.Asset.IsEmpty() ? 0 : 1;
+		UE_LOG(LogTemp, Display, TEXT("PA250 anim clips: registry of %d names, %d with a clip"), R.Entries.Num(), WithAsset);
+	}
+	else
+	{
+		UE_LOG(LogTemp, Error, TEXT("PA250 anim clips: FALLBACK, every named clip shows its placeholder. Fix %s."), *Path);
+	}
+	return Errors.IsEmpty();
+}
+
+const TArray<FPA250ClipEntry>& PA250AnimClips::Registry()
+{
+	FClipRegistry& R = ClipRegistry();
+	if (!R.bTried) LoadRegistry(DataPath());
+	return R.Entries;
+}
+
+const FPA250ClipEntry* PA250AnimClips::FindClip(FName Name)
+{
+	Registry();
+	const FClipRegistry& R = ClipRegistry();
+	const int32* At = R.Index.Find(Name);
+	return At ? &R.Entries[*At] : nullptr;
+}
+
+UAnimSequence* PA250AnimClips::Clip(FName Name)
+{
+	const FPA250ClipEntry* Entry = FindClip(Name);
+	FClipRegistry& R = ClipRegistry();
+	if (!Entry)
+	{
+		if (!R.Unknown.Contains(Name))
+		{
+			R.Unknown.Add(Name);
+			UE_LOG(LogTemp, Error, TEXT("PA250 anim clips: UNKNOWN %s (not a name in anim_clips.json)"), *Name.ToString());
+		}
+		return nullptr;
+	}
+	if (const TStrongObjectPtr<UAnimSequence>* Found = R.Loaded.Find(Name)) return Found->Get();
+	UAnimSequence* Asset = nullptr;
+	if (!Entry->Asset.IsEmpty())
+	{
+		const FString ObjectPath = Entry->Asset + TEXT(".") + FPaths::GetBaseFilename(Entry->Asset);
+		Asset = Cast<UAnimSequence>(StaticLoadObject(UAnimSequence::StaticClass(), nullptr, *ObjectPath, nullptr, LOAD_NoWarn));
+	}
+	R.Loaded.Add(Name, TStrongObjectPtr<UAnimSequence>(Asset));
+	if (!Asset && !R.Placeholders.Contains(Name))
+	{
+		R.Placeholders.Add(Name);
+		UE_LOG(LogTemp, Display, TEXT("PA250 anim clips: PLACEHOLDER %s (%s): %s"), *Name.ToString(),
+			Entry->Asset.IsEmpty() ? TEXT("no clip yet") : *FString::Printf(TEXT("%s is not on this machine"), *Entry->Asset), *Entry->Shows);
+	}
+	return Asset;
+}
+
+int32 PA250AnimClips::PlaceholdersLogged()
+{
+	return ClipRegistry().Placeholders.Num();
+}
+
+int32 PA250AnimClips::UnknownLogged()
+{
+	return ClipRegistry().Unknown.Num();
 }
 
 bool PA250AnimClips::LocomotionReady()

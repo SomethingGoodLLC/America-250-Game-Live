@@ -23,6 +23,10 @@ public:
 	/** Pure: an open class picker paints no battle chrome (score, reticle, legend, feeds). */
 	static bool ChromeSuppressed(bool bPickerOpen) { return bPickerOpen; }
 	void ShowDamageDirection(const FVector& WorldHitLocation);
+	/** Earth thrown over the view by round shot striking close by: a brown wash that clears over Seconds
+	 *  (PLACEHOLDER: a flat tint until a dirt overlay texture is supplied). */
+	void ShowDirt(float Seconds);
+	float GetDirtAlpha() const { return DirtSeconds > 0.f ? FMath::Clamp(DirtTimer / DirtSeconds, 0.f, 1.f) : 0.f; }
 	bool IsReticleHostile() const;
 	bool IsReticleBlocked() const;
 	float GetReticleSpreadPx() const;
@@ -48,6 +52,8 @@ private:
 	bool bHitmarkerKill = false;
 	FString HitText;
 	float DamageDirTimer = 0.f;
+	float DirtTimer = 0.f;
+	float DirtSeconds = 0.f;
 	FVector2D DamageDirScreen = FVector2D::ZeroVector;
 public:
 	static constexpr float HitmarkerSeconds = 0.45f;

@@ -8,6 +8,7 @@
 #include "PA250Blast.h"
 #include "PA250BattleEndRules.h"
 #include "pa250/types.hpp"
+#include "PA250Hero.h"
 #include "PA250BattleGameMode.generated.h"
 
 namespace PA250BattleCases { struct FArtilleryAccess; }
@@ -179,6 +180,33 @@ public:
 	/** No reserves left: the player steps into the nearest of his side's men still standing (no ticket
 	 *  is spent, the bot's controller is retired). False when nobody is left to take over. */
 	bool TakeOverSoldier(APlayerController* PC);
+	/** Earth over the player's view (round shot striking close by). */
+	void ShowDirt(float Seconds);
+
+	// ---- The playable general (M5, GAME INVENTION; rules in PA250Hero.h, the battle's part in PA250BattleHero.cpp) ----
+	/** What the player has just done: toward leading the general, or (as him) for time on the meter. */
+	void NoteHeroEvent(EPA250HeroEvent Event);
+	/** The general of the player's side can be taken now (score earned, he lives, he has a hero kit). */
+	bool CanOfferHero() const;
+	bool IsHeroPlayed() const { return Hero.bPlaying; }
+	/** Is this man the general, with the player fighting as him? */
+	bool IsPlayedGeneral(const ARFCharacter* Man) const;
+	/** Y: the takeover screen. */
+	void OpenHeroScreen(APlayerController* PC);
+	void CloseHeroScreen(APlayerController* PC);
+	/** The player becomes the general where he stands; his own man fights on as a bot and is remembered. */
+	bool BeginHero(APlayerController* PC);
+	/** U: the general's trait ability. (T, the class verb, is his rally.) */
+	void UseHeroAbility(ARFCharacter* Soldier);
+	/** The HUD's line: the score toward him, the offer, or (as him) the meter and his two verbs. */
+	FString GetHeroLine(const ARFCharacter* Soldier) const;
+	FString GetHeroScreenTitle() const;
+	FString GetHeroScreenTraits() const;
+	FString GetHeroScreenKit() const;
+	FString GetHeroScreenCost() const;
+	const FPA250HeroState& GetHeroState() const { return Hero; }
+	/** How much sooner the player's reserve comes up under the general's huzza (1 otherwise). */
+	float HeroReinforceDelayScale(FName Faction) const;
 	const pa250::BattleResult& GetResult() const { return Result; }
 	/** Pure: sum recorded KIA/WIA plus prisoners. Artillery pass: no post-hoc ratio split. */
 	static std::map<std::string, std::map<std::string, pa250::MenDown>> CasualtiesFromLedger(
@@ -709,6 +737,47 @@ private:
 	TObjectPtr<UPA250BattleHUD> Hud;
 	UPROPERTY(Transient)
 	TObjectPtr<UPA250SpawnScreen> SpawnScreen;
+	UPROPERTY(Transient)
+	TObjectPtr<class UPA250HeroScreen> HeroScreen;
+
+	// The battle music (M6): layers by how the day goes for the player's side.
+	TSharedPtr<struct FPA250BattleMusic> Music;
+	float MusicUpdateTimer = 0.f;
+	void TickMusic(float DeltaSeconds);
+	/** -PA250IntensityProbe: a near miss and a round shot beside the player, logged, with one still. */
+	void TickIntensityProbe();
+	int32 IntensityProbeStep = 0;
+	// The playable general (M5).
+	FPA250HeroState Hero;
+	TWeakObjectPtr<ARFCharacter> HeroOwnBody;  // the player's own man while he fights as the general
+	bool bHeroOffered = false;
+	float HeroBaseMaxHealth = 0.f;
+	float HeroRallyReadyAt = 0.f;
+	float HeroAbilityReadyAt = 0.f;
+	float HeroReinforceScale = 1.f;
+	float HeroReinforceUntil = -1000.f;
+	int32 HeroRallies = 0;
+	int32 HeroAbilityUses = 0;
+	mutable bool bHeroRulesRead = false;
+	mutable pa250::HeroRules HeroRulesCache;
+	int32 HeroProbeMode = -1;   // -1 unread, 0 none, 1 rally, 2 flow
+	float HeroProbeAt = 0.f;
+	float HeroProbeNextAt = -1.f;
+	int32 HeroProbeStep = 0;
+	const pa250::HeroRules& HeroRules() const;
+	const pa250::SideSetup* HeroSide() const;
+	ARFCharacter* HeroGeneral() const;
+	void TickHero(float DeltaSeconds);
+	void TickHeroProbe(float DeltaSeconds);
+	bool HeroPossess(APlayerController* PC, ARFCharacter* Body);
+	void GiveBotController(ARFCharacter* Body, FName UnitClass);
+	void RestoreGeneralKit(ARFCharacter* General);
+	void EndHero(APlayerController* PC);        // the meter ran out
+	void HeroFell(APlayerController* PC);       // he fell while the player fought as him
+	void ReturnFromHero(APlayerController* PC); // his own body, else the next man of his file, else any man, else the spawn screen
+	bool UseHeroRally(ARFCharacter* Soldier);
+	bool RaiseHeroWork(const ARFCharacter* Soldier, float BuiltShare);
+	FString HeroTraceJson() const;
 	UPROPERTY(Transient)
 	TObjectPtr<UPA250VolleyCoordinator> Volleys;
 };

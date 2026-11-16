@@ -1,0 +1,107 @@
+{
+ "name": "input_buffer_fire",
+ "description": "a fire press while he is held still after the last shot: inside the window it fires when the lock ends, outside it is dropped",
+ "window_s": 0.25,
+ "cases": [
+  {
+   "what": "pressed 0.1 s before he can",
+   "events": [
+    [
+     "press",
+     1.0
+    ],
+    [
+     "ready",
+     1.1
+    ]
+   ],
+   "fires_at": [
+    1.1
+   ]
+  },
+  {
+   "what": "pressed exactly a window before",
+   "events": [
+    [
+     "press",
+     1.0
+    ],
+    [
+     "ready",
+     1.25
+    ]
+   ],
+   "fires_at": [
+    1.25
+   ]
+  },
+  {
+   "what": "pressed too early",
+   "events": [
+    [
+     "press",
+     1.0
+    ],
+    [
+     "ready",
+     1.3
+    ]
+   ],
+   "fires_at": []
+  },
+  {
+   "what": "nothing pressed",
+   "events": [
+    [
+     "ready",
+     1.0
+    ],
+    [
+     "ready",
+     2.0
+    ]
+   ],
+   "fires_at": []
+  },
+  {
+   "what": "a press is spent once",
+   "events": [
+    [
+     "press",
+     1.0
+    ],
+    [
+     "ready",
+     1.1
+    ],
+    [
+     "ready",
+     1.15
+    ]
+   ],
+   "fires_at": [
+    1.1
+   ]
+  },
+  {
+   "what": "the later press counts",
+   "events": [
+    [
+     "press",
+     1.0
+    ],
+    [
+     "press",
+     1.2
+    ],
+    [
+     "ready",
+     1.4
+    ]
+   ],
+   "fires_at": [
+    1.4
+   ]
+  }
+ ]
+}

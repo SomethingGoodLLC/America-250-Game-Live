@@ -1,4 +1,8 @@
 #include "PA250VolleyCoordinator.h"
+#include "Battle/PA250TraversalLinks.h"
+#include "PA250MeleeComponent.h"
+#include "Battle/PA250BattleFeel.h"
+#include "Battle/PA250Intensity.h"
 #include "PA250UnitClasses.h"
 #include "CollisionQueryParams.h"
 #include "EngineUtils.h"
@@ -499,6 +503,8 @@ void UPA250VolleyCoordinator::AssignSquadSlots()
 	if (!bCoverAnchorsBuilt)
 	{
 		bCoverAnchorsBuilt = true;
+		// The crossing links follow the same obstacles (a work raised or battered down).
+		if (UPA250TraversalLinks* TraversalLinks = GameMode->GetWorld()->GetSubsystem<UPA250TraversalLinks>()) TraversalLinks->RequestRebuild();
 		CoverAnchors.Reset();
 		WorkAnchors.Reset();
 		CoverSlots.Reset();
@@ -1108,6 +1114,14 @@ void UPA250VolleyCoordinator::TickFormation(FSquad& Sq, const TArray<ARFCharacte
 		Sq.RecentLoss += float(Sq.LastLive - Live.Num()) / FMath::Max(1, Sq.Peak);
 	}
 	Sq.LastLive = Live.Num();
+	// charge (the played general's verb): the men's blows are heavier for its time.
+	{
+		const float Blow = Now < Sq.HeroBlowUntil ? Sq.HeroBlowScale : 1.f;
+		for (ARFCharacter* C : Live)
+		{
+			if (C->MeleeComponent) C->MeleeComponent->OrderDamageScale = Blow;
+		}
+	}
 	Sq.RecentLoss *= FMath::Pow(0.5f, DeltaSeconds / 12.f); // half-life 12 s
 	int32 Suppressed = 0;
 	for (const ARFCharacter* C : Live) Suppressed += C->SuppressionTimer > 0.f ? 1 : 0;
@@ -1137,8 +1151,11 @@ void UPA250VolleyCoordinator::TickFormation(FSquad& Sq, const TArray<ARFCharacte
 	const bool bInCover = Sq.CoveredFraction >= Verbs.CoveredFraction;
 	const float OpenPressure = (ClassKit.bSteadyInCover && Sq.bEngaged && !bInCover) ? Verbs.OpenPressure : 0.f;
 	const float Resolve = Tr.MoraleResolve * ((ClassKit.bSteadyInCover && bInCover) ? 1.f + Verbs.CoverResolveBonus : 1.f);
-	const float Pressure = PA250MoralePressure(Sq.RecentLoss, float(Suppressed) / Live.Num(), Strength, bClose, bFlanked,
-		bBeingCharged && !bSkirmishEvade) + CampaignBias + Shock + OpenPressure;
+	// hold_fast (the played general's verb): what the fight does to them weighs less for its time. The
+	// campaign's own bias is not his to change.
+	const float HeroScale = Now < Sq.HeroPressureUntil ? Sq.HeroPressureScale : 1.f;
+	const float Pressure = (PA250MoralePressure(Sq.RecentLoss, float(Suppressed) / Live.Num(), Strength, bClose, bFlanked,
+		bBeingCharged && !bSkirmishEvade) + Shock + OpenPressure) * HeroScale + CampaignBias;
 
 	// Deliberate withdrawal orders (never panic): heavily outnumbered while weakened (any role),
 	// or exposed in the open at close range (roles that withdraw when exposed). Cooldown = cost.
@@ -1732,7 +1749,7 @@ void UPA250VolleyCoordinator::AnnounceMorale(const FSquad& Sq, EPA250Morale Befo
 		else ShoutNearListener(TEXT("enemy_falling_back"), TEXT("They're falling back!"));
 		break;
 	case EPA250Morale::Routing:
-		if (bOurs) Shout(Sq.Faction, TEXT("breaking"), TEXT("The line is breaking - run!"), Sq.Anchor);
+		if (bOurs) ShoutEvent(TEXT("rout"), Sq.Faction, Sq.Anchor);
 		else ShoutNearListener(TEXT("enemy_running"), TEXT("They're running!"));
 		break;
 	case EPA250Morale::Rallying:
@@ -1801,7 +1818,7 @@ void UPA250VolleyCoordinator::StartCharge(FSquad& Sq, float Now)
 	Sq.ChargeStartTime = Now;
 	CancelVolleyOrders(Sq, TEXT("cancelled_charge"));
 	MoraleTransitions.FindOrAdd(FString::Printf(TEXT("%s.Charge"), *Sq.Faction.ToString()))++;
-	if (IsNearViewer(Sq.Anchor)) Shout(Sq.Faction, TEXT("charge_b"), TEXT("Charge! At them!"), Sq.Anchor);
+	if (IsNearViewer(Sq.Anchor)) ShoutEvent(TEXT("charge"), Sq.Faction, Sq.Anchor);
 }
 
 void UPA250VolleyCoordinator::ApplyVolleyShock(int32 TargetSquadId, FName ByFaction)
@@ -1916,6 +1933,179 @@ FString UPA250VolleyCoordinator::OrderNearestLine(FName Faction, const FVector& 
 		}
 	}
 	return FString();
+}
+
+bool UPA250VolleyCoordinator::SquadCentre(const FSquad& Sq, FVector& OutCentre)
+{
+	FVector Sum = FVector::ZeroVector;
+	int32 N = 0;
+	for (const TWeakObjectPtr<ARFCharacter>& W : Sq.Members)
+	{
+		if (W.IsValid() && !W->IsDead())
+		{
+			Sum += W->GetActorLocation();
+			++N;
+		}
+	}
+	if (N == 0) return false;
+	OutCentre = Sum / N;
+	return true;
+}
+
+int32 UPA250VolleyCoordinator::RallyAllRouting(FName Faction, const FVector& Where, float RadiusCm)
+{
+	int32 Rallied = 0;
+	for (FSquad& Sq : Squads)
+	{
+		FVector Centre;
+		if (Sq.Faction != Faction || Sq.Morale.State != EPA250Morale::Routing || !SquadCentre(Sq, Centre)) continue;
+		if (FVector::Dist2D(Centre, Where) > RadiusCm) continue;
+		const EPA250Morale Before = Sq.Morale.State;
+		Sq.Morale.Set(EPA250Morale::Rallying);
+		Sq.Anchor = Centre;
+		Sq.RallyPoint = Centre;
+		Sq.RecentLoss *= 0.5f; // as the officer's rally: the losses weigh less on men who have been steadied
+		MoraleTransitions.FindOrAdd(FString::Printf(TEXT("%s.Rallying"), *Faction.ToString()))++;
+		MoraleTransitions.FindOrAdd(FString::Printf(TEXT("%s.Rallied"), *Faction.ToString()))++;
+		AnnounceMorale(Sq, Before);
+		++Rallied;
+	}
+	if (Rallied > 0) MoraleTransitions.FindOrAdd(FString::Printf(TEXT("%s.GeneralRallied"), *Faction.ToString()))++;
+	return Rallied;
+}
+
+int32 UPA250VolleyCoordinator::HeroHoldFast(FName Faction, const FVector& Where, float RadiusCm, float Seconds, float Scale)
+{
+	if (!GameMode.IsValid() || !GameMode->GetWorld()) return 0;
+	const float Until = GameMode->GetWorld()->GetTimeSeconds() + Seconds;
+	int32 Reached = 0;
+	for (FSquad& Sq : Squads)
+	{
+		FVector Centre;
+		if (Sq.Faction != Faction || !SquadCentre(Sq, Centre) || FVector::Dist2D(Centre, Where) > RadiusCm) continue;
+		Sq.HeroPressureScale = FMath::Clamp(Scale, 0.f, 1.f);
+		Sq.HeroPressureUntil = Until;
+		++Reached;
+	}
+	if (Reached > 0) MoraleTransitions.FindOrAdd(FString::Printf(TEXT("%s.GeneralHoldFast"), *Faction.ToString()))++;
+	return Reached;
+}
+
+int32 UPA250VolleyCoordinator::HeroCharge(FName Faction, const FVector& Where, float RadiusCm, float Seconds, float Scale, int32& OutCharging)
+{
+	OutCharging = 0;
+	if (!GameMode.IsValid() || !GameMode->GetWorld()) return 0;
+	const UPA250BotTuning* BT = GameMode->GetBotTuning();
+	const float ChargeRange = BT ? BT->Values.ChargeOrderRangeCm : 3500.f;
+	const float Now = GameMode->GetWorld()->GetTimeSeconds();
+	int32 Reached = 0;
+	for (FSquad& Sq : Squads)
+	{
+		FVector Centre;
+		if (Sq.Faction != Faction || !SquadCentre(Sq, Centre) || FVector::Dist2D(Centre, Where) > RadiusCm) continue;
+		Sq.HeroBlowScale = FMath::Max(1.f, Scale);
+		Sq.HeroBlowUntil = Now + Seconds;
+		++Reached;
+		// A line that can obey goes in: steady or shaken, in volley order, an enemy in front and within charge range.
+		const bool bCanObey = !Sq.Role.bIndividualFire && Sq.bAnchored && Sq.Contact.IsValid() && !Sq.bCharging
+			&& (Sq.Morale.State == EPA250Morale::Steady || Sq.Morale.State == EPA250Morale::Shaken)
+			&& FVector::Dist2D(Sq.Contact->GetActorLocation(), Sq.Anchor) <= ChargeRange;
+		if (bCanObey)
+		{
+			StartCharge(Sq, Now);
+			++OutCharging;
+		}
+	}
+	if (Reached > 0) MoraleTransitions.FindOrAdd(FString::Printf(TEXT("%s.GeneralCharge"), *Faction.ToString()))++;
+	return Reached;
+}
+
+int32 UPA250VolleyCoordinator::HeroSteady(FName Faction, const FVector& Where, float RadiusCm, float Share)
+{
+	const float Keep = 1.f - FMath::Clamp(Share, 0.f, 1.f);
+	int32 Reached = 0;
+	for (FSquad& Sq : Squads)
+	{
+		FVector Centre;
+		if (Sq.Faction != Faction || !SquadCentre(Sq, Centre) || FVector::Dist2D(Centre, Where) > RadiusCm) continue;
+		Sq.RecentLoss *= Keep;
+		Sq.ShockPressure *= Keep;
+		if (Sq.Morale.State == EPA250Morale::Shaken)
+		{
+			const EPA250Morale Before = Sq.Morale.State;
+			Sq.Morale.Set(EPA250Morale::Steady);
+			MoraleTransitions.FindOrAdd(FString::Printf(TEXT("%s.Steady"), *Faction.ToString()))++;
+			AnnounceMorale(Sq, Before);
+		}
+		++Reached;
+	}
+	if (Reached > 0) MoraleTransitions.FindOrAdd(FString::Printf(TEXT("%s.GeneralSteadied"), *Faction.ToString()))++;
+	return Reached;
+}
+
+int32 UPA250VolleyCoordinator::HeroQuickStep(FName Faction, const FVector& Where, float RadiusCm, float Seconds, float Scale)
+{
+	if (!GameMode.IsValid() || !GameMode->GetWorld()) return 0;
+	const float Until = GameMode->GetWorld()->GetTimeSeconds() + Seconds;
+	int32 Reached = 0;
+	for (FSquad& Sq : Squads)
+	{
+		FVector Centre;
+		if (Sq.Faction != Faction || !SquadCentre(Sq, Centre) || FVector::Dist2D(Centre, Where) > RadiusCm) continue;
+		Sq.HeroSpeedScale = FMath::Max(1.f, Scale);
+		Sq.HeroSpeedUntil = Until;
+		++Reached;
+	}
+	if (Reached > 0) MoraleTransitions.FindOrAdd(FString::Printf(TEXT("%s.GeneralQuickStep"), *Faction.ToString()))++;
+	return Reached;
+}
+
+float UPA250VolleyCoordinator::SpeedScaleFor(const ARFCharacter* Soldier) const
+{
+	if (!Soldier || Soldier->SquadId < 0 || !GameMode.IsValid() || !GameMode->GetWorld()) return 1.f;
+	const float Now = GameMode->GetWorld()->GetTimeSeconds();
+	for (const FSquad& Sq : Squads)
+	{
+		if (Sq.Id == Soldier->SquadId) return Now < Sq.HeroSpeedUntil ? Sq.HeroSpeedScale : 1.f;
+	}
+	return 1.f;
+}
+
+bool UPA250VolleyCoordinator::ShoutEvent(FName Event, FName Faction, const FVector& Where)
+{
+	const FPA250Shout* Words = PA250BattleFeel::Get().Shouts.Find(Event);
+	if (!Words || !GameMode.IsValid() || !GameMode->GetWorld()) return false;
+	const float Now = GameMode->GetWorld()->GetTimeSeconds();
+	float& Last = LastShoutEventAt.FindOrAdd(Event.ToString() + TEXT(".") + Faction.ToString(), -1000.f);
+	if (!PA250Intensity::MayShout(Now, Last, Words->CooldownSeconds)) return false;
+	Last = Now;
+	ShoutEventCounts.FindOrAdd(Event)++;
+	Shout(Faction, *Words->Key, *Words->Text, Where);
+	return true;
+}
+
+float UPA250VolleyCoordinator::SteadyShare(FName Faction) const
+{
+	int32 All = 0, Steady = 0;
+	for (const FSquad& Sq : Squads)
+	{
+		FVector Centre;
+		if (Sq.Faction != Faction || !SquadCentre(Sq, Centre)) continue;
+		++All;
+		Steady += Sq.Morale.State == EPA250Morale::Steady ? 1 : 0;
+	}
+	return All > 0 ? float(Steady) / All : 1.f;
+}
+
+int32 UPA250VolleyCoordinator::CountRouting(FName Faction) const
+{
+	int32 N = 0;
+	for (const FSquad& Sq : Squads)
+	{
+		FVector Centre;
+		N += (Sq.Faction == Faction && Sq.Morale.State == EPA250Morale::Routing && SquadCentre(Sq, Centre)) ? 1 : 0;
+	}
+	return N;
 }
 
 bool UPA250VolleyCoordinator::IsRouting(const ARFCharacter* Soldier) const
@@ -2400,7 +2590,7 @@ ARFCharacter* UPA250VolleyCoordinator::PickSuccessor(const ARFCharacter* FallenL
 	for (const TWeakObjectPtr<ARFCharacter>& W : Sq->Members)
 	{
 		ARFCharacter* C = W.Get();
-		if (!C || C->IsDead() || C->IsMounted() || !Cast<APA250BotController>(C->GetController())) continue;
+		if (!C || C->IsDead() || C->IsMounted() || !Cast<APA250BotController>(C->GetController()) || C->ActorHasTag(TEXT("PA250General"))) continue;
 		const float D = FVector::DistSquared(C->GetActorLocation(), FallenLeader->GetActorLocation());
 		if (D < BestD)
 		{
@@ -2479,8 +2669,10 @@ void UPA250VolleyCoordinator::ScheduleLedVolley(FSquad& Sq, const TArray<ARFChar
 bool UPA250VolleyCoordinator::ShouldJoinSquad(const ARFCharacter* C)
 {
 	// Dragoons ride and fight on their own (APA250BotController::TickDragoon), never in a volley squad.
+	// Nor is the general one of the ranks: he keeps his own post (APA250BotController::TickGeneral), and a
+	// man of a file is a man the player can step into (PickSuccessor) or lead (EnsureLeaderFile).
 	return C && !C->IsDead() && !C->FactionId.IsNone() && !C->IsPlayerControlled() && !Cast<APlayerController>(C->GetController())
-		&& C->UnitClass != TEXT("dragoon");
+		&& C->UnitClass != TEXT("dragoon") && !C->ActorHasTag(TEXT("PA250General"));
 }
 
 void UPA250VolleyCoordinator::Tick(float DeltaSeconds)

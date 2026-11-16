@@ -1,0 +1,37 @@
+{
+ "name": "input_buffer_no_window",
+ "description": "with no window a press counts only at the very moment it is made",
+ "window_s": 0.0,
+ "cases": [
+  {
+   "what": "ready at the same moment",
+   "events": [
+    [
+     "press",
+     1.0
+    ],
+    [
+     "ready",
+     1.0
+    ]
+   ],
+   "fires_at": [
+    1.0
+   ]
+  },
+  {
+   "what": "ready a frame later",
+   "events": [
+    [
+     "press",
+     1.0
+    ],
+    [
+     "ready",
+     1.016
+    ]
+   ],
+   "fires_at": []
+  }
+ ]
+}

@@ -9,7 +9,7 @@ public class PlayAmerica250Editor : ModuleRules
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 		PublicDependencyModuleNames.AddRange(new[] { "Core", "CoreUObject", "Engine" });
-		PrivateDependencyModuleNames.AddRange(new[] { "UnrealEd", "AssetRegistry", "PoseSearch" });
+		PrivateDependencyModuleNames.AddRange(new[] { "UnrealEd", "AssetRegistry", "PoseSearch", "MotionWarping" });
 		PublicIncludePaths.Add(ModuleDirectory);
 	}
 }

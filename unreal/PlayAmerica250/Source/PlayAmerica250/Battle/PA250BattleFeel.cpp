@@ -47,6 +47,13 @@ struct FReader
 		}
 		Out = static_cast<float>(Value);
 	}
+	void String(const TSharedPtr<FJsonObject>& In, const TCHAR* Key, const FString& Where, FString& Out) const
+	{
+		if (!In.IsValid() || !In->TryGetStringField(Key, Out))
+		{
+			Errors.Add(FString::Printf(TEXT("no text \"%s%s\""), *Where, Key));
+		}
+	}
 	void Bool(const TSharedPtr<FJsonObject>& In, const TCHAR* Key, const FString& Where, bool& Out) const
 	{
 		if (!In.IsValid() || !In->TryGetBoolField(Key, Out))
@@ -179,6 +186,131 @@ bool PA250BattleFeel::LoadFromFile(const FString& Path, FName Platform, TArray<F
 			R.Number(*Reload, TEXT("ram_left_hand_height_cm"), TEXT("reload."), Feel.RamLeftHandHeightCm);
 			R.Number(*Reload, TEXT("ram_left_hand_max_slide_cm"), TEXT("reload."), Feel.RamLeftHandMaxSlideCm);
 		}
+		if (const TSharedPtr<FJsonObject>* Tr = R.Object(Root, TEXT("traversal"), TEXT("")))
+		{
+			const FString W = TEXT("traversal.");
+			R.Number(*Tr, TEXT("min_speed_cm_s"), W, Feel.TraversalMinSpeedCmS);
+			R.Number(*Tr, TEXT("detect_distance_cm"), W, Feel.TraversalDetectDistanceCm);
+			R.Number(*Tr, TEXT("check_hz"), W, Feel.TraversalCheckHz);
+			R.Number(*Tr, TEXT("hurdle_min_cm"), W, Feel.HurdleMinCm);
+			R.Number(*Tr, TEXT("hurdle_max_height_cm"), W, Feel.HurdleMaxHeightCm);
+			R.Number(*Tr, TEXT("vault_max_height_cm"), W, Feel.VaultMaxHeightCm);
+			R.Number(*Tr, TEXT("vault_max_depth_cm"), W, Feel.VaultMaxDepthCm);
+			R.Number(*Tr, TEXT("mantle_max_height_cm"), W, Feel.MantleMaxHeightCm);
+			R.Number(*Tr, TEXT("mantle_max_depth_cm"), W, Feel.MantleMaxDepthCm);
+			R.Number(*Tr, TEXT("capsule_half_height_cm"), W, Feel.TraversalCapsuleHalfHeightCm);
+			R.Number(*Tr, TEXT("cooldown_seconds"), W, Feel.TraversalCooldownSeconds);
+			R.Number(*Tr, TEXT("bot_link_spacing_m"), W, Feel.BotLinkSpacingM);
+			R.Number(*Tr, TEXT("bot_link_cost"), W, Feel.BotLinkCost);
+			R.Number(*Tr, TEXT("bot_stagger_seconds"), W, Feel.BotStaggerSeconds);
+			R.Number(*Tr, TEXT("formation_error_max_cm"), W, Feel.FormationErrorMaxCm);
+			R.Number(*Tr, TEXT("max_approach_angle_deg"), W, Feel.TraversalMaxApproachAngleDeg);
+			R.Number(*Tr, TEXT("landing_clear_cm"), W, Feel.TraversalLandingClearCm);
+			R.Number(*Tr, TEXT("start_lead_seconds"), W, Feel.TraversalStartLeadSeconds);
+		}
+		if (const TSharedPtr<FJsonObject>* Move = R.Object(Root, TEXT("movement"), TEXT("")))
+		{
+			const FString W = TEXT("movement.");
+			R.Number(*Move, TEXT("walk_speed_cm"), W, Feel.WalkSpeedCm);
+			R.Number(*Move, TEXT("sprint_speed_cm"), W, Feel.SprintSpeedCm);
+			R.Number(*Move, TEXT("max_acceleration"), W, Feel.MoveMaxAcceleration);
+			R.Number(*Move, TEXT("braking_deceleration"), W, Feel.MoveBrakingDeceleration);
+			R.Number(*Move, TEXT("rotation_rate_yaw_deg"), W, Feel.RotationRateYawDeg);
+			R.Number(*Move, TEXT("camera_lag_speed"), W, Feel.CameraLagSpeed);
+			R.Number(*Move, TEXT("fire_lock_seconds"), W, Feel.FireLockSeconds);
+			R.Bool(*Move, TEXT("mouse_smoothing"), W, Feel.bMouseSmoothing);
+		}
+		if (const TSharedPtr<FJsonObject>* Input = R.Object(Root, TEXT("input"), TEXT("")))
+		{
+			if (const TSharedPtr<FJsonObject>* Windows = R.Object(*Input, TEXT("buffer_seconds"), TEXT("input.")))
+			{
+				const FString W = TEXT("input.buffer_seconds.");
+				R.Number(*Windows, TEXT("fire"), W, Feel.BufferFireSeconds);
+				R.Number(*Windows, TEXT("reload"), W, Feel.BufferReloadSeconds);
+				R.Number(*Windows, TEXT("vault"), W, Feel.BufferVaultSeconds);
+				R.Number(*Windows, TEXT("order"), W, Feel.BufferOrderSeconds);
+				R.Number(*Windows, TEXT("thrust"), W, Feel.BufferThrustSeconds);
+			}
+		}
+		if (const TSharedPtr<FJsonObject>* In = R.Object(Root, TEXT("intensity"), TEXT("")))
+		{
+			if (const TSharedPtr<FJsonObject>* J = R.Object(*In, TEXT("near_miss"), TEXT("intensity.")))
+			{
+				const FString W = TEXT("intensity.near_miss.");
+				R.Number(*J, TEXT("radius_cm"), W, Feel.NearMissRadiusCm);
+				R.Number(*J, TEXT("min_shot_distance_cm"), W, Feel.NearMissMinShotCm);
+				R.Number(*J, TEXT("fov_punch_deg"), W, Feel.NearMissFovPunchDeg);
+				R.Number(*J, TEXT("flinch"), W, Feel.NearMissFlinch);
+				R.Number(*J, TEXT("shake_scale"), W, Feel.NearMissShakeScale);
+				R.String(*J, TEXT("crack_bank"), W, Feel.NearMissCrackBank);
+			}
+			if (const TSharedPtr<FJsonObject>* J = R.Object(*In, TEXT("round_shot"), TEXT("intensity.")))
+			{
+				const FString W = TEXT("intensity.round_shot.");
+				R.Number(*J, TEXT("shake_inner_m"), W, Feel.RoundShotShakeInnerM);
+				R.Number(*J, TEXT("shake_outer_m"), W, Feel.RoundShotShakeOuterM);
+				R.Number(*J, TEXT("shake_scale"), W, Feel.RoundShotShakeScale);
+				R.Number(*J, TEXT("dirt_radius_m"), W, Feel.RoundShotDirtRadiusM);
+				R.Number(*J, TEXT("dirt_seconds"), W, Feel.RoundShotDirtSeconds);
+			}
+			if (const TSharedPtr<FJsonObject>* J = R.Object(*In, TEXT("shake"), TEXT("intensity.")))
+			{
+				const FString W = TEXT("intensity.shake.");
+				R.Number(*J, TEXT("seconds"), W, Feel.ShakeSeconds);
+				R.Number(*J, TEXT("location_cm"), W, Feel.ShakeLocationCm);
+				R.Number(*J, TEXT("rotation_deg"), W, Feel.ShakeRotationDeg);
+				R.Number(*J, TEXT("frequency_hz"), W, Feel.ShakeFrequencyHz);
+			}
+			if (const TSharedPtr<FJsonObject>* J = R.Object(*In, TEXT("shouts"), TEXT("intensity.")))
+			{
+				for (const TCHAR* Event : {TEXT("charge"), TEXT("rout"), TEXT("officer_down"), TEXT("colours_taken")})
+				{
+					if (const TSharedPtr<FJsonObject>* S = R.Object(*J, Event, TEXT("intensity.shouts.")))
+					{
+						const FString W = FString::Printf(TEXT("intensity.shouts.%s."), Event);
+						FPA250Shout Shout;
+						R.String(*S, TEXT("key"), W, Shout.Key);
+						R.String(*S, TEXT("text"), W, Shout.Text);
+						R.Number(*S, TEXT("cooldown_seconds"), W, Shout.CooldownSeconds);
+						Feel.Shouts.Add(Event, Shout);
+					}
+				}
+			}
+			if (const TSharedPtr<FJsonObject>* J = R.Object(*In, TEXT("corpses"), TEXT("intensity.")))
+			{
+				const FString W = TEXT("intensity.corpses.");
+				float Max = 0.f;
+				R.Number(*J, TEXT("max"), W, Max);
+				Feel.CorpsesMax = FMath::RoundToInt(Max);
+				R.Number(*J, TEXT("seconds"), W, Feel.CorpseSeconds);
+				R.Number(*J, TEXT("freeze_after_seconds"), W, Feel.CorpseFreezeAfterSeconds);
+			}
+			if (const TSharedPtr<FJsonObject>* J = R.Object(*In, TEXT("music"), TEXT("intensity.")))
+			{
+				const FString W = TEXT("intensity.music.");
+				R.Number(*J, TEXT("fade_seconds"), W, Feel.MusicFadeSeconds);
+				R.Number(*J, TEXT("morale_weight"), W, Feel.MusicMoraleWeight);
+				R.Number(*J, TEXT("ticket_weight"), W, Feel.MusicTicketWeight);
+				R.Number(*J, TEXT("volume"), W, Feel.MusicVolume);
+				const TArray<TSharedPtr<FJsonValue>>* Layers = nullptr;
+				if (!(*J)->TryGetArrayField(TEXT("layers"), Layers) || Layers->IsEmpty())
+				{
+					Errors.Add(TEXT("no list \"intensity.music.layers\""));
+				}
+				else
+				{
+					for (const TSharedPtr<FJsonValue>& V : *Layers)
+					{
+						const TSharedPtr<FJsonObject> LayerJson = V->AsObject();
+						FPA250MusicLayer Layer;
+						R.String(LayerJson, TEXT("bank"), TEXT("intensity.music.layers."), Layer.Bank);
+						R.Number(LayerJson, TEXT("from"), TEXT("intensity.music.layers."), Layer.From);
+						R.Number(LayerJson, TEXT("full"), TEXT("intensity.music.layers."), Layer.Full);
+						Feel.MusicLayers.Add(Layer);
+					}
+				}
+			}
+		}
 		if (const TSharedPtr<FJsonObject>* Verify = R.Object(Root, TEXT("verify"), TEXT("")))
 		{
 			R.Number(*Verify, TEXT("frame_time_margin_pct"), TEXT("verify."), Feel.FrameTimeMarginPct);
@@ -252,6 +384,35 @@ TArray<int32> PA250BattleFeel::PickFullQuality(bool bMotionMatching, const FPA25
 		if (Soldiers[i].DistanceM <= Reach) Full.Add(i);
 	}
 	return Full;
+}
+
+EPA250Traversal PA250BattleFeel::ClassifyTraversal(float HeightCm, float DepthCm, float HurdleMinCm, float HurdleMaxHeightCm, float VaultMaxHeightCm,
+	float VaultMaxDepthCm, float MantleMaxHeightCm, float MantleMaxDepthCm)
+{
+	if (HeightCm < HurdleMinCm) return EPA250Traversal::None;
+	if (HeightCm > MantleMaxHeightCm || DepthCm > MantleMaxDepthCm) return EPA250Traversal::None;
+	if (DepthCm <= VaultMaxDepthCm && HeightCm <= VaultMaxHeightCm)
+	{
+		return HeightCm <= HurdleMaxHeightCm ? EPA250Traversal::Hurdle : EPA250Traversal::Vault;
+	}
+	return EPA250Traversal::Mantle;
+}
+
+EPA250Traversal PA250BattleFeel::ClassifyTraversal(float HeightCm, float DepthCm, const FPA250BattleFeel& Feel)
+{
+	return ClassifyTraversal(HeightCm, DepthCm, Feel.HurdleMinCm, Feel.HurdleMaxHeightCm, Feel.VaultMaxHeightCm, Feel.VaultMaxDepthCm,
+		Feel.MantleMaxHeightCm, Feel.MantleMaxDepthCm);
+}
+
+const TCHAR* PA250BattleFeel::TraversalName(EPA250Traversal Action)
+{
+	switch (Action)
+	{
+	case EPA250Traversal::Hurdle: return TEXT("hurdle");
+	case EPA250Traversal::Vault: return TEXT("vault");
+	case EPA250Traversal::Mantle: return TEXT("mantle");
+	default: return TEXT("none");
+	}
 }
 
 EPA250FootGait PA250BattleFeel::PickGait(float SpeedCmS, float IdleMaxCmS, float WalkMaxCmS, float RunMaxCmS)

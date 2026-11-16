@@ -83,8 +83,16 @@ public:
 	static bool IssuedBayonet(FName Faction, FName UnitClass, uint32 Seed);
 	/** Tests / probe: force the answer. */
 	void SetBayonetOverride(bool bHas) { BayonetOverride = bHas ? 1 : 0; }
+	/** The played general's sword (M5): his blow is the overhead cut (the club's swing) with the
+	 *  sword's own damage, reach and recovery, from the persons data. Off: as he was. */
+	void SetSword(bool bOn, float Damage, float ReachCm, float RecoverSeconds);
+	bool HasSword() const { return bSword; }
+	/** A start of the body with no blow behind it (a ball past his ear): the hit-reaction pose alone, by Strength 0..1. */
+	void Flinch(const FVector& WorldDir, float Strength);
 	/** Class kit: multiplies every blow this man lands (a grenadier hits harder, a rifleman lighter). */
 	float DamageScale = 1.f;
+	/** A timed scale from an order over his squad (the played general's charge); 1 otherwise. */
+	float OrderDamageScale = 1.f;
 	bool IsClubSwing() const { return bClubSwing; }
 	static FPA250MeleePose ClubPose(float T, float Windup, float Hold);
 
@@ -255,6 +263,11 @@ private:
 	bool bMusketWasLoaded = false;
 	double SlowMoEndSeconds = 0.0;
 	int8 BayonetOverride = -1;
+	bool bSword = false;
+	int8 BayonetBeforeSword = -1;
+	float SwordDamage = 0.f;
+	float SwordReachCm = 0.f;
+	float SwordRecoverSeconds = 0.f;
 	bool bClubSwing = false;
 	bool bClubCharge = false;
 	bool bGuardHeld = false;
