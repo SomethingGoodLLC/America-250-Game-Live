@@ -1,0 +1,349 @@
+{
+  "units": "cm, cannon mesh space: +X is the muzzle end, Z up, ground at z = 0",
+  "mesh": "/Game/ThirdParty/PTM_Cannon/Mesh",
+  "bounds": {
+    "min": [
+      -176.6,
+      -64.05,
+      -0.01
+    ],
+    "max": [
+      155.98,
+      56.88,
+      123.94
+    ],
+    "size": [
+      332.58,
+      120.93,
+      123.95
+    ]
+  },
+  "sockets": {
+    "Muzzle": [
+      156.0,
+      0.0,
+      113.0
+    ],
+    "Vent": [
+      10.0,
+      0.0,
+      116.0
+    ],
+    "Crew_1": [
+      40.0,
+      115.0,
+      0.0
+    ],
+    "Crew_2": [
+      40.0,
+      -115.0,
+      0.0
+    ],
+    "Crew_3": [
+      -90.0,
+      75.0,
+      0.0
+    ],
+    "Crew_4": [
+      -90.0,
+      -75.0,
+      0.0
+    ],
+    "Trail": null,
+    "TrailL": null,
+    "Linstock": null
+  },
+  "sockets_missing": [
+    "Trail",
+    "TrailL",
+    "Linstock"
+  ],
+  "socket_offsets": {
+    "Muzzle": {
+      "from_muzzle_cm": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "from_vent_cm": [
+        146.0,
+        0.0,
+        -3.0
+      ],
+      "height_cm": 113.0
+    },
+    "Vent": {
+      "from_muzzle_cm": [
+        -146.0,
+        0.0,
+        3.0
+      ],
+      "from_vent_cm": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "height_cm": 116.0
+    },
+    "Crew_1": {
+      "from_muzzle_cm": [
+        -116.0,
+        115.0,
+        -113.0
+      ],
+      "from_vent_cm": [
+        30.0,
+        115.0,
+        -116.0
+      ],
+      "height_cm": 0.0
+    },
+    "Crew_2": {
+      "from_muzzle_cm": [
+        -116.0,
+        -115.0,
+        -113.0
+      ],
+      "from_vent_cm": [
+        30.0,
+        -115.0,
+        -116.0
+      ],
+      "height_cm": 0.0
+    },
+    "Crew_3": {
+      "from_muzzle_cm": [
+        -246.0,
+        75.0,
+        -113.0
+      ],
+      "from_vent_cm": [
+        -100.0,
+        75.0,
+        -116.0
+      ],
+      "height_cm": 0.0
+    },
+    "Crew_4": {
+      "from_muzzle_cm": [
+        -246.0,
+        -75.0,
+        -113.0
+      ],
+      "from_vent_cm": [
+        -100.0,
+        -75.0,
+        -116.0
+      ],
+      "height_cm": 0.0
+    }
+  },
+  "stations": {
+    "station_MuzzleR": {
+      "role": "sponger (sponge, ram)",
+      "cm": [
+        176.0,
+        70.0,
+        0.0
+      ],
+      "provisional": true,
+      "offset_from_muzzle_cm": [
+        20.0,
+        70.0,
+        -113.0
+      ],
+      "offset_from_vent_cm": [
+        166.0,
+        70.0,
+        -116.0
+      ]
+    },
+    "station_MuzzleL": {
+      "role": "loader",
+      "cm": [
+        176.0,
+        -70.0,
+        0.0
+      ],
+      "provisional": true,
+      "offset_from_muzzle_cm": [
+        20.0,
+        -70.0,
+        -113.0
+      ],
+      "offset_from_vent_cm": [
+        166.0,
+        -70.0,
+        -116.0
+      ]
+    },
+    "station_Vent": {
+      "role": "ventsman (vent, prime)",
+      "cm": [
+        10.0,
+        50.0,
+        0.0
+      ],
+      "provisional": true,
+      "offset_from_muzzle_cm": [
+        -146.0,
+        50.0,
+        -113.0
+      ],
+      "offset_from_vent_cm": [
+        0.0,
+        50.0,
+        -116.0
+      ]
+    },
+    "Linstock": {
+      "role": "firer",
+      "cm": [
+        10.0,
+        -90.0,
+        0.0
+      ],
+      "provisional": true,
+      "offset_from_muzzle_cm": [
+        -146.0,
+        -90.0,
+        -113.0
+      ],
+      "offset_from_vent_cm": [
+        0.0,
+        -90.0,
+        -116.0
+      ]
+    },
+    "Trail": {
+      "role": "captain (lay)",
+      "cm": [
+        -216.6,
+        0.0,
+        0.0
+      ],
+      "derived": "x = min bound - 40",
+      "provisional": true,
+      "offset_from_muzzle_cm": [
+        -372.6,
+        0.0,
+        -113.0
+      ],
+      "offset_from_vent_cm": [
+        -226.6,
+        0.0,
+        -116.0
+      ]
+    },
+    "TrailL": {
+      "role": "handspike man",
+      "cm": [
+        -156.6,
+        60.0,
+        0.0
+      ],
+      "derived": "x = min bound + 20, y = 60: beside the trail end, a bar's length from it (my placement)",
+      "provisional": true,
+      "offset_from_muzzle_cm": [
+        -312.6,
+        60.0,
+        -113.0
+      ],
+      "offset_from_vent_cm": [
+        -166.6,
+        60.0,
+        -116.0
+      ]
+    },
+    "Crew_3": {
+      "role": "stand-by",
+      "cm": [
+        -90.0,
+        75.0,
+        0.0
+      ],
+      "provisional": true,
+      "offset_from_muzzle_cm": [
+        -246.0,
+        75.0,
+        -113.0
+      ],
+      "offset_from_vent_cm": [
+        -100.0,
+        75.0,
+        -116.0
+      ]
+    },
+    "Crew_4": {
+      "role": "stand-by",
+      "cm": [
+        -90.0,
+        -75.0,
+        0.0
+      ],
+      "provisional": true,
+      "offset_from_muzzle_cm": [
+        -246.0,
+        -75.0,
+        -113.0
+      ],
+      "offset_from_vent_cm": [
+        -100.0,
+        -75.0,
+        -116.0
+      ]
+    }
+  },
+  "bore_axis": {
+    "origin_cm": [
+      156.0,
+      0.0,
+      113.0
+    ],
+    "direction": [
+      1.0,
+      0.0,
+      0.0
+    ],
+    "height_cm": 113.0,
+    "note": "the one-piece mesh stays level (actor pitch 0), so the bore is the +X line through Muzzle"
+  },
+  "hand_targets": {
+    "sponge_hold_forward_of_muzzle_cm": [
+      100.0,
+      140.0
+    ],
+    "ram_stroke_forward_of_muzzle_cm": [
+      140.0,
+      70.0,
+      140.0
+    ],
+    "muzzle_mouth_cm": [
+      156.0,
+      0.0,
+      113.0
+    ],
+    "vent_cm": [
+      10.0,
+      0.0,
+      116.0
+    ],
+    "note": "staff hands lie on the bore axis extended forward of Muzzle at bore height"
+  },
+  "soldier": {
+    "mesh": "/Game/american_soldier/base_mesh/SK_AMERICAN_SOLDIER",
+    "standing_height_cm": 190.09,
+    "bounds_z_cm": [
+      -1.69,
+      188.4
+    ],
+    "note": "reference-pose mesh bounds, hat included if the mesh has one"
+  },
+  "soma": {
+    "standing_height_cm": 175.8,
+    "source": "kimodo somaskel77 skin_standard.npz"
+  },
+  "scale_soma_over_soldier": 0.987,
+  "scale_note": "multiply every constraint target by this ratio before it goes to Kimodo. Shoulder joint height in the reference poses as Unreal imports them (AnimationPass/logs/rig_dump.json): SOMA LeftArm 142.92 cm / soldier upperarm_l 144.80 cm. The mesh-bounds ratio (0.9248) was wrong: the 190.1 cm bound is not the body height (head joint 164.4 cm; SOMA head joint 159.8 cm).",
+  "scale_soma_over_soldier_from_bounds": 0.9248
+}
