@@ -1,4 +1,6 @@
 #include "MusketProjectile.h"
+#include "PA250FieldGun.h"
+#include "Battle/PA250Intensity.h"
 #include "Components/SphereComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMeshActor.h"
@@ -166,6 +168,10 @@ void AMusketProjectile::OnHit(UPrimitiveComponent* HitComp, AActor* OtherActor, 
 				const float Near = FMath::Max(1.f, WeaponTuning->Values.TorsoDamageNear);
 				Applied *= (Damage / Near);
 			}
+			if (FalloffEndCm > FalloffStartCm)
+			{
+				Applied *= PA250Gunnery::CanisterDamageScale(DistCm, FalloffStartCm, FalloffEndCm, FalloffFloor);
+			}
 			UGameplayStatics::ApplyPointDamage(OtherActor, Applied, GetVelocity().GetSafeNormal(), Hit,
 			                                   GetInstigatorController(), this, nullptr);
 			if (OtherComp && OtherComp->IsSimulatingPhysics())
@@ -193,14 +199,11 @@ void AMusketProjectile::Tick(float DeltaSeconds)
 		const APlayerController* PC = GetWorld()->GetFirstPlayerController();
 		const bool bOwnShot = PC && GetInstigator() && GetInstigator() == PC->GetPawn();
 		const FVector Closest = FMath::ClosestPointOnSegment(Listener, PrevLocation, Now);
-		if (!bOwnShot && FVector::Dist(Closest, Listener) < 500.f && FVector::Dist(SpawnLocation, Listener) > 800.f)
+		// A near miss makes the player start: his view, his body, a short shake and the ball's crack
+		// (battle_feel.json intensity.near_miss; PA250Intensity).
+		if (!bOwnShot && PA250Intensity::NearMiss(PC ? Cast<ARFCharacter>(PC->GetPawn()) : nullptr, SpawnLocation, Closest, Listener))
 		{
 			bWhizzed = true;
-			// A near miss makes the player start.
-			if (ARFCharacter* Me = PC ? Cast<ARFCharacter>(PC->GetPawn()) : nullptr; Me && !Me->IsDead())
-			{
-				Me->PunchFOV(2.f);
-			}
 			FPA250BattleAudio::PlayAt(this, TEXT("ball_whiz"), Closest, EPA250SoundRange::Whiz, 1.f, 0.12f);
 		}
 	}

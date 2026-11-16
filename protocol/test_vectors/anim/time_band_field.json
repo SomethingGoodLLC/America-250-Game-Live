@@ -1,0 +1,75 @@
+{
+ "name": "time_band_field",
+ "description": "the data's bands: every hour of the day falls in one, and a battle that does not say its hour takes the default",
+ "time_bands": {
+  "dawn": [
+   [
+    4,
+    8
+   ]
+  ],
+  "day": [
+   [
+    9,
+    16
+   ]
+  ],
+  "dusk": [
+   [
+    17,
+    23
+   ],
+   [
+    0,
+    3
+   ]
+  ]
+ },
+ "default_band": "day",
+ "cases": [
+  {
+   "hour": 0,
+   "band": "dusk"
+  },
+  {
+   "hour": 3,
+   "band": "dusk"
+  },
+  {
+   "hour": 4,
+   "band": "dawn"
+  },
+  {
+   "hour": 5,
+   "band": "dawn"
+  },
+  {
+   "hour": 8,
+   "band": "dawn"
+  },
+  {
+   "hour": 9,
+   "band": "day"
+  },
+  {
+   "hour": 12,
+   "band": "day"
+  },
+  {
+   "hour": 16,
+   "band": "day"
+  },
+  {
+   "hour": 17,
+   "band": "dusk"
+  },
+  {
+   "hour": 23,
+   "band": "dusk"
+  },
+  {
+   "hour": -1,
+   "band": "day"
+  }
+ ]
+}

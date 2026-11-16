@@ -1,0 +1,147 @@
+$schema: "http://json-schema.org/draft-07/schema#"
+title: Animation clips named by data
+description: >-
+  unreal/PA250Sim/data/anim_clips.json. Four blocks. locomotion and traversal are written by
+  Scripts/build_locomotion.py (the motion-matching databases; the traversal montages with what the
+  bake measured). source_rigs and clips are the clip registry (M4): every clip the battle can show
+  by name, whether or not an asset exists for it yet. A name with no asset shows its placeholder,
+  and the battle logs "PA250 anim clips: PLACEHOLDER <name>" once. Scripts/import_anim_drop.py fills
+  asset and source when a file named <clip_name>@<rig>.fbx is dropped in the drop folder
+  (<clip_name>@<rig>.local.fbx for a clip that must stay on this machine).
+  The drill names follow the stages of RF/ActiveReloadSequencer: reload_<stance>_<stage>
+  (shared vector protocol/test_vectors/anim/drill_clip_names.json).
+type: object
+additionalProperties: false
+required: [locomotion, source_rigs, clips]
+definitions:
+  package: {type: string, pattern: "^/Game/[A-Za-z0-9_/]+$"}
+  triple: {type: array, minItems: 3, maxItems: 3, items: {type: number}}
+properties:
+  locomotion:
+    type: object
+    additionalProperties: false
+    required: [retargeted_from, rig, retargeter, clip_folder, databases]
+    properties:
+      retargeted_from: {type: string}
+      rig: {$ref: "#/definitions/package"}
+      retargeter: {$ref: "#/definitions/package"}
+      clip_folder: {$ref: "#/definitions/package"}
+      databases:
+        type: object
+        additionalProperties: false
+        required: [idle, walk, run, sprint]
+        properties:
+          idle:
+            type: object
+            additionalProperties: false
+            required: [idles, turn_in_place]
+            properties:
+              idles: {$ref: "#/definitions/package"}
+              turn_in_place: {$ref: "#/definitions/package"}
+          walk: {$ref: "#/properties/locomotion/properties/databases/definitions/moving"}
+          run: {$ref: "#/properties/locomotion/properties/databases/definitions/moving"}
+          sprint: {$ref: "#/properties/locomotion/properties/databases/definitions/moving"}
+        definitions:
+          moving:
+            type: object
+            additionalProperties: false
+            required: [loops, pivots, starts, stops]
+            properties:
+              loops: {$ref: "#/definitions/package"}
+              pivots: {$ref: "#/definitions/package"}
+              starts: {$ref: "#/definitions/package"}
+              stops: {$ref: "#/definitions/package"}
+  traversal:
+    type: object
+    additionalProperties: false
+    required: [retargeted_from, clip_folder, clips]
+    properties:
+      retargeted_from: {type: string}
+      note: {type: string}
+      clip_folder: {$ref: "#/definitions/package"}
+      clips:
+        type: array
+        minItems: 1
+        items:
+          type: object
+          additionalProperties: false
+          required: [asset, action, gait, foot, variant, length_s, scale, blend_out_s, windows, approach]
+          properties:
+            asset: {$ref: "#/definitions/package"}
+            action: {enum: [hurdle, vault, mantle]}
+            gait: {enum: [run, walk, stand]}
+            foot: {enum: [l, r]}
+            variant: {type: integer, minimum: 1}
+            length_s: {type: number, exclusiveMinimum: 0}
+            scale: {type: number, exclusiveMinimum: 0}
+            blend_out_s: {type: number, exclusiveMinimum: 0}
+            windows:
+              type: array
+              minItems: 1
+              items:
+                type: object
+                additionalProperties: false
+                required: [name, target, start_s, end_s, root_cm, point_cm]
+                properties:
+                  name: {type: string, pattern: "^PA250Warp[0-9]+$"}
+                  target: {enum: [FrontLedge, BackLedge, BackFloor]}
+                  start_s: {type: number, minimum: 0}
+                  end_s: {type: number, minimum: 0}
+                  root_cm: {$ref: "#/definitions/triple"}
+                  point_cm:
+                    oneOf: [{type: "null"}, {$ref: "#/definitions/triple"}]
+            approach:
+              type: array
+              minItems: 2
+              items: {type: array, minItems: 2, maxItems: 2, items: {type: number}}
+  source_rigs:
+    type: object
+    description: >-
+      The skeletons a dropped clip may be on. soldier is the game's own (no retarget). Any other
+      needs a skeletal mesh on that skeleton and a retargeter from it to the soldier; both must be
+      on disk, or the importer refuses the file.
+    required: [soldier]
+    propertyNames: {pattern: "^[a-z0-9_]+$"}
+    additionalProperties:
+      type: object
+      additionalProperties: false
+      required: [mesh, retargeter]
+      properties:
+        note: {type: string}
+        mesh: {$ref: "#/definitions/package"}
+        retargeter:
+          oneOf: [{type: "null"}, {$ref: "#/definitions/package"}]
+  clips:
+    type: object
+    propertyNames: {pattern: "^[a-z0-9_]+$"}
+    additionalProperties:
+      type: object
+      additionalProperties: false
+      required: [group, asset, placeholder, shows, loop]
+      properties:
+        group:
+          enum: [loading_drill, gun_crew, rowing, rout, surrender, crawl, drummer, ensign, locomotion, traversal]
+        asset:
+          description: "The imported clip, or null: the placeholder shows."
+          oneOf: [{type: "null"}, {$ref: "#/definitions/package"}]
+        placeholder:
+          description: >-
+            What stands in while there is no clip. procedural: a pose made in code. locomotion: the
+            ordinary movement clips. none: nothing is acted.
+          enum: [procedural, locomotion, none]
+        shows: {type: string, minLength: 8, description: "In plain words, what the player sees today in place of the clip."}
+        loop: {type: boolean}
+        stage: {enum: [prime_pan, ram_charge, shoulder_aim, miss_delay, jammed]}
+        stance: {enum: [stand, kneel]}
+        wired:
+          type: boolean
+          description: "True when the battle plays this name once it has an asset. False: registered and importable, but nothing plays it yet."
+        source:
+          type: object
+          additionalProperties: false
+          required: [file, rig, sha1, local]
+          properties:
+            file: {type: string}
+            rig: {type: string, pattern: "^[a-z0-9_]+$"}
+            sha1: {type: string, pattern: "^[0-9a-f]{40}$"}
+            local: {type: boolean, description: "True: the asset is under /Game/PA250/Anim/Local, which git ignores (a clip whose terms keep it on this machine)."}

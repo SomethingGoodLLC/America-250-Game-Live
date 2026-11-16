@@ -1,0 +1,66 @@
+{
+ "name": "drill_clip_names",
+ "description": "the clip name for each stage of the active reload (RF/ActiveReloadSequencer EActiveReloadPhase), standing and kneeling; no name when nothing is being loaded",
+ "cases": [
+  {
+   "phase": "PrimePan",
+   "kneel": false,
+   "name": "reload_stand_prime_pan"
+  },
+  {
+   "phase": "PrimePan",
+   "kneel": true,
+   "name": "reload_kneel_prime_pan"
+  },
+  {
+   "phase": "RamCharge",
+   "kneel": false,
+   "name": "reload_stand_ram_charge"
+  },
+  {
+   "phase": "RamCharge",
+   "kneel": true,
+   "name": "reload_kneel_ram_charge"
+  },
+  {
+   "phase": "ShoulderAim",
+   "kneel": false,
+   "name": "reload_stand_shoulder_aim"
+  },
+  {
+   "phase": "ShoulderAim",
+   "kneel": true,
+   "name": "reload_kneel_shoulder_aim"
+  },
+  {
+   "phase": "MissDelay",
+   "kneel": false,
+   "name": "reload_stand_miss_delay"
+  },
+  {
+   "phase": "MissDelay",
+   "kneel": true,
+   "name": "reload_kneel_miss_delay"
+  },
+  {
+   "phase": "Jammed",
+   "kneel": false,
+   "name": "reload_stand_jammed"
+  },
+  {
+   "phase": "Jammed",
+   "kneel": true,
+   "name": "reload_kneel_jammed"
+  },
+  {
+   "phase": "Idle",
+   "kneel": false,
+   "name": ""
+  },
+  {
+   "phase": "Complete",
+   "kneel": true,
+   "name": ""
+  }
+ ]
+}

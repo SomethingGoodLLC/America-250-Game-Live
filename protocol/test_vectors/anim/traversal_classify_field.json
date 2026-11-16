@@ -1,0 +1,74 @@
+{
+ "name": "traversal_classify_field",
+ "description": "the obstacles the battle levels have, by the rules in the data",
+ "rules": {
+  "hurdle_min_cm": 40,
+  "hurdle_max_height_cm": 75,
+  "vault_max_height_cm": 130,
+  "vault_max_depth_cm": 100,
+  "mantle_max_height_cm": 150,
+  "mantle_max_depth_cm": 220
+ },
+ "cases": [
+  {
+   "what": "a kerb",
+   "height_cm": 25,
+   "depth_cm": 30,
+   "action": "none"
+  },
+  {
+   "what": "a low rail",
+   "height_cm": 60,
+   "depth_cm": 15,
+   "action": "hurdle"
+  },
+  {
+   "what": "a rail fence",
+   "height_cm": 105,
+   "depth_cm": 20,
+   "action": "vault"
+  },
+  {
+   "what": "a stone wall (the levels' 1.1 m wall, 80 cm through)",
+   "height_cm": 110,
+   "depth_cm": 80,
+   "action": "vault"
+  },
+  {
+   "what": "a breastwork (120 cm high, 90 through)",
+   "height_cm": 120,
+   "depth_cm": 90,
+   "action": "vault"
+  },
+  {
+   "what": "a redoubt's bank (135 cm high, 160 through)",
+   "height_cm": 135,
+   "depth_cm": 160,
+   "action": "mantle"
+  },
+  {
+   "what": "a thick low wall",
+   "height_cm": 70,
+   "depth_cm": 150,
+   "action": "mantle"
+  },
+  {
+   "what": "a house wall",
+   "height_cm": 300,
+   "depth_cm": 30,
+   "action": "none"
+  },
+  {
+   "what": "a bank just too high",
+   "height_cm": 151,
+   "depth_cm": 60,
+   "action": "none"
+  },
+  {
+   "what": "a barn floor: low but far too deep",
+   "height_cm": 60,
+   "depth_cm": 600,
+   "action": "none"
+  }
+ ]
+}

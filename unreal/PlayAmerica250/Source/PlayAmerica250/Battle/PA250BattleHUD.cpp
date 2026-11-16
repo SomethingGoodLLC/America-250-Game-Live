@@ -1,4 +1,5 @@
 #include "PA250BattleHUD.h"
+#include "PA250HudStyle.h"
 #include "GameFramework/PlayerController.h"
 #include "InputCoreTypes.h"
 #include "Blueprint/WidgetLayoutLibrary.h"
@@ -7,6 +8,7 @@
 #include "PA250AimComponent.h"
 #include "PA250BattleGameMode.h"
 #include "PA250ControlPoint.h"
+#include "PA250FieldGun.h"
 #include "PA250WeaponTuning.h"
 #include "RFCharacter.h"
 #include "Styling/AppStyle.h"
@@ -146,6 +148,12 @@ int32 UPA250BattleHUD::NativePaint(const FPaintArgs& Args, const FGeometry& G, c
 	FSlateWindowElementList& Out, int32 LayerId, const FWidgetStyle& InWidgetStyle, bool bParentEnabled) const
 {
 	int32 Layer = Super::NativePaint(Args, G, MyCullingRect, Out, LayerId, InWidgetStyle, bParentEnabled);
+	if (const float Dirt = GetDirtAlpha(); Dirt > 0.f)
+	{
+		// Thrown earth: thick at first, clearing as it falls.
+		FSlateDrawElement::MakeBox(Out, ++Layer, G.ToPaintGeometry(), &FPA250HudStyle::Get().White, ESlateDrawEffect::None,
+			FLinearColor(0.16f, 0.11f, 0.06f, 0.75f * Dirt * Dirt));
+	}
 	const APA250BattleGameMode* GM = GameMode.Get();
 	APlayerController* PC = GetOwningPlayer();
 	if (!GM || !PC || ChromeSuppressed(GM->IsClassPickerOpen())) return Layer;
@@ -274,6 +282,13 @@ void UPA250BattleHUD::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 	HitmarkerTimer = FMath::Max(0.f, HitmarkerTimer - InDeltaTime);
 	HitTextTimer = FMath::Max(0.f, HitTextTimer - InDeltaTime);
 	DamageDirTimer = FMath::Max(0.f, DamageDirTimer - InDeltaTime);
+	DirtTimer = FMath::Max(0.f, DirtTimer - InDeltaTime);
+}
+
+void UPA250BattleHUD::ShowDirt(float Seconds)
+{
+	DirtSeconds = FMath::Max(0.1f, Seconds);
+	DirtTimer = DirtSeconds;
 }
 
 float UPA250BattleHUD::LegendFade(float /*AgeSeconds*/)
@@ -294,19 +309,16 @@ TSharedRef<SWidget> UPA250BattleHUD::RebuildWidget()
 		const APA250BattleGameMode* GM = WeakThis.IsValid() ? WeakThis->GameMode.Get() : nullptr;
 		if (!GM) return FText::GetEmpty();
 		// Post letters are painted under this bar (NativePaint).
-		// Bleed shows next to the side losing tickets for holding fewer posts.
-		auto Bleed = [GM](const TCHAR* F) {
-			const int32 B = GM->GetBleedPerInterval(F);
-			return B > 0 ? FString::Printf(TEXT(" (-%d/%.0fs)"), B, GM->BleedIntervalSeconds) : FString();
-		};
-		// The number is every man the side still has (reserve + on the field), so 0 means beaten.
-		// With the reserve gone it says so, and a breaking remnant shows its countdown.
-		auto Side = [GM, &Bleed](const TCHAR* Label, const TCHAR* F) {
-			FString S = FString::Printf(TEXT("%s %d"), Label, GM->MenRemaining(F));
+		// Men as a number; Army Resolve as the bar you watch drain (CP pressure no longer spends men).
+		auto Side = [GM](const TCHAR* Label, const TCHAR* F) {
+			const int32 Men = GM->MenRemaining(F);
+			const int32 Res = FMath::RoundToInt(GM->GetArmyResolve(F));
+			FString S = FString::Printf(TEXT("%s %d  Resolve %d"), Label, Men, Res);
 			const float Rout = GM->RemnantCountdown(F);
 			if (Rout >= 0.f) S += FString::Printf(TEXT(" left, quitting the field in %.0fs"), Rout);
-			else if (GM->TicketsRemaining(F) <= 0 && GM->MenRemaining(F) > 0) S += TEXT(" (last men)");
-			else S += Bleed(F);
+			else if (GM->TicketsRemaining(F) <= 0 && Men > 0) S += TEXT(" (last men)");
+			else if (const int32 B = GM->GetBleedPerInterval(F); B > 0)
+				S += FString::Printf(TEXT(" (−%d Resolve/%.0fs)"), B, GM->BleedIntervalSeconds);
 			// The two endings beside tickets and the clock, counted down where both sides can see them.
 			const float Broke = GM->ArmyBrokeCountdown(F);
 			if (Broke >= 0.f) S += FString::Printf(TEXT("  ARMY BREAKING %.0fs"), Broke);
@@ -369,6 +381,9 @@ TSharedRef<SWidget> UPA250BattleHUD::RebuildWidget()
 		{
 			const FString Ability = GM->GetAbilityLine(Me);
 			if (!Ability.IsEmpty()) Line += TEXT("\n") + Ability;
+			// The general: the score toward leading him, the offer, or (as him) his meter and verbs.
+			const FString HeroLine = GM->GetHeroLine(Me);
+			if (!HeroLine.IsEmpty()) Line += TEXT("\n") + HeroLine;
 			// His file: men, loaded muskets, the standing order and the order keys.
 			const FString File = GM->GetFileLine(Me);
 			if (!File.IsEmpty()) Line += TEXT("\n") + File;
@@ -392,12 +407,28 @@ TSharedRef<SWidget> UPA250BattleHUD::RebuildWidget()
 		const ARFCharacter* Me = PC ? Cast<ARFCharacter>(PC->GetPawn()) : nullptr;
 		return Me && !Me->IsDead() ? Me : nullptr;
 	};
-	auto IsReloadingBar = [MeP]() {
+	auto ServingGun = [WeakThis, MeP]() -> const APA250FieldGun* {
+		const ARFCharacter* Me = MeP();
+		const APA250BattleGameMode* GM = WeakThis.IsValid() ? WeakThis->GameMode.Get() : nullptr;
+		if (!Me || !GM) return nullptr;
+		for (APA250FieldGun* Gun : GM->GetGuns())
+		{
+			if (Gun && Gun->GetPlayerGunner() == Me) return Gun;
+		}
+		return nullptr;
+	};
+	auto IsReloadingBar = [MeP, ServingGun]() {
+		if (const APA250FieldGun* Gun = ServingGun()) return Gun->IsDrillActive();
 		const ARFCharacter* Me = MeP();
 		return Me && Me->GetEquippedFirearm() && !Me->GetEquippedFirearm()->CanFire() && !Me->GetEquippedFirearm()->IsJammed();
 	};
 
-	auto Reload = [MeP]() {
+	auto Reload = [MeP, ServingGun]() {
+		if (const APA250FieldGun* Gun = ServingGun())
+		{
+			if (Gun->IsLoaded()) return FText::FromString(TEXT("Gun loaded"));
+			return FText::FromString(FString::Printf(TEXT("Gun drill   %s"), *Gun->GetDrill().GetStepLabel()));
+		}
 		const ARFCharacter* Me = MeP();
 		if (!Me || !Me->GetEquippedFirearm()) return FText::GetEmpty();
 		if (Me->GetEquippedFirearm()->IsJammed()) return FText::FromString(TEXT("WEAPON JAMMED  -  hold R to clear"));
@@ -406,13 +437,15 @@ TSharedRef<SWidget> UPA250BattleHUD::RebuildWidget()
 		if (Me->GetEquippedFirearm()->IsReloadPaused()) return FText::FromString(TEXT("Slow down to reload"));
 		return FText::FromString(FString::Printf(TEXT("Reloading   %s"), *Me->GetEquippedFirearm()->GetReloadPhaseLabel()));
 	};
-	auto ReloadColor = [MeP]() {
+	auto ReloadColor = [MeP, ServingGun]() {
+		if (ServingGun()) return FSlateColor(FLinearColor(1.f, 0.92f, 0.65f));
 		const ARFCharacter* Me = MeP();
 		if (Me && Me->GetEquippedFirearm() && Me->GetEquippedFirearm()->IsJammed()) return FSlateColor(FLinearColor(1.f, 0.3f, 0.2f));
 		if (Me && Me->GetEquippedFirearm() && Me->GetEquippedFirearm()->CanFire()) return FSlateColor(FLinearColor(0.75f, 1.f, 0.75f));
 		return FSlateColor(FLinearColor(1.f, 0.95f, 0.7f));
 	};
-	auto ReloadHint = [MeP]() {
+	auto ReloadHint = [MeP, ServingGun]() {
+		if (ServingGun()) return FText::FromString(TEXT("Tap R on each drill step  -  full crew perfect ≈15 s  -  or wait for the crew"));
 		const ARFCharacter* Me = MeP();
 		if (!Me || !Me->GetEquippedFirearm() || Me->GetEquippedFirearm()->CanFire() || Me->GetEquippedFirearm()->IsJammed() || Me->GetEquippedFirearm()->IsDry()) return FText::GetEmpty();
 		return FText::FromString(TEXT("Tap R as the marker crosses the gold zone to load faster  -  3 perfect taps = +15% damage  -  or just wait"));
@@ -435,22 +468,30 @@ TSharedRef<SWidget> UPA250BattleHUD::RebuildWidget()
 			: H == EActiveReloadHit::Sweet ? FLinearColor(0.85f, 0.95f, 0.85f) : FLinearColor(1.f, 0.35f, 0.25f));
 	};
 	constexpr float BarW = 360.f;
-	auto Zone = [MeP, BarW](bool bPerfect) {
+	auto Zone = [MeP, ServingGun, BarW](bool bPerfect) {
+		if (const APA250FieldGun* Gun = ServingGun())
+		{
+			const float S = bPerfect ? Gun->GetDrill().GetPerfectStart() : Gun->GetDrill().GetSweetStart();
+			const float E = bPerfect ? Gun->GetDrill().GetPerfectEnd() : Gun->GetDrill().GetSweetEnd();
+			return FMargin(S * BarW, 0.f, (1.f - E) * BarW, 0.f);
+		}
 		const ARFCharacter* Me = MeP();
 		if (!Me || !Me->GetEquippedFirearm()) return FMargin(0.f);
 		const float S = bPerfect ? Me->GetEquippedFirearm()->GetPerfectStart() : Me->GetEquippedFirearm()->GetSweetStart();
 		const float E = bPerfect ? Me->GetEquippedFirearm()->GetPerfectEnd() : Me->GetEquippedFirearm()->GetSweetEnd();
 		return FMargin(S * BarW, 0.f, (1.f - E) * BarW, 0.f);
 	};
-	auto Marker = [MeP, BarW]() {
-		const ARFCharacter* Me = MeP();
-		const float P = Me && Me->GetEquippedFirearm() ? FMath::Clamp(Me->GetEquippedFirearm()->GetReloadProgress(), 0.f, 1.f) : 0.f;
+	auto Marker = [MeP, ServingGun, BarW]() {
+		float P = 0.f;
+		if (const APA250FieldGun* Gun = ServingGun()) P = FMath::Clamp(Gun->GetDrill().GetPhaseProgress(), 0.f, 1.f);
+		else if (const ARFCharacter* Me = MeP(); Me && Me->GetEquippedFirearm()) P = FMath::Clamp(Me->GetEquippedFirearm()->GetReloadProgress(), 0.f, 1.f);
 		const float L = FMath::Clamp(P * BarW - 2.f, 0.f, BarW - 4.f);
 		return FMargin(L, 0.f, BarW - L - 4.f, 0.f);
 	};
-	auto Fill = [MeP, BarW]() {
-		const ARFCharacter* Me = MeP();
-		const float P = Me && Me->GetEquippedFirearm() ? FMath::Clamp(Me->GetEquippedFirearm()->GetReloadProgress(), 0.f, 1.f) : 0.f;
+	auto Fill = [MeP, ServingGun, BarW]() {
+		float P = 0.f;
+		if (const APA250FieldGun* Gun = ServingGun()) P = FMath::Clamp(Gun->GetDrill().GetPhaseProgress(), 0.f, 1.f);
+		else if (const ARFCharacter* Me = MeP(); Me && Me->GetEquippedFirearm()) P = FMath::Clamp(Me->GetEquippedFirearm()->GetReloadProgress(), 0.f, 1.f);
 		return FMargin(0.f, 0.f, (1.f - P) * BarW, 0.f);
 	};
 
@@ -466,6 +507,7 @@ TSharedRef<SWidget> UPA250BattleHUD::RebuildWidget()
 		const float Cd = Me->MeleeComponent->GetChargeCooldownRemaining();
 		if (Cd > 0.f) return FText::FromString(FString::Printf(TEXT("Bayonet charge ready in %.1fs"), Cd));
 		if (Me->MeleeComponent->FindChargeTarget()) return FText::FromString(TEXT(">> Enemy in reach - press G to CHARGE! <<"));
+		if (Me->MeleeComponent->HasSword()) return FText::FromString(TEXT("Sword in hand - E cuts, G rushes; hold aim to draw the pistol"));
 		if (!Me->MeleeComponent->HasBayonet()) return FText::FromString(TEXT("No bayonet - E clubs with the musket, G rushes"));
 		return FText::FromString(TEXT("Bayonet charge ready  (G)"));
 	};

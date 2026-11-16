@@ -1,0 +1,59 @@
+{
+ "name": "time_band_other_rules",
+ "description": "the bands are the data's, not the code's; an hour outside 0..23 takes the default",
+ "time_bands": {
+  "dawn": [
+   [
+    5,
+    6
+   ]
+  ],
+  "day": [
+   [
+    7,
+    19
+   ]
+  ],
+  "dusk": [
+   [
+    20,
+    23
+   ],
+   [
+    0,
+    4
+   ]
+  ]
+ },
+ "default_band": "dusk",
+ "cases": [
+  {
+   "hour": 4,
+   "band": "dusk"
+  },
+  {
+   "hour": 5,
+   "band": "dawn"
+  },
+  {
+   "hour": 7,
+   "band": "day"
+  },
+  {
+   "hour": 19,
+   "band": "day"
+  },
+  {
+   "hour": 20,
+   "band": "dusk"
+  },
+  {
+   "hour": -1,
+   "band": "dusk"
+  },
+  {
+   "hour": 24,
+   "band": "dusk"
+  }
+ ]
+}

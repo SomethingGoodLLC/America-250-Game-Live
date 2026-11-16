@@ -11,7 +11,10 @@ What it makes, all under /Game/PA250/Anim (and nothing anywhere else):
                                             the soldier's mesh) and the sample's retargeter aimed at it
   Loco/<clip>                               every clip of the staged databases, on the soldier's skeleton
   MM/PSS_*, MM/PSD_*                        the schemas and databases, on the soldier's skeleton
-and the "locomotion" block of unreal/PA250Sim/data/anim_clips.json (asset paths the battle loads).
+  Traversal/<clip>, Traversal/AM_<clip>     (M2) the staged hurdle, vault and mantle clips on the soldier's
+                                            skeleton, and a montage of each with its warp windows baked
+and the "locomotion" and "traversal" blocks of unreal/PA250Sim/data/anim_clips.json (asset paths the
+battle loads; for traversal also each clip's warp windows and approach, measured by the bake).
 It never overwrites: an asset that exists is kept and reported. To rebuild, delete Content/PA250/Anim.
 The pose-search database is filled by UPA250AnimBuildLibrary (C++), which Python cannot do.
 """
@@ -85,6 +88,65 @@ def retarget(sources, folder, rtg, soldier, uefn):
     for data in made:
         eal.save_asset(str(data.package_name), only_if_is_dirty=False)
     return len(made)
+
+
+def traversal_kind(name):
+    """AM_M_Neutral_Traversal_Vault_1_0_run_F_Lfoot -> ('vault', 'run', 'l', variant)."""
+    parts = name.split('_')
+    action = next((a for a in ('hurdle', 'vault', 'mantle') if a.capitalize() in parts), None)
+    gait = next((g for g in ('run', 'walk', 'stand') if g in parts), None)
+    foot = 'l' if 'Lfoot' in parts else 'r' if 'Rfoot' in parts else None
+    return action, gait, foot, 2 if 'V2' in parts else 1
+
+
+def build_traversal(plan, rtg, soldier, uefn, old_block):
+    """Retarget the staged traversal clips and bake a soldier montage of each. Returns the registry
+    block, the count retargeted now and the count of montages. A montage already on disk is kept,
+    with the measurements the registry holds for it."""
+    folder = OUT + '/Traversal'
+    entries = plan.get('traversal') or []
+    sequences = sorted({s for e in entries for s in e['sequences']})
+    made = retarget(sequences, folder, rtg, soldier, uefn)
+    old = {c['asset']: c for c in (old_block or {}).get('clips', [])}
+    clips = []
+    for e in sorted(entries, key=lambda e: e['montage']):
+        name = name_of(e['montage'])
+        action, gait, foot, variant = traversal_kind(name)
+        if not action or not gait or not foot or len(e['sequences']) != 1:
+            problem('traversal montage %s: its name or clips are not understood' % name)
+            continue
+        clip_path = '%s/%s' % (folder, name_of(e['sequences'][0]))
+        dst = '%s/%s' % (folder, name)
+        if not eal.does_asset_exist(clip_path):
+            problem('traversal clip %s was not retargeted' % clip_path)
+            continue
+        if eal.does_asset_exist(dst):
+            if dst in old:
+                clips.append(old[dst])
+            else:
+                problem('%s exists but anim_clips.json has no measurements for it: delete it and rebuild' % dst)
+            continue
+        if VERIFY_ONLY:
+            problem('no traversal montage %s' % dst)
+            continue
+        baked = lib.build_traversal_montage(unreal.load_asset(e['montage']), unreal.load_asset(clip_path), dst)
+        if not baked:
+            problem('traversal montage %s could not be built' % dst)
+            continue
+        eal.save_asset(dst, only_if_is_dirty=False)
+        info = json.loads(baked)
+        clips.append({'asset': dst, 'action': action, 'gait': gait, 'foot': foot, 'variant': variant, 'length_s': info['length_s'],
+                      'scale': info['scale'], 'blend_out_s': info['blend_out_s'], 'windows': info['windows'], 'approach': info['approach']})
+    for c in clips:
+        data = eal.find_asset_data(c['asset'])
+        if 'SK_AMERICAN_SOLDIER_Skeleton' not in str(data.get_tag_value('Skeleton') or ''):
+            problem('%s is not on the soldier skeleton' % c['asset'])
+    block = {'retargeted_from': 'Game Animation Sample (Epic Games), UEFN mannequin, through RTG_UEFN_to_Soldier',
+             'note': 'Measured by UPA250AnimBuildLibrary::BuildTraversalMontage, in the clip\'s own space (cm: forward, right, up), soldier-sized. '
+                     'windows: where the root stands at the end of each warp window (root_cm) and, when the sample warped to a point on the obstacle, '
+                     'that point (point_cm). approach: [time_s, root forward cm]. blend_out_s: when the sample lets the clip be left for ordinary movement.',
+             'clip_folder': folder, 'clips': clips}
+    return block, made, len(clips), len(entries)
 
 
 def main():
@@ -165,19 +227,27 @@ def main():
     if wrong:
         problem('%d retargeted clips are not on the soldier skeleton' % wrong)
 
+    old_doc = json.load(open(REGISTRY, encoding='utf-8')) if os.path.exists(REGISTRY) else {}
+    traversal, traversal_made, traversal_clips, traversal_wanted = build_traversal(plan, rtg, soldier, uefn, old_doc.get('traversal'))
+    if traversal_clips != traversal_wanted:
+        problem('%d of %d traversal montages' % (traversal_clips, traversal_wanted))
+
     if not VERIFY_ONLY and not problems:
-        doc = json.load(open(REGISTRY, encoding='utf-8')) if os.path.exists(REGISTRY) else {}
+        doc = old_doc
         doc['locomotion'] = registry
+        if traversal_wanted:
+            doc['traversal'] = traversal
         with open(REGISTRY, 'w', encoding='utf-8', newline='\n') as f:
             json.dump(doc, f, indent=2)
             f.write('\n')
     report = {'verify_only': VERIFY_ONLY, 'retargeted_now': made, 'clips': len(sequences), 'clips_in_databases': clips_in_databases,
-              'databases': sum(len(v) for v in registry['databases'].values()), 'schemas': len(schemas), 'problems': problems}
+              'databases': sum(len(v) for v in registry['databases'].values()), 'schemas': len(schemas),
+              'traversal_retargeted_now': traversal_made, 'traversal_montages': traversal_clips, 'problems': problems}
     os.makedirs(SAVED, exist_ok=True)
     with open(os.path.join(SAVED, 'locomotion_build.json'), 'w', encoding='utf-8') as f:
         json.dump(report, f, indent=1)
-    unreal.log('PA250 locomotion %s: %d clips (%d retargeted now), %d databases holding %d clips, %d schemas, %d problems' % (
-        'VERIFIED' if VERIFY_ONLY else 'BUILT', len(sequences), made, report['databases'], clips_in_databases, len(schemas), len(problems)))
+    unreal.log('PA250 locomotion %s: %d clips (%d retargeted now), %d databases holding %d clips, %d schemas, %d traversal montages (%d clips retargeted now), %d problems' % (
+        'VERIFIED' if VERIFY_ONLY else 'BUILT', len(sequences), made, report['databases'], clips_in_databases, len(schemas), traversal_clips, traversal_made, len(problems)))
 
 
 main()

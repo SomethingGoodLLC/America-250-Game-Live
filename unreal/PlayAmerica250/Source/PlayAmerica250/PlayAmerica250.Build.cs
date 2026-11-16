@@ -43,6 +43,10 @@ public class PlayAmerica250 : ModuleRules
 		PrivateDependencyModuleNames.AddRange(new string[] { "ImageWrapper", "AnimationCore", "AudioCapture", "AudioCaptureCore", "MoviePlayer" });
 		// Motion-matched locomotion (RF/PA250AnimNode_Locomotion): the engine pose search and its blend stack.
 		PrivateDependencyModuleNames.AddRange(new string[] { "PoseSearch", "BlendStack", "Chooser", "AnimGraphRuntime" });
+		// Automatic traversal (Battle/PA250TraversalComponent): the engine warps the vault clips onto the obstacle.
+		PrivateDependencyModuleNames.Add("MotionWarping");
+		// The battle's camera shake (Battle/PA250Intensity): the engine's noise shake pattern.
+		PrivateDependencyModuleNames.Add("EngineCameras");
 		PublicIncludePaths.Add("PlayAmerica250/Campaign");
 		PublicIncludePaths.Add("PlayAmerica250/Battle");
 		PublicIncludePaths.Add("PlayAmerica250/Diplomacy");

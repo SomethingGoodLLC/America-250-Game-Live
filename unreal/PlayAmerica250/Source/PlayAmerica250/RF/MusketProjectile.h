@@ -31,6 +31,11 @@ public:
 	/** Class kit: 2 = damage falls off over twice the distance (a rifle). */
 	float RangeScale = 1.f;
 
+	/** Canister: scale Damage by distance flown. 0 end means unused (musket balls). */
+	float FalloffStartCm = 0.f;
+	float FalloffEndCm = 0.f;
+	float FalloffFloor = 0.25f;
+
 	FVector SpawnLocation = FVector::ZeroVector;
 	FVector PrevLocation = FVector::ZeroVector;
 	bool bHavePrev = false;

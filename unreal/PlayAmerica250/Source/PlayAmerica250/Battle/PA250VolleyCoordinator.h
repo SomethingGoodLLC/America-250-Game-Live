@@ -92,6 +92,17 @@ public:
 	void Init(APA250BattleGameMode* InGM);
 	void Tick(float DeltaSeconds);
 	void NotifyShot(ARFCharacter* Shooter, const FVector& Dir, bool bHit);
+	/** Anim notify hook: fire this man's pending volley shot on the recoil frame (no-op until clips arrive). */
+	void NotifyVolleyDischarge(ARFCharacter* Shooter);
+	/** Pure: one man's stage jitter in seconds, in [0, MaxMs] ms. It replaces VolleyShotDelay's
+	 *  jitter (the two are never added). Keyed by squad, volley and place in the line, so it does
+	 *  not depend on where an actor happens to sit in memory. */
+	static float StageJitterSeconds(int32 SquadId, int32 VolleyEpoch, int32 OrderFromRight, float MaxMs);
+	/** Pure: a pending shot's whole offset from the word of command (rolling file delay + stage jitter). */
+	static float VolleyTotalOffset(int32 SquadId, int32 VolleyEpoch, int32 OrderFromRight, float RollingFileSeconds, float MaxMs)
+	{
+		return VolleyShotDelay(OrderFromRight, RollingFileSeconds, 0.f, 0.f) + StageJitterSeconds(SquadId, VolleyEpoch, OrderFromRight, MaxMs);
+	}
 
 	FString GetCallout() const;
 	int32 GetVolleyCount() const { return VolleyCount; }
@@ -144,6 +155,30 @@ public:
 	 *  volleys now (it has a contact beyond charge range and loaded muskets) or charges (contact in
 	 *  charge range). Returns "volley", "charge" or an empty string when no squad could obey. */
 	FString OrderNearestLine(FName Faction, const FVector& Where, float RadiusCm, bool bAllowVolley, bool bAllowCharge);
+	// ---- The played general's verbs (M5; every value is the persons data's hero block) ----
+	/** Every routing squad of the side within RadiusCm of Where starts to rally. Returns how many. */
+	int32 RallyAllRouting(FName Faction, const FVector& Where, float RadiusCm);
+	/** hold_fast: for Seconds, fire and losses weigh Scale times as much on the side's squads within
+	 *  RadiusCm of Where. Returns the squads it reached (the same for the three below). */
+	int32 HeroHoldFast(FName Faction, const FVector& Where, float RadiusCm, float Seconds, float Scale);
+	/** charge: every line within RadiusCm that can obey (steady or shaken, an enemy in front, inside
+	 *  charge range) goes in with the bayonet; for Seconds the blows of every squad within RadiusCm
+	 *  are Scale times as heavy. OutCharging: how many went in. */
+	int32 HeroCharge(FName Faction, const FVector& Where, float RadiusCm, float Seconds, float Scale, int32& OutCharging);
+	/** steady: the squads within RadiusCm shake off Share of what they have suffered; a shaken one stands steady again. */
+	int32 HeroSteady(FName Faction, const FVector& Where, float RadiusCm, float Share);
+	/** quick_step: for Seconds the men of the squads within RadiusCm move Scale times as fast. */
+	int32 HeroQuickStep(FName Faction, const FVector& Where, float RadiusCm, float Seconds, float Scale);
+	/** A man's pace under quick_step (1 when his squad has none). */
+	float SpeedScaleFor(const ARFCharacter* Soldier) const;
+	/** An event's shout (battle_feel.json intensity.shouts: charge, rout, officer_down, colours_taken),
+	 *  unless the same event was shouted for that side inside its cooldown. True when it was given. */
+	bool ShoutEvent(FName Event, FName Faction, const FVector& Where);
+	int32 ShoutEventCount(FName Event) const { return ShoutEventCounts.FindRef(Event); }
+	/** The share of a side's squads (with a man standing) that are steady: 1 when it has none. */
+	float SteadyShare(FName Faction) const;
+	/** A side's squads that are routing now. */
+	int32 CountRouting(FName Faction) const;
 	/** Is this man's squad routing (a dragoon may take him)? */
 	bool IsRouting(const ARFCharacter* Soldier) const;
 	/** How often a verb or morale change has happened ("british.VolleyShock", "continental.Rallied"...). */
@@ -293,6 +328,13 @@ private:
 		 *  the squad stays there instead of going out after a post the enemy has taken (a garrison
 		 *  that sallied from its works was shot down in the open: works matchup, 2026-11-14). */
 		TWeakObjectPtr<APA250ControlPoint> WorksPost;
+		// The played general's verbs (M5), each until its time:
+		float HeroPressureScale = 1.f;   // hold_fast: fire and losses weigh this much
+		float HeroPressureUntil = -1000.f;
+		float HeroBlowScale = 1.f;       // charge: the men's blows are this much heavier
+		float HeroBlowUntil = -1000.f;
+		float HeroSpeedScale = 1.f;      // quick_step: the men's pace
+		float HeroSpeedUntil = -1000.f;
 		// A led squad: who leads it, what he ordered and where, and where he is aiming.
 		TWeakObjectPtr<ARFCharacter> Leader;
 		EPA250SquadOrder Order = EPA250SquadOrder::None;
@@ -321,6 +363,8 @@ private:
 	void ShoutNearListener(const TCHAR* Key, const TCHAR* Text);
 	void CancelVolleyOrders(FSquad& Sq, const TCHAR* Reason);
 	FSquad* FindSquad(int32 SquadId);
+	/** Where a squad's living men are (their mean place). False when none stands. */
+	static bool SquadCentre(const FSquad& Sq, FVector& OutCentre);
 	/** Regular's verb: a volley of enough muskets shakes the squad it was fired on. */
 	void ApplyVolleyShock(int32 TargetSquadId, FName ByFaction);
 	/** Grenadier's verb: a charge that reaches a squad forces its rout check. */
@@ -338,11 +382,15 @@ private:
 	ARFCharacter* EnemyNear(FName Faction, const FVector& Point, float RadiusCm) const;
 	void SetOrder(FSquad& Sq, EPA250SquadOrder Order, const ARFCharacter* Giver, const FVector& AimPoint, float Until);
 	void TickPendingVolley(FSquad& Sq);
+	/** Fire one pending shot if it is still good (epoch, alive, lane). The caller has removed it. */
+	void FirePendingShot(FSquad& Sq, const FPendingVolleyShot& P);
 	void DischargeOne(ARFCharacter* Shooter, ARFCharacter* Enemy, const FVector& AimAt);
 	TArray<FSquad> Squads;
 	float SquadRebuildTimer = 0.f;
 	int32 NextSquadId = 0;
 	TMap<FString, int32> MoraleTransitions;
+	TMap<FString, float> LastShoutEventAt;   // "<event>.<faction>"
+	TMap<FName, int32> ShoutEventCounts;
 	TArray<FVector> CoverAnchors;          // tagged wall segments (PA250Cover) in the level
 	TArray<FVector> WorkAnchors;           // standing field works (PA250FieldWork that give cover)
 	TMap<FName, FVector> ColoursFlying;    // a side's colours while they are carried

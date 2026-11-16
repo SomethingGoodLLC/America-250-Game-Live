@@ -272,6 +272,16 @@ PA250BattleCards::FAfter PA250BattleCards::AfterBattle(const pa250::BattleReport
 		A.Notes.Add(FString::Printf(TEXT("Units out of the ranks: yours %d, the enemy's %d (men short of a whole unit are carried to the next battle)"), MineOut, TheirsOut));
 	}
 	if (Report.personal_kills > 0) A.Notes.Add(FString::Printf(TEXT("By your own hand: %s"), *Plural(Report.personal_kills, TEXT("man"), TEXT("men"))));
+	if (bMen)
+	{
+		// Start → end (−losses): end is start minus men who left; invariant is tickets, shown here as men.
+		const int32 MineLoss = MineDown.killed + MineDown.wounded + MineDown.prisoners;
+		const int32 TheirsLoss = TheirsDown.killed + TheirsDown.wounded + TheirsDown.prisoners;
+		A.Notes.Add(FString::Printf(TEXT("Men in the field (yours): losses −%d (killed %d, wounded %d, taken %d)"),
+			MineLoss, MineDown.killed, MineDown.wounded, MineDown.prisoners));
+		A.Notes.Add(FString::Printf(TEXT("Men in the field (%s): losses −%d (killed %d, wounded %d, taken %d)"),
+			*FactionName(Theirs), TheirsLoss, TheirsDown.killed, TheirsDown.wounded, TheirsDown.prisoners));
+	}
 	return A;
 }
 

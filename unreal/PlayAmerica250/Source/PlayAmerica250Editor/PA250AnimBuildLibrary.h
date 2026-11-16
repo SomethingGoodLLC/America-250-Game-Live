@@ -4,6 +4,8 @@
 #include "Kismet/BlueprintFunctionLibrary.h"
 #include "PA250AnimBuildLibrary.generated.h"
 
+class UAnimMontage;
+class UAnimSequence;
 class UPoseSearchDatabase;
 class UPoseSearchSchema;
 class USkeleton;
@@ -32,6 +34,23 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "PA250|Animation")
 	static UPoseSearchDatabase* BuildDatabase(UPoseSearchDatabase* Source, UPoseSearchSchema* Schema, const FString& ClipFolder,
 		const FString& OutPackagePath, TArray<FString>& OutMissing);
+
+	/**
+	 * A soldier copy of one of the sample's traversal montages at OutPackagePath (a new package; an
+	 * existing one is refused): the same span of SoldierClip (the retargeted sequence), and only the
+	 * motion-warping windows kept (the sample's other notifies name its own Blueprints). The sample
+	 * warps to a bone, `attach`, that the soldier's skeleton lacks; here each window is given a warp
+	 * target name of its own (PA250Warp0, 1, ...) with no warp point, and where the root stands
+	 * against the sample's point at the window's end is measured and returned, so the battle can
+	 * place each target itself.
+	 * Returns JSON (empty on failure): length_s, scale (soldier root travel over the sample's),
+	 * blend_out_s (when the sample lets the clip be left for ordinary movement),
+	 * windows[] {name, target, start_s, end_s, root_cm [forward, right, up], point_cm or null} and
+	 * approach[] [time_s, root forward cm], all in the clip's own space, soldier-sized.
+	 * The caller saves the asset.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "PA250|Animation")
+	static FString BuildTraversalMontage(UAnimMontage* Source, UAnimSequence* SoldierClip, const FString& OutPackagePath);
 
 	/** The clips a database holds, as object paths (for checks). */
 	UFUNCTION(BlueprintCallable, Category = "PA250|Animation")

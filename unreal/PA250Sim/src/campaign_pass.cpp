@@ -1806,6 +1806,10 @@ CommanderRules commander_rules() {
     r.fate_wounded = g_cp_prules.fate_wounded;
     r.fate_killed = g_cp_prules.fate_killed;
     r.fate_captured = g_cp_prules.fate_captured;
+    r.wounded_days = g_cp_prules.wounded_days;
+    r.army_morale_on_fall = g_cp_prules.army_morale_on_fall;
+    r.army_morale_on_fall_victory = g_cp_prules.army_morale_on_fall_victory;
+    r.detachment_unit_cap = g_cp_prules.detachment_unit_cap;
     return r;
 }
 

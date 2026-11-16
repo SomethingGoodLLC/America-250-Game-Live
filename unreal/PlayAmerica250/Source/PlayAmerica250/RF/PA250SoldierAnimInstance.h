@@ -133,6 +133,8 @@ struct FPA250SoldierAnimProxy : public FAnimInstanceProxy
 	static float CrossfadeAlpha(float Elapsed, float Seconds);
 	/** Pure: one bone between the old clip's pose and the new one's (shortest way round, normalized). */
 	static FTransform BlendBone(const FTransform& Old, const FTransform& New, float Alpha);
+	/** Pure: which bones of this bone set an upper-body clip takes: UpperRoot and everything below it. Empty when the set lacks it. */
+	static void UpperBodyMask(const FBoneContainer& Bones, FName UpperRoot, TArray<bool>& OutMask);
 
 protected:
 	virtual void Initialize(UAnimInstance* InAnimInstance) override;
@@ -170,6 +172,17 @@ private:
 	FPA250SupportHandTarget Hand;
 	FPA250MeleePose Melee;
 	FPA250MountedAim MountedAim;
+	/** A clip over the upper body (the loading drill's), and which bones that is for this bone set. */
+	const UAnimSequence* UpperClip = nullptr;
+	double UpperTime = 0.0;
+	float UpperWeight = 0.f;
+	bool bUpperLoop = false;
+	TArray<bool> UpperMask;
+	int32 UpperMaskSerial = -1;
+	/** Over an obstacle: the traversal clip over everything else, by its montage's weight. */
+	const UAnimSequence* TraversalClip = nullptr;
+	double TraversalTime = 0.0;
+	float TraversalWeight = 0.f;
 };
 
 /** Native body anim for the period soldier: one looping locomotion clip (cross-faded when it changes), the melee pose layer and the support-hand IK. */
@@ -198,6 +211,25 @@ public:
 	/** Game thread. Full quality: motion matching over these databases (what the gait asks for).
 	 *  An empty list, or bFull false, leaves the soldier on the cheap path. */
 	void SetFullQuality(bool bInFull, const TArray<UPoseSearchDatabase*>& InDatabases, float InSearchThrottleSeconds);
+	/** Game thread. Over an obstacle (Battle/PA250TraversalComponent): the montage's clip, where it
+	 *  stands and how much of it shows. The montage moves the capsule; the pose is sampled in the proxy. */
+	void SetTraversal(UAnimSequence* InClip, float InTime, float InWeight)
+	{
+		TraversalClip = InClip;
+		TraversalTime = InTime;
+		TraversalWeight = InClip ? FMath::Clamp(InWeight, 0.f, 1.f) : 0.f;
+	}
+	const UAnimSequence* GetTraversalClip() const { return TraversalClip; }
+	/** Game thread. A clip over the upper body (spine_01 and above) at a given time, by weight: the
+	 *  loading drill's registered clip, scrubbed by the stage's progress (Battle/PA250AnimClips).
+	 *  A clip on another skeleton is refused. */
+	void SetUpperBodyClip(UAnimSequence* InClip, float InTime, float InWeight, bool bInLoop);
+	const UAnimSequence* GetUpperBodyClip() const { return UpperClip; }
+	float GetUpperBodyTime() const { return UpperTime; }
+	float GetUpperBodyWeight() const { return UpperWeight; }
+	bool GetUpperBodyLoop() const { return bUpperLoop; }
+	float GetTraversalTime() const { return TraversalTime; }
+	float GetTraversalWeight() const { return TraversalWeight; }
 	bool WantsFullQuality() const { return bFullQuality; }
 	const TArray<TObjectPtr<UPoseSearchDatabase>>& GetLocomotionDatabases() const { return LocomotionDatabases; }
 	float GetSearchThrottleSeconds() const { return SearchThrottleSeconds; }
@@ -220,6 +252,16 @@ protected:
 private:
 	UPROPERTY(Transient)
 	TObjectPtr<UAnimSequence> Locomotion;
+	UPROPERTY(Transient)
+	TObjectPtr<UAnimSequence> TraversalClip;
+	UPROPERTY(Transient)
+	TObjectPtr<UAnimSequence> UpperClip;
+	float UpperTime = 0.f;
+	float UpperWeight = 0.f;
+	bool bUpperLoop = false;
+	bool bUpperRefusedLogged = false;
+	float TraversalTime = 0.f;
+	float TraversalWeight = 0.f;
 	/** Kept alive here while the anim thread searches them. */
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<UPoseSearchDatabase>> LocomotionDatabases;

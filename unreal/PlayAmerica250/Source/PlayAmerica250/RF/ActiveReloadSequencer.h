@@ -44,6 +44,12 @@ struct FActiveReloadTuningPlain
 	bool bMissResumesProgress = false;
 	/** Preset mode: after one fumble in a step, further early presses in that step are ignored (no mash penalty). */
 	bool bIgnoreRepeatMiss = false;
+	/**
+	 * Artillery pass: when > 0, use CustomStepSeconds (N steps) instead of the three musket phases.
+	 * Musket keeps CustomStepSeconds empty → exact 3-phase path (regression guard).
+	 */
+	TArray<float> CustomStepSeconds;
+	TArray<FString> CustomStepLabels;
 };
 
 struct FActiveReloadStats
@@ -86,14 +92,22 @@ public:
 	float PeekDamageBonus() const { return PendingDamageBonus; }
 	const FActiveReloadStats& GetStats() const { return Stats; }
 	FString PhaseLabel() const;
+	/** Current custom step index when using CustomStepSeconds; else maps 3-phase to 0..2. */
+	int32 GetStepIndex() const { return PhasesCompleted; }
+	int32 GetStepCount() const;
+	FString GetStepLabel() const;
+	bool UsesCustomSteps() const { return Tuning.CustomStepSeconds.Num() > 0; }
 
 private:
 	float PhaseDuration(EActiveReloadPhase P) const;
+	float CurrentStepDuration() const;
 	void AdvanceAfterHit(EActiveReloadHit Hit, FRandomStream* JamRng);
 	void EnterPhase(EActiveReloadPhase P);
+	void EnterCustomStep(int32 Index);
 	void GoToNextCombatPhase();
 	void FinishReload();
 	EActiveReloadHit Classify(float Progress01) const;
+	int32 RequiredPhases() const;
 
 	FActiveReloadTuningPlain Tuning;
 	EActiveReloadPhase Phase = EActiveReloadPhase::Idle;

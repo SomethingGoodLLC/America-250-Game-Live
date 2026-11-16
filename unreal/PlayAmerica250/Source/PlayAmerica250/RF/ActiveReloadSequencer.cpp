@@ -13,6 +13,53 @@ void FActiveReloadSequencer::Reset()
 	ResumePhase = EActiveReloadPhase::PrimePan;
 }
 
+int32 FActiveReloadSequencer::RequiredPhases() const
+{
+	return UsesCustomSteps() ? Tuning.CustomStepSeconds.Num() : 3;
+}
+
+int32 FActiveReloadSequencer::GetStepCount() const
+{
+	return RequiredPhases();
+}
+
+FString FActiveReloadSequencer::GetStepLabel() const
+{
+	if (UsesCustomSteps() && IsReloading() && !IsJammed()
+		&& Phase != EActiveReloadPhase::MissDelay && Tuning.CustomStepLabels.IsValidIndex(PhasesCompleted))
+	{
+		return Tuning.CustomStepLabels[PhasesCompleted];
+	}
+	return PhaseLabel();
+}
+
+float FActiveReloadSequencer::CurrentStepDuration() const
+{
+	if (UsesCustomSteps() && Tuning.CustomStepSeconds.IsValidIndex(PhasesCompleted))
+	{
+		return Tuning.CustomStepSeconds[PhasesCompleted];
+	}
+	return PhaseDuration(Phase);
+}
+
+void FActiveReloadSequencer::EnterCustomStep(int32 Index)
+{
+	PhasesCompleted = Index;
+	// Cycle the three combat phases so a step change is visible to anything that
+	// keys off GetPhase (musket sounds, anim). Index >= 2 used to stay on ShoulderAim,
+	// so steps 3–6 never announced themselves.
+	switch (Index % 3)
+	{
+	case 1: Phase = EActiveReloadPhase::RamCharge; break;
+	case 2: Phase = EActiveReloadPhase::ShoulderAim; break;
+	default: Phase = EActiveReloadPhase::PrimePan; break;
+	}
+	ResumePhase = Phase;
+	PhaseTime = 0.f;
+	PhaseLen = CurrentStepDuration() * SpeedScale;
+	if (PhaseLen < 0.05f) PhaseLen = 0.05f;
+}
+
 void FActiveReloadSequencer::BeginReload()
 {
 	PerfectHits = 0;
@@ -22,7 +69,8 @@ void FActiveReloadSequencer::BeginReload()
 	JamHold = 0.f;
 	ResumeTime = 0.f;
 	bMissedInPhase = false;
-	EnterPhase(EActiveReloadPhase::PrimePan);
+	if (UsesCustomSteps()) EnterCustomStep(0);
+	else EnterPhase(EActiveReloadPhase::PrimePan);
 }
 
 float FActiveReloadSequencer::PhaseDuration(EActiveReloadPhase P) const
@@ -97,6 +145,12 @@ void FActiveReloadSequencer::GoToNextCombatPhase()
 {
 	bMissedInPhase = false;
 	ResumeTime = 0.f;
+	if (UsesCustomSteps())
+	{
+		if (PhasesCompleted >= RequiredPhases()) FinishReload();
+		else EnterCustomStep(PhasesCompleted);
+		return;
+	}
 	if (PhasesCompleted <= 0)
 	{
 		EnterPhase(EActiveReloadPhase::PrimePan);
@@ -117,9 +171,8 @@ void FActiveReloadSequencer::GoToNextCombatPhase()
 
 void FActiveReloadSequencer::FinishReload()
 {
-	if (PerfectHits >= 3)
+	if (PerfectHits >= RequiredPhases())
 	{
-		// Perfect path already applied SpeedScale during phases; grant bonus.
 		PendingDamageBonus = Tuning.PerfectDamageBonus;
 	}
 	EnterPhase(EActiveReloadPhase::Complete);
@@ -133,7 +186,7 @@ void FActiveReloadSequencer::AdvanceAfterHit(EActiveReloadHit Hit, FRandomStream
 		++Stats.Perfect;
 		++PerfectHits;
 		++PhasesCompleted;
-		SpeedScale = FMath::Lerp(1.f, Tuning.PerfectReloadScale, PerfectHits / 3.f);
+		SpeedScale = FMath::Lerp(1.f, Tuning.PerfectReloadScale, PerfectHits / float(FMath::Max(1, RequiredPhases())));
 		break;
 	case EActiveReloadHit::Sweet:
 		++Stats.Sweet;
@@ -158,9 +211,10 @@ void FActiveReloadSequencer::AdvanceAfterHit(EActiveReloadHit Hit, FRandomStream
 		return;
 	}
 
-	if (PhasesCompleted >= 3)
+	const int32 Need = RequiredPhases();
+	if (PhasesCompleted >= Need)
 	{
-		if (PerfectHits >= 3)
+		if (PerfectHits >= Need)
 		{
 			SpeedScale = Tuning.PerfectReloadScale;
 			PendingDamageBonus = Tuning.PerfectDamageBonus;
@@ -184,7 +238,8 @@ void FActiveReloadSequencer::Tick(float DeltaSeconds)
 	{
 		if (PhaseTime >= PhaseLen)
 		{
-			EnterPhase(ResumePhase);
+			if (UsesCustomSteps()) EnterCustomStep(PhasesCompleted);
+			else EnterPhase(ResumePhase);
 			PhaseTime = ResumeTime;
 		}
 		return;
@@ -195,7 +250,7 @@ void FActiveReloadSequencer::Tick(float DeltaSeconds)
 		{
 			// Base path: no press is a normal, unhurried reload (no stat, no bonus, no jam roll).
 			++PhasesCompleted;
-			if (PhasesCompleted >= 3) FinishReload();
+			if (PhasesCompleted >= RequiredPhases()) FinishReload();
 			else GoToNextCombatPhase();
 			return;
 		}
@@ -255,7 +310,8 @@ bool FActiveReloadSequencer::TryClearJam(bool bHolding, float DeltaSeconds)
 	if (JamHold >= Tuning.JamClearHoldSeconds)
 	{
 		JamHold = 0.f;
-		EnterPhase(ResumePhase);
+		if (UsesCustomSteps()) EnterCustomStep(PhasesCompleted);
+		else EnterPhase(ResumePhase);
 		PhaseTime = ResumeTime;
 		return true;
 	}

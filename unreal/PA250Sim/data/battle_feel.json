@@ -43,5 +43,80 @@
     "ram_left_hand_height_cm": 108,
     "ram_left_hand_max_slide_cm": 85
   },
+  "traversal": {
+    "note": "Automatic traversal (GAME INVENTION). A man sprinting at a wall, fence or field work goes over it with no key pressed: a hurdle over something low, a vault with a hand on something chest high, a mantle onto and over something deeper or higher. Anything taller than mantle_max_height_cm, or deeper than mantle_max_depth_cm, cannot be crossed and stays cover. Heights are from the ground the man stands on; depth is through the obstacle along his run. Bots cross at links placed every bot_link_spacing_m along a crossable obstacle.",
+    "min_speed_cm_s": 500,
+    "detect_distance_cm": 140,
+    "max_approach_angle_deg": 40,
+    "check_hz": 15,
+    "hurdle_min_cm": 40,
+    "hurdle_max_height_cm": 75,
+    "vault_max_height_cm": 130,
+    "vault_max_depth_cm": 100,
+    "mantle_max_height_cm": 150,
+    "mantle_max_depth_cm": 220,
+    "capsule_half_height_cm": 36,
+    "landing_clear_cm": 70,
+    "start_lead_seconds": 0.25,
+    "cooldown_seconds": 0.5,
+    "bot_link_spacing_m": 6,
+    "bot_link_cost": 3.0,
+    "bot_stagger_seconds": 0.4,
+    "formation_error_max_cm": 400
+  },
+  "movement": {
+    "note": "The player's movement and camera (GAME INVENTION). Before 2026-11-15 these were constants in RFCharacter and engine defaults: acceleration 2048, braking 2048, turn rate 360, camera lag 10, still after a shot 0.6 s (DA_WeaponTuning FireStillSeconds, no longer read for this), mouse smoothing on. walk and sprint speed are unchanged.",
+    "walk_speed_cm": 450,
+    "sprint_speed_cm": 650,
+    "max_acceleration": 1800,
+    "braking_deceleration": 2000,
+    "rotation_rate_yaw_deg": 540,
+    "camera_lag_speed": 14,
+    "fire_lock_seconds": 0.35,
+    "mouse_smoothing": false
+  },
+  "input": {
+    "note": "Buffered input (GAME INVENTION). A press that cannot be acted on at once (he is held still after a shot, mid-thrust, over a wall) is remembered for its window and acted on the moment it can be; older than the window it is dropped. vault: the jump key asks for a traversal at any speed for this long.",
+    "buffer_seconds": {"fire": 0.25, "reload": 0.4, "vault": 0.3, "order": 0.5, "thrust": 0.3}
+  },
+  "intensity": {
+    "note": "How hard the battle presses on the player (GAME INVENTION). Before 2026-11-15 the near miss's 5 m and 8 m and its 2 degree start were constants in MusketProjectile, and the fallen's 24 and 45 s were console variables only (pa250.MaxCorpses, pa250.CorpseSeconds still override). The rest is new.",
+    "near_miss": {
+      "radius_cm": 500,
+      "min_shot_distance_cm": 800,
+      "fov_punch_deg": 2,
+      "flinch": 0.15,
+      "shake_scale": 0.4,
+      "crack_bank": "ball_crack"
+    },
+    "round_shot": {
+      "shake_inner_m": 6,
+      "shake_outer_m": 30,
+      "shake_scale": 1.0,
+      "dirt_radius_m": 8,
+      "dirt_seconds": 2.5
+    },
+    "shake": {
+      "seconds": 0.35,
+      "location_cm": 1.2,
+      "rotation_deg": 0.6,
+      "frequency_hz": 18
+    },
+    "shouts": {
+      "charge": {"key": "charge_b", "text": "At them, boys! Charge!", "cooldown_seconds": 8},
+      "rout": {"key": "breaking", "text": "The line is breaking - run!", "cooldown_seconds": 8},
+      "officer_down": {"key": "officer_down", "text": "The officer is down!", "cooldown_seconds": 8},
+      "colours_taken": {"key": "colours_taken", "text": "They have our colours!", "cooldown_seconds": 8}
+    },
+    "corpses": {"max": 24, "seconds": 45, "freeze_after_seconds": 4},
+    "music": {
+      "note": "Layers of one piece, started together and kept in step; each layer's loudness follows how the day is going for the player's side. Intensity = morale_weight x (share of his squads not steady) + ticket_weight x (share of his reserve spent), 0 to 1. A layer is silent below `from`, full at `full`, and rises evenly between; a layer whose from and full are both 0 always plays.",
+      "layers": [{"bank": "music_battle_low", "from": 0.0, "full": 0.0}, {"bank": "music_battle_mid", "from": 0.25, "full": 0.5}, {"bank": "music_battle_high", "from": 0.6, "full": 0.85}],
+      "fade_seconds": 2,
+      "morale_weight": 0.6,
+      "ticket_weight": 0.4,
+      "volume": 0.5
+    }
+  },
   "verify": {"frame_time_margin_pct": 10}
 }
