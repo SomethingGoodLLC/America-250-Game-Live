@@ -10,8 +10,18 @@
     "soldiers_per_unit": 4
   },
   "casualties": {
-    "note": "A battle reports its casualties in men. Of the men shot or bayoneted down, wounded_pct_of_fallen in a hundred are wounded and the rest killed (rounded half up, a class at a time); men who surrendered are prisoners, and a man a surgeon reached in time is wounded whatever this ratio says. The campaign takes whole units (soldiers_per_unit men) out of the ranks and keeps the men left over on the army for the next battle.",
+    "note": "A battle reports its casualties in men. The Unreal battle records killed or wounded on each event (Artillery pass 2026-11); CasualtiesFromLedger sums those. wounded_pct_of_fallen remains for sim auto_resolve_battle / split_fallen only (tests and pa250sim_tool). Men who surrendered are prisoners. The campaign takes whole units (soldiers_per_unit men) out of the ranks and keeps the men left over on the army for the next battle.",
     "wounded_pct_of_fallen": 60
+  },
+  "resolve": {
+    "note": "GAME INVENTION (Artillery pass 2026-11). Per-side Army Resolve 100 to 0. CP post deficit drains Resolve (not tickets). Casualties, officer/colours/cannon shocks drain it; a majority of posts recovers it slowly. At 0 the side breaks (end_reason army_broke). Tickets equal men: one man leaving (kia/wia/pow) spends one ticket.",
+    "start": 100,
+    "drain_per_bleed_unit": 2.0,
+    "casualty_scale": 40.0,
+    "officer_shock": 8.0,
+    "colours_shock": 10.0,
+    "cannon_shock": 3.0,
+    "majority_recover_per_second": 0.35
   },
   "rounds": {
     "note": "One cartridge in a town magazine is a bundle of rounds_per_cartridge rounds. Every army carries its own rounds (Army.rounds_per_man in the save): a full box is carried_per_man. The boxes pay for what the army fires and they fill only while the army stands in a town its side holds, charged to that town's magazine, never above carried_per_man. A side fighting in a town it holds also has that magazine at hand: it opens with the magazine shared among its men when that is more than the boxes hold (up to max_per_man), and the magazine is charged for its shots before the boxes are. A column has only its boxes. No side opens with fewer than min_per_man. A beaten army that quits the field leaves defeat_drop_pct of its boxes behind, rout_drop_pct when it routed or broke (end_reason routed, army_broke), rounded up to a whole round a man; the winner's men fill their boxes from what was dropped.",
@@ -150,19 +160,31 @@
     "elevation_min_deg": -5.0,
     "elevation_max_deg": 15.0,
     "elevation_deg_per_second": 6.0,
+    "quoin_steps": 21,
+    "shot_gravity_cm": 980.0,
+    "shot_drag_k": 0.00074,
     "round_shot_range_m": 350.0,
     "round_shot_speed_m": 160.0,
     "round_shot_damage": 400.0,
     "round_shot_spread_degrees": 0.5,
     "round_shot_pierce_men": 3,
+    "round_shot_kill_mps": 40.0,
+    "round_shot_wound_mps": 12.0,
+    "graze_max_deg": 18.0,
+    "graze_restitution": 0.35,
+    "graze_retention": 0.75,
     "knockdown_radius_cm": 220.0,
     "knockdown_seconds": 1.2,
     "works_damage": 160.0,
     "morale_pressure": 0.5,
     "morale_seconds": 8.0,
-    "grape_range_m": 70.0,
-    "grape_balls": 20,
-    "grape_cone_degrees": 6.0,
+    "grape_range_m": 300.0,
+    "grape_balls": 40,
+    "grape_cone_degrees": 4.0,
+    "grape_damage": 55.0,
+    "grape_speed_m": 280.0,
+    "grape_falloff_start_m": 150.0,
+    "grape_falloff_floor": 0.25,
     "shell_range_m": 300.0,
     "shell_speed_m": 120.0,
     "shell_fuse_min_m": 40.0,
@@ -178,5 +200,37 @@
     "length_cm": 333.0,
     "knockdown_push_cm": 320.0,
     "dirt_burst_scale": 3.0
+  },
+  "blast": {
+    "note": "GAME INVENTION (Artillery pass M9). Shared blast path for shell burst, premature muzzle discharge, and ammunition-chest detonation. Outer radii and impulses scale by size; outcome rings are fractions of the outer radius. Cover (LOS blocked) drops one ring. Knockdown/stagger/flinch spend no ticket. Ragdoll cap and 1.5 s settle apply only to blast knockdowns (horse throws keep their own constants). Chest ready_rounds and refill are GAME INVENTION: Load takes one from the chest; Fire spends through GunShots/magazine; chest refills near a friendly command post while the magazine holds spare rounds beyond those already in chests. chest.resolve_own is the Resolve the chest's own side loses when it blows; chest.resolve_enemy is what the other side loses, 0 since 2026-11-16 (it was 8: a side lost Resolve because its enemy's chest blew).",
+    "shell": { "radius_cm": 400.0, "impulse_cm": 320.0 },
+    "premature": { "radius_cm": 180.0, "impulse_cm": 200.0 },
+    "chest": {
+      "radius_cm": 700.0,
+      "impulse_cm": 480.0,
+      "ready_rounds": 6,
+      "refill_seconds": 12.0,
+      "resupply_radius_cm": 2500.0,
+      "detonate_chance_round": 0.08,
+      "detonate_chance_shell": 0.15,
+      "resolve_own": 18.0,
+      "resolve_enemy": 0.0
+    },
+    "rings": {
+      "killed_frac": 0.25,
+      "wounded_frac": 0.45,
+      "knockdown_frac": 0.65,
+      "stagger_frac": 0.85,
+      "flinch_frac": 1.0
+    },
+    "ragdoll_cap": 12,
+    "ragdoll_max_distance_cm": 3500.0,
+    "settle_speed_cm": 60.0,
+    "settle_max_seconds": 1.5,
+    "player_control_loss_seconds": 1.5,
+    "near_miss_path_cm": 200.0,
+    "dirt_spray_cm": 300.0,
+    "leg_wound_crawl_seconds": 3.0,
+    "volley_stage_jitter_ms": 150.0
   }
 }

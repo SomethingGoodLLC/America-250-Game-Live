@@ -1,4 +1,5 @@
 #include "MusketProjectile.h"
+#include "PA250FieldGun.h"
 #include "Components/SphereComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMeshActor.h"
@@ -165,6 +166,10 @@ void AMusketProjectile::OnHit(UPrimitiveComponent* HitComp, AActor* OtherActor, 
 				// Preserve perfect-reload bonus baked into Damage relative to near torso.
 				const float Near = FMath::Max(1.f, WeaponTuning->Values.TorsoDamageNear);
 				Applied *= (Damage / Near);
+			}
+			if (FalloffEndCm > FalloffStartCm)
+			{
+				Applied *= PA250Gunnery::CanisterDamageScale(DistCm, FalloffStartCm, FalloffEndCm, FalloffFloor);
 			}
 			UGameplayStatics::ApplyPointDamage(OtherActor, Applied, GetVelocity().GetSafeNormal(), Hit,
 			                                   GetInstigatorController(), this, nullptr);

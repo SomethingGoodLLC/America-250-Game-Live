@@ -4,9 +4,13 @@
 #include "CoreMinimal.h"
 #include "RFGameMode.h"
 #include "PA250TicketLedger.h"
+#include "PA250ArmyResolve.h"
+#include "PA250Blast.h"
 #include "PA250BattleEndRules.h"
 #include "pa250/types.hpp"
 #include "PA250BattleGameMode.generated.h"
+
+namespace PA250BattleCases { struct FArtilleryAccess; }
 
 class APA250ControlPoint;
 class APA250FieldWork;
@@ -129,8 +133,12 @@ public:
 	FName GetObjectiveHolder() const;
 	int32 PostsOwned(FName Faction) const;
 	int32 CountPosts() const;
-	/** Tickets this side is losing per bleed interval right now (0 if it isn't bleeding). For the HUD. */
+	/** Resolve drain units this side takes per bleed interval (0 if it isn't bleeding). For the HUD. */
 	int32 GetBleedPerInterval(FName Faction) const;
+	/** Army Resolve 0–100 for the HUD bar. */
+	float GetArmyResolve(FName Faction) const;
+	/** Apply a Resolve shock (chest detonation, colours, etc.). */
+	void ShockArmyResolve(FName Faction, float Amount);
 	const TArray<TWeakObjectPtr<APA250ControlPoint>>& GetPosts() const;
 	bool IsBattleOver() const { return bBattleOver; }
 	/** The battle banner, or a timed notice to the player while one is up. */
@@ -172,13 +180,34 @@ public:
 	 *  is spent, the bot's controller is retired). False when nobody is left to take over. */
 	bool TakeOverSoldier(APlayerController* PC);
 	const pa250::BattleResult& GetResult() const { return Result; }
-	/** Pure: the battle's own ledger as BattleResult.casualties, in men. The men shot or bayoneted down
-	 *  (Deaths) are split into killed and wounded by the sim's ratio (pa250::split_fallen,
-	 *  battle_rules.json); the men who surrendered are prisoners. Every man who fell is exactly one of
-	 *  the three, so a side's card total is its deaths plus its surrendered, to the man. */
+	/** Pure: sum recorded KIA/WIA plus prisoners. Artillery pass: no post-hoc ratio split. */
 	static std::map<std::string, std::map<std::string, pa250::MenDown>> CasualtiesFromLedger(
-		const TMap<FName, TMap<FName, int32>>& Deaths, const TMap<FName, TMap<FName, int32>>& Surrendered,
-		const TMap<FName, TMap<FName, int32>>& SavedBySurgeon = TMap<FName, TMap<FName, int32>>());
+		const TMap<FName, TMap<FName, int32>>& Killed, const TMap<FName, TMap<FName, int32>>& Wounded,
+		const TMap<FName, TMap<FName, int32>>& Surrendered);
+	/** Opening men (tickets at start) for the results line. */
+	int32 OpeningTickets(FName Faction) const { return OpeningTicketPool.FindRef(Faction); }
+	/** Tag him, then kill him so the body leaves the fight. OnCharacterDied records WIA
+	 *  (not a second KIA) and personal_kills if By is the player. A stun does not call this. */
+	void WoundOut(ARFCharacter* Man, const ARFCharacter* By, AActor* Causer);
+
+	// ---- Blasts (PA250Blast; battle_rules.json "blast") ----
+	void ApplyBlastKnockdown(ARFCharacter* Man, const FVector& Impulse, EPA250BlastDir Dir);
+	void ApplyBlastStagger(ARFCharacter* Man, EPA250BlastDir Dir);
+	void ApplyBlastFlinch(ARFCharacter* Man, EPA250BlastDir Dir);
+	/** Physics ragdoll if under the cap and in range; else in-place react/death clip. */
+	void TryBlastRagdoll(ARFCharacter* Man, const FVector& Impulse, bool bDead);
+	void NoteFriendlyBlastCasualties(FName SourceFaction, int32 Killed, int32 Wounded);
+	int32 GetFriendlyBlastKilled(FName Faction) const { return FriendlyBlastKilled.FindRef(Faction); }
+	int32 GetFriendlyBlastWounded(FName Faction) const { return FriendlyBlastWounded.FindRef(Faction); }
+	int32 ActiveBlastRagdolls() const { return BlastRagdollActive; }
+	void NotifyBlastRagdollEnded();
+	/** Rounds lost to chest detonations (charged to the magazine as spent). */
+	int32 ChestRoundsLost() const { return ChestRoundsBlown; }
+	void AddChestRoundsLost(int32 N) { ChestRoundsBlown += FMath::Max(0, N); }
+	/** Magazine rounds still available beyond those sitting in chests (for chest refill). */
+	int32 MagazineSpareForChests(FName Faction) const;
+	/** Charge detonated chest rounds as spent (results screen). */
+	void ChargeChestLossToMagazine(FName Faction, int32 Rounds);
 
 	// ---- Field guns (PA250FieldGun.h; values in battle_rules.json cannon) ----
 	const TArray<TObjectPtr<APA250FieldGun>>& GetGuns() const { return Guns; }
@@ -192,6 +221,10 @@ public:
 	/** His reload key at a gun he serves works its drill: true when the key belonged to the gun. */
 	bool PlayerWorksGun(ARFCharacter* Soldier, EActiveReloadHit& OutHit);
 	void NotifyGunTaken(APA250FieldGun* Gun, FName From);
+	/** Gun lost or crew below minimum: those men fall back to the nearest friendly post.
+	 *  An unarmed man (tools-only crew) with an enemy within 20 m is taken prisoner.
+	 *  A man who still has his firelock is not. */
+	void FallBackGunCrew(const TArray<ARFCharacter*>& Crew, FName Faction, APA250FieldGun* LostGun);
 	void NotifyGunFired(APA250FieldGun* Gun, EPA250Shot Shot);
 	/** Deploy as gunner: place the player at a crew post and serve that gun. */
 	bool PlacePlayerAtGun(ARFCharacter* Soldier);
@@ -379,6 +412,7 @@ protected:
 	virtual void OnControllerRespawned(AController* Controller, APawn* NewPawn) override;
 
 private:
+	friend struct PA250BattleCases::FArtilleryAccess;
 	void EnsureInitialized();
 	void ConfigureBattleCamera();
 	void ApplyLowCinematicSpectator(APlayerController* PC, ARFCharacter* ViewSoldier);
@@ -477,6 +511,7 @@ private:
 	FName ChooseClassFor(FName Faction, FName Preferred) const;
 	bool CanSpawn(FName Faction) const;
 	void SpendDeathTicket(FName Faction, FName UnitClass);
+	void SpendWoundTicket(FName Faction, FName UnitClass);
 	void BleedTickets(float DeltaSeconds);
 	void TickRemnants(float DeltaSeconds);
 	int32 PoolTotal(FName Faction) const;
@@ -618,8 +653,16 @@ private:
 	TMap<FName, bool> EverFielded;
 	/** Seconds each side has been a breaking remnant (RemnantBreaks) without a break. */
 	TMap<FName, float> RemnantTime;
-	/** Remaining tickets (death + bleed) and per-class deaths. HUD shows Ledger.Pool. */
+	/** Remaining tickets (deaths/wounds/POW only) and recorded KIA/WIA. HUD shows Ledger.Pool. */
 	FPA250TicketLedger Ledger;
+	/** Army Resolve: CP bleed drains this, not tickets. */
+	FPA250ArmyResolve ArmyResolve;
+	/** Tickets at battle start (for results start→end line and the invariant). */
+	TMap<FName, int32> OpeningTicketPool;
+	/** Spawn scoring (Artillery pass M2): recent deaths and slot cool-downs. */
+	mutable TArray<TPair<FVector, float>> RecentDeathSites;
+	mutable TArray<TPair<FVector, float>> RecentSpawnSlots;
+	mutable int32 SpawnSlotSerial = 0;
 	TMap<FName, TArray<TWeakObjectPtr<AActor>>> Starts;
 	TMap<TWeakObjectPtr<AController>, FName> ControllerFaction;
 	TMap<TWeakObjectPtr<AController>, FName> ControllerClass;
@@ -644,6 +687,10 @@ private:
 	int32 BotProfileSerial = 0;
 	int32 Misfires = 0;
 	int32 PersonalKills = 0;
+	TMap<FName, int32> FriendlyBlastKilled;
+	TMap<FName, int32> FriendlyBlastWounded;
+	int32 BlastRagdollActive = 0;
+	int32 ChestRoundsBlown = 0;
 	TMap<FName, int32> ShotsFiredByFaction;
 	TMap<FName, int32> MisfiresByFaction;
 	int32 ClothesSerial = 0;
