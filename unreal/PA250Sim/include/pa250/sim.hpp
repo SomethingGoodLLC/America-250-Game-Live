@@ -311,9 +311,13 @@ PA250_API CampaignState start_recruitment(const CampaignState& state, const std:
 PA250_API CampaignState cancel_recruitment(const CampaignState& state, const std::string& province_id,
                                  std::string& error);
 PA250_API void tick_recruitment_jobs(CampaignState& s);
-// A company the player raised that stands idle in a town with another of the player's armies is
-// absorbed by it (a battle is set up between one army per side). Scripted armies are never absorbed.
+// A company the player raised, or an allied company standing idle beside an army, is absorbed
+// by it. An army with a general is never absorbed. A company the player split off (role
+// "on_its_own") stays separate until it marches into a town where that army is standing.
 PA250_API void merge_idle_player_armies(CampaignState& s);
+// Fold one idle army into the other army of the player's standing in its town. Arrivals pass
+// allow_kept_separate so a company the player had split off joins again when it marches in.
+PA250_API void fold_player_army_into_neighbor(CampaignState& s, const std::string& army_id, bool allow_kept_separate);
 // Treasury (GAME INVENTION, after the bills of credit Massachusetts issued in 1775). On the 1st of
 // each month the province settles: town levies, depot trade and workshop output come in; army
 // pay, building upkeep and interest on debt go out. A shortfall is borrowed automatically up to

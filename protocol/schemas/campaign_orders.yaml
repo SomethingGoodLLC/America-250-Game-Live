@@ -18,7 +18,7 @@ additionalProperties: false
 properties:
   order:
     type: string
-    enum: [halt, form_army, assign_person, relieve_person, use_agent, lobby, vote_now, send_dispatch, decide, transfer_units]
+    enum: [halt, form_army, assign_person, relieve_person, use_agent, lobby, vote_now, send_dispatch, decide, transfer_units, detach_company]
     description: >
       halt: the army gives up its march. Standing in a town (no hour of its current leg marched) it
       simply stays: the order and the progress are cleared. Part-way along a leg it turns about and
@@ -57,8 +57,13 @@ properties:
 
       transfer_units (from_army, to_army, units): move named companies between two of the player's
       idle armies in the same town. An army still turning back from a halt is not idle. Allied
-      companies (Stockbridge) are refused. An empty source army is removed and its general freed.
-      Guns move with artillerymen.
+      companies are not moved by hand: they join the army in their town on their own. An empty
+      source army is removed and its general freed. Guns move with artillerymen.
+
+      detach_company (army_id, units): take those companies out of an idle army as a new detachment
+      in the same town. The army must keep at least one company. The new body stays separate until
+      it marches into a town where another of the player's armies is standing, and then it joins.
+      Allied men, such as the Stockbridge company, are the ones taken out when they are present.
   army_id: {type: string}
   province: {type: string}
   person: {type: string}

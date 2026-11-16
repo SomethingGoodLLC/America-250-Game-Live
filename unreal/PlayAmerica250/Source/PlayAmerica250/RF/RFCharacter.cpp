@@ -678,26 +678,35 @@ void ARFCharacter::TickAnimProbe(float DeltaTime)
 	// Seconds after the script starts (it waits 10 s for the level to settle).
 	const float T = AnimProbeTime - 10.f;
 	if (T < 0.f) return;
-	struct FLeg { float From, To, Scale; bool bSprint; };
+	// Pace: 0 walk (WalkSpeed), 1 run (midway in the run band), 2 sprint. Input scale does not
+	// change top speed, so each leg sets MaxWalkSpeed itself.
+	struct FLeg { float From, To, Scale; int32 Pace; };
 	static const FLeg Legs[] = {
-		{0.f, 3.f, 0.5f, false},     // walk forward
-		{4.5f, 7.5f, -1.f, false},   // turn about and run back
-		{8.5f, 12.f, 1.f, true},     // sprint forward, the squad following
+		{0.f, 3.f, 1.f, 0},      // walk forward
+		{4.5f, 7.5f, -1.f, 1},   // turn about and run back
+		{8.5f, 12.f, 1.f, 2},    // sprint forward, the squad following
 	};
 	float Scale = 0.f;
-	bool bWantSprint = false;
+	int32 Pace = 0;
 	for (const FLeg& L : Legs)
 	{
 		if (T >= L.From && T < L.To)
 		{
 			Scale = L.Scale;
-			bWantSprint = L.bSprint;
+			Pace = L.Pace;
 		}
 	}
+	const bool bWantSprint = Pace == 2;
 	if (bWantSprint != bSprinting)
 	{
 		if (bWantSprint) StartSprint();
 		else StopSprint();
+	}
+	if (!bWantSprint && GetCharacterMovement())
+	{
+		const FPA250BattleFeel& Bands = PA250BattleFeel::Get();
+		const float RunPace = (Bands.WalkMaxCmS + Bands.RunMaxCmS) * 0.5f;
+		GetCharacterMovement()->MaxWalkSpeed = (Pace == 1 && RunPace > WalkSpeed) ? RunPace : WalkSpeed;
 	}
 	if (Scale != 0.f) AddMovementInput(AnimProbeForward, Scale);
 	// The squad follows from the start, so the walk shows men at the shoulder and the sprint men at the trail.

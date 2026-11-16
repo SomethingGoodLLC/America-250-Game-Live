@@ -1152,6 +1152,22 @@ static void test_pass_politics() {
                                .dump());
         CHECK(!s.armies.count("raised_concord_1"));
         CHECK(pass_units(s.armies.at("continental_militia")) == before + 1);
+        const int joined = pass_units(s.armies.at("continental_militia"));
+        s = pass_order(s, json{{"order", "detach_company"},
+                               {"army_id", "continental_militia"},
+                               {"units", {{"militia", 1}}}}
+                               .dump());
+        std::string split;
+        for (const auto& ak : s.armies)
+            if (ak.second.role == "on_its_own") split = ak.first;
+        CHECK(!split.empty());
+        CHECK(s.armies.at(split).units.at("militia") == 1);
+        CHECK(pass_units(s.armies.at("continental_militia")) == joined - 1);
+        merge_idle_player_armies(s);
+        CHECK(s.armies.count(split) == 1);  // a split stands until it marches back in
+        fold_player_army_into_neighbor(s, split, true);
+        CHECK(s.armies.count(split) == 0);
+        CHECK(pass_units(s.armies.at("continental_militia")) == joined);
         Army allied;
         allied.id = "stockbridge_company";
         allied.name = "Stockbridge Company";
@@ -1303,7 +1319,7 @@ static void test_pass_politics() {
         for (const auto& ch : s.resource_changes) told = told || ch.reason.find("Unity is low") != std::string::npos;
         CHECK(told);
     }
-    // 10) The Stockbridge company: its own army, paid for, never merged; it goes home unpaid.
+    // 10) The Stockbridge company joins the army in its town, stays marked allied, and goes home unpaid.
     {
         CampaignState s = pass_campaign_decided(YMDH{1775, 4, 30, 23});
         for (const char* b : {"committee_men", "country_towns", "seaport_merchants"}) s.pass.bloc_lean[b] = 100;
@@ -1322,22 +1338,32 @@ static void test_pass_politics() {
         s.pass.measures["raise_the_army"].status = "passed";
         s.pass.measures["call_on_neighbours"].status = "passed";
         s.armies.at("continental_militia").province = "cambridge";
+        const int militia_before = s.armies.at("continental_militia").units.count("militia")
+                                       ? s.armies.at("continental_militia").units.at("militia") : 0;
+        const int allied_before = s.armies.at("continental_militia").allied.count("militia")
+                                      ? s.armies.at("continental_militia").allied.at("militia") : 0;
         s = advance_hour(s).state;
-        CHECK(s.armies.count("stockbridge_company") == 1);
-        const Army& co = s.armies.at("stockbridge_company");
-        CHECK(co.name == "Stockbridge Company" && co.province == "cambridge" && co.role == "allied_company");
-        CHECK(pass_units(co) == 2);
+        // The company is raised and, the same hour, joins the army standing in the town.
+        // The men stay marked allied, so they can be split off or sent home.
+        CHECK(s.armies.count("stockbridge_company") == 0);
+        CHECK(s.armies.at("continental_militia").units.at("militia") == militia_before + 2);
+        CHECK(s.armies.at("continental_militia").allied.at("militia") == allied_before + 2);
         bool paid = false;
         for (const auto& ch : s.resource_changes) paid = paid || (ch.reason.find("Enlist the Stockbridge company passes") != std::string::npos && ch.gold == -12);
         CHECK(paid);
         for (int i = 0; i < 48; ++i) s = advance_hour(s).state;
-        CHECK(s.armies.count("stockbridge_company") == 1);  // standing beside the militia, not absorbed
+        CHECK(s.armies.count("stockbridge_company") == 0);
+        CHECK(s.armies.at("continental_militia").allied.at("militia") == allied_before + 2);
         std::string err;
         pass_order(s, order_json({{"order", "form_army"}, {"person", "william_heath"}, {"province", "cambridge"}, {"army_id", "stockbridge_company"}}), &err);
         CHECK(err == "no_army_here" || err == "no_muster");
         s.progress.pay_arrears_months = 1;
         for (int i = 0; i < 25; ++i) s = advance_hour(s).state;
-        CHECK(s.armies.count("stockbridge_company") == 0);
+        CHECK(s.armies.at("continental_militia").units.at("militia") == militia_before);
+        CHECK(s.armies.at("continental_militia").allied.count("militia") == 0 || s.armies.at("continental_militia").allied.at("militia") == allied_before);
+        bool went = false;
+        for (const auto& ch : s.resource_changes) went = went || ch.reason.find("go home") != std::string::npos;
+        CHECK(went);
     }
     // 11) A victory warms the blocs and earns a favor; a mission done earns one too.
     {

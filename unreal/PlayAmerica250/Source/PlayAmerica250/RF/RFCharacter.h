@@ -302,8 +302,11 @@ public:
 	float CameraBlendSeconds = 0.15f;
 	UPROPERTY(EditAnywhere, Category = "Camera")
 	float FaceControlYawHoldSeconds = 1.f;
+	/** Ordinary pace, cm/s. A walk: inside battle_feel.json's walk band (at or under walk_max, 300).
+	 *  450 is that file's run, so holding a direction used to play a run and Shift a sprint, and
+	 *  there was no walk. Shift is still the sprint. */
 	UPROPERTY(EditAnywhere, Category = "Movement")
-	float WalkSpeed = 450.f;
+	float WalkSpeed = 220.f;
 	UPROPERTY(EditAnywhere, Category = "Movement")
 	float SprintSpeed = 650.f;
 

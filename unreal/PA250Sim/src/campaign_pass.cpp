@@ -946,6 +946,18 @@ void cp_tick_politics(CampaignState& s) {
                 s.armies.erase(id);
                 continue;
             }
+            if (unpaid && s.player_faction == kContinental) {
+                bool went = false;
+                for (auto& al : a.allied) {
+                    const int n = std::min(al.second, std::max(0, detail::map_get(a.units, al.first)));
+                    if (n <= 0) continue;
+                    went = true;
+                    a.units[al.first] -= n;
+                    if (a.units[al.first] <= 0) a.units.erase(al.first);
+                    al.second = 0;
+                }
+                if (went) cp_note(s, "Allied men go home from " + a.name + ": they were promised their pay and have not had it");
+            }
             for (auto& al : a.allied) {
                 al.second = std::min(al.second, std::max(0, detail::map_get(a.units, al.first)));
                 while (leaving > 0 && al.second > 0) {
@@ -1131,7 +1143,7 @@ std::string cp_parse_order(const std::string& text, CpOrder& o) {
         return "malformed_order";
     }
     if (!cp_known(o.order, {"halt", "form_army", "assign_person", "relieve_person", "use_agent", "lobby", "vote_now",
-                            "send_dispatch", "decide", "transfer_units"}))
+                            "send_dispatch", "decide", "transfer_units", "detach_company"}))
         return "unknown_order";
     return "";
 }
@@ -1227,6 +1239,24 @@ std::string cp_validate(const CampaignState& s, const CpOrder& o) {
         }
         const int cap = detail::army_unit_cap(s, to);
         if (cap > 0 && detail::total_units(to) + moving > cap) return "over_cap";
+        return "";
+    }
+    if (o.order == "detach_company") {
+        auto ait = s.armies.find(o.army_id);
+        if (ait == s.armies.end()) return "unknown_army";
+        const Army& from = ait->second;
+        if (from.faction != side) return "not_your_army";
+        if (!from.path.empty() || from.returning_hours > 0) return "army_on_the_march";
+        if (s.pending_battle.active) return "battle_pending";
+        if (o.units.empty()) return "no_units";
+        int moving = 0;
+        for (const auto& u : o.units) {
+            if (u.second <= 0) return "no_units";
+            if (detail::map_get(from.units, u.first) < u.second) return "not_enough_units";
+            moving += u.second;
+        }
+        if (moving <= 0 || detail::total_units(from) - moving < 1) return "would_empty";
+        if (g_cp_persons_loaded && moving > g_cp_prules.detachment_unit_cap) return "over_cap";
         return "";
     }
     if (o.order == "use_agent") {
@@ -2322,6 +2352,45 @@ CampaignState apply_campaign_order(const CampaignState& in, const std::string& o
                 if (cj.army_id == o.from_army) cj.army_id = o.to_army;
             s.armies.erase(o.from_army);
         }
+    } else if (o.order == "detach_company") {
+        Army& from = s.armies.at(o.army_id);
+        Army neu;
+        neu.id = "split_" + from.province + "_" + std::to_string(s.next_command_seq++);
+        const std::string town = cp_town(s, from.province);
+        int moved = 0, allied_moved = 0;
+        for (const auto& u : o.units) {
+            const int n = u.second;
+            const int allied_n = std::min(n, std::max(0, detail::map_get(from.allied, u.first)));
+            from.units[u.first] -= n;
+            if (from.units[u.first] <= 0) from.units.erase(u.first);
+            if (allied_n > 0) {
+                from.allied[u.first] -= allied_n;
+                if (from.allied[u.first] <= 0) from.allied.erase(u.first);
+                neu.allied[u.first] += allied_n;
+            }
+            neu.units[u.first] += n;
+            moved += n;
+            allied_moved += allied_n;
+            if (u.first == "artilleryman") {
+                const int take = std::min(n, std::max(0, from.guns));
+                from.guns -= take;
+                neu.guns += take;
+            }
+        }
+        neu.name = allied_moved == moved ? std::string("Allied company") : town + " Detachment";
+        neu.faction = from.faction;
+        neu.province = from.province;
+        neu.previous_province = from.province;
+        neu.morale = from.morale;
+        neu.readiness = from.readiness;
+        neu.fatigue = from.fatigue;
+        neu.rounds_per_man = from.rounds_per_man;
+        // Stays its own body in this town. It joins again when it marches in somewhere the army is.
+        neu.role = "on_its_own";
+        s.armies[neu.id] = neu;
+        cp_note(s, neu.name + " splits off from " + from.name + " at " + town + " (" + std::to_string(moved) +
+                       (moved == 1 ? " company" : " companies") + ")",
+                0, 0, from.province);
     } else if (o.order == "use_agent") {
         const CpAbility& ab = g_cp_abilities.at(p->ability);
         s.pass.persons[o.person].uses_left = cp_uses_left(s, *p) - 1;

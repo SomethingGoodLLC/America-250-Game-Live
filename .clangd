@@ -34,3 +34,10 @@ CompileFlags:
 Diagnostics:
   UnusedIncludes: None
   MissingIncludes: None
+
+---
+# Fragment headers included inside namespace pa250_tests by sim_cases.hpp — not standalone TUs.
+If:
+  PathMatch: .*/unreal/PA250Sim/tests/(pass|playtest|sim)_cases\.hpp
+Diagnostics:
+  Suppress: "*"

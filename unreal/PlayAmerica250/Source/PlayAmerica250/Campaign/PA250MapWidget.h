@@ -98,6 +98,9 @@ public:
 	bool IsReorganizeOpen() const { return bShowReorganize; }
 	bool CanReorganizeSelected() const;
 	void TransferUnits(const FString& FromArmy, const FString& ToArmy, const FString& UnitClass, int32 Count);
+	/** Take a company out of the selected army. It stays separate until it marches back in. */
+	void PressSplit();
+	bool CanSplitSelected() const;
 	/** The HUD's width in Slate units (the UI is scaled by the window's height, so a 16:10 window
 	 *  is narrower in units than a 16:9 one of any size). */
 	float HudWidthUnits() const;
