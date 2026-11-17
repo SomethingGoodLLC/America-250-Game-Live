@@ -99,10 +99,12 @@
 # The aim: right hand at the small of the stock just ahead of the right shoulder, left hand under the fore-end
 # 36 cm further along the line of fire, both about shoulder high (GAME INVENTION for the numbers). Without these
 # targets Kimodo aims with both arms pushed forward side by side, which no musket fits.
+# Present holds the aim from frame 34; `seed: chain_end` solves that hold from the pose the clip ends in (Fire's
+# first frame) so the two agree. Solved from the unconstrained pose, three of four variants missed by 5 to 14 cm.
 - {name: AM_Volley_MakeReady, expect: {travel_max_m: 0.4, end_hip_min_m: 0.8}, family: Volley, duration: 2.0, variants: 4, chain_to: AM_Volley_Present,
    prompt: "A soldier standing at attention with a long gun resting upright against his left shoulder brings it up vertically in front of his chest with both hands and pulls back its hammer with his right thumb."}
 - {name: AM_Volley_Present, expect: {travel_max_m: 0.4, end_hip_min_m: 0.8}, family: Volley, duration: 1.5, variants: 4, chain_to: AM_Volley_Fire,
-   constraints: [{frame: 32, left_hand: {body_cm: [-12, 60, 141]}, right_hand: {body_cm: [-16, 24, 140]}}],
+   constraints: [{frame: 34, seed: chain_end, left_hand: {body_cm: [-12, 60, 141]}, right_hand: {body_cm: [-16, 24, 140]}}],
    prompt: "A soldier holding a long gun upright in front of his chest steps back with his right foot, levels the gun to his right shoulder, lowers his cheek to it and aims straight ahead, holding still."}
 - {name: AM_Volley_Fire, expect: {travel_max_m: 0.4, end_hip_min_m: 0.8}, family: Volley, duration: 1.5, variants: 4,
    constraints: [{frame: 0, left_hand: {body_cm: [-12, 60, 141]}, right_hand: {body_cm: [-16, 24, 140]}}, {frame: 9, left_hand: {body_cm: [-12, 60, 141]}, right_hand: {body_cm: [-16, 24, 140]}}],
@@ -110,7 +112,7 @@
 - {name: AM_Volley_Kneel_MakeReady, expect: {travel_max_m: 0.4, start_hip_max_m: 0.75, end_hip_max_m: 0.75}, family: Volley, duration: 2.0, variants: 3, chain_to: AM_Volley_Kneel_Present,
    prompt: "A soldier kneeling on his right knee holds a long gun upright in front of his chest with both hands and pulls back its hammer with his right thumb, staying on one knee."}
 - {name: AM_Volley_Kneel_Present, expect: {travel_max_m: 0.4, start_hip_max_m: 0.75, end_hip_max_m: 0.75}, family: Volley, duration: 1.5, variants: 3, chain_to: AM_Volley_Kneel_Fire,
-   constraints: [{frame: 32, left_hand: {body_cm: [-12, 60, 104]}, right_hand: {body_cm: [-16, 24, 103]}}],
+   constraints: [{frame: 34, seed: chain_end, left_hand: {body_cm: [-12, 60, 104]}, right_hand: {body_cm: [-16, 24, 103]}}],
    prompt: "A soldier kneeling on his right knee levels a long gun to his right shoulder, lowers his cheek to it and aims straight ahead, holding still on one knee."}
 - {name: AM_Volley_Kneel_Fire, expect: {travel_max_m: 0.4, start_hip_max_m: 0.75, end_hip_max_m: 0.75}, family: Volley, duration: 1.5, variants: 3,
    constraints: [{frame: 0, left_hand: {body_cm: [-12, 60, 104]}, right_hand: {body_cm: [-16, 24, 103]}}, {frame: 9, left_hand: {body_cm: [-12, 60, 104]}, right_hand: {body_cm: [-16, 24, 103]}}],

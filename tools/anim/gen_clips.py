@@ -159,7 +159,7 @@ def local30_from_output(skeleton, out: dict, frame: int, torch, device):
     return local30, root
 
 
-def build_constraints(skeleton, spec: dict, geo: dict, seed_out: dict, n_frames: int, torch, device):
+def build_constraints(skeleton, spec: dict, geo: dict, seed_out: dict, n_frames: int, torch, device, chain_npz=None):
     """Constraint sets for one variant plus the record that goes in the manifest."""
     from kimodo.constraints import EndEffectorConstraintSet, FullBodyConstraintSet
 
@@ -184,7 +184,13 @@ def build_constraints(skeleton, spec: dict, geo: dict, seed_out: dict, n_frames:
                     raise ValueError("%s: gun hand targets need 'station' and 'face'" % spec["name"])
                 targets_cm[h] = gun_point(geo, ref)
                 targets[h] = to_kimodo(geo, station, face, targets_cm[h])
-        local, root = local30_from_output(skeleton, seed_out, frame, torch, device)
+        if c.get("seed") == "chain_end" and chain_npz is not None and Path(chain_npz).exists():
+            # Bend the pose this clip must end in (the next clip's first frame) instead of the unconstrained
+            # pose at this frame: the hold before the end and the end pose then agree, and the model only holds.
+            import numpy as np
+            local, root = local30_from_output(skeleton, np.load(chain_npz), 0, torch, device)
+        else:
+            local, root = local30_from_output(skeleton, seed_out, frame, torch, device)
         if anchor is None and any("body_cm" in ref for ref in hands.values()):
             anchor = root  # targets in his own space: he stays where he stands and turns or leans to reach
         local, root, res, shift = solve_hands(skeleton, local, root, targets, torch, anchor=anchor)
@@ -363,7 +369,8 @@ def main() -> int:
                 constraint_lst, record = [], []
                 if spec.get("constraints") or spec.get("loop"):
                     first = generate(model, spec, seed, n_frames, [], args.steps)
-                    constraint_lst, record = build_constraints(skeleton, spec, geo, first, n_frames, torch, device)
+                    chain_npz = out_root / "native" / ("%s_v0.npz" % nxt) if nxt else None
+                    constraint_lst, record = build_constraints(skeleton, spec, geo, first, n_frames, torch, device, chain_npz)
                 if nxt and nxt in by_name and by_name[nxt].get("station") == spec.get("station"):
                     nxt_npz = out_root / "native" / ("%s_v0.npz" % nxt)
                     if nxt_npz.exists():

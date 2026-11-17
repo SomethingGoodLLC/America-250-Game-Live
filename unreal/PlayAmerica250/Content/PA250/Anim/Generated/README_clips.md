@@ -38,12 +38,12 @@ clip before it in a chain; where the join is not direct, a transition clip below
 | `AM_Reload_PrimePan` | 3 | 3.0 | no | no | no | `AM_Reload_RamCharge` | Notify_FootPlant, Notify_Reload_PhaseEnd |
 | `AM_Reload_RamCharge` | 3 | 4.0 | no | no | no | `AM_Reload_Shoulder` | Notify_FootPlant, Notify_Reload_PhaseEnd |
 | `AM_Reload_Shoulder` | 3 | 2.0 | no | no | no |  | Notify_FootPlant, Notify_Reload_PhaseEnd |
-| `AM_Volley_Fire` | 4 | 1.5 | no | no | no |  | Notify_Volley_Discharge |
-| `AM_Volley_Kneel_Fire` | 3 | 1.5 | no | no | no |  | Notify_Volley_Discharge |
+| `AM_Volley_Fire` | 4 | 1.5 | no | no | yes |  | Notify_FootPlant, Notify_Volley_Discharge |
+| `AM_Volley_Kneel_Fire` | 3 | 1.5 | no | no | yes |  | Notify_FootPlant, Notify_Volley_Discharge |
 | `AM_Volley_Kneel_MakeReady` | 3 | 2.0 | no | no | no | `AM_Volley_Kneel_Present` |  |
-| `AM_Volley_Kneel_Present` | 3 | 1.5 | no | no | no | `AM_Volley_Kneel_Fire` |  |
-| `AM_Volley_MakeReady` | 4 | 2.0 | no | no | no | `AM_Volley_Present` |  |
-| `AM_Volley_Present` | 4 | 1.5 | no | no | no | `AM_Volley_Fire` |  |
+| `AM_Volley_Kneel_Present` | 3 | 1.5 | no | no | yes | `AM_Volley_Kneel_Fire` | Notify_FootPlant |
+| `AM_Volley_MakeReady` | 4 | 2.0 | no | no | no | `AM_Volley_Present` | Notify_FootPlant |
+| `AM_Volley_Present` | 4 | 1.5 | no | no | yes | `AM_Volley_Fire` | Notify_FootPlant |
 
 ## React
 
@@ -80,4 +80,4 @@ Ragdoll joins are in the knockdown's space: the get-up that follows must be plac
 | `AM_React_BlastKnockdown_L` | `AM_GetUp_Side` | 4 | 26 to 50 |
 | `AM_React_BlastKnockdown_R` | `AM_GetUp_Side` | 4 | 50 to 50 |
 | `AM_Reload_RamCharge` | `AM_Reload_Shoulder` | 3 | 26 to 30 |
-| `AM_Volley_Kneel_MakeReady` | `AM_Volley_Kneel_Present` | 3 | 26 to 26 |
+| `AM_Volley_Kneel_Present` | `AM_Volley_Kneel_Fire` | 5 | 26 to 26 |

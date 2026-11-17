@@ -42,8 +42,6 @@ def export(key, path):
     opt = unreal.FbxExportOption()
     opt.set_editor_property("ascii", False)
     opt.set_editor_property("export_preview_mesh", False)
-    opt.set_editor_property("bake_camera_and_light_animation", unreal.MovieSceneBakeType.BAKE_NONE) if hasattr(
-        unreal, "MovieSceneBakeType") and hasattr(opt, "bake_camera_and_light_animation") else None
     task = unreal.AssetExportTask()
     task.object = seq
     task.filename = path

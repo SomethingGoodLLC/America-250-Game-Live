@@ -16,17 +16,23 @@ REELS = {
              "Next four: stagger, then deafened. Far four: near-miss duck.",
 }
 ISSUES = [
-    "No props are attached anywhere (no sponge/ram staff, musket, linstock, handspike or cartridge bag). The plan's stand-in props and "
-    "the left-hand musket IK were not done; hands were pinned to points on the gun only.",
+    "Props are separate actors keyed every frame from the hands, not bone attachments: the sponge-and-rammer staff, linstock, "
+    "handspike and cartridge of this pass (flat colours, no textures) and the game's musket. A two-handed prop lies along the line "
+    "between the grips; one carried in one hand stands upright in it, so the idles hold the staff and linstock bolt upright.",
+    "Volley: the musket is upright through Make Ready and swings level over the first 12 frames of Present; in the reload clips "
+    "(not in a reel) no musket was fitted and their hands are not pinned to one.",
+    "Volley kneeling clips: the fix-up moved the hips 12 to 15 cm to bring the hands onto the aim and held the ankles, but the "
+    "knee on the ground is not pinned and may lift or slide. They are in no reel and have not been looked at on the soldier.",
     "Gun reel: the crew is crowded. The provisional ventsman station (10, 50) is inside the wheel track (the wheel's outer face is at "
     "y = 57 to 64 cm) and Crew_3/Crew_4 at (-90, +-75) stand at the wheels, so men overlap the carriage and each other.",
     "Gun reel: the sponger and loader step about half a metre from their stations to reach the bore targets (station and staff "
-    "numbers disagree, see PROGRESS.md), and after a constrained clip the following idle starts back at the station: a visible pop.",
+    "numbers disagree, see PROGRESS.md), and after a constrained clip the following idle starts back at the station: a visible pop, "
+    "which the staff follows.",
     "Reels cut from clip to clip with no blending; a clip that ends before the reel does starts again (Volley: up to 4 frames).",
     "React reel: the get-up is played by a second figure placed where the transition ends; a one-frame mismatch at that cut is the "
-    "reel's, not the clips'. Transitions are not foot-locked.",
-    "Volley: the men stand with their feet well apart in all three clips. Not checked whether that is the generated motion or the retarget.",
-    "Only the three contact-sheet views were looked at by the agent (Volley front, Gun high, React high); no MP4 was watched in motion.",
+    "reel's, not the clips'. Transitions are not foot-locked. The React reel has no props and was not rendered again in the prop pass.",
+    "Volley: the men stand with their feet well apart. Not checked whether that is the generated motion or the retarget.",
+    "Looked at by the agent: key-frame sheets of Volley front, Gun high and React high. No MP4 was watched in motion.",
 ]
 lines = ["# Animation pass review: gun drill, volley, reactions", "",
          "Rendered with Movie Render Queue in the scratch project (`AnimationPass/UEHost`), 1280x720, 30 fps, soldier mesh with its "
