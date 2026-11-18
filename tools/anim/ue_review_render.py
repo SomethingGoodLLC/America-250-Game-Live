@@ -222,7 +222,9 @@ def build_gun(mesh):
     level = base_level("Gun", 160.0)
     gun = spawn(unreal.StaticMeshActor, (0, 0, 0), 0, "Cannon")
     gun.static_mesh_component.set_static_mesh(unreal.load_asset(CANNON))
-    muzzle, vent = geo["sockets"]["Muzzle"], geo["sockets"]["Vent"]
+    muzzle = geo["bore_axis"]["origin_cm"]  # measured centre of the muzzle face
+    vent = geo.get("vent_measured_cm") or geo["sockets"]["Vent"]
+    bore = tuple(geo["bore_axis"]["direction"])  # out of the muzzle; the barrel is elevated, not level
     st = {k: v["cm"] for k, v in geo["stations"].items()}
     roles = {  # role: (station, what he faces, [(seconds, clip)])
         "Sponger": ("station_MuzzleR", muzzle, [(0, "AM_Gun_Sponge_v0"), (4, "AM_Gun_Idle_Sponger_v0"), (7, "AM_Gun_Ram_v0"),
@@ -231,11 +233,12 @@ def build_gun(mesh):
                                             (13, "AM_Gun_Idle_Ventsman_v1"), (18.5, "AM_Gun_Flinch_v1"), (20, "AM_Gun_Idle_Ventsman_v2")]),
         "Loader": ("station_MuzzleL", muzzle, [(0, "AM_Gun_Idle_Loader_v0"), (4, "AM_Gun_Load_v0"), (7, "AM_Gun_Idle_Loader_v1"),
                                                (18.5, "AM_Gun_Flinch_v2"), (20, "AM_Gun_Idle_Loader_v2")]),
-        "Captain": ("Trail", muzzle, [(0, "AM_Gun_Idle_Captain_v0"), (13, "AM_Gun_Lay_v0"), (16, "AM_Gun_Idle_Captain_v1")]),
+        "Captain": ("Trail", muzzle, [(0, "AM_Gun_Observe_v0"), (4, "AM_Gun_Idle_Captain_v0"), (13, "AM_Gun_Lay_v0"),
+                                      (16, "AM_Gun_Idle_Captain_v1"), (19, "AM_Gun_Observe_v1")]),
         "Handspike": ("TrailL", (st["Trail"][0] + 40, 0, 0), [(0, "AM_Gun_Idle_Handspike_v0"), (13, "AM_Gun_Traverse_v0"),
                                                              (16, "AM_Gun_Idle_Handspike_v1")]),
         "Firer": ("Linstock", vent, [(0, "AM_Gun_Idle_Firer_v0"), (16, "AM_Gun_Fire_v0"), (18.5, "AM_Gun_Idle_Firer_v1")]),
-        "RunUpL": ("Crew_3", (st["Crew_3"][0] + 100, st["Crew_3"][1], 0), [(0, "AM_Gun_Idle_Loader_v2"), (20, "AM_Gun_RunUp_v0")]),
+        "RunUpL": ("Crew_3", (st["Crew_3"][0] + 100, st["Crew_3"][1], 0), [(0, "AM_Gun_Idle_Ventsman_v1"), (20, "AM_Gun_RunUp_v0")]),
         "RunUpR": ("Crew_4", (st["Crew_4"][0] + 100, st["Crew_4"][1], 0), [(0, "AM_Gun_Idle_Ventsman_v2"), (20, "AM_Gun_RunUp_v1")]),
     }
     total = 23 * FPS
@@ -257,7 +260,21 @@ def build_gun(mesh):
         R, L = grips(loc, yaw, key, lf)
         if key.startswith(("AM_Gun_Sponge", "AM_Gun_Ram")) and vlen(vsub(L, R)) < 80.0:
             d = vunit(vsub(L, R))  # toward the muzzle: the left hand is the nearer one
-            o, r = along(vadd(R, vmul(d, 30.0)), d if key.startswith("AM_Gun_Sponge") else vmul(d, -1.0))  # the head 150 cm past the right hand
+            # How far the hands are off the bore axis (the +X line through the muzzle). On it, the staff is put
+            # exactly on the axis; off it, the staff follows the hands but its head may never be past the muzzle
+            # face, so it cannot pass through the barrel (user review 2026-11-16).
+            def on_bore(g):  # the point of the bore line nearest g
+                t = sum((g[i] - muzzle[i]) * bore[i] for i in range(3))
+                return vadd(tuple(muzzle), vmul(bore, t))
+            off = max(vlen(vsub(g, on_bore(g))) for g in (R, L))
+            w = max(0.0, min(1.0, 1.0 - (off - 3.0) / 12.0))
+            axis = vmul(bore, -1.0)  # into the barrel
+            d = vunit(vadd(vmul(d, 1.0 - w), vmul(axis, w)))
+            anchor = vadd(vmul(R, 1.0 - w), vmul(on_bore(R), w))
+            head = vadd(anchor, vmul(d, 150.0))  # the working head, 150 cm past the right hand
+            if w < 1.0 and head[0] < muzzle[0] + 6.0 and abs(d[0]) > 1e-3:
+                anchor = vadd(anchor, vmul(d, (muzzle[0] + 6.0 - head[0]) / d[0]))
+            o, r = along(vadd(anchor, vmul(d, 30.0)), d if key.startswith("AM_Gun_Sponge") else vmul(d, -1.0))
         else:
             o, r = upright(R[0], R[1], 120.0)
         staff.append((f, o, r))
@@ -285,11 +302,26 @@ def build_gun(mesh):
             loc, yaw, its = who["Loader"]
             key, lf = clip_at(its, f)
             R, L = grips(loc, yaw, key, lf)
-            o, r = along(R, vsub((muzzle[0], muzzle[1], R[2]), R))
+            o, r = along(R, vsub(R, (muzzle[0], muzzle[1], R[2])))  # powder bag first into the muzzle, the ball outward
             cart.append((f, o, r))
     props.append((prop_actor(PROPS + "/SM_SpongeRammer", "Prop_Staff"), staff))
     props.append((prop_actor(PROPS + "/SM_Linstock", "Prop_Linstock"), linstock))
     props.append((prop_actor(PROPS + "/SM_Handspike", "Prop_Handspike"), spike))
+    glass = []
+    loc, yaw, its = who["Captain"]
+    for f in range(total + 1):
+        key, lf = clip_at(its, f)
+        R, L = grips(loc, yaw, key, lf)
+        d = vsub(L, R)
+        if key.startswith("AM_Gun_Observe") and 12.0 < vlen(d) < 45.0:
+            o, r = along(R, vunit(d))  # at his eye, along the hands
+        else:
+            o, r = along(R, (0.0, 0.0, -1.0))  # closed in his right hand, hanging at his side
+        glass.append((f, o, r))
+    props.append((prop_actor(PROPS + "/SM_Spyglass", "Prop_Spyglass"), glass))
+    for k in range(6):  # ready round shot on the ground by the loader
+        s_ = prop_actor(PROPS + "/SM_RoundShot", "Shot_%d" % k)
+        s_.set_actor_location(unreal.Vector(235.0 + 9.5 * (k % 3), -128.0 - 9.5 * (k // 3), 4.5), False, False)
     c_actor = prop_actor(PROPS + "/SM_Cartridge", "Prop_Cartridge")
     props.append((c_actor, cart))
     hides.append((c_actor, load_start, load_start + load_frame))  # in his hand until it is in the muzzle
@@ -302,13 +334,13 @@ def build_gun(mesh):
 def build_volley(mesh):
     level = base_level("Volley", -110.0)
     rng = random.Random(1775)
-    total = 4 + 60 + 45 + 45  # the latest man's Fire ends here; an earlier man's Fire starts again for up to 4 frames
+    total = 60 + 45 + 45 - 4  # the earliest man's Fire ends here
     plays, props = [], []
     for i in range(10):
         a = soldier_at(mesh, ((i - 4.5) * 70.0, 0, 0), 0.0, "Man_%02d" % i)
         j = rng.randint(0, 4)
         v = i % 4
-        t = j
+        t = -j  # up to 4 frames ahead of the others; a section that began late left him in the reference pose
         # a man who is late holds the first frame of Make Ready: the section starts late and the pose before it is the clip's start
         items = [(t, "AM_Volley_MakeReady_v%d" % v)]
         t += frames("AM_Volley_MakeReady_v%d" % v)
@@ -321,18 +353,16 @@ def build_volley(mesh):
         for f in range(total + 1):
             key, lf = clip_at(items, f)
             R, L = grips(loc, 0.0, key, lf)
-            # Make Ready: upright at the recover. Present: comes down onto the line through the two hands over
-            # its first 12 frames. Fire: on that line. The musket's root is in the right hand.
-            if "Present" in key:
-                x = max(0.0, min(1.0, lf / 12.0))
-                w = x * x * (3.0 - 2.0 * x)
-            else:
-                w = 1.0 if "Fire" in key else 0.0
+            # With both hands on it the musket lies along them, root in the right hand (the recover, the aim).
+            # Before the right hand has come to the stock (shouldered arms at the start of Make Ready) it stands
+            # upright on the left hand, which carries the butt.
             d = vsub(L, R)
-            if vlen(d) > 15.0:  # stock in the right hand, fore-end through the left
-                line = vunit(d)
-            up = (0.0, 0.0, 1.0)
-            o, r = along(R, vunit(vadd(vmul(up, 1.0 - w), vmul(line, w))))
+            x = max(0.0, min(1.0, (70.0 - vlen(d)) / 30.0)) if vlen(d) > 15.0 else 0.0
+            w = x * x * (3.0 - 2.0 * x)  # 0: carried on the left hand; 1: in both hands
+            carry_o = (L[0], L[1], L[2] + 26.0)  # the musket's root is 26 cm above the butt, which sits on the left hand
+            both_d = vunit(d) if vlen(d) > 1.0 else (0.0, 0.0, 1.0)
+            o = vadd(vmul(carry_o, 1.0 - w), vmul(R, w))
+            o, r = along(o, vunit(vadd(vmul((0.0, 0.0, 1.0), 1.0 - w), vmul(both_d, w))))
             keys.append((f, o, r))
         props.append((prop_actor(MUSKET, "Musket_%02d" % i), keys))
     cams = {"Front": camera("Front", (0, 620, 160), (0, 0, 110)), "Side": camera("Side", (-620, 120, 170), (0, 0, 110)),

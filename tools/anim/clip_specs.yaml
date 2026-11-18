@@ -20,6 +20,12 @@
 - {name: AM_Gun_Idle_Handspike, expect: {travel_max_m: 0.25, end_hip_min_m: 0.8}, family: Gun, station: TrailL, loop: true, duration: 4.0, variants: 3,
    prompt: "A man stands ready in place holding a heavy bar upright with both hands in front of him, shifts his weight slightly and waits."}
 
+# The gun captain watches the fall of shot through a spyglass (a brass draw telescope: period; binoculars are not).
+- {name: AM_Gun_Observe, expect: {travel_max_m: 0.25, end_hip_min_m: 0.8}, family: Gun, station: Trail, duration: 4.0, variants: 2,
+   constraints: [{frame: 40, left_hand: {body_cm: [-3, 40, 161]}, right_hand: {body_cm: [-5, 14, 162]}},
+                 {frame: 95, left_hand: {body_cm: [-3, 40, 161]}, right_hand: {body_cm: [-5, 14, 162]}}],
+   prompt: "A man standing upright raises a long thin tube to his right eye with both hands, one hand near his eye and the other further forward, and looks through it steadily at something far ahead."}
+
 - name: AM_Gun_Sponge
   family: Gun
   prompt: "A man standing beside a waist-high horizontal tube holds a long wooden pole level across his body with both hands, thrusts it firmly to his left into the tube, twists it twice, then draws it back out to his right."
@@ -101,18 +107,26 @@
 # targets Kimodo aims with both arms pushed forward side by side, which no musket fits.
 # Present holds the aim from frame 34; `seed: chain_end` solves that hold from the pose the clip ends in (Fire's
 # first frame) so the two agree. Solved from the unconstrained pose, three of four variants missed by 5 to 14 cm.
+# The recover (Make Ready ends in it, Present starts from it): the musket upright 30 cm in front of the left
+# shoulder, the face clear, right hand at the small of the stock at chest height, left hand above the lock at the
+# height of the neck (GAME INVENTION for the numbers). Make Ready starts from shouldered arms: left hand under the
+# butt at the left hip, right hand at his side. Without these the men hunched with their hands over their faces
+# and the musket ran up through the hat (user review 2026-11-16).
 - {name: AM_Volley_MakeReady, expect: {travel_max_m: 0.4, end_hip_min_m: 0.8}, family: Volley, duration: 2.0, variants: 4, chain_to: AM_Volley_Present,
+   constraints: [{frame: 6, left_hand: {body_cm: [8, 28, 134]}, right_hand: {body_cm: [4, 27, 108]}},
+                 {frame: 42, seed: chain_end, left_hand: {body_cm: [6, 30, 148]}, right_hand: {body_cm: [5, 28, 120]}}],
    prompt: "A soldier standing at attention with a long gun resting upright against his left shoulder brings it up vertically in front of his chest with both hands and pulls back its hammer with his right thumb."}
 - {name: AM_Volley_Present, expect: {travel_max_m: 0.4, end_hip_min_m: 0.8}, family: Volley, duration: 1.5, variants: 4, chain_to: AM_Volley_Fire,
-   constraints: [{frame: 34, seed: chain_end, left_hand: {body_cm: [-12, 60, 141]}, right_hand: {body_cm: [-16, 24, 140]}}],
+   constraints: [{frame: 0, full_body: true, left_hand: {body_cm: [6, 30, 148]}, right_hand: {body_cm: [5, 28, 120]}}, {frame: 34, seed: chain_end, left_hand: {body_cm: [-12, 60, 141]}, right_hand: {body_cm: [-16, 24, 140]}}],
    prompt: "A soldier holding a long gun upright in front of his chest steps back with his right foot, levels the gun to his right shoulder, lowers his cheek to it and aims straight ahead, holding still."}
 - {name: AM_Volley_Fire, expect: {travel_max_m: 0.4, end_hip_min_m: 0.8}, family: Volley, duration: 1.5, variants: 4,
    constraints: [{frame: 0, left_hand: {body_cm: [-12, 60, 141]}, right_hand: {body_cm: [-16, 24, 140]}}, {frame: 9, left_hand: {body_cm: [-12, 60, 141]}, right_hand: {body_cm: [-16, 24, 140]}}],
    prompt: "A soldier aiming a long gun from his right shoulder fires it, his shoulder jerks back sharply from the recoil, he holds the aim for a moment and then lowers the gun in front of him."}
 - {name: AM_Volley_Kneel_MakeReady, expect: {travel_max_m: 0.4, start_hip_max_m: 0.75, end_hip_max_m: 0.75}, family: Volley, duration: 2.0, variants: 3, chain_to: AM_Volley_Kneel_Present,
+   constraints: [{frame: 42, seed: chain_end, left_hand: {body_cm: [6, 30, 111]}, right_hand: {body_cm: [5, 28, 83]}}],
    prompt: "A soldier kneeling on his right knee holds a long gun upright in front of his chest with both hands and pulls back its hammer with his right thumb, staying on one knee."}
 - {name: AM_Volley_Kneel_Present, expect: {travel_max_m: 0.4, start_hip_max_m: 0.75, end_hip_max_m: 0.75}, family: Volley, duration: 1.5, variants: 3, chain_to: AM_Volley_Kneel_Fire,
-   constraints: [{frame: 34, seed: chain_end, left_hand: {body_cm: [-12, 60, 104]}, right_hand: {body_cm: [-16, 24, 103]}}],
+   constraints: [{frame: 0, full_body: true, left_hand: {body_cm: [6, 30, 111]}, right_hand: {body_cm: [5, 28, 83]}}, {frame: 34, seed: chain_end, left_hand: {body_cm: [-12, 60, 104]}, right_hand: {body_cm: [-16, 24, 103]}}],
    prompt: "A soldier kneeling on his right knee levels a long gun to his right shoulder, lowers his cheek to it and aims straight ahead, holding still on one knee."}
 - {name: AM_Volley_Kneel_Fire, expect: {travel_max_m: 0.4, start_hip_max_m: 0.75, end_hip_max_m: 0.75}, family: Volley, duration: 1.5, variants: 3,
    constraints: [{frame: 0, left_hand: {body_cm: [-12, 60, 104]}, right_hand: {body_cm: [-16, 24, 103]}}, {frame: 9, left_hand: {body_cm: [-12, 60, 104]}, right_hand: {body_cm: [-16, 24, 103]}}],

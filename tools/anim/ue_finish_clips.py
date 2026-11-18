@@ -168,9 +168,16 @@ def fix_hands(seq, m):
     lo, hi = max(0, frames[0] - EASE), min(n - 1, frames[-1] + EASE)
     hands = sorted(tg[0][1].keys())
     line = None
-    if len(tg) > 1 and len(hands) == 2:
+    first = next(r for r in m["constraints"] if r.get("type") == "hands")
+    if len(hands) == 2 and len(first.get("targets_gun_cm") or {}) == 2:
+        # Both hands on the staff in the bore: its line is the line through the two targets. The hands are kept on
+        # it for the whole clip wherever they are near it, not only at the constraint frames (user review
+        # 2026-11-16: between them the staff swung through the barrel wall).
         a, b = tg[0][1][hands[0]], tg[0][1][hands[1]]
         line = (a, unit(sub(b, a)))
+    ease_lo, ease_hi = lo, hi
+    if line is not None:
+        lo, hi = 0, n - 1
     poses = {f: pose_at(seq, f) for f in range(lo, hi + 1)}
     err = {h: {f: sub(t[h], grip(poses[f], h)) for f, t in tg} for h in hands}
     new_rot, pelvis_shift, worst_shift = {}, {}, 0.0
@@ -179,16 +186,19 @@ def fix_hands(seq, m):
         want = {}
         for hand in hands:
             if f <= frames[0]:
-                d = mul(err[hand][frames[0]], smooth((f - lo) / float(frames[0] - lo)) if frames[0] > lo else 1.0)
+                d = mul(err[hand][frames[0]], smooth((f - ease_lo) / float(frames[0] - ease_lo)) if frames[0] > ease_lo else 1.0)
             elif f >= frames[-1]:
-                d = mul(err[hand][frames[-1]], smooth((hi - f) / float(hi - frames[-1])) if hi > frames[-1] else 1.0)
+                d = mul(err[hand][frames[-1]], smooth((ease_hi - f) / float(ease_hi - frames[-1])) if ease_hi > frames[-1] else 1.0)
             else:
                 i0 = max(k for k, fr in enumerate(frames) if fr <= f)
                 w = (f - frames[i0]) / float(frames[i0 + 1] - frames[i0])
                 d = add(mul(err[hand][frames[i0]], 1.0 - w), mul(err[hand][frames[i0 + 1]], w))
-            if line is not None and frames[0] <= f <= frames[-1]:
+            if line is not None:
                 rel = sub(add(grip(pose, hand), d), line[0])
-                d = sub(d, sub(rel, mul(line[1], dot(rel, line[1]))))  # back onto the staff's line, free along it
+                perp = sub(rel, mul(line[1], dot(rel, line[1])))
+                # Fully on the line within 12 cm of it or between the constraint frames; let go by 50 cm away.
+                hold = 1.0 if frames[0] <= f <= frames[-1] else smooth(1.0 - (norm(perp) - 12.0) / 38.0)
+                d = sub(d, mul(perp, hold))  # back onto the staff's line, free along it
             want[hand] = d
         # The soldier's arms are shorter than the source body's: what an arm cannot reach, the hips make up.
         shift = (0.0, 0.0, 0.0)

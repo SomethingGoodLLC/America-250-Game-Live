@@ -8,7 +8,9 @@ documented); the exact lengths and the shapes are this pass's own (GAME INVENTIO
   SM_SpongeRammer  2.40 m ash staff; +X end a fleece sponge head (9 x 22 cm), -X end a wooden rammer head (8.6 x 10 cm)
   SM_Linstock      1.50 m staff with a forked iron head at +X holding the slow match
   SM_Handspike     1.70 m lever, 6.5 cm at the +X (working) end tapering to 4 cm at the grip
-  SM_Cartridge     flannel powder bag, 8.6 cm across and 18 cm long
+  SM_Cartridge     a fixed round: flannel powder bag (8.6 x 16 cm), wooden sabot, and the 6-pound ball (8.9 cm) at +X
+  SM_RoundShot     one 6-pound iron ball, 8.9 cm across (documented size), for the pile by the gun
+  SM_Spyglass      brass draw telescope, 60 cm drawn out, eyepiece at -X; origin 8 cm from the eyepiece (the right hand)
 """
 from __future__ import annotations
 
@@ -108,7 +110,22 @@ def main() -> int:
     finish("SM_Handspike", [cyl(-0.85, 0.35, 0.02, 0.026, m["wood"]), cyl(0.35, 0.85, 0.026, 0.0325, m["wood"])], out)
 
     m = fresh()
-    finish("SM_Cartridge", [cyl(-0.09, 0.07, 0.043, 0.043, m["flannel"], 24), cyl(0.07, 0.09, 0.043, 0.012, m["flannel"], 24)], out)
+    bpy.ops.mesh.primitive_uv_sphere_add(segments=20, ring_count=12, radius=0.0445, location=(0.125, 0, 0))
+    ball = bpy.context.object
+    ball.data.materials.append(m["iron"])
+    finish("SM_Cartridge", [cyl(-0.13, 0.03, 0.043, 0.043, m["flannel"], 24), cyl(-0.15, -0.13, 0.015, 0.043, m["flannel"], 24),
+                            cyl(0.03, 0.09, 0.043, 0.04, m["wood"], 24), ball], out)
+
+    m = fresh()
+    bpy.ops.mesh.primitive_uv_sphere_add(segments=20, ring_count=12, radius=0.0445, location=(0, 0, 0))
+    shot = bpy.context.object
+    shot.data.materials.append(m["iron"])
+    finish("SM_RoundShot", [shot], out)
+
+    m = fresh()
+    brass = material("M_Tool_Brass", (0.72, 0.53, 0.18, 1.0), 0.35, 1.0)
+    finish("SM_Spyglass", [cyl(-0.08, 0.14, 0.014, 0.016, brass), cyl(0.14, 0.34, 0.018, 0.02, brass),
+                           cyl(0.34, 0.52, 0.022, 0.025, m["dark"]), cyl(0.50, 0.52, 0.027, 0.027, brass)], out)
     return 0
 
 

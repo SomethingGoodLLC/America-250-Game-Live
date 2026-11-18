@@ -9,30 +9,31 @@ rev = out_root / "review"
 m = json.loads((out_root / "manifest.json").read_text(encoding="utf-8"))
 ffprobe = next((out_root.parent / "Tooling" / "ffmpeg").rglob("ffprobe.exe"))
 REELS = {
-    "Gun": "Full drill reel, 23 s: the cannon at its real place and one man per role at his station. Sponge + Vent (0-4 s), Load (4-7), "
+    "Gun": "Full drill reel, 23 s: the cannon at its real place and one man per role at his station; the captain observes "
+           "through a spyglass at the start and the end. Sponge + Vent (0-4 s), Load (4-7), "
            "Ram (7-10), Prime (10-13), Lay + Traverse (13-16), Fire (16-18.5), Flinch (18.5-20), Run Up (20-23); idles between.",
     "Volley": "Ten-man line, Make Ready -> Present -> Fire, variants v0-v3 across the line, each man 0 to 4 frames (0-133 ms) late (seed 1775).",
     "React": "Twelve-man block, blast at the cone in front of it at 1 s. Nearest four: knockdown, two seconds lying, transition, get-up. "
              "Next four: stagger, then deafened. Far four: near-miss duck.",
 }
 ISSUES = [
-    "Props are separate actors keyed every frame from the hands, not bone attachments: the sponge-and-rammer staff, linstock, "
-    "handspike and cartridge of this pass (flat colours, no textures) and the game's musket. A two-handed prop lies along the line "
-    "between the grips; one carried in one hand stands upright in it, so the idles hold the staff and linstock bolt upright.",
-    "Volley: the musket is upright through Make Ready and swings level over the first 12 frames of Present; in the reload clips "
-    "(not in a reel) no musket was fitted and their hands are not pinned to one.",
-    "Volley kneeling clips: the fix-up moved the hips 12 to 15 cm to bring the hands onto the aim and held the ankles, but the "
-    "knee on the ground is not pinned and may lift or slide. They are in no reel and have not been looked at on the soldier.",
+    "Reviewed by the agent on 2026-11-17 after the user's review: Volley front at half-second steps and frames 0 and 24 at full "
+    "size; Gun high at half-second steps and the sponge, load and both ram frames at full size; Gun front at four frames. "
+    "Volley side and high, Gun side and all React reels were not looked at after the last changes. No MP4 was watched in motion.",
+    "Volley, Make Ready: the men hold the musket in both hands from the first frame (there is no shouldered-arms start: a "
+    "constrained one leaned badly and was dropped). In the first frames the muskets point in different directions from man to "
+    "man before they come upright at the recover at 0.8 s.",
+    "Props are separate actors keyed every frame from the hands, not bone attachments. The staff is put on the measured bore "
+    "line whenever the hands are within 3 cm of it and may never pass the muzzle face while off it. Flat colours, no textures.",
     "Gun reel: the crew is crowded. The provisional ventsman station (10, 50) is inside the wheel track (the wheel's outer face is at "
     "y = 57 to 64 cm) and Crew_3/Crew_4 at (-90, +-75) stand at the wheels, so men overlap the carriage and each other.",
-    "Gun reel: the sponger and loader step about half a metre from their stations to reach the bore targets (station and staff "
-    "numbers disagree, see PROGRESS.md), and after a constrained clip the following idle starts back at the station: a visible pop, "
-    "which the staff follows.",
-    "Reels cut from clip to clip with no blending; a clip that ends before the reel does starts again (Volley: up to 4 frames).",
-    "React reel: the get-up is played by a second figure placed where the transition ends; a one-frame mismatch at that cut is the "
-    "reel's, not the clips'. Transitions are not foot-locked. The React reel has no props and was not rendered again in the prop pass.",
+    "Gun reel: the sponger and loader step about half a metre from their stations to reach the bore, and after a constrained "
+    "clip the following idle starts back at the station: a visible pop, which the staff follows (it blurs at 20 s).",
+    "Gun reel: the round is carried to the muzzle and vanishes there (it is hidden at the frame the hand reaches the muzzle); "
+    "it is not seen going down the bore. The shot pile is static.",
+    "Volley kneeling clips are in no reel and have not been looked at on the soldier; the fix-up does not pin the knee on the ground.",
+    "Reels cut from clip to clip with no blending. React reel: unchanged since 2026-11-16 and not rendered again.",
     "Volley: the men stand with their feet well apart. Not checked whether that is the generated motion or the retarget.",
-    "Looked at by the agent: key-frame sheets of Volley front, Gun high and React high. No MP4 was watched in motion.",
 ]
 lines = ["# Animation pass review: gun drill, volley, reactions", "",
          "Rendered with Movie Render Queue in the scratch project (`AnimationPass/UEHost`), 1280x720, 30 fps, soldier mesh with its "

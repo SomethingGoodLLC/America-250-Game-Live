@@ -298,15 +298,15 @@
     "origin_cm": [
       156.0,
       0.0,
-      113.0
+      113.58
     ],
     "direction": [
-      1.0,
+      0.98662,
       0.0,
-      0.0
+      0.16303
     ],
-    "height_cm": 113.0,
-    "note": "the one-piece mesh stays level (actor pitch 0), so the bore is the +X line through Muzzle"
+    "elevation_deg": 9.38,
+    "note": "measured from the mesh's vertices (tools/anim/ue_measure_bore.py, 2026-11-17): barrel centre 113.0 cm at x 145..160 (top 122.1, bottom 103.9), 99.85 at x 70..85, 97.35 at x 55..70, 95.65 at x 40..55. The barrel is NOT level; the first pass assumed it was and the rammer came out through the top of the barrel."
   },
   "hand_targets": {
     "sponge_hold_forward_of_muzzle_cm": [
@@ -321,7 +321,7 @@
     "muzzle_mouth_cm": [
       156.0,
       0.0,
-      113.0
+      113.58
     ],
     "vent_cm": [
       10.0,
@@ -345,5 +345,11 @@
   },
   "scale_soma_over_soldier": 0.987,
   "scale_note": "multiply every constraint target by this ratio before it goes to Kimodo. Shoulder joint height in the reference poses as Unreal imports them (AnimationPass/logs/rig_dump.json): SOMA LeftArm 142.92 cm / soldier upperarm_l 144.80 cm. The mesh-bounds ratio (0.9248) was wrong: the 190.1 cm bound is not the body height (head joint 164.4 cm; SOMA head joint 159.8 cm).",
-  "scale_soma_over_soldier_from_bounds": 0.9248
+  "scale_soma_over_soldier_from_bounds": 0.9248,
+  "vent_measured_cm": [
+    10.0,
+    0.0,
+    100.3
+  ],
+  "vent_note": "top of the breech at x -5..10 is z 100.3 (measured). The Vent socket on the mesh is at z 116, 16 cm above the metal: for the game agent to move in Scripts/setup_cannon_asset.py."
 }

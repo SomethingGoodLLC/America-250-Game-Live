@@ -62,7 +62,7 @@ def gun_point(geo: dict, ref: dict) -> list[float]:
         p = [float(x) for x in ref["point_cm"]]
     else:
         kind = ref["point"]
-        muzzle = geo["sockets"]["Muzzle"]
+        muzzle = geo["bore_axis"]["origin_cm"]  # the measured centre of the muzzle face, not the socket
         if kind == "bore":  # on the bore axis, forward of the muzzle face
             d = geo["bore_axis"]["direction"]
             fwd = float(ref["forward_of_muzzle_cm"])
@@ -70,7 +70,7 @@ def gun_point(geo: dict, ref: dict) -> list[float]:
         elif kind == "muzzle_mouth":
             p = list(muzzle)
         elif kind == "vent":
-            p = list(geo["sockets"]["Vent"])
+            p = list(geo.get("vent_measured_cm") or geo["sockets"]["Vent"])  # the metal, not the socket above it
         elif kind in geo["sockets"] and geo["sockets"][kind]:
             p = list(geo["sockets"][kind])
         elif kind in geo["stations"]:
@@ -159,7 +159,8 @@ def local30_from_output(skeleton, out: dict, frame: int, torch, device):
     return local30, root
 
 
-def build_constraints(skeleton, spec: dict, geo: dict, seed_out: dict, n_frames: int, torch, device, chain_npz=None):
+def build_constraints(skeleton, spec: dict, geo: dict, seed_out: dict, n_frames: int, torch, device, chain_npz=None,
+                      start_npz=None):
     """Constraint sets for one variant plus the record that goes in the manifest."""
     from kimodo.constraints import EndEffectorConstraintSet, FullBodyConstraintSet
 
@@ -172,6 +173,7 @@ def build_constraints(skeleton, spec: dict, geo: dict, seed_out: dict, n_frames:
         if not 0 <= frame < n_frames:
             raise ValueError("%s: constraint frame %d is outside 0..%d" % (spec["name"], frame, n_frames - 1))
         hands = {h: c[h] for h in HAND if h in c}
+        from_v0 = False
         targets_cm, targets = {}, {}
         k = float(geo["scale_soma_over_soldier"]) / 100.0
         for h, ref in hands.items():
@@ -184,23 +186,43 @@ def build_constraints(skeleton, spec: dict, geo: dict, seed_out: dict, n_frames:
                     raise ValueError("%s: gun hand targets need 'station' and 'face'" % spec["name"])
                 targets_cm[h] = gun_point(geo, ref)
                 targets[h] = to_kimodo(geo, station, face, targets_cm[h])
-        if c.get("seed") == "chain_end" and chain_npz is not None and Path(chain_npz).exists():
+        if c.get("seed_clip") and chain_npz is not None and (Path(chain_npz).parent / (c["seed_clip"] + ".npz")).exists():
+            # Bend the first pose of a named clip (a plain upright stand) instead of whatever the unconstrained pass
+            # showed at this frame: solved from that, the shouldered-arms start leaned back with an arm overhead.
+            import numpy as np
+            local, root = local30_from_output(
+                skeleton, np.load(Path(chain_npz).parent / (c["seed_clip"] + ".npz")), 0, torch, device)
+        elif c.get("seed") == "chain_end" and chain_npz is not None and Path(chain_npz).exists():
             # Bend the pose this clip must end in (the next clip's first frame) instead of the unconstrained
             # pose at this frame: the hold before the end and the end pose then agree, and the model only holds.
             import numpy as np
             local, root = local30_from_output(skeleton, np.load(chain_npz), 0, torch, device)
+        elif frame == 0 and start_npz is not None and Path(start_npz).exists():
+            # This variant must start in variant 0's first pose: bend that pose onto the targets and give it as the
+            # one full-body constraint at frame 0 (a separate start pose 5 cm off at the hands made every seed miss).
+            import numpy as np
+            local, root = local30_from_output(skeleton, np.load(start_npz), 0, torch, device)
+            from_v0 = True
         else:
             local, root = local30_from_output(skeleton, seed_out, frame, torch, device)
         if anchor is None and any("body_cm" in ref for ref in hands.values()):
             anchor = root  # targets in his own space: he stays where he stands and turns or leans to reach
-        local, root, res, shift = solve_hands(skeleton, local, root, targets, torch, anchor=anchor)
+        # A hold solved from the pose the clip ends in keeps that pose's own place: pulled toward where the clip
+        # began, it disagreed with the end pose by the hips' sway and the hands missed by 7 cm.
+        hold_at = root if c.get("seed") == "chain_end" else anchor
+        local, root, res, shift = solve_hands(skeleton, local, root, targets, torch, anchor=hold_at)
         anchor = root if anchor is None else anchor
         grot, gpos, _ = skeleton.fk(local[None], root[None])
-        sets.append(EndEffectorConstraintSet(
-            skeleton, torch.tensor([frame]), gpos, grot, None,
-            joint_names=[HAND[h][0] for h in hands]))
+        if from_v0 or (frame == 0 and c.get("full_body")):
+            # A hold on the very first frame is given as the whole pose: as a hands-only constraint there the
+            # model missed by 5 to 7 cm (kneeling Present), as a full pose by under 3.
+            sets.append(FullBodyConstraintSet(skeleton, torch.tensor([frame]), gpos, grot))
+        else:
+            sets.append(EndEffectorConstraintSet(
+                skeleton, torch.tensor([frame]), gpos, grot, None,
+                joint_names=[HAND[h][0] for h in hands]))
         record.append({"type": "hands", "frame": frame, "targets_gun_cm": targets_cm, "targets_kimodo_m": targets,
-                       "ik_residual_m": res, "ik_root_shift_m": shift})
+                       "ik_residual_m": res, "ik_root_shift_m": shift, "full_body_from_v0": from_v0})
     if spec.get("loop"):  # first and last frame share the unconstrained first pose
         local, root = local30_from_output(skeleton, seed_out, 0, torch, device)
         grot, gpos, _ = skeleton.fk(local[None].repeat(2, 1, 1, 1), root[None].repeat(2, 1))
@@ -300,6 +322,7 @@ def main() -> int:
     ap.add_argument("--all", action="store_true")
     ap.add_argument("--model", default=ALLOWED_MODELS[0])
     ap.add_argument("--steps", type=int, default=100)
+    ap.add_argument("--from-variant", type=int, default=0, help="keep variants below this number as they are on disk")
     ap.add_argument("--max-hand-error", type=float, default=0.05, help="metres, at constraint frames")
     ap.add_argument("--retries", type=int, default=7, help="new seeds to try when the hands or the expectations miss")
     ap.add_argument("--cfg-weight", type=float, nargs=2, default=[2.0, 4.0], metavar=("TEXT", "CONSTRAINT"),
@@ -359,6 +382,8 @@ def main() -> int:
         n_frames = int(round(float(spec["duration"]) * fps))
         for v in range(int(spec.get("variants", 1))):
             key = "%s_v%d" % (spec["name"], v)
+            if v < args.from_variant and (out_root / "native" / (key + ".npz")).exists():
+                continue
             base_seed = clip_seed(spec, v)
             t0 = time.time()
             nxt = spec.get("chain_to")
@@ -370,7 +395,10 @@ def main() -> int:
                 if spec.get("constraints") or spec.get("loop"):
                     first = generate(model, spec, seed, n_frames, [], args.steps)
                     chain_npz = out_root / "native" / ("%s_v0.npz" % nxt) if nxt else None
-                    constraint_lst, record = build_constraints(skeleton, spec, geo, first, n_frames, torch, device, chain_npz)
+                    start_npz = out_root / "native" / ("%s_v0.npz" % spec["name"]) if (
+                        v > 0 and spec["name"] in chain_targets) else None
+                    constraint_lst, record = build_constraints(skeleton, spec, geo, first, n_frames, torch, device, chain_npz,
+                                                               start_npz)
                 if nxt and nxt in by_name and by_name[nxt].get("station") == spec.get("station"):
                     nxt_npz = out_root / "native" / ("%s_v0.npz" % nxt)
                     if nxt_npz.exists():
@@ -379,7 +407,8 @@ def main() -> int:
                     else:
                         record.append({"type": "end_pose", "skipped": "%s_v0 not generated yet" % nxt})
                 own_v0 = out_root / "native" / ("%s_v0.npz" % spec["name"])
-                if v > 0 and spec["name"] in chain_targets and own_v0.exists():
+                if v > 0 and spec["name"] in chain_targets and own_v0.exists() \
+                        and not any(r.get("full_body_from_v0") for r in record):
                     # Every variant of a clip that others chain into starts from variant 0's first pose.
                     c0 = end_pose_constraint(skeleton, own_v0, 1, torch, device)
                     constraint_lst.append(c0)

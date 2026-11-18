@@ -10,7 +10,7 @@ import unreal
 PASS = os.environ.get("PA250_ANIM_PASS", r"C:\Users\user\Documents\ChatGPT\Play America 250\AnimationPass")
 DST = "/Game/PA250/Props/GunTools"
 MUSKET = "/Game/HS_WeaponPack_01/Meshes/MusketRifle/Meshes/SM_HS_WP01_MusketRifle_X_0"
-NAMES = ("SM_SpongeRammer", "SM_Linstock", "SM_Handspike", "SM_Cartridge")
+NAMES = ("SM_SpongeRammer", "SM_Linstock", "SM_Handspike", "SM_Cartridge", "SM_RoundShot", "SM_Spyglass")
 eal = unreal.EditorAssetLibrary
 
 unreal.SystemLibrary.execute_console_command(None, "Interchange.FeatureFlags.Import.FBX 0")
