@@ -9,18 +9,18 @@
 # _L on his left (thrown to his right), _R on his right (thrown to his left).
 
 # ---------------- A. Gun crew ----------------
-- {name: AM_Gun_Idle_Sponger, expect: {travel_max_m: 0.25, end_hip_min_m: 0.8}, family: Gun, station: station_MuzzleR, loop: true, duration: 4.0, variants: 3,
-   prompt: "A man stands ready in place holding a long pole upright at his side, shifts his weight slightly and watches someone to his left."}
+- {name: AM_Gun_Idle_Sponger, seed: 761000, expect: {travel_max_m: 0.25, end_hip_min_m: 0.8, stance_max_m: 0.45, hands_apart_max_m: 0.75, hand_high_max_m: 1.25}, family: Gun, station: station_MuzzleR, loop: true, duration: 4.0, variants: 3,
+   prompt: "A man stands at ease in place with his arms relaxed at his sides, shifts his weight slightly and glances to his left."}
 - {name: AM_Gun_Idle_Loader, expect: {travel_max_m: 0.25, end_hip_min_m: 0.8}, family: Gun, station: station_MuzzleL, loop: true, duration: 4.0, variants: 3,
    prompt: "A man stands ready in place with one hand resting on a bag at his hip, shifts his weight slightly and watches someone to his right."}
-- {name: AM_Gun_Idle_Ventsman, expect: {travel_max_m: 0.25, end_hip_min_m: 0.8}, family: Gun, station: station_Vent, loop: true, duration: 4.0, variants: 3,
-   prompt: "A man stands ready in place with his arms at his sides, shifts his weight slightly and looks ahead attentively."}
-- {name: AM_Gun_Idle_Firer, expect: {travel_max_m: 0.25, end_hip_min_m: 0.8}, family: Gun, station: Linstock, loop: true, duration: 4.0, variants: 3,
-   prompt: "A man stands upright in place holding a short staff upright in his right hand at his side, shifts his weight slightly and watches."}
+- {name: AM_Gun_Idle_Ventsman, seed: 764000, expect: {travel_max_m: 0.25, end_hip_min_m: 0.8, stance_max_m: 0.45, hands_apart_max_m: 0.75, hand_high_max_m: 1.0, lean_max_m: 0.1, hand_out_max_m: 0.4}, family: Gun, station: station_Vent, loop: true, duration: 4.0, variants: 3,
+   prompt: "A man stands upright at ease in place with his arms relaxed at his sides, shifts his weight slightly and glances to his right."}
+- {name: AM_Gun_Idle_Firer, seed: 765000, expect: {travel_max_m: 0.25, end_hip_min_m: 0.8, stance_max_m: 0.45, hands_apart_max_m: 0.75, hand_high_max_m: 1.0, lean_max_m: 0.1, hand_out_max_m: 0.4}, family: Gun, station: Linstock, loop: true, duration: 4.0, variants: 3,
+   prompt: "A man stands upright at ease in place with his arms relaxed at his sides, shifts his weight slightly and looks straight ahead."}
 - {name: AM_Gun_Idle_Captain, expect: {travel_max_m: 0.25, end_hip_min_m: 0.8}, family: Gun, station: Trail, loop: true, duration: 4.0, variants: 3,
    prompt: "A man stands upright in place with his hands behind his back, shifts his weight slightly and looks straight ahead, watching."}
-- {name: AM_Gun_Idle_Handspike, expect: {travel_max_m: 0.25, end_hip_min_m: 0.8}, family: Gun, station: TrailL, loop: true, duration: 4.0, variants: 3,
-   prompt: "A man stands ready in place holding a heavy bar upright with both hands in front of him, shifts his weight slightly and waits."}
+- {name: AM_Gun_Idle_Handspike, seed: 767500, expect: {travel_max_m: 0.25, end_hip_min_m: 0.8, stance_max_m: 0.45, hands_apart_max_m: 0.75, hand_high_max_m: 1.25, lean_max_m: 0.1}, family: Gun, station: TrailL, loop: true, duration: 4.0, variants: 3,
+   prompt: "A man stands upright at ease in place with his head up and his hands clasped in front of his waist, shifts his weight slightly and waits."}
 
 # The gun captain watches the fall of shot through a spyglass (a brass draw telescope: period; binoculars are not).
 - {name: AM_Gun_Observe, intent: [hands_at_face], expect: {travel_max_m: 0.25, end_hip_min_m: 0.8}, family: Gun, station: Trail, duration: 4.0, variants: 2,
@@ -105,7 +105,7 @@
    prompt: "A man crouches down low, looks carefully forward along a line at eye level, raises his left hand and waves it to the left, then to the right, and holds his palm up to signal stop."}
 - {name: AM_Gun_Fire, intent: [stoop], family: Gun, station: Linstock, duration: 2.5, variants: 3,
    prompt: "A man reaches out to his left at arm's length with a long staff in his right hand and touches it down on a waist-high object, leaning his body away and turning his head away."}
-- {name: AM_Gun_Flinch, intent: [hands_at_face, stoop], expect: {travel_max_m: 0.5, end_hip_min_m: 0.8}, family: Gun, duration: 1.5, variants: 4,
+- {name: AM_Gun_Flinch, intent: [hands_at_face, stoop], expect: {travel_max_m: 0.5, end_hip_min_m: 0.8, head_low_min_m: 1.38}, family: Gun, duration: 1.5, variants: 4,
    prompt: "A standing man braces himself, hunches his shoulders and turns his face sharply away from a loud bang beside him, then recovers."}
 
 # ---------------- B. Coordinated musket fire ----------------
@@ -119,31 +119,57 @@
 # height of the neck (GAME INVENTION for the numbers). Make Ready starts from shouldered arms: left hand under the
 # butt at the left hip, right hand at his side. Without these the men hunched with their hands over their faces
 # and the musket ran up through the hat (user review 2026-11-16).
-- {name: AM_Volley_MakeReady, expect: {travel_max_m: 0.4, end_hip_min_m: 0.8}, family: Volley, duration: 2.0, variants: 4, chain_to: AM_Volley_Present,
-   constraints: [{frame: 6, left_hand: {body_cm: [8, 28, 134]}, right_hand: {body_cm: [4, 27, 108]}},
-                 {frame: 42, seed: chain_end, left_hand: {body_cm: [6, 30, 148]}, right_hand: {body_cm: [5, 28, 120]}}],
-   prompt: "A soldier standing at attention with a long gun resting upright against his left shoulder brings it up vertically in front of his chest with both hands and pulls back its hammer with his right thumb."}
-- {name: AM_Volley_Present, expect: {travel_max_m: 0.4, end_hip_min_m: 0.8}, family: Volley, duration: 1.5, variants: 4, chain_to: AM_Volley_Fire,
-   constraints: [{frame: 0, full_body: true, left_hand: {body_cm: [6, 30, 148]}, right_hand: {body_cm: [5, 28, 120]}}, {frame: 34, seed: chain_end, left_hand: {body_cm: [-12, 60, 141]}, right_hand: {body_cm: [-16, 24, 140]}}],
+# `upright`: the holds are solved with the arms and the spine stays as it stands (see gen_clips.py). Make Ready
+# starts in the poise that Reload_Shoulder ends in (musket upright before the chest, right hand at the small of the
+# stock, left hand above it), so the cycle runs on from the reload. Both hands stay on the musket in every volley
+# clip: the game carries it in the right hand and puts the left on the stock, so a pose with the right hand let go
+# (arms shouldered on the left, tried 2026-11-18) would leave it hanging from that hand.
+- {name: AM_Volley_MakeReady, upright: true, expect: {travel_max_m: 0.4, end_hip_min_m: 0.8, start_hip_min_m: 0.9, lean_max_m: 0.2, head_low_min_m: 1.48, stance_max_m: 0.45}, family: Volley, duration: 2.0, variants: 4, chain_to: AM_Volley_Present,
+   constraints: [{frame: 0, full_body: true, seed_clip: AM_Gun_Idle_Loader_v2, left_hand: {body_cm: [8, 28, 124]}, right_hand: {body_cm: [5, 27, 100]}},
+                 {frame: 42, seed: chain_end, left_hand: {body_cm: [8, 30, 132]}, right_hand: {body_cm: [6, 28, 106]}}],
+   prompt: "A soldier standing at attention holds a long gun upright in front of his chest with both hands, raises it a little and pulls back its hammer with his right thumb, standing still."}
+- {name: AM_Volley_Present, upright: true, expect: {travel_max_m: 0.4, end_hip_min_m: 0.8, lean_max_m: 0.2, head_low_min_m: 1.48}, family: Volley, duration: 1.5, variants: 4, chain_to: AM_Volley_Fire,
+   constraints: [{frame: 0, full_body: true, seed_clip: AM_Gun_Idle_Loader_v2, left_hand: {body_cm: [8, 30, 132]}, right_hand: {body_cm: [6, 28, 106]}}, {frame: 34, seed: chain_end, left_hand: {body_cm: [-12, 60, 141]}, right_hand: {body_cm: [-16, 24, 140]}}],
    prompt: "A soldier holding a long gun upright in front of his chest steps back with his right foot, levels the gun to his right shoulder, lowers his cheek to it and aims straight ahead, holding still."}
-- {name: AM_Volley_Fire, intent: [hold], expect: {travel_max_m: 0.4, end_hip_min_m: 0.8}, family: Volley, duration: 1.5, variants: 4,
-   constraints: [{frame: 0, left_hand: {body_cm: [-12, 60, 141]}, right_hand: {body_cm: [-16, 24, 140]}}, {frame: 9, left_hand: {body_cm: [-12, 60, 141]}, right_hand: {body_cm: [-16, 24, 140]}}],
+- {name: AM_Volley_Fire, intent: [hold], expect: {travel_max_m: 0.4, end_hip_min_m: 0.8, stance_max_m: 0.46}, family: Volley, duration: 1.5, variants: 4,
+   constraints: [{frame: 0, full_body: true, seed_clip: AM_Gun_Idle_Loader_v2, left_hand: {body_cm: [-12, 60, 141]}, right_hand: {body_cm: [-16, 24, 140]}},
+                 {frame: 9, full_body: true, seed_clip: AM_Gun_Idle_Loader_v2, left_hand: {body_cm: [-12, 60, 141]}, right_hand: {body_cm: [-16, 24, 140]}}],
    prompt: "A soldier aiming a long gun from his right shoulder fires it, his shoulder jerks back sharply from the recoil, he holds the aim for a moment and then lowers the gun in front of him."}
 - {name: AM_Volley_Kneel_MakeReady, intent: [hold], expect: {travel_max_m: 0.4, start_hip_max_m: 0.75, end_hip_max_m: 0.75}, family: Volley, duration: 2.0, variants: 3, chain_to: AM_Volley_Kneel_Present,
-   constraints: [{frame: 42, seed: chain_end, left_hand: {body_cm: [6, 30, 111]}, right_hand: {body_cm: [5, 28, 83]}}],
+   constraints: [{frame: 42, seed: chain_end, left_hand: {body_cm: [8, 30, 80]}, right_hand: {body_cm: [6, 28, 56]}}],
    prompt: "A soldier kneeling on his right knee holds a long gun upright in front of his chest with both hands and pulls back its hammer with his right thumb, staying on one knee."}
 - {name: AM_Volley_Kneel_Present, intent: [hold], expect: {travel_max_m: 0.4, start_hip_max_m: 0.75, end_hip_max_m: 0.75}, family: Volley, duration: 1.5, variants: 3, chain_to: AM_Volley_Kneel_Fire,
-   constraints: [{frame: 0, full_body: true, left_hand: {body_cm: [6, 30, 111]}, right_hand: {body_cm: [5, 28, 83]}}, {frame: 34, seed: chain_end, left_hand: {body_cm: [-12, 60, 104]}, right_hand: {body_cm: [-16, 24, 103]}}],
+   constraints: [{frame: 0, full_body: true, left_hand: {body_cm: [8, 30, 80]}, right_hand: {body_cm: [6, 28, 56]}}, {frame: 34, seed: chain_end, left_hand: {body_cm: [-12, 58, 93]}, right_hand: {body_cm: [-16, 23, 92]}}],
    prompt: "A soldier kneeling on his right knee levels a long gun to his right shoulder, lowers his cheek to it and aims straight ahead, holding still on one knee."}
 - {name: AM_Volley_Kneel_Fire, intent: [hold], expect: {travel_max_m: 0.4, start_hip_max_m: 0.75, end_hip_max_m: 0.75}, family: Volley, duration: 1.5, variants: 3,
-   constraints: [{frame: 0, left_hand: {body_cm: [-12, 60, 104]}, right_hand: {body_cm: [-16, 24, 103]}}, {frame: 9, left_hand: {body_cm: [-12, 60, 104]}, right_hand: {body_cm: [-16, 24, 103]}}],
+   constraints: [{frame: 0, left_hand: {body_cm: [-12, 58, 93]}, right_hand: {body_cm: [-16, 23, 92]}}, {frame: 9, left_hand: {body_cm: [-12, 58, 93]}, right_hand: {body_cm: [-16, 23, 92]}}],
    prompt: "A soldier kneeling on his right knee and aiming a long gun from his right shoulder fires it, his shoulder jerks back from the recoil, he holds the aim, then lowers the gun, staying on one knee."}
-- {name: AM_Reload_PrimePan, intent: [hands_at_face], expect: {travel_max_m: 0.4, end_hip_min_m: 0.8}, family: Volley, duration: 3.0, variants: 3, chain_to: AM_Reload_RamCharge,
+# The reload, with the musket where the hands must be (GAME INVENTION for the numbers; the steps are the manual
+# exercise). Prime: musket level at the right hip in the left hand; the right hand goes to the pouch, the mouth
+# (bites the cartridge), then the pan. Charge: musket upright, butt on the ground between the feet, left hand below
+# the muzzle; the right hand pours, draws the rammer up, rams twice, returns it. Shoulder: lifted by the left
+# hand to the poise before the chest, the right hand at the small of the stock. Every hold is solved from an upright stand
+# (seed_clip). Without these the hands waved at chest height and nothing read as loading (review 2026-11-18).
+- {name: AM_Reload_PrimePan, upright: true, intent: [hands_at_face], expect: {travel_max_m: 0.4, end_hip_min_m: 0.8, stance_max_m: 0.45, lean_max_m: 0.2, head_low_min_m: 1.48}, family: Volley, duration: 3.0, variants: 3, chain_to: AM_Reload_RamCharge,
+   constraints: [{frame: 0, full_body: true, seed_clip: AM_Gun_Idle_Loader_v2, left_hand: {body_cm: [2, 36, 106]}, right_hand: {body_cm: [-18, 16, 110]}},
+                 {frame: 14, seed_clip: AM_Gun_Idle_Loader_v2, left_hand: {body_cm: [2, 36, 106]}, right_hand: {body_cm: [-27, -6, 96]}},
+                 {frame: 34, seed_clip: AM_Gun_Idle_Loader_v2, left_hand: {body_cm: [2, 36, 106]}, right_hand: {body_cm: [-3, 14, 158]}},
+                 {frame: 56, seed_clip: AM_Gun_Idle_Loader_v2, left_hand: {body_cm: [2, 36, 106]}, right_hand: {body_cm: [-18, 16, 110]}}],
    prompt: "A standing soldier holds a long gun level at his right hip with his left hand, takes a small paper packet from a pouch at his right hip, bites the end off it, tips a little powder onto the gun near his right hand and snaps a small lid shut."}
-- {name: AM_Reload_RamCharge, expect: {travel_max_m: 0.4, end_hip_min_m: 0.8}, family: Volley, duration: 4.0, variants: 3, chain_to: AM_Reload_Shoulder,
+- {name: AM_Reload_RamCharge, upright: true, intent: [hands_at_face], expect: {travel_max_m: 0.4, end_hip_min_m: 0.8, stance_max_m: 0.45, lean_max_m: 0.2, head_low_min_m: 1.48}, family: Volley, duration: 4.0, variants: 3, chain_to: AM_Reload_Shoulder,
+   constraints: [{frame: 0, full_body: true, seed_clip: AM_Gun_Idle_Loader_v2, left_hand: {body_cm: [6, 26, 118]}, right_hand: {body_cm: [4, 28, 140]}},
+                 {frame: 22, seed_clip: AM_Gun_Idle_Loader_v2, left_hand: {body_cm: [6, 26, 118]}, right_hand: {body_cm: [4, 28, 140]}},
+                 {frame: 44, seed_clip: AM_Gun_Idle_Loader_v2, left_hand: {body_cm: [6, 26, 118]}, right_hand: {body_cm: [3, 28, 168]}},
+                 {frame: 58, seed_clip: AM_Gun_Idle_Loader_v2, left_hand: {body_cm: [6, 26, 118]}, right_hand: {body_cm: [4, 28, 144]}},
+                 {frame: 70, seed_clip: AM_Gun_Idle_Loader_v2, left_hand: {body_cm: [6, 26, 118]}, right_hand: {body_cm: [3, 28, 168]}},
+                 {frame: 82, seed_clip: AM_Gun_Idle_Loader_v2, left_hand: {body_cm: [6, 26, 118]}, right_hand: {body_cm: [4, 28, 144]}},
+                 {frame: 104, seed_clip: AM_Gun_Idle_Loader_v2, left_hand: {body_cm: [6, 26, 118]}, right_hand: {body_cm: [5, 27, 100]}}],
    prompt: "A standing soldier swings a long gun upright with its butt on the ground by his left foot, pours something into its top end with his right hand, draws a long thin rod out from under the barrel, pushes the rod down the barrel twice, pulls it out and slides it back into place."}
-- {name: AM_Reload_Shoulder, expect: {travel_max_m: 0.4, end_hip_min_m: 0.8}, family: Volley, duration: 2.0, variants: 3,
-   prompt: "A standing soldier lifts a long gun from the ground with both hands and brings it up to rest upright against his left shoulder, then stands at attention."}
+- {name: AM_Reload_Shoulder, upright: true, expect: {travel_max_m: 0.4, end_hip_min_m: 0.8, stance_max_m: 0.45, lean_max_m: 0.2, head_low_min_m: 1.48}, family: Volley, duration: 2.0, variants: 3, chain_to: AM_Volley_MakeReady,
+   constraints: [{frame: 0, full_body: true, seed_clip: AM_Gun_Idle_Loader_v2, left_hand: {body_cm: [6, 26, 118]}, right_hand: {body_cm: [5, 27, 100]}},
+                 {frame: 22, seed_clip: AM_Gun_Idle_Loader_v2, left_hand: {body_cm: [8, 27, 138]}, right_hand: {body_cm: [5, 27, 100]}},
+                 {frame: 46, full_body: true, seed_clip: AM_Gun_Idle_Loader_v2, left_hand: {body_cm: [8, 28, 124]}, right_hand: {body_cm: [5, 27, 100]}}],
+   prompt: "A soldier standing upright lifts a long gun from the ground with his left hand, grips it lower down with his right hand and holds it upright in front of his chest with both hands, standing at attention."}
 
 # ---------------- C. Explosion and impact reactions ----------------
 - {name: AM_React_NearMiss, intent: [hands_at_face, stoop, wide_stance], expect: {travel_max_m: 0.5, end_hip_min_m: 0.8}, family: React, duration: 1.5, variants: 4,
@@ -174,11 +200,11 @@
    prompt: "A man lying face down on the ground pushes himself up with his arms to a crouch and then stands up."}
 - {name: AM_GetUp_Side, expect: {start_hip_max_m: 0.45, end_hip_min_m: 0.8}, family: React, duration: 3.0, variants: 2, root_motion: true,
    prompt: "A man lying on his side on the ground pushes himself up with one arm to a crouch and then stands up."}
-- {name: AM_Wound_Leg_Fall, expect: {end_hip_max_m: 0.5}, family: React, duration: 2.5, variants: 3, root_motion: true,
+- {name: AM_Wound_Leg_Fall, start_pose_from: AM_Gun_Idle_Loader_v2, expect: {start_hip_min_m: 0.85, end_hip_max_m: 0.5}, family: React, duration: 2.5, variants: 3, root_motion: true,
    prompt: "A standing man is struck in his right leg, the leg buckles under him and he collapses to the ground clutching it with both hands."}
 - {name: AM_Wound_Crawl, expect: {start_hip_max_m: 0.4, end_hip_max_m: 0.4, travel_min_m: 0.4, direction: fwd}, family: React, duration: 3.0, variants: 2, root_motion: true,
    prompt: "A wounded man lying face down on the ground drags himself slowly forward on his forearms, his legs trailing behind him."}
-- {name: AM_Death_Shot_F, expect: {end_hip_max_m: 0.35}, family: React, duration: 2.0, variants: 3, root_motion: true,
+- {name: AM_Death_Shot_F, start_pose_from: AM_Gun_Idle_Loader_v2, expect: {start_hip_min_m: 0.85, end_hip_max_m: 0.35}, family: React, duration: 2.0, variants: 3, root_motion: true,
    prompt: "A standing man is shot in the chest, jerks backward, his knees give way and he falls onto his back and lies still."}
-- {name: AM_Death_Shot_B, expect: {end_hip_max_m: 0.35}, family: React, duration: 2.0, variants: 3, root_motion: true,
+- {name: AM_Death_Shot_B, start_pose_from: AM_Gun_Idle_Loader_v2, expect: {start_hip_min_m: 0.85, end_hip_max_m: 0.35}, family: React, duration: 2.0, variants: 3, root_motion: true,
    prompt: "A standing man is shot in the back, arches, staggers forward and falls face down and lies still."}

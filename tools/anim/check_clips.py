@@ -106,7 +106,7 @@ def main() -> int:
                 fails.append("skate %.1f cm" % (skate * 100))
             if hand > HAND_LIMIT_M:
                 fails.append("hand %.1f cm" % (hand * 100))
-            fails += expectation_failures(d["root_positions"], spec.get("expect"))
+            fails += expectation_failures(d["root_positions"], spec.get("expect"), pj, idx)
             rows.append({"clip": key, "seed": m["seed"], "tries": len(m.get("attempts", [1])), "finite": finite,
                          "fps": round(fps, 3), "duration_s": round(duration, 3), "skate_cm": round(skate * 100, 2),
                          "contact_phases": phases, "hand_cm": round(hand * 100, 2), "fails": fails})

@@ -100,10 +100,11 @@ def to_kimodo(geo: dict, station_cm: list[float], face_cm: list[float], p_cm: li
 
 # ---------- IK on the SOMA 30-joint skeleton ----------
 
-def solve_hands(skeleton, seed_local, seed_root, targets: dict, torch, anchor=None):
+def solve_hands(skeleton, seed_local, seed_root, targets: dict, torch, anchor=None, spine=4.0):
     """Bend the seed pose so each hand's grip point (midway wrist -> middle fingertip) is on its target.
 
     seed_local [30,3,3], seed_root [3]; targets {"left_hand": [3], ...} in Kimodo space.
+    spine: what bending the spine costs against bending an arm (4 by default); None keeps the spine as seeded.
     Returns local rots [30,3,3], root [3], residuals {hand: metres}, root shift in metres.
     """
     from kimodo.geometry import axis_angle_to_matrix
@@ -115,13 +116,15 @@ def solve_hands(skeleton, seed_local, seed_root, targets: dict, torch, anchor=No
     delta = (1e-3 * torch.randn(len(idx), 3, generator=gen)).to(dev).requires_grad_(True)
     droot = torch.zeros(3, device=dev, requires_grad=True)
     yaw = torch.full((1,), 1e-3, device=dev, requires_grad=True)  # turn of the whole body about the vertical
-    weight = torch.tensor([4.0 if n.startswith(("Spine", "Chest")) else 1.0 for n in IK_JOINTS], device=dev)
+    is_spine = [n.startswith(("Spine", "Chest")) for n in IK_JOINTS]
+    weight = torch.tensor([float(spine or 1.0) if sp else 1.0 for sp in is_spine], device=dev)
+    free = torch.tensor([0.0 if (sp and spine is None) else 1.0 for sp in is_spine], device=dev)[:, None]
     tgt = {h: torch.tensor(p, device=dev, dtype=seed_local.dtype) for h, p in targets.items()}
     opt = torch.optim.Adam([delta, droot, yaw], lr=0.03)
 
     def pose():
         local = seed_local.clone()
-        local[idx] = seed_local[idx] @ axis_angle_to_matrix(delta)
+        local[idx] = seed_local[idx] @ axis_angle_to_matrix(delta * free)
         turn = axis_angle_to_matrix(torch.stack([yaw.new_zeros(1), yaw, yaw.new_zeros(1)], dim=-1))[0]
         local[skeleton.root_idx] = turn @ seed_local[skeleton.root_idx]
         root = seed_root + droot
@@ -160,7 +163,7 @@ def local30_from_output(skeleton, out: dict, frame: int, torch, device):
 
 
 def build_constraints(skeleton, spec: dict, geo: dict, seed_out: dict, n_frames: int, torch, device, chain_npz=None,
-                      start_npz=None):
+                      start_npz=None, seed_dir=None):
     """Constraint sets for one variant plus the record that goes in the manifest."""
     from kimodo.constraints import EndEffectorConstraintSet, FullBodyConstraintSet
 
@@ -197,6 +200,11 @@ def build_constraints(skeleton, spec: dict, geo: dict, seed_out: dict, n_frames:
             # pose at this frame: the hold before the end and the end pose then agree, and the model only holds.
             import numpy as np
             local, root = local30_from_output(skeleton, np.load(chain_npz), 0, torch, device)
+        elif c.get("seed_clip"):
+            # Bend a known upright pose (another clip's first frame) onto the targets: solved from the model's own
+            # unconstrained pose, a hold came out leaning or hunched (shouldered arms, the reload holds).
+            import numpy as np
+            local, root = local30_from_output(skeleton, np.load(seed_dir / ("%s.npz" % c["seed_clip"])), 0, torch, device)
         elif frame == 0 and start_npz is not None and Path(start_npz).exists():
             # This variant must start in variant 0's first pose: bend that pose onto the targets and give it as the
             # one full-body constraint at frame 0 (a separate start pose 5 cm off at the hands made every seed miss).
@@ -209,20 +217,33 @@ def build_constraints(skeleton, spec: dict, geo: dict, seed_out: dict, n_frames:
             anchor = root  # targets in his own space: he stays where he stands and turns or leans to reach
         # A hold solved from the pose the clip ends in keeps that pose's own place: pulled toward where the clip
         # began, it disagreed with the end pose by the hips' sway and the hands missed by 7 cm.
-        hold_at = root if c.get("seed") == "chain_end" else anchor
-        local, root, res, shift = solve_hands(skeleton, local, root, targets, torch, anchor=hold_at)
+        hold_at = root if (c.get("seed") == "chain_end" or c.get("seed_clip")) else anchor
+        if spec.get("upright"):
+            # `upright`: the arms alone first, and the spine only as far as they cannot reach. With the spine as cheap
+            # as it is by default the solver leaned him 32 cm forward to hold a musket 30 cm in front of his chest
+            # (the recover; every Make Ready ended bowed and every Present began so, review 2026-11-18).
+            for spine in (None, 40.0, 4.0):
+                solved = solve_hands(skeleton, local, root, targets, torch, anchor=hold_at, spine=spine)
+                if max(solved[2].values()) <= 0.015:
+                    break
+            local, root, res, shift = solved
+        else:
+            spine = 4.0
+            local, root, res, shift = solve_hands(skeleton, local, root, targets, torch, anchor=hold_at)
         anchor = root if anchor is None else anchor
         grot, gpos, _ = skeleton.fk(local[None], root[None])
-        if from_v0 or (frame == 0 and c.get("full_body")):
-            # A hold on the very first frame is given as the whole pose: as a hands-only constraint there the
-            # model missed by 5 to 7 cm (kneeling Present), as a full pose by under 3.
+        if from_v0 or c.get("full_body"):
+            # `full_body` gives the whole solved pose, feet included, not only the hands. On the first frame a
+            # hands-only hold was missed by 5 to 7 cm (kneeling Present); and only a whole pose fixes the stance:
+            # left free, the standing aim spread the feet 54 to 60 cm apart on every seed.
             sets.append(FullBodyConstraintSet(skeleton, torch.tensor([frame]), gpos, grot))
         else:
             sets.append(EndEffectorConstraintSet(
                 skeleton, torch.tensor([frame]), gpos, grot, None,
                 joint_names=[HAND[h][0] for h in hands]))
         record.append({"type": "hands", "frame": frame, "targets_gun_cm": targets_cm, "targets_kimodo_m": targets,
-                       "ik_residual_m": res, "ik_root_shift_m": shift, "full_body_from_v0": from_v0})
+                       "ik_residual_m": res, "ik_root_shift_m": shift, "full_body_from_v0": from_v0,
+                       **({"ik_spine": spine if spine is not None else "kept"} if spec.get("upright") else {})})
     if spec.get("loop"):  # first and last frame share the unconstrained first pose
         local, root = local30_from_output(skeleton, seed_out, 0, torch, device)
         grot, gpos, _ = skeleton.fk(local[None].repeat(2, 1, 1, 1), root[None].repeat(2, 1))
@@ -392,13 +413,19 @@ def main() -> int:
                 # A variant whose hands miss their targets is generated again with a new seed, never hand-edited.
                 seed = base_seed + 1000 * attempt
                 constraint_lst, record = [], []
-                if spec.get("constraints") or spec.get("loop"):
+                if spec.get("constraints") or spec.get("loop") or spec.get("start_pose_from"):
                     first = generate(model, spec, seed, n_frames, [], args.steps)
                     chain_npz = out_root / "native" / ("%s_v0.npz" % nxt) if nxt else None
                     start_npz = out_root / "native" / ("%s_v0.npz" % spec["name"]) if (
                         v > 0 and spec["name"] in chain_targets) else None
                     constraint_lst, record = build_constraints(skeleton, spec, geo, first, n_frames, torch, device, chain_npz,
-                                                               start_npz)
+                                                               start_npz, out_root / "native")
+                if spec.get("start_pose_from"):
+                    # The clip starts in another clip's first pose (a man on his feet): a fall or a death generated
+                    # free started already bent over or kneeling.
+                    src_npz = out_root / "native" / ("%s.npz" % spec["start_pose_from"])
+                    constraint_lst.append(end_pose_constraint(skeleton, src_npz, 1, torch, device))
+                    record.append({"type": "start_pose", "frame": 0, "from": "%s frame 0" % spec["start_pose_from"]})
                 if nxt and nxt in by_name and by_name[nxt].get("station") == spec.get("station"):
                     nxt_npz = out_root / "native" / ("%s_v0.npz" % nxt)
                     if nxt_npz.exists():
@@ -419,11 +446,11 @@ def main() -> int:
                 achieved_errors(model, out, record, torch, device)
                 got0 = max([max(r["achieved_error_m"].values()) for r in record if r.get("type") == "hands"] or [0.0])
                 if attempt == args.retries or (
-                        got0 <= args.max_hand_error and not expectation_failures(out["root_positions"], spec.get("expect"))):
+                        got0 <= args.max_hand_error and not expectation_failures(out["root_positions"], spec.get("expect"), out["posed_joints"], skel77.bone_index)):
                     out = lock_feet(out, skel77, torch, device)  # planted feet pinned; hips and arms untouched
                     foot_stats = out.pop("_foot_lock")
                 got = max([max(r["achieved_error_m"].values()) for r in record if r.get("type") == "hands"] or [0.0])
-                misses = expectation_failures(out["root_positions"], spec.get("expect"))
+                misses = expectation_failures(out["root_positions"], spec.get("expect"), out["posed_joints"], skel77.bone_index)
                 attempts.append({"seed": seed, "hand_error_m": got, "expect_failures": misses})
                 if got <= args.max_hand_error and not misses:
                     break

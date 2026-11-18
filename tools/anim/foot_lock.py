@@ -8,6 +8,13 @@ touched, so hand targets and the root path stay as generated.
 
 Used by gen_clips.py before a clip is saved; also runs over clips already on disk:
   python foot_lock.py [--out <AnimationPass>] [--only KEY ...]
+  python foot_lock.py --chains [--specs clip_specs.yaml]
+
+--chains. Each clip's legs are solved on their own, so where one clip is meant to run straight into another the
+planted foot could be turned up to 21 degrees differently on the two sides of the join though the rest of the body
+agreed within 4 (found 2026-11-18). This pass locks the clips of every chain again with the join in it: a clip
+that chains to another ends with the legs of that clip's variant 0 at its first frame, and every variant of a clip
+others chain into starts with the legs of its own variant 0. Clips are done in chain order, the last link first.
 """
 from __future__ import annotations
 
@@ -38,8 +45,11 @@ def phases(on: np.ndarray):
         t = e + 1
 
 
-def lock_feet(out: dict, skel77, torch, device, steps: int = 400) -> dict:
-    """Return a copy of a Kimodo output dict with planted feet pinned, plus out['_foot_lock'] stats."""
+def lock_feet(out: dict, skel77, torch, device, steps: int = 400, start_local=None, end_local=None) -> dict:
+    """Return a copy of a Kimodo output dict with planted feet pinned, plus out['_foot_lock'] stats.
+
+    start_local / end_local: local rotations [J,3,3] whose legs the first / last frame must take (a chain join).
+    """
     from kimodo.geometry import axis_angle_to_matrix
 
     local0 = torch.as_tensor(out["local_rot_mats"], device=device, dtype=torch.float32)
@@ -58,13 +68,35 @@ def lock_feet(out: dict, skel77, torch, device, steps: int = 400) -> dict:
             target[t : e + 1, col] = pos0[t : e + 1, j][:, [0, 2]].median(dim=0).values
             mask[t : e + 1, col] = 1.0
             n_phases += 1
-    stats = {"phases": n_phases}
-    if n_phases == 0:
+    lj = [skel77.bone_index[n] for n in LEG]
+    ends = []
+    for frame, ref in ((0, start_local), (T - 1, end_local)):
+        if ref is None:
+            continue
+        ref = torch.as_tensor(ref, device=device, dtype=torch.float32)
+        pose = local0[frame].clone()
+        pose[lj] = ref[lj]
+        with torch.no_grad():
+            _, pos_ref, _ = skel77.fk(pose[None], root[frame][None])
+        ends.append((frame, ref[lj]))
+        for col, name in enumerate(foot_names):  # a phase that touches the join is pinned where the neighbour has the foot
+            if not contacts[frame, col]:
+                continue
+            t = e = frame
+            while t > 0 and contacts[t - 1, col]:
+                t -= 1
+            while e + 1 < T and contacts[e + 1, col]:
+                e += 1
+            if frame == T - 1 and start_local is not None and t == 0:
+                continue  # one phase spans the whole clip: the start already fixed its place
+            target[t : e + 1, col] = pos_ref[0, skel77.bone_index[name]][[0, 2]]
+            mask[t : e + 1, col] = 1.0
+    stats = {"phases": n_phases, "joined": [f for f, _ in ends]}
+    if n_phases == 0 and not ends:
         res = dict(out)
         res["_foot_lock"] = stats
         return res
     fj = [skel77.bone_index[n] for n in foot_names]
-    lj = [skel77.bone_index[n] for n in LEG]
     gen = torch.Generator().manual_seed(0)
     delta = (1e-3 * torch.randn(T, len(lj), 3, generator=gen)).to(device).requires_grad_(True)
     opt = torch.optim.Adam([delta], lr=0.01)
@@ -82,8 +114,10 @@ def lock_feet(out: dict, skel77, torch, device, steps: int = 400) -> dict:
         stats["before_cm"] = float(err(pos0).max().sqrt()) * 100
     for _ in range(steps):
         opt.zero_grad()
-        _, _, pos = run()
-        loss = 1e4 * err(pos).sum() / mask.sum() + 1.0 * (delta ** 2).mean()
+        local_now, _, pos = run()
+        loss = 1e4 * err(pos).sum() / mask.sum().clamp(min=1.0) + 1.0 * (delta ** 2).mean()
+        for frame, ref in ends:
+            loss = loss + 300.0 * ((local_now[frame, lj] - ref) ** 2).mean()
         if T > 1:
             loss = loss + 20.0 * ((delta[1:] - delta[:-1]) ** 2).mean()
         loss.backward()
@@ -115,6 +149,8 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default=str(DEFAULT_OUT))
     ap.add_argument("--only", action="append", default=[])
+    ap.add_argument("--chains", action="store_true")
+    ap.add_argument("--specs", default=str(Path(__file__).resolve().parent / "clip_specs.yaml"))
     a = ap.parse_args()
     import torch
     from kimodo.exports.bvh import save_motion_bvh
@@ -126,20 +162,42 @@ def main() -> int:
     out_root = Path(a.out)
     mpath = out_root / "manifest.json"
     manifest = json.loads(mpath.read_text(encoding="utf-8"))
-    for key in sorted(manifest["clips"]):
+    jobs = []  # (key, start reference key or None, end reference key or None)
+    if a.chains:
+        import yaml
+        import gen_clips
+        specs = yaml.safe_load(Path(a.specs).read_text(encoding="utf-8"))
+        by = {x["name"]: x for x in specs}
+        linked = lambda x: x.get("chain_to") in by and by[x["chain_to"]].get("station") == x.get("station")
+        targets = {x["chain_to"] for x in specs if linked(x)}
+        for spec in gen_clips.order_for_chains(specs, [x["name"] for x in specs]):
+            if not linked(spec) and spec["name"] not in targets:
+                continue
+            for v in range(int(spec.get("variants", 1))):
+                key = "%s_v%d" % (spec["name"], v)
+                start = "%s_v0" % spec["name"] if spec["name"] in targets else None
+                jobs.append((key, start, "%s_v0" % spec["chain_to"] if linked(spec) else None))
+    else:
+        jobs = [(key, None, None) for key in sorted(manifest["clips"])
+                if not manifest["clips"][key].get("foot_lock") and (not a.only or key in a.only)]
+    first_local = lambda key: np.load(out_root / "native" / (key + ".npz"))["local_rot_mats"][0]
+    for key, start_key, end_key in jobs:
         m = manifest["clips"][key]
-        if (a.only and key not in a.only) or m.get("foot_lock"):
-            continue
         npz, bvh = out_root / "native" / m["files"]["npz"], out_root / "bvh" / m["files"]["bvh"]
         out = {k: v for k, v in np.load(npz).items()}
-        res = lock_feet(out, skel, torch, device)
+        res = lock_feet(out, skel, torch, device,
+                        start_local=first_local(start_key) if start_key else None,
+                        end_local=first_local(end_key) if end_key else None)
         stats = res.pop("_foot_lock")
         save_kimodo_npz(str(npz), res)
         rot = torch.from_numpy(res["global_rot_mats"]).to(device)
         pos = torch.from_numpy(res["posed_joints"]).to(device)
         save_motion_bvh(str(bvh), global_rots_to_local_rots(rot, skel), pos[:, skel.root_idx, :],
                         skeleton=skel, fps=float(m["fps"]), standard_tpose=True)
-        m["foot_lock"] = stats
+        if a.chains:
+            m["foot_lock_joined"] = {"start": start_key, "end": end_key, **stats}
+        else:
+            m["foot_lock"] = stats
         m["files"]["npz_sha256"], m["files"]["bvh_sha256"] = sha256(npz), sha256(bvh)
         mpath.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
         print("%-34s phases %2d  worst %.1f -> %.1f cm  leg change %.1f deg" % (
