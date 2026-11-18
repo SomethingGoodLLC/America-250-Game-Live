@@ -59,6 +59,28 @@ inline bool FollowTurns(const FVector& LineFacing, const FVector& LeaderFacing, 
 {
 	return bLeaderMoving || FVector::DotProduct(LineFacing.GetSafeNormal2D(), LeaderFacing.GetSafeNormal2D()) < FMath::Cos(FMath::DegreesToRadians(TurnDegrees));
 }
+/** Where a following line's anchor goes this tick. The line keeps its ground while its leader is
+ *  within SlackCm of where it would stand (he may shift his feet without moving every man); beyond
+ *  that it comes after him, staying SlackCm short; once he has stood still (bSettle) it closes up
+ *  on him at StepCm a tick, a walk. */
+inline FVector FollowAnchor(const FVector& Current, const FVector& Want, float SlackCm, bool bSettle, float StepCm)
+{
+	const FVector To = FVector(Want.X - Current.X, Want.Y - Current.Y, 0.f);
+	const float D = To.Size();
+	if (D <= 1.f) return Current;
+	if (D > SlackCm) return Current + To / D * (D - SlackCm);
+	return bSettle ? Current + To / D * FMath::Min(D, FMath::Max(0.f, StepCm)) : Current;
+}
+/** The pace of a man going to his place under his leader's order: a walk within WalkWithinCm of it,
+ *  rising evenly to a run at RunBeyondCm, so a man neither sprints two paces nor lurches between
+ *  a walk and a run as the gap opens and closes. WalkCmS of 0 or less keeps the old rule (his own
+ *  pace, a run beyond RunBeyondCm). */
+inline float FollowPaceCmS(float DistCm, float WalkWithinCm, float RunBeyondCm, float WalkCmS, float OwnCmS, float RunCmS)
+{
+	if (WalkCmS <= 0.f) return DistCm > RunBeyondCm ? RunCmS : OwnCmS;
+	if (RunBeyondCm <= WalkWithinCm) return DistCm > RunBeyondCm ? RunCmS : WalkCmS;
+	return FMath::Lerp(WalkCmS, RunCmS, FMath::Clamp((DistCm - WalkWithinCm) / (RunBeyondCm - WalkWithinCm), 0.f, 1.f));
+}
 /** The drummer's beating for an order (SFX bank "drum_call_<name>"), told apart by ear. */
 PLAYAMERICA250_API const TCHAR* OrderDrumCall(EPA250SquadOrder Order);
 /** Where a led squad's line stands: behind the leader (FollowMe), on the point given (FormLine, Hold,
@@ -175,6 +197,8 @@ public:
 	 *  unless the same event was shouted for that side inside its cooldown. True when it was given. */
 	bool ShoutEvent(FName Event, FName Faction, const FVector& Where);
 	int32 ShoutEventCount(FName Event) const { return ShoutEventCounts.FindRef(Event); }
+	/** How often the player has called his file after him with this line ("on_me", "form_up", "to_the_right", "to_the_left"). */
+	int32 FileCallCount(FName Key) const { return FileCallCounts.FindRef(Key); }
 	/** The share of a side's squads (with a man standing) that are steady: 1 when it has none. */
 	float SteadyShare(FName Faction) const;
 	/** A side's squads that are routing now. */
@@ -366,6 +390,9 @@ private:
 		bool bHoldsPost = false;
 		/** Following its leader at his shoulders (one rank, half to each side of him). */
 		bool bAbreast = false;
+		float LeaderStillSeconds = 0.f;   // how long the leader it follows has stood still
+		float FollowTurnSeconds = 0.f;    // how long he has faced a way the line would wheel to
+		float LastFollowCallAt = -1000.f; // when he last called his file after him ("On me!", "To the right!")
 		/** The post whose works it mans. While that post is its side's and a work still stands by it,
 		 *  the squad stays there instead of going out after a post the enemy has taken (a garrison
 		 *  that sallied from its works was shot down in the open: works matchup, 2026-11-14). */
@@ -403,6 +430,9 @@ private:
 	void Shout(FName VoiceFaction, const TCHAR* Key, const TCHAR* Text, const FVector& Where, float Seconds = 2.f);
 	/** News about the enemy, shouted by the player's side close to the camera. */
 	void ShoutNearListener(const TCHAR* Key, const TCHAR* Text);
+	/** The player calling his own file after him ("On me!", "Form up!", "To the right!"): spoken at
+	 *  him, no oftener than verbs.squad call_cooldown_seconds. Only a file the player leads. */
+	bool CallFileAfter(FSquad& Sq, const TCHAR* Key, const TCHAR* Text, const FVector& Where);
 	void CancelVolleyOrders(FSquad& Sq, const TCHAR* Reason);
 	FSquad* FindSquad(int32 SquadId);
 	/** Where a squad's living men are (their mean place). False when none stands. */
@@ -460,6 +490,7 @@ private:
 	TMap<FString, int32> MoraleTransitions;
 	TMap<FString, float> LastShoutEventAt;   // "<event>.<faction>"
 	TMap<FName, int32> ShoutEventCounts;
+	TMap<FName, int32> FileCallCounts;
 	TArray<FVector> CoverAnchors;          // tagged wall segments (PA250Cover) in the level
 	TArray<FVector> WorkAnchors;           // standing field works (PA250FieldWork that give cover)
 	TMap<FName, FVector> ColoursFlying;    // a side's colours while they are carried

@@ -391,6 +391,7 @@ void FPA250SoldierAnimProxy::PostUpdate(UAnimInstance* InAnimInstance) const
 	Report.bHadHistory = Locomotion.bHadHistory;
 	Report.Searches = Locomotion.Searches;
 	Report.Jumps = Locomotion.Jumps;
+	if (const UAnimationAsset* Playing = Locomotion.GetAnimAsset()) Report.Clip = Playing->GetFName();
 	CastChecked<UPA250SoldierAnimInstance>(InAnimInstance)->SetLocomotionReport(Report);
 }
 

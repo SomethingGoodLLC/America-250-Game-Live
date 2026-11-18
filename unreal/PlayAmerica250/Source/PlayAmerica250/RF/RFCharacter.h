@@ -403,6 +403,7 @@ protected:
 	void OnKey6() { OnNumberKey(6); }
 	void OnGuardPressed();
 	void OnGuardReleased();
+	void OnCycleGraphics();
 	void OnDuckPressed();
 	void OnDuckReleased();
 	void OnSensitivityDown();
@@ -424,6 +425,8 @@ private:
 	TObjectPtr<UAnimSequence> SoldierRun;
 	bool bUsesPeriodSoldier = false;
 	bool bAnimFullQuality = false;
+	uint8 LastMovingGait = 0;      // EPA250FootGait he last moved at (0: has not moved)
+	float LastMovingAt = -1000.f;
 	/** Debug run -PA250AnimProbe=move: the player walks, stops, turns about, runs and sprints on a
 	 *  fixed script, with stills and a log line a second (speed, gait, tier, left hand to the musket). */
 	void TickAnimProbe(float DeltaTime);

@@ -324,6 +324,14 @@ bool PA250UnitClasses::LoadFromFile(const FString& Path, TArray<FString>* OutErr
 		Get(TEXT("squad"), TEXT("follow_spacing_m"), Verbs.SquadFollowSpacingM);
 		Get(TEXT("squad"), TEXT("follow_turn_degrees"), Verbs.SquadFollowTurnDegrees);
 		Get(TEXT("squad"), TEXT("run_when_behind_m"), Verbs.SquadRunWhenBehindM);
+		Get(TEXT("squad"), TEXT("follow_slack_m"), Verbs.SquadFollowSlackM);
+		Get(TEXT("squad"), TEXT("follow_settle_seconds"), Verbs.SquadFollowSettleSeconds);
+		Get(TEXT("squad"), TEXT("follow_turn_seconds"), Verbs.SquadFollowTurnSeconds);
+		Get(TEXT("squad"), TEXT("follow_turn_moving_degrees"), Verbs.SquadFollowTurnMovingDegrees);
+		Get(TEXT("squad"), TEXT("walk_within_m"), Verbs.SquadWalkWithinM);
+		Get(TEXT("squad"), TEXT("walk_speed_cm"), Verbs.SquadWalkSpeedCm);
+		Get(TEXT("squad"), TEXT("call_cooldown_seconds"), Verbs.SquadCallCooldownSeconds);
+		Get(TEXT("squad"), TEXT("call_turn_degrees"), Verbs.SquadCallTurnDegrees);
 		Get(TEXT("squad"), TEXT("with_you_m"), Verbs.SquadWithYouM);
 		Get(TEXT("squad"), TEXT("line_ahead_m"), Verbs.SquadLineAheadM);
 		Get(TEXT("squad"), TEXT("order_seconds"), Verbs.SquadOrderSeconds);

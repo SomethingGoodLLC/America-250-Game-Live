@@ -2025,6 +2025,13 @@ void RunScenario(FLog& Log)
 	APA250BattleGameMode::ConcordBanks(TEXT("british"), East, West);
 	Log.Check(East == TEXT("british") && West == TEXT("continental"),
 		TEXT("concord: a British-held Concord keeps the east bank"));
+	// Playtest 2026-11-17: a Continental-held Concord stood its gun on the west bank, among the British starts.
+	Log.Check(APA250BattleGameMode::GunSlotTag(TEXT("continental"), true) == TEXT("british") && APA250BattleGameMode::GunSlotTag(TEXT("british"), true) == TEXT("continental")
+		&& APA250BattleGameMode::GunSlotTag(TEXT("continental"), false) == TEXT("continental"),
+		TEXT("concord: where the banks are swapped a side's guns take the places marked for the bank it stands on"));
+	Log.Check(APA250BattleGameMode::GunSlotOnOwnGround(FVector(900.f, 0.f, 0.f), FVector::ZeroVector, FVector(10000.f, 0.f, 0.f))
+		&& !APA250BattleGameMode::GunSlotOnOwnGround(FVector(9100.f, 0.f, 0.f), FVector::ZeroVector, FVector(10000.f, 0.f, 0.f)),
+		TEXT("guns: a marked place nearer the enemy's start than its own side's is never used"));
 	Log.Check(House->GetObjectiveTitle() == TEXT("Muster ground"), TEXT("scenario: meetinghouse labeled Muster ground"));
 	Log.Check(Buck->GetObjectiveTitle() == TEXT("Far bridgehead"), TEXT("scenario: buckman labeled Far bridgehead"));
 	const bool bHouseMoved = House->ApplyCapturePressure(TEXT("british"), 6, 0, 30.f);
@@ -2858,6 +2865,24 @@ void RunPlaytest(FLog& Log)
 			FString::Printf(TEXT("playtest: the HUD says how many of his file are at his side (%s)"), *Some.Left(60)));
 		FPA250FormationOrder O;
 		Log.Check(!O.bHurry && O.HurryBeyondCm > 0.f, TEXT("playtest: a line walks to its places unless its own leader's order hurries it"));
+		// Playtest 2026-11-17: "I turn to the right or move a few feet and they move immediately."
+		Log.Check(V.SquadFollowSlackM > 0.f && V.SquadFollowSettleSeconds > 0.f && V.SquadFollowTurnSeconds > 0.f && V.SquadWalkSpeedCm > 0.f
+			&& V.SquadWalkWithinM > 0.f && V.SquadRunWhenBehindM > V.SquadWalkWithinM && V.SquadCallCooldownSeconds > 0.f,
+			TEXT("playtest: the follow slack, settle time, wheel delay and walking pace come from unit_classes.json"));
+		const FVector At(0.f, 0.f, 0.f);
+		const FVector Near = PA250Squad::FollowAnchor(At, FVector(60.f, 0.f, 0.f), 100.f, false, 5.f);
+		const FVector Far = PA250Squad::FollowAnchor(At, FVector(400.f, 0.f, 0.f), 100.f, false, 5.f);
+		const FVector Settle = PA250Squad::FollowAnchor(At, FVector(60.f, 0.f, 0.f), 100.f, true, 5.f);
+		const FVector Close = PA250Squad::FollowAnchor(At, FVector(3.f, 0.f, 0.f), 100.f, true, 5.f);
+		Log.Check(Near.Equals(At) && FMath::IsNearlyEqual(Far.X, 300.0, 0.01) && FMath::IsNearlyEqual(Settle.X, 5.0, 0.01) && FMath::IsNearlyEqual(Close.X, 3.0, 0.01),
+			FString::Printf(TEXT("playtest: a following line keeps its ground while he shifts a pace, comes after him beyond the slack, and closes up at a walk when he halts (%.0f %.0f %.0f %.0f)"),
+				Near.X, Far.X, Settle.X, Close.X));
+		const float PaceNear = PA250Squad::FollowPaceCmS(50.f, 75.f, 250.f, 190.f, 450.f, 650.f);
+		const float PaceMid = PA250Squad::FollowPaceCmS(162.5f, 75.f, 250.f, 190.f, 450.f, 650.f);
+		const float PaceFar = PA250Squad::FollowPaceCmS(900.f, 75.f, 250.f, 190.f, 450.f, 650.f);
+		Log.Check(PaceNear == 190.f && FMath::IsNearlyEqual(PaceMid, 420.f, 0.5f) && PaceFar == 650.f
+			&& PA250Squad::FollowPaceCmS(50.f, 75.f, 250.f, 0.f, 450.f, 650.f) == 450.f && PA250Squad::FollowPaceCmS(300.f, 75.f, 250.f, 0.f, 450.f, 650.f) == 650.f,
+			FString::Printf(TEXT("playtest: a man near his place walks to it, and his pace rises evenly to a run with the gap (%.0f %.0f %.0f)"), PaceNear, PaceMid, PaceFar));
 	}
 	// 2) "Winning a mission needs a popup with a result, and a reward."
 	pa250::load_campaign_rules(pa250::read_text_file(TCHAR_TO_UTF8(*UPA250Subsystem::CampaignRulesPath())));

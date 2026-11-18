@@ -1415,13 +1415,49 @@ void UPA250VolleyCoordinator::TickFormation(FSquad& Sq, const TArray<ARFCharacte
 			const FVector Want = (!bLed && Sq.Order == EPA250SquadOrder::FollowMe)
 				? GiverLoc + Sq.OrderPoint
 				: PA250Squad::LedAnchor(Sq.Order, GiverLoc, GiverFacing, Sq.OrderPoint, Sq.Anchor, Verbs.SquadFollowBehindM * 100.f);
+			const bool bFollowing = Sq.Order == EPA250SquadOrder::FollowMe;
+			const bool bGiverMoving = Giver->GetVelocity().Size2D() > 60.f;
+			const float StillBefore = Sq.LeaderStillSeconds;
+			Sq.LeaderStillSeconds = bGiverMoving ? 0.f : Sq.LeaderStillSeconds + DeltaSeconds;
+			const bool bJustHalted = StillBefore < Verbs.SquadFollowSettleSeconds && Sq.LeaderStillSeconds >= Verbs.SquadFollowSettleSeconds;
 			// While he holds his aim the line halts where it is and turns to his aim point.
-			if (!bLedAim && !bHoldGround) Sq.Anchor = FVector(Want.X, Want.Y, Sq.Anchor.Z);
-			if (bLedAim) WantFacing = (Sq.LeaderAimPoint - Sq.Anchor).GetSafeNormal2D();
-			else if (Sq.Order == EPA250SquadOrder::FollowMe)
+			if (!bLedAim && !bHoldGround)
 			{
-				// The line turns with him on the move; standing still he may look about without wheeling it.
-				WantFacing = PA250Squad::FollowTurns(Sq.Facing, GiverFacing, Giver->GetVelocity().Size2D() > 60.f, Verbs.SquadFollowTurnDegrees) ? GiverFacing : Sq.Facing;
+				// A following line is not nailed to him: it keeps its ground while he shifts a pace or two,
+				// comes after him when he goes further, and closes up at a walk once he has halted.
+				const FVector Next = bFollowing
+					? PA250Squad::FollowAnchor(Sq.Anchor, Want, Verbs.SquadFollowSlackM * 100.f, Sq.LeaderStillSeconds >= Verbs.SquadFollowSettleSeconds,
+						FMath::Max(Verbs.SquadWalkSpeedCm, 100.f) * DeltaSeconds)
+					: Want;
+				if (bFollowing && bLed && bGiverMoving && !Sq.bCharging && FVector::Dist2D(Next, Sq.Anchor) > 1.f && FVector::Dist2D(Want, Sq.Anchor) > Verbs.SquadFollowSlackM * 100.f)
+				{
+					CallFileAfter(Sq, TEXT("on_me"), TEXT("On me!"), GiverLoc);
+				}
+				// Halted with his men strung out behind him: he calls them up.
+				if (bFollowing && bLed && !Sq.bCharging && bJustHalted && Lag > Verbs.SquadWalkWithinM * 100.f + 50.f)
+				{
+					CallFileAfter(Sq, TEXT("form_up"), TEXT("Form up!"), GiverLoc);
+				}
+				Sq.Anchor = FVector(Next.X, Next.Y, Sq.Anchor.Z);
+			}
+			if (bLedAim) WantFacing = (Sq.LeaderAimPoint - Sq.Anchor).GetSafeNormal2D();
+			else if (bFollowing)
+			{
+				// The line wheels to his new facing only when he has kept it a moment: on the move past
+				// follow_turn_moving_degrees, standing still past follow_turn_degrees (he may look about).
+				const bool bWouldTurn = bGiverMoving && Verbs.SquadFollowTurnMovingDegrees > 0.f
+					? PA250Squad::FollowTurns(Sq.Facing, GiverFacing, false, Verbs.SquadFollowTurnMovingDegrees)
+					: PA250Squad::FollowTurns(Sq.Facing, GiverFacing, bGiverMoving, Verbs.SquadFollowTurnDegrees);
+				Sq.FollowTurnSeconds = bWouldTurn ? Sq.FollowTurnSeconds + DeltaSeconds : 0.f;
+				const bool bWheel = bWouldTurn && Sq.FollowTurnSeconds >= Verbs.SquadFollowTurnSeconds;
+				if (bWheel && bLed && !Sq.bCharging)
+				{
+					const float Side = Sq.Facing.X * GiverFacing.Y - Sq.Facing.Y * GiverFacing.X; // > 0: he turned to the right
+					const bool bCall = FVector::DotProduct(Sq.Facing, GiverFacing) < FMath::Cos(FMath::DegreesToRadians(FMath::Max(1.f, Verbs.SquadCallTurnDegrees)));
+					if (bCall) CallFileAfter(Sq, Side > 0.f ? TEXT("to_the_right") : TEXT("to_the_left"), Side > 0.f ? TEXT("To the right!") : TEXT("To the left!"), GiverLoc);
+				}
+				WantFacing = bWheel ? GiverFacing : Sq.Facing;
+				if (bWheel) Sq.FollowTurnSeconds = 0.f;
 			}
 			else if (ARFCharacter* C = Sq.Contact.Get()) WantFacing = (C->GetActorLocation() - Sq.Anchor).GetSafeNormal2D();
 			else WantFacing = Sq.OrderFacing;
@@ -1819,6 +1855,8 @@ void UPA250VolleyCoordinator::TickFormation(FSquad& Sq, const TArray<ARFCharacte
 			// His own file under his order does not dawdle: a man well behind his place runs to it.
 			O.bHurry = bLed && bObey;
 			O.HurryBeyondCm = PA250UnitClasses::Verbs().SquadRunWhenBehindM * 100.f;
+			O.WalkWithinCm = PA250UnitClasses::Verbs().SquadWalkWithinM * 100.f;
+			O.WalkSpeedCm = PA250UnitClasses::Verbs().SquadWalkSpeedCm;
 			O.bCharge = Sq.bCharging;
 			O.bInCover = Sq.bHasCover.IsValidIndex(i) && Sq.bHasCover[i];
 		}
@@ -1892,6 +1930,19 @@ void UPA250VolleyCoordinator::Shout(FName VoiceFaction, const TCHAR* Key, const 
 			FPA250BattleAudio::PlayAt(GameMode.Get(), TEXT("drum_roll"), Where + FVector(0.f, 0.f, 100.f), EPA250SoundRange::Voice, 0.8f, 0.03f);
 		}
 	}
+}
+
+bool UPA250VolleyCoordinator::CallFileAfter(FSquad& Sq, const TCHAR* Key, const TCHAR* Text, const FVector& Where)
+{
+	const ARFCharacter* Leader = Sq.Leader.Get();
+	if (!Leader || !Leader->IsPlayerControlled() || !GameMode.IsValid() || !GameMode->GetWorld()) return false;
+	const float Now = GameMode->GetWorld()->GetTimeSeconds();
+	if (!PA250Intensity::MayShout(Now, Sq.LastFollowCallAt, PA250UnitClasses::Verbs().SquadCallCooldownSeconds)) return false;
+	Sq.LastFollowCallAt = Now;
+	FileCallCounts.FindOrAdd(FName(Key))++;
+	Shout(Sq.Faction, Key, Text, Where, 1.5f);
+	UE_LOG(LogTemp, Display, TEXT("PA250 squad: the leader calls \"%s\""), Text);
+	return true;
 }
 
 void UPA250VolleyCoordinator::ShoutNearListener(const TCHAR* Key, const TCHAR* Text)

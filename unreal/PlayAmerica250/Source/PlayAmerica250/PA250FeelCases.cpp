@@ -180,6 +180,13 @@ void PA250FeelCases::RunLook(FCheck Check)
 	bool bMac = true;
 	const FString Mac = PA250BattleLook::TierFor(TEXT("mac"), D, bMac);
 	Check(bOther && D.Tiers.Num() > 0 && Unknown == D.Tiers[0].Name && !bMac && !Mac.IsEmpty(), TEXT("look: an unmeasured platform gets the lowest tier"));
+	// The player's own choice (O in a battle) goes round the file's tiers.
+	Check(PA250BattleLook::NextTier({TEXT("a"), TEXT("b"), TEXT("c")}, TEXT("a")) == TEXT("b") && PA250BattleLook::NextTier({TEXT("a"), TEXT("b"), TEXT("c")}, TEXT("c")) == TEXT("a")
+		&& PA250BattleLook::NextTier({TEXT("a"), TEXT("b")}, TEXT("zzz")) == TEXT("a") && PA250BattleLook::NextTier({}, TEXT("a")).IsEmpty() && D.Tiers.Num() >= 2
+		&& !PA250BattleLook::TierNote(D.Tiers[0].Name).IsEmpty(),
+		TEXT("look: the player's key steps through the tiers and round again, and every tier says what it is"));
+	Check(PA250BattleFeel::Get().BackstepSpeedCm > 0.f && PA250BattleFeel::Get().BackstepSpeedCm < PA250BattleFeel::Get().WalkSpeedCm,
+		TEXT("feel: a man facing his view steps back slower than he walks forward (playtest 2026-11-17: men ran backwards)"));
 	Check(D.FrameRateBar > 0.f && D.ShadowCastM >= 0.f, TEXT("look: the frame-rate bar and the soldier budget are the file's"));
 	Check(!PA250BattleLook::LoadFromFile(PA250BattleLook::DataPath() + TEXT(".absent")) && !PA250BattleLook::Get().bLoaded && !PA250BattleLook::Apply(nullptr, 12),
 		TEXT("look: without the file nothing is applied"));
@@ -660,6 +667,7 @@ void PA250FeelCases::RunAnimation(FCheck Check)
 		const bool bEdges = P::BlendBone(Old, New, 0.f).Equals(Old, 1.e-4) && P::BlendBone(Old, New, 1.f).Equals(New, 1.e-4);
 		Check(bRises && bEnds && bNoFade && bHalf && bShort && bEdges, TEXT("anim: the cheap path cross-fades"));
 		Check(PA250BattleFeel::Get().CheapCrossfadeSeconds > 0.f, TEXT("anim: the cross-fade time is the file's and is not zero"));
+		Check(PA250BattleFeel::Get().StopSettleSeconds > 0.f && PA250BattleFeel::Get().StopSettleSeconds <= 1.5f, TEXT("anim: the time a halted man keeps his stop clips is the file's (playtest 2026-11-17: he jogged on the spot)"));
 	}
 
 	// Coming up to full quality: the cheap path shows until the motion-matched player has a clip.

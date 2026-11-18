@@ -52,6 +52,11 @@ LINES: dict[str, tuple[str, str]] = {
     # The leader's orders to his file (squad command, 2026-11-14).
     "follow_me": ("Follow me!", "officer"),
     "charge_bayonets": ("Charge bayonets!", "officer"),
+    # The leader calling his file after him as he moves (2026-11-17).
+    "on_me": ("On me!", "officer"),
+    "form_up": ("Form up!", "officer"),
+    "to_the_right": ("To the right!", "officer"),
+    "to_the_left": ("To the left!", "officer"),
     # The general falls (2026-11-15).
     "general_wounded": ("The general is wounded!", "soldier"),
     "general_killed": ("The general is down! He's killed!", "soldier"),

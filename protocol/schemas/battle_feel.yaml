@@ -16,7 +16,7 @@ properties:
   animation:
     type: object
     additionalProperties: false
-    required: [motion_matching, platforms, switch_hysteresis_m, tier_blend_seconds, cheap_crossfade_seconds,
+    required: [motion_matching, platforms, switch_hysteresis_m, tier_blend_seconds, cheap_crossfade_seconds, stop_settle_seconds,
                mm_blend_seconds, bot_search_throttle_seconds, play_rate_min, play_rate_max, upper_body_sway,
                gait_speed_cm_s]
     description: >-
@@ -39,6 +39,7 @@ properties:
       switch_hysteresis_m: {type: number, minimum: 0}
       tier_blend_seconds: {type: number, minimum: 0, description: "Blend when a soldier changes between full and cheap."}
       cheap_crossfade_seconds: {type: number, minimum: 0, description: "Cross-fade between the cheap path's clips (it was a hard cut)."}
+      stop_settle_seconds: {type: number, minimum: 0, description: "A man who has just halted keeps his last gait's stop clips to search for this long, so the stop plays out; after it only the standing clips are searched and any moving clip is left."}
       mm_blend_seconds: {type: number, minimum: 0, description: "Blend into a newly matched pose."}
       bot_search_throttle_seconds: {type: number, minimum: 0, description: "A bot searches for a new pose no oftener than this; the player searches every frame."}
       play_rate_min: {type: number, exclusiveMinimum: 0}
@@ -153,11 +154,12 @@ properties:
   movement:
     type: object
     additionalProperties: false
-    required: [walk_speed_cm, sprint_speed_cm, max_acceleration, braking_deceleration, rotation_rate_yaw_deg, camera_lag_speed,
+    required: [walk_speed_cm, backstep_speed_cm, sprint_speed_cm, max_acceleration, braking_deceleration, rotation_rate_yaw_deg, camera_lag_speed,
                fire_lock_seconds, mouse_smoothing]
     properties:
       note: {type: string}
       walk_speed_cm: {type: number, exclusiveMinimum: 0}
+      backstep_speed_cm: {type: number, exclusiveMinimum: 0, description: "The fastest the player goes backwards while he faces his view (aiming); a bot told to a place behind him turns and goes instead."}
       sprint_speed_cm: {type: number, exclusiveMinimum: 0}
       max_acceleration: {type: number, exclusiveMinimum: 0, description: "cm/s2 on foot."}
       braking_deceleration: {type: number, minimum: 0, description: "cm/s2 when he lets go of the keys."}

@@ -346,6 +346,7 @@ void APA250BattleGameMode::AssignConcordGround()
 		};
 		SwapSide(Starts);
 		SwapSide(MusterPoints);
+		bBanksSwapped = true;
 	}
 	for (const TWeakObjectPtr<APA250ControlPoint>& WP : Posts)
 	{
@@ -365,6 +366,17 @@ void APA250BattleGameMode::AssignConcordGround()
 	}
 	UE_LOG(LogTemp, Display, TEXT("PA250 concord ground: %s holds the town and takes the east bank; %s starts on the west"),
 		*East.ToString(), *West.ToString());
+}
+
+FName APA250BattleGameMode::GunSlotTag(FName Faction, bool bBanksAreSwapped)
+{
+	if (!bBanksAreSwapped) return Faction;
+	return Faction == TEXT("british") ? FName(TEXT("continental")) : Faction == TEXT("continental") ? FName(TEXT("british")) : Faction;
+}
+
+bool APA250BattleGameMode::GunSlotOnOwnGround(const FVector& Slot, const FVector& OwnStart, const FVector& EnemyStart)
+{
+	return FVector::DistSquared2D(Slot, OwnStart) <= FVector::DistSquared2D(Slot, EnemyStart);
 }
 
 FName APA250BattleGameMode::PreservationWinner(int32 RemainingA, int32 InitialA, int32 RemainingB, int32 InitialB,
@@ -589,6 +601,10 @@ void APA250BattleGameMode::ApplyScenarioPreset()
 				   *Holder.ToString());
 		}
 	}
+	// The sides' ground first: works and guns are placed by where each side starts and what it holds.
+	// (Until 2026-11-17 they were placed before it. At a Concord the Continentals held, their gun
+	// stood on the west bank among the British starts and its crew was cut down as it came on.)
+	AssignConcordGround();
 	// Works for every battle: with no fortification they are only places a sapper can build on.
 	SpawnFieldWorks();
 	SpawnFieldGuns();
@@ -611,7 +627,6 @@ void APA250BattleGameMode::ApplyScenarioPreset()
 			SpawnCreekBridge(GetWorld(), Green->GetActorLocation() + FVector(0.f, 0.f, -140.f));
 		}
 	}
-	AssignConcordGround();
 	// DebugSetHolder marks flips; clear so scenario setup is not scored as capture flips.
 	for (const TWeakObjectPtr<APA250ControlPoint>& WP : Posts)
 	{
@@ -790,10 +805,26 @@ void APA250BattleGameMode::SpawnFieldGuns()
 		// Places: the level's PA250GunSlot markers for this side (tagged with the faction as well),
 		// else drawn up in line a little in front of the side's own start, fronting the enemy.
 		TArray<FTransform> Slots;
+		// Where the banks are swapped (Concord held by the Continentals) so are the markers' tags.
+		const FName SlotTag = GunSlotTag(F, bBanksSwapped);
+		const FVector OwnRear = GetRearPoint(F, FVector::ZeroVector);
+		const FVector EnemyRear = GetRearPoint(Enemy, OwnRear);
+		int32 Refused = 0;
 		for (TActorIterator<AActor> It(World); It; ++It)
 		{
 			const FName RoleTag = Kv.first == Setup.attacker_faction ? FName(TEXT("PA250Attacker")) : FName(TEXT("PA250Defender"));
-			if (It->ActorHasTag(TEXT("PA250GunSlot")) && (It->ActorHasTag(F) || It->ActorHasTag(RoleTag))) Slots.Add(It->GetActorTransform());
+			if (!It->ActorHasTag(TEXT("PA250GunSlot")) || !(It->ActorHasTag(SlotTag) || It->ActorHasTag(RoleTag))) continue;
+			// Whatever its tag says, a place nearer the enemy's start than its own side's is not used.
+			if (!GunSlotOnOwnGround(It->GetActorLocation(), OwnRear, EnemyRear))
+			{
+				++Refused;
+				continue;
+			}
+			Slots.Add(It->GetActorTransform());
+		}
+		if (Refused > 0)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("PA250 guns: %d marked places for %s are nearer the enemy's start than its own and are not used"), Refused, *F.ToString());
 		}
 		const bool bMarked = Slots.Num() >= Count;
 		if (!bMarked)
@@ -828,6 +859,8 @@ void APA250BattleGameMode::SpawnFieldGuns()
 			if (!Gun) continue;
 			Gun->Place(F);
 			Guns.Add(Gun);
+			UE_LOG(LogTemp, Display, TEXT("PA250 guns: %s gun %d stands %.0f m from its own side's start and %.0f m from the enemy's"), *F.ToString(), i + 1,
+				FVector::Dist2D(At, GetRearPoint(F, At)) / 100.f, FVector::Dist2D(At, GetRearPoint(Enemy, At)) / 100.f);
 		}
 		UE_LOG(LogTemp, Display, TEXT("PA250 guns: %s brings %d field %s (%s)"), *F.ToString(), Count, Count == 1 ? TEXT("gun") : TEXT("guns"),
 			bMarked ? TEXT("marked places") : TEXT("made-up places"));
@@ -2351,6 +2384,14 @@ void APA250BattleGameMode::MaybeStartFpsSample()
 		FpsSampleTime = 0.f;
 		FpsSampleFrames = 0;
 		UE_LOG(LogTemp, Display, TEXT("PA250 FPS sample started"));
+		// -PA250ProfileGPU: one frame's GPU passes into the log, part-way through the sample.
+		if (FParse::Param(FCommandLine::Get(), TEXT("PA250ProfileGPU")))
+		{
+			FTimerHandle Profile;
+			GetWorldTimerManager().SetTimer(Profile, FTimerDelegate::CreateWeakLambda(this, [this]() {
+				if (GEngine) GEngine->Exec(GetWorld(), TEXT("ProfileGPU"));
+			}), 3.f, false);
+		}
 	}), FMath::Max(0.5f, SampleDelay), false);  // after shader warm-up and the first runtime navmesh build
 }
 

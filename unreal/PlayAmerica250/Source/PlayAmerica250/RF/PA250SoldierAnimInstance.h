@@ -294,6 +294,7 @@ public:
 		bool bHadHistory = false;    // the node found its pose history
 		int32 Searches = 0;
 		int32 Jumps = 0;
+		FName Clip;                  // the clip the motion-matched player is on
 	};
 	const FLocomotionReport& GetLocomotionReport() const { return LocomotionReport; }
 	void SetLocomotionReport(const FLocomotionReport& In) { LocomotionReport = In; }

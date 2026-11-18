@@ -67,7 +67,11 @@ void FPA250AnimNode_Locomotion::UpdateAssetPlayer(const FAnimationUpdateContext&
 			}
 			FSearchResults_Single Results;
 			FPoseSearchContinuingProperties Continuing;
-			Continuing.InitFrom(State.SearchResult, EPoseSearchInterruptMode::DoNotInterrupt);
+			// A clip whose database is no longer among those searched is left (the engine's own rule for
+			// a change of state). With DoNotInterrupt a run loop could outlive the run: the man stood
+			// still, the standing databases were searched, and the loop he was in still won as the
+			// continuing pose, so he jogged on the spot (seen 2026-11-17: speed 0, clip Run_Loop_F).
+			Continuing.InitFrom(State.SearchResult, EPoseSearchInterruptMode::InterruptOnDatabaseChange);
 PRAGMA_DISABLE_EXPERIMENTAL_WARNINGS
 			UPoseSearchLibrary::MotionMatch(SearchContext, TArrayView<const UObject*>(Assets), Continuing, Results);
 PRAGMA_ENABLE_EXPERIMENTAL_WARNINGS

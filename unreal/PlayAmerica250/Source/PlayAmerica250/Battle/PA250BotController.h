@@ -49,6 +49,8 @@ struct FPA250FormationOrder
 	bool bHoldFire = false;                    // presented and waiting for the leader's shot
 	bool bHurry = false;                       // his leader's order: further than HurryBeyondCm from his place he runs
 	float HurryBeyondCm = 400.f;
+	float WalkWithinCm = 0.f;                  // ...and this close to it he walks, at WalkSpeedCm (0: his own pace)
+	float WalkSpeedCm = 0.f;
 };
 
 /** Pure: duck behind the wall unless moving, charging, routing, or loaded with a target in sight (rise to fire). */

@@ -473,7 +473,10 @@ void APA250BotController::Tick(float DeltaSeconds)
 			}
 		}
 		// Under his leader's order a man well behind his place runs to it; otherwise the line's own pace.
-		MoveComp->MaxWalkSpeed = (Form.bHurry && FVector::Dist2D(Me->GetActorLocation(), Form.Target) > Form.HurryBeyondCm) ? Me->SprintSpeed : BaseWalkSpeed;
+		// Close to it he walks; the pace rises evenly with the gap, so he does not lurch between the two.
+		MoveComp->MaxWalkSpeed = Form.bHurry
+			? PA250Squad::FollowPaceCmS(FVector::Dist2D(Me->GetActorLocation(), Form.Target), Form.WalkWithinCm, Form.HurryBeyondCm, Form.WalkSpeedCm, BaseWalkSpeed, Me->SprintSpeed)
+			: BaseWalkSpeed;
 		// quick_step (the played general's verb): the squad's pace for its time.
 		if (const APA250BattleGameMode* PaceGM = GetWorld() ? GetWorld()->GetAuthGameMode<APA250BattleGameMode>() : nullptr)
 		{
@@ -504,7 +507,10 @@ void APA250BotController::Tick(float DeltaSeconds)
 		else
 		{
 			ClearFocus(EAIFocusPriority::Gameplay);
-			SetFocalPoint(Me->GetActorLocation() + Form.Facing * 5000.f);
+			// At his place (or a step from it) he fronts as the line does. Further off he turns and goes
+			// to it: fronting the whole way made a man told to a place behind him run backwards.
+			const float TurnBeyondCm = FMath::Max(Form.WalkWithinCm, ArriveCm);
+			if (FVector::Dist2D(Me->GetActorLocation(), Form.Target) <= TurnBeyondCm) SetFocalPoint(Me->GetActorLocation() + Form.Facing * 5000.f);
 			State = Form.bEngaged ? (bLoaded ? EBotState::FormLine : EBotState::Reload) : EBotState::Advance;
 		}
 		if (bAtSpot) StopMovement();

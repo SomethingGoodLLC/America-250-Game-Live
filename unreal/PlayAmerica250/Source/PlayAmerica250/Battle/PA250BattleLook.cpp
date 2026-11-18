@@ -171,6 +171,7 @@ bool PA250BattleLook::LoadFromFile(const FString& Path, TArray<FString>* OutErro
 					Errors.Add(TEXT("a tier lacks its name or its cvars"));
 					continue;
 				}
+				J->TryGetStringField(TEXT("note"), Tier.Note);
 				for (const auto& C : (*Cvars)->Values) Tier.Cvars.Add(FString(C.Key), static_cast<float>(C.Value->AsNumber()));
 				D.Tiers.Add(MoveTemp(Tier));
 			}
@@ -245,6 +246,77 @@ FString PA250BattleLook::TierFor(FName Platform, const FPA250BattleLookData& Dat
 	return Data.Tiers[0].Name;
 }
 
+namespace
+{
+const TCHAR* GraphicsSection = TEXT("PA250.Graphics");
+const TCHAR* GraphicsKey = TEXT("Tier");
+
+int32 SetTierVariables(const FString& TierName)
+{
+	int32 Set = 0;
+	const FPA250BattleLookData& Data = PA250BattleLook::Get();
+	if (const FPA250LookTier* Tier = Data.Tiers.FindByPredicate([&TierName](const FPA250LookTier& T) { return T.Name == TierName; }))
+	{
+		for (const auto& C : Tier->Cvars)
+		{
+			if (IConsoleVariable* Var = IConsoleManager::Get().FindConsoleVariable(*C.Key))
+			{
+				Var->Set(C.Value, ECVF_SetByConsole);
+				++Set;
+			}
+			else
+			{
+				UE_LOG(LogTemp, Error, TEXT("PA250 battle look: tier %s names an unknown console variable %s"), *TierName, *C.Key);
+			}
+		}
+	}
+	return Set;
+}
+}
+
+FString PA250BattleLook::PlayerTier()
+{
+	FString Saved;
+	if (!GConfig || !GConfig->GetString(GraphicsSection, GraphicsKey, Saved, GGameUserSettingsIni)) return FString();
+	const FPA250BattleLookData& Data = Get();
+	return Data.Tiers.ContainsByPredicate([&Saved](const FPA250LookTier& T) { return T.Name == Saved; }) ? Saved : FString();
+}
+
+FString PA250BattleLook::NextTier(const TArray<FString>& Names, const FString& Current)
+{
+	if (Names.IsEmpty()) return FString();
+	const int32 At = Names.IndexOfByKey(Current);
+	return Names[(At + 1) % Names.Num()]; // INDEX_NONE + 1 is the first
+}
+
+FString PA250BattleLook::CyclePlayerTier()
+{
+	const FPA250BattleLookData& Data = Get();
+	TArray<FString> Names;
+	for (const FPA250LookTier& T : Data.Tiers) Names.Add(T.Name);
+	FString Current = Loaded().Applied;
+	int32 Slash = INDEX_NONE;
+	if (Current.FindLastChar(TEXT('/'), Slash)) Current = Current.Mid(Slash + 1);
+	const FString Next = NextTier(Names, Current);
+	if (Next.IsEmpty()) return FString();
+	const int32 Set = SetTierVariables(Next);
+	if (GConfig)
+	{
+		GConfig->SetString(GraphicsSection, GraphicsKey, *Next, GGameUserSettingsIni);
+		GConfig->Flush(false, GGameUserSettingsIni);
+	}
+	FString& Applied = Loaded().Applied;
+	Applied = (Applied.FindLastChar(TEXT('/'), Slash) ? Applied.Left(Slash + 1) : FString(TEXT("?/?/"))) + Next;
+	UE_LOG(LogTemp, Display, TEXT("PA250 look: the player chose tier %s (%d variables set, saved)"), *Next, Set);
+	return Next;
+}
+
+FString PA250BattleLook::TierNote(const FString& TierName)
+{
+	const FPA250LookTier* Tier = Get().Tiers.FindByPredicate([&TierName](const FPA250LookTier& T) { return T.Name == TierName; });
+	return Tier ? Tier->Note : FString();
+}
+
 FString PA250BattleLook::Applied()
 {
 	return Loaded().Applied;
@@ -317,28 +389,15 @@ bool PA250BattleLook::Apply(UWorld* World, int32 HourOfDay, bool bRelight)
 	{
 		UE_LOG(LogTemp, Error, TEXT("PA250 battle look: no tier chosen for platform \"%s\" (chosen): the lowest, %s"), *Platform.ToString(), *TierName);
 	}
+	// The player's own choice (O in a battle; saved with his other settings) comes before the platform's.
+	if (const FString Mine = PlayerTier(); !Mine.IsEmpty()) TierName = Mine;
 	FString Asked;
 	if (FParse::Value(FCommandLine::Get(), TEXT("PA250Look="), Asked))
 	{
 		if (Data.Tiers.ContainsByPredicate([&Asked](const FPA250LookTier& T) { return T.Name == Asked; })) TierName = Asked;
 		else UE_LOG(LogTemp, Error, TEXT("PA250 battle look: -PA250Look=%s is not a tier in the file"), *Asked);
 	}
-	int32 Set = 0;
-	if (const FPA250LookTier* Tier = Data.Tiers.FindByPredicate([&TierName](const FPA250LookTier& T) { return T.Name == TierName; }))
-	{
-		for (const auto& C : Tier->Cvars)
-		{
-			if (IConsoleVariable* Var = IConsoleManager::Get().FindConsoleVariable(*C.Key))
-			{
-				Var->Set(C.Value, ECVF_SetByConsole);
-				++Set;
-			}
-			else
-			{
-				UE_LOG(LogTemp, Error, TEXT("PA250 battle look: tier %s names an unknown console variable %s"), *TierName, *C.Key);
-			}
-		}
-	}
+	const int32 Set = SetTierVariables(TierName);
 	Loaded().Applied = FString::Printf(TEXT("%s/%s/%s"), Level.IsEmpty() ? TEXT("?") : *Level, bRelight ? BandName(Band) : TEXT("as_built"), *TierName);
 	UE_LOG(LogTemp, Display, TEXT("PA250 look: %s, band %s (hour %d), tier %s for %s (%d variables set)%s"), Level.IsEmpty() ? *World->GetMapName() : *Level, BandName(Band),
 		HourOfDay, *TierName, *Platform.ToString(), Set, (Looks && bRelight) ? TEXT("") : TEXT(", lights left as built"));

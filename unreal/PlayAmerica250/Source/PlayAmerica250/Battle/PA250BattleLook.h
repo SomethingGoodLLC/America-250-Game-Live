@@ -27,6 +27,7 @@ struct FPA250LookSettings
 struct FPA250LookTier
 {
 	FString Name;
+	FString Note;
 	TMap<FString, float> Cvars;
 };
 
@@ -68,6 +69,14 @@ PLAYAMERICA250_API FString TierFor(FName Platform, const FPA250BattleLookData& D
  *  the level was built and sets the tier only (a debug battle with no hour given: its campaign
  *  clock is not a battle's hour). Returns false when nothing was applied. */
 PLAYAMERICA250_API bool Apply(UWorld* World, int32 HourOfDay, bool bRelight = true);
+/** The tier the player chose for himself (saved in GameUserSettings, [PA250.Graphics] Tier), or empty. */
+PLAYAMERICA250_API FString PlayerTier();
+/** Pure: the tier after Current in Names, round again to the first; the first when Current is not one. */
+PLAYAMERICA250_API FString NextTier(const TArray<FString>& Names, const FString& Current);
+/** The player's key (O in a battle): the next tier, set at once and saved. Returns its name. */
+PLAYAMERICA250_API FString CyclePlayerTier();
+/** A tier's one-line description from the file. */
+PLAYAMERICA250_API FString TierNote(const FString& TierName);
 /** What was applied last (for the trace and the cases): "L_Concord/day/low", or empty. */
 PLAYAMERICA250_API FString Applied();
 }

@@ -106,7 +106,7 @@ properties:
   tiers:
     type: array
     minItems: 1
-    description: "Lowest first. cvars are engine console variables set when the battle begins."
+    description: "Lowest first. cvars are engine console variables set when the battle begins, or when the player picks the tier (O in a battle; his choice is saved and comes before the platform's). Every tier sets the same variables."
     items:
       type: object
       additionalProperties: false

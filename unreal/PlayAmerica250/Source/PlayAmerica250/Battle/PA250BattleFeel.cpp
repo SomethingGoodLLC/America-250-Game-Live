@@ -125,6 +125,7 @@ bool PA250BattleFeel::LoadFromFile(const FString& Path, FName Platform, TArray<F
 			R.Number(*Anim, TEXT("switch_hysteresis_m"), W, Feel.SwitchHysteresisM);
 			R.Number(*Anim, TEXT("tier_blend_seconds"), W, Feel.TierBlendSeconds);
 			R.Number(*Anim, TEXT("cheap_crossfade_seconds"), W, Feel.CheapCrossfadeSeconds);
+			R.Number(*Anim, TEXT("stop_settle_seconds"), W, Feel.StopSettleSeconds);
 			R.Number(*Anim, TEXT("mm_blend_seconds"), W, Feel.MMBlendSeconds);
 			R.Number(*Anim, TEXT("bot_search_throttle_seconds"), W, Feel.BotSearchThrottleSeconds);
 			R.Number(*Anim, TEXT("play_rate_min"), W, Feel.PlayRateMin);
@@ -212,6 +213,7 @@ bool PA250BattleFeel::LoadFromFile(const FString& Path, FName Platform, TArray<F
 		{
 			const FString W = TEXT("movement.");
 			R.Number(*Move, TEXT("walk_speed_cm"), W, Feel.WalkSpeedCm);
+			R.Number(*Move, TEXT("backstep_speed_cm"), W, Feel.BackstepSpeedCm);
 			R.Number(*Move, TEXT("sprint_speed_cm"), W, Feel.SprintSpeedCm);
 			R.Number(*Move, TEXT("max_acceleration"), W, Feel.MoveMaxAcceleration);
 			R.Number(*Move, TEXT("braking_deceleration"), W, Feel.MoveBrakingDeceleration);

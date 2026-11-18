@@ -142,7 +142,15 @@ struct FPA250ClassVerbs
 	float SquadFollowBehindM = 0.5f;   // "follow me": his men stand this far behind his own line...
 	float SquadFollowSpacingM = 1.2f;  // ...at his shoulders, this far apart, half to each side of him
 	float SquadFollowTurnDegrees = 45.f; // standing still, the line turns with him only past this
-	float SquadRunWhenBehindM = 4.f;   // a man of his file further than this from his place runs to it
+	float SquadRunWhenBehindM = 4.f;   // a man of his file this far from his place is at a full run
+	float SquadFollowSlackM = 0.f;     // the line keeps its ground until he is further than this from his place in it
+	float SquadFollowSettleSeconds = 0.f; // ...and closes up on him once he has stood still this long
+	float SquadFollowTurnSeconds = 0.f; // he must face the new way this long before the line wheels
+	float SquadFollowTurnMovingDegrees = 0.f; // on the move the line wheels only past this (0: with every turn)
+	float SquadWalkWithinM = 0.f;      // a man this close to his place walks to it...
+	float SquadWalkSpeedCm = 0.f;      // ...at this pace (0: his own pace, as before 2026-11-17)
+	float SquadCallCooldownSeconds = 6.f; // the leader's "On me!" and "To the right!" no oftener than this
+	float SquadCallTurnDegrees = 30.f; // a wheel past this is called "To the right!" or "To the left!"
 	float SquadWithYouM = 10.f;        // HUD: a man this close to him is "with you"
 	float SquadLineAheadM = 4.f;       // "form line here": this far in front of him
 	float SquadOrderSeconds = 45.f;    // how long another squad obeys an officer's order

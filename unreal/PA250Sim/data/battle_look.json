@@ -279,14 +279,54 @@
   },
   "tiers": [
     {
-      "name": "low",
-      "note": "No Lumen: distance-field ambient occlusion, screen-space reflections, ordinary shadow maps.",
+      "name": "fastest",
+      "note": "Fast and plainer: no clouds or fog shafts, no ambient occlusion, short soft shadows, drawn at three quarters size.",
+      "cvars": {
+        "r.DynamicGlobalIlluminationMethod": 0,
+        "r.ReflectionMethod": 2,
+        "r.Shadow.Virtual.Enable": 0,
+        "r.DistanceFieldAO": 0,
+        "r.ScreenPercentage": 75,
+        "r.VolumetricCloud": 0,
+        "r.VolumetricFog": 0,
+        "r.AntiAliasingMethod": 2,
+        "r.Shadow.MaxResolution": 1024,
+        "r.Shadow.CSM.MaxCascades": 2,
+        "r.Shadow.DistanceScale": 0.6
+      }
+    },
+    {
+      "name": "fast",
+      "note": "No clouds in the sky and simpler anti-aliasing; everything else as low.",
       "cvars": {
         "r.DynamicGlobalIlluminationMethod": 0,
         "r.ReflectionMethod": 2,
         "r.Shadow.Virtual.Enable": 0,
         "r.DistanceFieldAO": 1,
-        "r.ScreenPercentage": 100
+        "r.ScreenPercentage": 100,
+        "r.VolumetricCloud": 0,
+        "r.VolumetricFog": 1,
+        "r.AntiAliasingMethod": 2,
+        "r.Shadow.MaxResolution": 2048,
+        "r.Shadow.CSM.MaxCascades": 10,
+        "r.Shadow.DistanceScale": 1.0
+      }
+    },
+    {
+      "name": "low",
+      "note": "No Lumen: distance-field ambient occlusion, screen-space reflections, ordinary shadow maps; the clouds and the sharper upscaler kept.",
+      "cvars": {
+        "r.DynamicGlobalIlluminationMethod": 0,
+        "r.ReflectionMethod": 2,
+        "r.Shadow.Virtual.Enable": 0,
+        "r.DistanceFieldAO": 1,
+        "r.ScreenPercentage": 100,
+        "r.VolumetricCloud": 1,
+        "r.VolumetricFog": 1,
+        "r.AntiAliasingMethod": 4,
+        "r.Shadow.MaxResolution": 2048,
+        "r.Shadow.CSM.MaxCascades": 10,
+        "r.Shadow.DistanceScale": 1.0
       }
     },
     {
@@ -297,7 +337,13 @@
         "r.ReflectionMethod": 2,
         "r.Shadow.Virtual.Enable": 0,
         "r.DistanceFieldAO": 1,
-        "r.ScreenPercentage": 100
+        "r.ScreenPercentage": 100,
+        "r.VolumetricCloud": 1,
+        "r.VolumetricFog": 1,
+        "r.AntiAliasingMethod": 4,
+        "r.Shadow.MaxResolution": 2048,
+        "r.Shadow.CSM.MaxCascades": 10,
+        "r.Shadow.DistanceScale": 1.0
       }
     },
     {
@@ -308,7 +354,13 @@
         "r.ReflectionMethod": 1,
         "r.Shadow.Virtual.Enable": 1,
         "r.DistanceFieldAO": 1,
-        "r.ScreenPercentage": 100
+        "r.ScreenPercentage": 100,
+        "r.VolumetricCloud": 1,
+        "r.VolumetricFog": 1,
+        "r.AntiAliasingMethod": 4,
+        "r.Shadow.MaxResolution": 2048,
+        "r.Shadow.CSM.MaxCascades": 10,
+        "r.Shadow.DistanceScale": 1.0
       }
     }
   ],
@@ -319,9 +371,9 @@
       "note": "NVIDIA L4, 1920x1080, 40 bots: 51 to 60 fps on the three levels in the three bands, GPU 13.7 to 17.8 ms. Two of six samples at Lexington dusk read 40 fps with the game thread at 24 ms and the GPU lower; they did not come back in three more. See PROGRESS.md."
     },
     "mac": {
-      "tier": "low",
-      "measured": null,
-      "note": "Not measured on the Mac: the lowest tier until it is."
+      "tier": "fastest",
+      "measured": "2026-11-17",
+      "note": "Apple M3 (base), 1710x1112, Concord, 16 bots a side, GPU-bound (game thread 7 to 9 ms). One-frame GPU profiles: low 67 ms (volumetric clouds 18, sky capture of the clouds 7, TSR 10); clouds off with TAA 33 ms. 10 s samples: low 14 to 16 fps, fast 22 to 29; fastest not measured cleanly (a video stream was sharing the GPU). No tier meets the 45 fps bar here. See PROGRESS.md."
     }
   },
   "soldier_lod": {

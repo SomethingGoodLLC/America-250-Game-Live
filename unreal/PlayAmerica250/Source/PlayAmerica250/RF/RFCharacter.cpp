@@ -3,6 +3,7 @@
 #include "Battle/PA250AnimClips.h"
 #include "Misc/Paths.h"
 #include "Battle/PA250BattleFeel.h"
+#include "Battle/PA250BattleLook.h"
 #include "Battle/PA250BattleWeather.h"
 #include "Battle/PA250BattleRng.h"
 #include "Battle/PA250MusketFeel.h"
@@ -890,12 +891,13 @@ void ARFCharacter::TickAnimProbe(float DeltaTime)
 			HandCm = FVector::Dist(GetMesh()->GetSocketLocation(TEXT("hand_l")), Musket->GetAnimatedMesh()->GetSocketLocation(TEXT("b_gun_LeftHandSpot")));
 		}
 		const UPA250SoldierAnimInstance* Inst = Cast<UPA250SoldierAnimInstance>(GetMesh()->GetAnimInstance());
-		UE_LOG(LogTemp, Display, TEXT("PA250 anim probe: t=%.1f speed=%.0f gait=%s tier=%s searches=%d jumps=%d left_hand_to_spot_cm=%.1f"), T, Speed,
+		UE_LOG(LogTemp, Display, TEXT("PA250 anim probe: t=%.1f speed=%.0f gait=%s tier=%s clip=%s searches=%d jumps=%d left_hand_to_spot_cm=%.1f"), T, Speed,
 			PA250BattleFeel::GaitName(PA250BattleFeel::PickGait(Speed, Feel.IdleMaxCmS, Feel.WalkMaxCmS, Feel.RunMaxCmS)),
 			Inst && Inst->GetLocomotionReport().bShowingFull ? TEXT("full") : TEXT("cheap"),
+			Inst ? *Inst->GetLocomotionReport().Clip.ToString() : TEXT("-"),
 			Inst ? Inst->GetLocomotionReport().Searches : 0, Inst ? Inst->GetLocomotionReport().Jumps : 0, HandCm);
 	}
-	if (T > 14.f)
+	if (T > 17.f)
 	{
 		UE_LOG(LogTemp, Display, TEXT("PA250 anim probe: done, %d stills"), AnimProbeStills);
 		FPlatformMisc::RequestExit(false);
@@ -927,8 +929,22 @@ void ARFCharacter::UpdateSoldierAnimation()
 		const bool bFull = bAnimFullQuality && !IsMounted() && !(MeleeComponent && MeleeComponent->IsPlantingFeet()) && PA250AnimClips::LocomotionReady();
 		if (bFull)
 		{
-			const EPA250FootGait Gait = PA250BattleFeel::PickGait(Speed, Feel.IdleMaxCmS, Feel.WalkMaxCmS, Feel.RunMaxCmS);
-			const bool bStopping = Gait != EPA250FootGait::Idle && GetCharacterMovement() && GetCharacterMovement()->GetCurrentAcceleration().IsNearlyZero(1.0);
+			EPA250FootGait Gait = PA250BattleFeel::PickGait(Speed, Feel.IdleMaxCmS, Feel.WalkMaxCmS, Feel.RunMaxCmS);
+			bool bStopping = Gait != EPA250FootGait::Idle && GetCharacterMovement() && GetCharacterMovement()->GetCurrentAcceleration().IsNearlyZero(1.0);
+			// He is at a stand before his stop clip is done (braking takes a fifth of a second), so for
+			// stop_settle_seconds he keeps the stops of the gait he halted from. After that only the
+			// standing clips are searched, and the node leaves any clip that is not one of them.
+			const float Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.f;
+			if (Gait != EPA250FootGait::Idle)
+			{
+				LastMovingGait = static_cast<uint8>(Gait);
+				LastMovingAt = Now;
+			}
+			else if (LastMovingGait != 0 && Now - LastMovingAt < Feel.StopSettleSeconds)
+			{
+				Gait = static_cast<EPA250FootGait>(LastMovingGait);
+				bStopping = true;
+			}
 			Instance->SetFullQuality(true, PA250AnimClips::LocomotionDatabases(Gait, bStopping), IsPlayerControlled() ? 0.f : Feel.BotSearchThrottleSeconds);
 		}
 		else
@@ -1199,7 +1215,9 @@ void ARFCharacter::BuildDefaultInput()
 	{
 		FEnhancedActionKeyMapping& S = Map(IA_Move, EKeys::S);
 		S.Modifiers.Add(Swizzle());
-		S.Modifiers.Add(Negate(true, false));
+		// After the swizzle the key's value is in Y, so Y is the axis to negate. (It negated X until
+		// 2026-11-17, which did nothing: S pushed him forward like W.)
+		S.Modifiers.Add(Negate(false, true));
 	}
 	Map(IA_Move, EKeys::A).Modifiers.Add(Negate(true, false));
 	Map(IA_Move, EKeys::D);
@@ -1308,6 +1326,7 @@ void ARFCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompone
 		// Guard is a plain held key (no mapping-context entry needed): X up = musket across the body.
 		PlayerInputComponent->BindKey(EKeys::X, IE_Pressed, this, &ARFCharacter::OnGuardPressed);
 		PlayerInputComponent->BindKey(EKeys::X, IE_Released, this, &ARFCharacter::OnGuardReleased);
+		PlayerInputComponent->BindKey(EKeys::O, IE_Pressed, this, &ARFCharacter::OnCycleGraphics);
 		EIC->BindAction(IA_Crouch, ETriggerEvent::Started, this, &ARFCharacter::OnDuckPressed);
 		EIC->BindAction(IA_Crouch, ETriggerEvent::Completed, this, &ARFCharacter::OnDuckReleased);
 		EIC->BindAction(IA_SensDown, ETriggerEvent::Started, this, &ARFCharacter::OnSensitivityDown);
@@ -1322,7 +1341,14 @@ void ARFCharacter::Move(const FInputActionValue& Value)
 	{
 		const FRotator Yaw(0.f, Controller->GetControlRotation().Yaw, 0.f);
 		// Guard up: he gives ground or closes at a shuffle, not a walk.
-		const float Pace = MeleeComponent && MeleeComponent->IsGuarding() ? 0.45f : 1.f;
+		float Pace = MeleeComponent && MeleeComponent->IsGuarding() ? 0.45f : 1.f;
+		// Facing his view (aiming, just fired) a man going backwards steps back; he does not run backwards.
+		if (bUseControllerRotationYaw && V.Y < -0.1f && GetCharacterMovement())
+		{
+			const float Top = GetCharacterMovement()->MaxWalkSpeed;
+			const float Back = PA250BattleFeel::Get().BackstepSpeedCm;
+			if (Back > 0.f && Top > Back) Pace = FMath::Min(Pace, Back / Top);
+		}
 		AddMovementInput(FRotationMatrix(Yaw).GetUnitAxis(EAxis::X), V.Y * Pace);
 		AddMovementInput(FRotationMatrix(Yaw).GetUnitAxis(EAxis::Y), V.X * Pace);
 	}
@@ -1428,6 +1454,17 @@ void ARFCharacter::OnShovePressed()
 	MeleeComponent->DoShove();
 }
 void ARFCharacter::OnGuardPressed() { if (MeleeComponent && !bIsDead) MeleeComponent->SetGuardHeld(true); }
+void ARFCharacter::OnCycleGraphics()
+{
+	// The player's graphics setting: the next tier of battle_look.json, set at once and saved.
+	const FString Tier = PA250BattleLook::CyclePlayerTier();
+	if (Tier.IsEmpty()) return;
+	if (APA250BattleGameMode* GM = GetWorld() ? GetWorld()->GetAuthGameMode<APA250BattleGameMode>() : nullptr)
+	{
+		GM->ShowNotice(FString::Printf(TEXT("Graphics: %s - %s  (O for the next)"), *Tier.ToUpper(), *PA250BattleLook::TierNote(Tier)), 5.f);
+	}
+}
+
 void ARFCharacter::OnGuardReleased() { if (MeleeComponent) MeleeComponent->SetGuardHeld(false); }
 bool ARFCharacter::IsOverObstacle() const
 {

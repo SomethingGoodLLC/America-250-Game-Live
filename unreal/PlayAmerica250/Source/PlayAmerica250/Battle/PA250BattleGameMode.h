@@ -404,6 +404,10 @@ public:
 	/** Concord: the east bank (village side, tagged british in the level) is the easier ground.
 	 *  The faction that holds the town takes it; the other side starts on the west bank. */
 	static void ConcordBanks(FName TownHolder, FName& East, FName& West);
+	/** The tag of the gun places a side uses: its own, or the other side's where the banks are swapped. */
+	static FName GunSlotTag(FName Faction, bool bBanksAreSwapped);
+	/** A marked gun place is used only if it is no nearer the enemy's start than its own side's. */
+	static bool GunSlotOnOwnGround(const FVector& Slot, const FVector& OwnStart, const FVector& EnemyStart);
 	/** Higher share of the starting pool wins. Equal shares go to DefenderOnTie. */
 	static FName PreservationWinner(int32 RemainingA, int32 InitialA, int32 RemainingB, int32 InitialB, FName SideA,
 		FName SideB, FName DefenderOnTie);
@@ -668,6 +672,7 @@ private:
 	bool bAutoplayBots = false;
 	bool bSelftest = false;
 	bool bDebugBattle = false;
+	bool bBanksSwapped = false; // Concord: the sides took each other's marked bank (AssignConcordGround)
 	float StartTime = 0.f;
 	int32 PostFlips = 0;
 	/** Battle trace (how long a side held): the game-second of the first post flip, and the second

@@ -17,6 +17,7 @@
     "switch_hysteresis_m": 5,
     "tier_blend_seconds": 0.25,
     "cheap_crossfade_seconds": 0.2,
+  "stop_settle_seconds": 0.6,
     "mm_blend_seconds": 0.2,
     "bot_search_throttle_seconds": 0.1,
     "play_rate_min": 0.8,
@@ -97,6 +98,7 @@
   "movement": {
     "note": "The player's movement and camera (GAME INVENTION). Before 2026-11-15 these were constants in RFCharacter and engine defaults: acceleration 2048, braking 2048, turn rate 360, camera lag 10, still after a shot 0.6 s (DA_WeaponTuning FireStillSeconds, no longer read for this), mouse smoothing on. walk and sprint speed are unchanged.",
     "walk_speed_cm": 450,
+  "backstep_speed_cm": 200,
     "sprint_speed_cm": 650,
     "max_acceleration": 1800,
     "braking_deceleration": 2000,

@@ -54,6 +54,7 @@ struct FPA250BattleFeel
 	float SwitchHysteresisM = 0.f;
 	float TierBlendSeconds = 0.f;
 	float CheapCrossfadeSeconds = 0.f;
+	float StopSettleSeconds = 0.f;     // a man who has just halted keeps his gait's stops to search this long
 	float MMBlendSeconds = 0.f;
 	float BotSearchThrottleSeconds = 0.f;
 	float PlayRateMin = 1.f;
@@ -109,6 +110,7 @@ struct FPA250BattleFeel
 
 	// movement (the player's; battle_feel.json movement)
 	float WalkSpeedCm = 0.f;
+	float BackstepSpeedCm = 0.f;       // the fastest a man facing his view goes backwards
 	float SprintSpeedCm = 0.f;
 	float MoveMaxAcceleration = 0.f;
 	float MoveBrakingDeceleration = 0.f;
