@@ -1,0 +1,919 @@
+{
+  "clips": {
+    "AM_Gun_Idle_Captain_v0": {
+      "attempts": [
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.0,
+          "seed": 154384
+        }
+      ],
+      "cfg": {
+        "cfg_type": "separated",
+        "cfg_weight": [
+          2.0,
+          4.0
+        ]
+      },
+      "chain_to": null,
+      "constraints": [
+        {
+          "frames": [
+            0,
+            119
+          ],
+          "type": "loop"
+        }
+      ],
+      "diffusion_steps": 100,
+      "duration_s": 4.0,
+      "expect": {
+        "end_hip_min_m": 0.8,
+        "travel_max_m": 0.25
+      },
+      "expect_ok": true,
+      "family": "Gun",
+      "files": {
+        "bvh": "AM_Gun_Idle_Captain_v0.bvh",
+        "bvh_sha256": "deb1bc4d950a4ebda29577e095eab11063b608e152f9b7312f538cd4f82ac93e",
+        "npz": "AM_Gun_Idle_Captain_v0.npz",
+        "npz_sha256": "cdf4f5217ea1245df820cd7fd33936317cd567382dac199c3d17718b41df4725"
+      },
+      "foot_lock": {
+        "after_cm": 0.018713856115937233,
+        "before_cm": 1.7663819715380669,
+        "max_leg_change_deg": 2.7893162119299175,
+        "phases": 6
+      },
+      "fps": 30.0,
+      "frames": 120,
+      "hand_error_limit_m": 0.05,
+      "hand_error_ok": true,
+      "loop": true,
+      "model": "Kimodo-SOMA-RP-v1",
+      "model_repo": "nvidia/Kimodo-SOMA-RP-v1",
+      "model_revision": "defbe1f34f5fd031eb0ccfe19f3f92a9880c287b",
+      "name": "AM_Gun_Idle_Captain",
+      "prompt": "A man stands upright in place with his hands behind his back, shifts his weight slightly and looks straight ahead, watching.",
+      "root_motion": false,
+      "scale_soma_over_soldier": 0.987,
+      "seed": 154384,
+      "station": "Trail",
+      "variant": 0
+    },
+    "AM_Gun_Idle_Captain_v1": {
+      "attempts": [
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.0,
+          "seed": 154385
+        }
+      ],
+      "cfg": {
+        "cfg_type": "separated",
+        "cfg_weight": [
+          2.0,
+          4.0
+        ]
+      },
+      "chain_to": null,
+      "constraints": [
+        {
+          "frames": [
+            0,
+            119
+          ],
+          "type": "loop"
+        }
+      ],
+      "diffusion_steps": 100,
+      "duration_s": 4.0,
+      "expect": {
+        "end_hip_min_m": 0.8,
+        "travel_max_m": 0.25
+      },
+      "expect_ok": true,
+      "family": "Gun",
+      "files": {
+        "bvh": "AM_Gun_Idle_Captain_v1.bvh",
+        "bvh_sha256": "a35c82c422de3008641599d8b8282594f3674fd7919fe2fa3ee9ced28bf51ca9",
+        "npz": "AM_Gun_Idle_Captain_v1.npz",
+        "npz_sha256": "99d3e382cbdfd4b4fc234b3d1c966460b27718909c2f445f4cd6102ee4c8b8a7"
+      },
+      "foot_lock": {
+        "after_cm": 0.016545828839298338,
+        "before_cm": 1.0686243884265423,
+        "max_leg_change_deg": 0.999130354161188,
+        "phases": 6
+      },
+      "fps": 30.0,
+      "frames": 120,
+      "hand_error_limit_m": 0.05,
+      "hand_error_ok": true,
+      "loop": true,
+      "model": "Kimodo-SOMA-RP-v1",
+      "model_repo": "nvidia/Kimodo-SOMA-RP-v1",
+      "model_revision": "defbe1f34f5fd031eb0ccfe19f3f92a9880c287b",
+      "name": "AM_Gun_Idle_Captain",
+      "prompt": "A man stands upright in place with his hands behind his back, shifts his weight slightly and looks straight ahead, watching.",
+      "root_motion": false,
+      "scale_soma_over_soldier": 0.987,
+      "seed": 154385,
+      "station": "Trail",
+      "variant": 1
+    },
+    "AM_Gun_Idle_Captain_v2": {
+      "attempts": [
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.0,
+          "seed": 154386
+        }
+      ],
+      "cfg": {
+        "cfg_type": "separated",
+        "cfg_weight": [
+          2.0,
+          4.0
+        ]
+      },
+      "chain_to": null,
+      "constraints": [
+        {
+          "frames": [
+            0,
+            119
+          ],
+          "type": "loop"
+        }
+      ],
+      "diffusion_steps": 100,
+      "duration_s": 4.0,
+      "expect": {
+        "end_hip_min_m": 0.8,
+        "travel_max_m": 0.25
+      },
+      "expect_ok": true,
+      "family": "Gun",
+      "files": {
+        "bvh": "AM_Gun_Idle_Captain_v2.bvh",
+        "bvh_sha256": "4e9d31f09b5f155cb6a0610f7a66f55910110f69e14747bc2b153bc3bce633c9",
+        "npz": "AM_Gun_Idle_Captain_v2.npz",
+        "npz_sha256": "ad4ecf2d280a848a29efc59eba82a12270f27128322fb5c836164533fca2d071"
+      },
+      "foot_lock": {
+        "after_cm": 0.015731054008938372,
+        "before_cm": 0.999811664223671,
+        "max_leg_change_deg": 2.7849258928276597,
+        "phases": 6
+      },
+      "fps": 30.0,
+      "frames": 120,
+      "hand_error_limit_m": 0.05,
+      "hand_error_ok": true,
+      "loop": true,
+      "model": "Kimodo-SOMA-RP-v1",
+      "model_repo": "nvidia/Kimodo-SOMA-RP-v1",
+      "model_revision": "defbe1f34f5fd031eb0ccfe19f3f92a9880c287b",
+      "name": "AM_Gun_Idle_Captain",
+      "prompt": "A man stands upright in place with his hands behind his back, shifts his weight slightly and looks straight ahead, watching.",
+      "root_motion": false,
+      "scale_soma_over_soldier": 0.987,
+      "seed": 154386,
+      "station": "Trail",
+      "variant": 2
+    },
+    "AM_Gun_Idle_Firer_v0": {
+      "attempts": [
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.0,
+          "seed": 18862
+        }
+      ],
+      "cfg": {
+        "cfg_type": "separated",
+        "cfg_weight": [
+          2.0,
+          4.0
+        ]
+      },
+      "chain_to": null,
+      "constraints": [
+        {
+          "frames": [
+            0,
+            119
+          ],
+          "type": "loop"
+        }
+      ],
+      "diffusion_steps": 100,
+      "duration_s": 4.0,
+      "expect": {
+        "end_hip_min_m": 0.8,
+        "travel_max_m": 0.25
+      },
+      "expect_ok": true,
+      "family": "Gun",
+      "files": {
+        "bvh": "AM_Gun_Idle_Firer_v0.bvh",
+        "bvh_sha256": "92e8c8f60c54e508e8393c3b66ce2b413795a548923a768e4e95c81866f7354c",
+        "npz": "AM_Gun_Idle_Firer_v0.npz",
+        "npz_sha256": "4cdee1ff62e75041833b2d8468319b5fb26ff379f953b878beacf49bb193c328"
+      },
+      "foot_lock": {
+        "after_cm": 0.07328473147936165,
+        "before_cm": 4.706580564379692,
+        "max_leg_change_deg": 6.624827387264371,
+        "phases": 6
+      },
+      "fps": 30.0,
+      "frames": 120,
+      "hand_error_limit_m": 0.05,
+      "hand_error_ok": true,
+      "loop": true,
+      "model": "Kimodo-SOMA-RP-v1",
+      "model_repo": "nvidia/Kimodo-SOMA-RP-v1",
+      "model_revision": "defbe1f34f5fd031eb0ccfe19f3f92a9880c287b",
+      "name": "AM_Gun_Idle_Firer",
+      "prompt": "A man stands upright in place holding a short staff upright in his right hand at his side, shifts his weight slightly and watches.",
+      "root_motion": false,
+      "scale_soma_over_soldier": 0.987,
+      "seed": 18862,
+      "station": "Linstock",
+      "variant": 0
+    },
+    "AM_Gun_Idle_Firer_v1": {
+      "attempts": [
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.0,
+          "seed": 18863
+        }
+      ],
+      "cfg": {
+        "cfg_type": "separated",
+        "cfg_weight": [
+          2.0,
+          4.0
+        ]
+      },
+      "chain_to": null,
+      "constraints": [
+        {
+          "frames": [
+            0,
+            119
+          ],
+          "type": "loop"
+        }
+      ],
+      "diffusion_steps": 100,
+      "duration_s": 4.0,
+      "expect": {
+        "end_hip_min_m": 0.8,
+        "travel_max_m": 0.25
+      },
+      "expect_ok": true,
+      "family": "Gun",
+      "files": {
+        "bvh": "AM_Gun_Idle_Firer_v1.bvh",
+        "bvh_sha256": "1a7baf04713b72d69ef0d7cae7d0a764a929ecf8cf2533f5f5d4a7e7d6cd6b45",
+        "npz": "AM_Gun_Idle_Firer_v1.npz",
+        "npz_sha256": "b829dcb9fb3541f46552a98793e2077025b9a6749210ff8958b43e4c39d579bb"
+      },
+      "foot_lock": {
+        "after_cm": 0.04907752154394984,
+        "before_cm": 5.1163531839847565,
+        "max_leg_change_deg": 3.208367463811487,
+        "phases": 6
+      },
+      "fps": 30.0,
+      "frames": 120,
+      "hand_error_limit_m": 0.05,
+      "hand_error_ok": true,
+      "loop": true,
+      "model": "Kimodo-SOMA-RP-v1",
+      "model_repo": "nvidia/Kimodo-SOMA-RP-v1",
+      "model_revision": "defbe1f34f5fd031eb0ccfe19f3f92a9880c287b",
+      "name": "AM_Gun_Idle_Firer",
+      "prompt": "A man stands upright in place holding a short staff upright in his right hand at his side, shifts his weight slightly and watches.",
+      "root_motion": false,
+      "scale_soma_over_soldier": 0.987,
+      "seed": 18863,
+      "station": "Linstock",
+      "variant": 1
+    },
+    "AM_Gun_Idle_Firer_v2": {
+      "attempts": [
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.0,
+          "seed": 18864
+        }
+      ],
+      "cfg": {
+        "cfg_type": "separated",
+        "cfg_weight": [
+          2.0,
+          4.0
+        ]
+      },
+      "chain_to": null,
+      "constraints": [
+        {
+          "frames": [
+            0,
+            119
+          ],
+          "type": "loop"
+        }
+      ],
+      "diffusion_steps": 100,
+      "duration_s": 4.0,
+      "expect": {
+        "end_hip_min_m": 0.8,
+        "travel_max_m": 0.25
+      },
+      "expect_ok": true,
+      "family": "Gun",
+      "files": {
+        "bvh": "AM_Gun_Idle_Firer_v2.bvh",
+        "bvh_sha256": "f996eed68a206dcbebb22c499b1d08f98053e0536cf3270cda24ee0fdd927ebf",
+        "npz": "AM_Gun_Idle_Firer_v2.npz",
+        "npz_sha256": "f77e10d8fec697e40af5e5a19580cc3668c62c207c967b4120902fb30a3fc89f"
+      },
+      "foot_lock": {
+        "after_cm": 0.020939366368111223,
+        "before_cm": 1.0572001338005066,
+        "max_leg_change_deg": 1.5276013823926449,
+        "phases": 6
+      },
+      "fps": 30.0,
+      "frames": 120,
+      "hand_error_limit_m": 0.05,
+      "hand_error_ok": true,
+      "loop": true,
+      "model": "Kimodo-SOMA-RP-v1",
+      "model_repo": "nvidia/Kimodo-SOMA-RP-v1",
+      "model_revision": "defbe1f34f5fd031eb0ccfe19f3f92a9880c287b",
+      "name": "AM_Gun_Idle_Firer",
+      "prompt": "A man stands upright in place holding a short staff upright in his right hand at his side, shifts his weight slightly and watches.",
+      "root_motion": false,
+      "scale_soma_over_soldier": 0.987,
+      "seed": 18864,
+      "station": "Linstock",
+      "variant": 2
+    },
+    "AM_Gun_Idle_Loader_v0": {
+      "attempts": [
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.0,
+          "seed": 138970
+        }
+      ],
+      "cfg": {
+        "cfg_type": "separated",
+        "cfg_weight": [
+          2.0,
+          4.0
+        ]
+      },
+      "chain_to": null,
+      "constraints": [
+        {
+          "frames": [
+            0,
+            119
+          ],
+          "type": "loop"
+        }
+      ],
+      "diffusion_steps": 100,
+      "duration_s": 4.0,
+      "expect": {
+        "end_hip_min_m": 0.8,
+        "travel_max_m": 0.25
+      },
+      "expect_ok": true,
+      "family": "Gun",
+      "files": {
+        "bvh": "AM_Gun_Idle_Loader_v0.bvh",
+        "bvh_sha256": "67d12fbba2b2330747ad585a0d1065fc82ee666a1fbea32a8c0a51ceb9ec4bf5",
+        "npz": "AM_Gun_Idle_Loader_v0.npz",
+        "npz_sha256": "d122a5cd1c51f488a8db8fd449557ed25daac33406c8aa1b29180573741c5acf"
+      },
+      "foot_lock": {
+        "after_cm": 0.0628099252935499,
+        "before_cm": 5.081983655691147,
+        "max_leg_change_deg": 7.884586220678687,
+        "phases": 6
+      },
+      "fps": 30.0,
+      "frames": 120,
+      "hand_error_limit_m": 0.05,
+      "hand_error_ok": true,
+      "loop": true,
+      "model": "Kimodo-SOMA-RP-v1",
+      "model_repo": "nvidia/Kimodo-SOMA-RP-v1",
+      "model_revision": "defbe1f34f5fd031eb0ccfe19f3f92a9880c287b",
+      "name": "AM_Gun_Idle_Loader",
+      "prompt": "A man stands ready in place with one hand resting on a bag at his hip, shifts his weight slightly and watches someone to his right.",
+      "root_motion": false,
+      "scale_soma_over_soldier": 0.987,
+      "seed": 138970,
+      "station": "station_MuzzleL",
+      "variant": 0
+    },
+    "AM_Gun_Idle_Loader_v1": {
+      "attempts": [
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.0,
+          "seed": 138971
+        }
+      ],
+      "cfg": {
+        "cfg_type": "separated",
+        "cfg_weight": [
+          2.0,
+          4.0
+        ]
+      },
+      "chain_to": null,
+      "constraints": [
+        {
+          "frames": [
+            0,
+            119
+          ],
+          "type": "loop"
+        }
+      ],
+      "diffusion_steps": 100,
+      "duration_s": 4.0,
+      "expect": {
+        "end_hip_min_m": 0.8,
+        "travel_max_m": 0.25
+      },
+      "expect_ok": true,
+      "family": "Gun",
+      "files": {
+        "bvh": "AM_Gun_Idle_Loader_v1.bvh",
+        "bvh_sha256": "231422a7cba8c31df7fee6b24ba2de4f990d441570b378e156d76a5c5ca927a5",
+        "npz": "AM_Gun_Idle_Loader_v1.npz",
+        "npz_sha256": "03b0261160a775c72e4dad88a3341e7a1d1dda387141e80d3209703a85073729"
+      },
+      "foot_lock": {
+        "after_cm": 0.018416348029859364,
+        "before_cm": 3.2769180834293365,
+        "max_leg_change_deg": 2.7644669076271353,
+        "phases": 6
+      },
+      "fps": 30.0,
+      "frames": 120,
+      "hand_error_limit_m": 0.05,
+      "hand_error_ok": true,
+      "loop": true,
+      "model": "Kimodo-SOMA-RP-v1",
+      "model_repo": "nvidia/Kimodo-SOMA-RP-v1",
+      "model_revision": "defbe1f34f5fd031eb0ccfe19f3f92a9880c287b",
+      "name": "AM_Gun_Idle_Loader",
+      "prompt": "A man stands ready in place with one hand resting on a bag at his hip, shifts his weight slightly and watches someone to his right.",
+      "root_motion": false,
+      "scale_soma_over_soldier": 0.987,
+      "seed": 138971,
+      "station": "station_MuzzleL",
+      "variant": 1
+    },
+    "AM_Gun_Idle_Loader_v2": {
+      "attempts": [
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.0,
+          "seed": 138972
+        }
+      ],
+      "cfg": {
+        "cfg_type": "separated",
+        "cfg_weight": [
+          2.0,
+          4.0
+        ]
+      },
+      "chain_to": null,
+      "constraints": [
+        {
+          "frames": [
+            0,
+            119
+          ],
+          "type": "loop"
+        }
+      ],
+      "diffusion_steps": 100,
+      "duration_s": 4.0,
+      "expect": {
+        "end_hip_min_m": 0.8,
+        "travel_max_m": 0.25
+      },
+      "expect_ok": true,
+      "family": "Gun",
+      "files": {
+        "bvh": "AM_Gun_Idle_Loader_v2.bvh",
+        "bvh_sha256": "fb7f1c736232761be296769effef0370773949277c2ec1725823324daa392365",
+        "npz": "AM_Gun_Idle_Loader_v2.npz",
+        "npz_sha256": "344d760b935f430db110adde59df233ce3b955acf2c117bf10079c19d3229e57"
+      },
+      "foot_lock": {
+        "after_cm": 0.025625425041653216,
+        "before_cm": 2.84389890730381,
+        "max_leg_change_deg": 3.6202167055249213,
+        "phases": 6
+      },
+      "fps": 30.0,
+      "frames": 120,
+      "hand_error_limit_m": 0.05,
+      "hand_error_ok": true,
+      "loop": true,
+      "model": "Kimodo-SOMA-RP-v1",
+      "model_repo": "nvidia/Kimodo-SOMA-RP-v1",
+      "model_revision": "defbe1f34f5fd031eb0ccfe19f3f92a9880c287b",
+      "name": "AM_Gun_Idle_Loader",
+      "prompt": "A man stands ready in place with one hand resting on a bag at his hip, shifts his weight slightly and watches someone to his right.",
+      "root_motion": false,
+      "scale_soma_over_soldier": 0.987,
+      "seed": 138972,
+      "station": "station_MuzzleL",
+      "variant": 2
+    },
+    "AM_Gun_Idle_Sponger_v0": {
+      "attempts": [
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.0,
+          "seed": 751673
+        }
+      ],
+      "cfg": {
+        "cfg_type": "separated",
+        "cfg_weight": [
+          2.0,
+          4.0
+        ]
+      },
+      "chain_to": null,
+      "constraints": [
+        {
+          "frames": [
+            0,
+            119
+          ],
+          "type": "loop"
+        }
+      ],
+      "diffusion_steps": 100,
+      "duration_s": 4.0,
+      "expect": {
+        "end_hip_min_m": 0.8,
+        "travel_max_m": 0.25
+      },
+      "expect_ok": true,
+      "family": "Gun",
+      "files": {
+        "bvh": "AM_Gun_Idle_Sponger_v0.bvh",
+        "bvh_sha256": "c593137339c31202c721937bd8d141d30ba350547fd0cfa53a35f97693701da4",
+        "npz": "AM_Gun_Idle_Sponger_v0.npz",
+        "npz_sha256": "8d4ad81a7df6c2749df3381002babd6e390cd002fdd7312406623a0263731e85"
+      },
+      "foot_lock": {
+        "after_cm": 0.026857646298594773,
+        "before_cm": 3.9927706122398376,
+        "max_leg_change_deg": 4.435486732502282,
+        "phases": 6
+      },
+      "fps": 30.0,
+      "frames": 120,
+      "hand_error_limit_m": 0.05,
+      "hand_error_ok": true,
+      "loop": true,
+      "model": "Kimodo-SOMA-RP-v1",
+      "model_repo": "nvidia/Kimodo-SOMA-RP-v1",
+      "model_revision": "defbe1f34f5fd031eb0ccfe19f3f92a9880c287b",
+      "name": "AM_Gun_Idle_Sponger",
+      "prompt": "A man stands ready in place holding a long pole upright at his side, shifts his weight slightly and watches someone to his left.",
+      "root_motion": false,
+      "scale_soma_over_soldier": 0.987,
+      "seed": 751673,
+      "station": "station_MuzzleR",
+      "variant": 0
+    },
+    "AM_Gun_Idle_Sponger_v1": {
+      "attempts": [
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.0,
+          "seed": 751674
+        }
+      ],
+      "cfg": {
+        "cfg_type": "separated",
+        "cfg_weight": [
+          2.0,
+          4.0
+        ]
+      },
+      "chain_to": null,
+      "constraints": [
+        {
+          "frames": [
+            0,
+            119
+          ],
+          "type": "loop"
+        }
+      ],
+      "diffusion_steps": 100,
+      "duration_s": 4.0,
+      "expect": {
+        "end_hip_min_m": 0.8,
+        "travel_max_m": 0.25
+      },
+      "expect_ok": true,
+      "family": "Gun",
+      "files": {
+        "bvh": "AM_Gun_Idle_Sponger_v1.bvh",
+        "bvh_sha256": "3929e16b8157e53b4ad2d591e683708642044f3c20db398d5d9d19a4feb00999",
+        "npz": "AM_Gun_Idle_Sponger_v1.npz",
+        "npz_sha256": "147a3027ff64fbbd6d6b987c17bae4301353ca50656c45515b1f90fabba89cd3"
+      },
+      "foot_lock": {
+        "after_cm": 0.03291998873464763,
+        "before_cm": 3.9153113961219788,
+        "max_leg_change_deg": 2.1316067526116966,
+        "phases": 6
+      },
+      "fps": 30.0,
+      "frames": 120,
+      "hand_error_limit_m": 0.05,
+      "hand_error_ok": true,
+      "loop": true,
+      "model": "Kimodo-SOMA-RP-v1",
+      "model_repo": "nvidia/Kimodo-SOMA-RP-v1",
+      "model_revision": "defbe1f34f5fd031eb0ccfe19f3f92a9880c287b",
+      "name": "AM_Gun_Idle_Sponger",
+      "prompt": "A man stands ready in place holding a long pole upright at his side, shifts his weight slightly and watches someone to his left.",
+      "root_motion": false,
+      "scale_soma_over_soldier": 0.987,
+      "seed": 751674,
+      "station": "station_MuzzleR",
+      "variant": 1
+    },
+    "AM_Gun_Idle_Sponger_v2": {
+      "attempts": [
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.0,
+          "seed": 751675
+        }
+      ],
+      "cfg": {
+        "cfg_type": "separated",
+        "cfg_weight": [
+          2.0,
+          4.0
+        ]
+      },
+      "chain_to": null,
+      "constraints": [
+        {
+          "frames": [
+            0,
+            119
+          ],
+          "type": "loop"
+        }
+      ],
+      "diffusion_steps": 100,
+      "duration_s": 4.0,
+      "expect": {
+        "end_hip_min_m": 0.8,
+        "travel_max_m": 0.25
+      },
+      "expect_ok": true,
+      "family": "Gun",
+      "files": {
+        "bvh": "AM_Gun_Idle_Sponger_v2.bvh",
+        "bvh_sha256": "b5dccb1291f8dac604f9d3fe521993d0404243b2e556b8264f98a1b93733de78",
+        "npz": "AM_Gun_Idle_Sponger_v2.npz",
+        "npz_sha256": "0859865446b5b4c717c653fa2d6311382d65b83b2a6db277f00acb5256d74bd3"
+      },
+      "foot_lock": {
+        "after_cm": 0.04604927671607584,
+        "before_cm": 5.618288740515709,
+        "max_leg_change_deg": 5.31334991607517,
+        "phases": 6
+      },
+      "fps": 30.0,
+      "frames": 120,
+      "hand_error_limit_m": 0.05,
+      "hand_error_ok": true,
+      "loop": true,
+      "model": "Kimodo-SOMA-RP-v1",
+      "model_repo": "nvidia/Kimodo-SOMA-RP-v1",
+      "model_revision": "defbe1f34f5fd031eb0ccfe19f3f92a9880c287b",
+      "name": "AM_Gun_Idle_Sponger",
+      "prompt": "A man stands ready in place holding a long pole upright at his side, shifts his weight slightly and watches someone to his left.",
+      "root_motion": false,
+      "scale_soma_over_soldier": 0.987,
+      "seed": 751675,
+      "station": "station_MuzzleR",
+      "variant": 2
+    },
+    "AM_Gun_Idle_Ventsman_v0": {
+      "attempts": [
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.0,
+          "seed": 352657
+        }
+      ],
+      "cfg": {
+        "cfg_type": "separated",
+        "cfg_weight": [
+          2.0,
+          4.0
+        ]
+      },
+      "chain_to": null,
+      "constraints": [
+        {
+          "frames": [
+            0,
+            119
+          ],
+          "type": "loop"
+        }
+      ],
+      "diffusion_steps": 100,
+      "duration_s": 4.0,
+      "expect": {
+        "end_hip_min_m": 0.8,
+        "travel_max_m": 0.25
+      },
+      "expect_ok": true,
+      "family": "Gun",
+      "files": {
+        "bvh": "AM_Gun_Idle_Ventsman_v0.bvh",
+        "bvh_sha256": "39bf686a820a98a56a0ae3964e5b8ed0701fa8b7cf8e11977baba28d74ea316a",
+        "npz": "AM_Gun_Idle_Ventsman_v0.npz",
+        "npz_sha256": "e99334bc9894ba493a5f4c344ed37bf8ca7d422042d9e023c510c58af04a6b0b"
+      },
+      "foot_lock": {
+        "after_cm": 0.02302204811712727,
+        "before_cm": 3.3455654978752136,
+        "max_leg_change_deg": 3.2634395122244952,
+        "phases": 6
+      },
+      "fps": 30.0,
+      "frames": 120,
+      "hand_error_limit_m": 0.05,
+      "hand_error_ok": true,
+      "loop": true,
+      "model": "Kimodo-SOMA-RP-v1",
+      "model_repo": "nvidia/Kimodo-SOMA-RP-v1",
+      "model_revision": "defbe1f34f5fd031eb0ccfe19f3f92a9880c287b",
+      "name": "AM_Gun_Idle_Ventsman",
+      "prompt": "A man stands ready in place with his arms at his sides, shifts his weight slightly and looks ahead attentively.",
+      "root_motion": false,
+      "scale_soma_over_soldier": 0.987,
+      "seed": 352657,
+      "station": "station_Vent",
+      "variant": 0
+    },
+    "AM_Gun_Idle_Ventsman_v1": {
+      "attempts": [
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.0,
+          "seed": 352658
+        }
+      ],
+      "cfg": {
+        "cfg_type": "separated",
+        "cfg_weight": [
+          2.0,
+          4.0
+        ]
+      },
+      "chain_to": null,
+      "constraints": [
+        {
+          "frames": [
+            0,
+            119
+          ],
+          "type": "loop"
+        }
+      ],
+      "diffusion_steps": 100,
+      "duration_s": 4.0,
+      "expect": {
+        "end_hip_min_m": 0.8,
+        "travel_max_m": 0.25
+      },
+      "expect_ok": true,
+      "family": "Gun",
+      "files": {
+        "bvh": "AM_Gun_Idle_Ventsman_v1.bvh",
+        "bvh_sha256": "7334b1373fa2a322cb2a1e4c9bef5e5b26f55b4ed0083513a64b7377dbe3336d",
+        "npz": "AM_Gun_Idle_Ventsman_v1.npz",
+        "npz_sha256": "1c19801e4b1d8b39cfeff3451b3f76819f6ed36ab42875a6716dd7a873dbf098"
+      },
+      "foot_lock": {
+        "after_cm": 0.023643164604436606,
+        "before_cm": 2.6382893323898315,
+        "max_leg_change_deg": 3.0340780493460597,
+        "phases": 6
+      },
+      "fps": 30.0,
+      "frames": 120,
+      "hand_error_limit_m": 0.05,
+      "hand_error_ok": true,
+      "loop": true,
+      "model": "Kimodo-SOMA-RP-v1",
+      "model_repo": "nvidia/Kimodo-SOMA-RP-v1",
+      "model_revision": "defbe1f34f5fd031eb0ccfe19f3f92a9880c287b",
+      "name": "AM_Gun_Idle_Ventsman",
+      "prompt": "A man stands ready in place with his arms at his sides, shifts his weight slightly and looks ahead attentively.",
+      "root_motion": false,
+      "scale_soma_over_soldier": 0.987,
+      "seed": 352658,
+      "station": "station_Vent",
+      "variant": 1
+    },
+    "AM_Gun_Idle_Ventsman_v2": {
+      "attempts": [
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.0,
+          "seed": 352659
+        }
+      ],
+      "cfg": {
+        "cfg_type": "separated",
+        "cfg_weight": [
+          2.0,
+          4.0
+        ]
+      },
+      "chain_to": null,
+      "constraints": [
+        {
+          "frames": [
+            0,
+            119
+          ],
+          "type": "loop"
+        }
+      ],
+      "diffusion_steps": 100,
+      "duration_s": 4.0,
+      "expect": {
+        "end_hip_min_m": 0.8,
+        "travel_max_m": 0.25
+      },
+      "expect_ok": true,
+      "family": "Gun",
+      "files": {
+        "bvh": "AM_Gun_Idle_Ventsman_v2.bvh",
+        "bvh_sha256": "c20a588224623b82f78f7eac4f0739c484b529867171e84c58e5d3df57d678b2",
+        "npz": "AM_Gun_Idle_Ventsman_v2.npz",
+        "npz_sha256": "e415faac6d666bfbbb2b60c8b96e6b0eca2149f6dcbe57d6bf6b951ce484dc9a"
+      },
+      "foot_lock": {
+        "after_cm": 0.019519457418937236,
+        "before_cm": 1.6883306205272675,
+        "max_leg_change_deg": 1.1513430952314287,
+        "phases": 6
+      },
+      "fps": 30.0,
+      "frames": 120,
+      "hand_error_limit_m": 0.05,
+      "hand_error_ok": true,
+      "loop": true,
+      "model": "Kimodo-SOMA-RP-v1",
+      "model_repo": "nvidia/Kimodo-SOMA-RP-v1",
+      "model_revision": "defbe1f34f5fd031eb0ccfe19f3f92a9880c287b",
+      "name": "AM_Gun_Idle_Ventsman",
+      "prompt": "A man stands ready in place with his arms at his sides, shifts his weight slightly and looks ahead attentively.",
+      "root_motion": false,
+      "scale_soma_over_soldier": 0.987,
+      "seed": 352659,
+      "station": "station_Vent",
+      "variant": 2
+    }
+  }
+}
