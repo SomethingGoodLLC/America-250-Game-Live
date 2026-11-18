@@ -100,3 +100,81 @@ def test_the_chosen_tier_exists_and_an_unmeasured_platform_is_lowest() -> None:
     # Every tier sets the same variables, so going down a tier undoes going up.
     keys = {tuple(sorted(t["cvars"])) for t in LOOK["tiers"]}
     assert len(keys) == 1
+
+
+# ---- Battle Feel Pass (2026-11-16): fx router, words of command, officer voices ----
+
+SFX_DIR = ROOT / "unreal" / "PlayAmerica250" / "Content" / "PA250" / "Audio" / "SFX"
+VOICE_DIR = ROOT / "unreal" / "PlayAmerica250" / "Content" / "PA250" / "Audio" / "Voice"
+FX_EVENTS = {
+    "CannonFired",
+    "RoundShotGroundStrike",
+    "CanisterFired",
+    "ShellBurst",
+    "ShellDud",
+}
+
+
+def _imported(folder: Path, name: str) -> bool:
+    """A bank is imported when its asset or its first variant is in the project."""
+    return (folder / f"{name}.uasset").exists() or (
+        folder / f"{name}_1.uasset"
+    ).exists()
+
+
+def test_fx_router_has_exactly_its_five_events_and_no_grapeshot() -> None:
+    fx = {k: v for k, v in LOOK["fx"].items() if k != "note"}
+    assert set(fx) == FX_EVENTS
+    assert not any("grape" in k.lower() for k in LOOK["fx"])
+    # A dud is heard and nothing more: no flash, no shake.
+    dud = fx["ShellDud"]
+    assert dud["niagara"] is None and dud["shake_scale"] == 0
+    # The round shot's shake has one owner, battle_feel.intensity.round_shot.
+    assert fx["RoundShotGroundStrike"]["shake_scale"] == 0
+    for name, entry in fx.items():
+        if entry["shake_scale"] > 0:
+            assert entry["outer_m"] > entry["inner_m"] >= 0, name
+
+
+def test_the_schema_refuses_an_unknown_fx_event_or_a_missing_field() -> None:
+    checker = Draft7Validator(SCHEMA)
+    extra = json.loads(json.dumps(LOOK))
+    extra["fx"]["GrapeshotFired"] = dict(LOOK["fx"]["CanisterFired"])
+    assert list(checker.iter_errors(extra))
+    missing = json.loads(json.dumps(LOOK))
+    del missing["fx"]["ShellBurst"]["fallback_sound"]
+    assert list(checker.iter_errors(missing))
+    no_orders = json.loads(json.dumps(LOOK))
+    del no_orders["audio"]["orders"]["halt"]
+    assert list(checker.iter_errors(no_orders))
+    bad_voice = json.loads(json.dumps(LOOK))
+    bad_voice["officer_voices"]["british"] = ["not a voice id"]
+    assert list(checker.iter_errors(bad_voice))
+
+
+def test_every_sound_the_fx_and_orders_name_is_imported() -> None:
+    banks: set[str] = set()
+    for name, entry in LOOK["fx"].items():
+        if name != "note":
+            banks |= {entry["sound"], entry["fallback_sound"]}
+    for cue in LOOK["audio"]["orders"].values():
+        banks |= {cue["drum"], cue["fife"]}
+    missing = sorted(b for b in banks if not _imported(SFX_DIR, b))
+    assert not missing, f"not imported into /Game/PA250/Audio/SFX: {missing}"
+    for side in ("british", "continental"):
+        for cue in LOOK["audio"]["orders"].values():
+            assert _imported(VOICE_DIR / side, "VO_" + cue["voice"]), (
+                side,
+                cue["voice"],
+            )
+
+
+def test_officer_lines_are_variants_of_the_shouts_they_belong_to() -> None:
+    # Each generated voice is a _1 / _2 variant of a shout bank, so the game plays it.
+    for side, voices in LOOK["officer_voices"].items():
+        if side == "note":
+            continue
+        for key in ("make_ready", "present", "fire", "rally", "steady"):
+            for n in range(1, len(voices) + 1):
+                asset = VOICE_DIR / side / f"VO_{key}_{n}.uasset"
+                assert asset.exists(), asset.relative_to(ROOT)

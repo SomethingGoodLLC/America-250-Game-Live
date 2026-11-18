@@ -48,10 +48,34 @@ inline bool ChooseShot(float RangeCm, const pa250::BattleRules& R, EPA250Shot& O
 	}
 	return false;
 }
+/** The data's word for a load (battle_rules.json cannon.gun_types). Grape is the canister load. */
+inline const char* ShotKey(EPA250Shot Shot)
+{
+	return Shot == EPA250Shot::Shell ? "shell" : Shot == EPA250Shot::Grape ? "canister" : "round_shot";
+}
+/** The kind of piece a gun is when nothing says otherwise (cannon.default_gun_type). */
+inline FString DefaultGunType(const pa250::BattleRules& R)
+{
+	return R.cannon_default_gun_type.empty() ? FString(TEXT("six_pounder")) : FString(UTF8_TO_TCHAR(R.cannon_default_gun_type.c_str()));
+}
+/** Whether this kind of piece fires the load (cannon.gun_types). A kind the data does not list
+ *  fires round shot and canister only, so no unlisted piece ever throws shell. */
+inline bool ShotAllowedForGun(const FString& GunType, EPA250Shot Shot, const pa250::BattleRules& R)
+{
+	const FString Type = GunType.IsEmpty() ? DefaultGunType(R) : GunType;
+	const auto It = R.cannon_gun_types.find(std::string(TCHAR_TO_UTF8(*Type.ToLower())));
+	if (It == R.cannon_gun_types.end()) return Shot != EPA250Shot::Shell;
+	for (const std::string& K : It->second)
+	{
+		if (K == ShotKey(Shot)) return true;
+	}
+	return false;
+}
 /** Why a chosen load will not fire at this range, or null when it will. Grape keeps a little
  *  grace past its range (1.25) so a mark just beyond the ring still goes. */
-inline const TCHAR* RefuseShot(EPA250Shot Shot, float RangeCm, const pa250::BattleRules& R)
+inline const TCHAR* RefuseShot(EPA250Shot Shot, float RangeCm, const pa250::BattleRules& R, const FString& GunType = FString())
 {
+	// Range first (the existing messages), then what this kind of piece fires at all.
 	if (Shot == EPA250Shot::Grape && RangeCm > R.cannon_grape_range_m * 100.f * 1.25f)
 	{
 		return TEXT("canister too far — switch load");
@@ -63,6 +87,10 @@ inline const TCHAR* RefuseShot(EPA250Shot Shot, float RangeCm, const pa250::Batt
 	if (Shot == EPA250Shot::RoundShot && RangeCm > R.cannon_round_range_m * 100.f)
 	{
 		return TEXT("round shot too far");
+	}
+	if (!ShotAllowedForGun(GunType, Shot, R))
+	{
+		return Shot == EPA250Shot::Shell ? TEXT("this piece fires no shell") : TEXT("this piece fires no such load");
 	}
 	return nullptr;
 }
@@ -94,7 +122,33 @@ inline float DrillSpeed(int32 Crew, int32 Trained, const pa250::BattleRules& R)
 	const float Skill = 1.f / FMath::Lerp(FMath::Max(1.f, R.cannon_untrained_scale), 1.f, TrainedShare);
 	return Manning * Skill;
 }
-/** Six-step gun drill (Artillery pass). Perfect full crew ≈15 s; neutral ≈22 s. */
+/** The drill's pace at the gun: DrillSpeed, and a crew short of full (at least min_crew) is slower
+ *  again by cannon.missing_roles_scale (its missing roles are covered by men doing two jobs). */
+inline float CrewDrillSpeed(int32 Crew, int32 Trained, const pa250::BattleRules& R)
+{
+	float Speed = DrillSpeed(Crew, Trained, R);
+	if (Crew > 0 && Crew < R.cannon_crew_men) Speed /= FMath::Max(1.f, R.cannon_missing_roles_scale);
+	return Speed;
+}
+/** The six drill steps, in the order the drill runs them. The HUD's labels (DrillPreset), the crew's
+ *  clips (APA250FieldGun::CrewStepClip), the chest (Load) and the premature discharge (Swab) all key
+ *  on these, never on bare numbers, so a reorder cannot leave one of them behind. */
+enum class EPA250GunStep : uint8 { Swab = 0, Load = 1, Ram = 2, RunOut = 3, Prime = 4, Fire = 5, Count = 6 };
+inline const TCHAR* GunStepLabel(EPA250GunStep Step)
+{
+	switch (Step)
+	{
+	case EPA250GunStep::Swab: return TEXT("Swab");
+	case EPA250GunStep::Load: return TEXT("Load");
+	case EPA250GunStep::Ram: return TEXT("Ram");
+	case EPA250GunStep::RunOut: return TEXT("Run up");
+	case EPA250GunStep::Prime: return TEXT("Prime");
+	case EPA250GunStep::Fire: return TEXT("Fire");
+	default: return TEXT("");
+	}
+}
+inline bool IsGunStep(int32 StepIndex, EPA250GunStep Step) { return StepIndex == static_cast<int32>(Step); }
+/** Six-step gun drill: Swab, Load, Ram, Run out ("Run up"), Prime, Fire. */
 inline FActiveReloadTuningPlain DrillPreset(const pa250::BattleRules& R)
 {
 	FActiveReloadTuningPlain T;
@@ -102,22 +156,23 @@ inline FActiveReloadTuningPlain DrillPreset(const pa250::BattleRules& R)
 	T.PhasePrimePan = R.cannon_sponge_load_seconds;
 	T.PhaseRamCharge = R.cannon_ram_seconds;
 	T.PhaseShoulderAim = R.cannon_prime_lay_seconds;
-	// Neutral target 22 s: scale the catalog times and add the Fire step.
-	const float Catalog = FMath::Max(0.1f, R.cannon_sponge_load_seconds + R.cannon_ram_seconds + R.cannon_prime_lay_seconds);
+	const float RunOut = R.cannon_run_out_seconds > 0.f ? R.cannon_run_out_seconds : 3.f;
+	// Neutral target 22 s: scale the catalog times and add RunOut + Fire.
+	const float Catalog = FMath::Max(0.1f,
+		R.cannon_sponge_load_seconds + R.cannon_ram_seconds + R.cannon_prime_lay_seconds + RunOut);
 	constexpr float NeutralTarget = 22.f;
 	constexpr float FireStep = 2.0f;
 	const float Scale = (NeutralTarget - FireStep) / Catalog;
 	T.CustomStepSeconds = {
-		R.cannon_sponge_load_seconds * 0.45f * Scale, // Sponge
+		R.cannon_sponge_load_seconds * 0.45f * Scale, // Swab (sponge)
 		R.cannon_sponge_load_seconds * 0.55f * Scale, // Load
 		R.cannon_ram_seconds * Scale,                 // Ram
-		R.cannon_prime_lay_seconds * 0.4f * Scale,    // Prime
-		R.cannon_prime_lay_seconds * 0.6f * Scale,    // Run up & Lay
+		RunOut * Scale,                               // RunOut / run up
+		R.cannon_prime_lay_seconds * Scale,           // Prime
 		FireStep                                      // Fire
 	};
-	T.CustomStepLabels = {
-		TEXT("Sponge"), TEXT("Load"), TEXT("Ram"), TEXT("Prime"), TEXT("Run up & Lay"), TEXT("Fire")
-	};
+	T.CustomStepLabels.Reset();
+	for (int32 i = 0; i < static_cast<int32>(EPA250GunStep::Count); ++i) T.CustomStepLabels.Add(GunStepLabel(static_cast<EPA250GunStep>(i)));
 	T.bTimeoutCompletesPhase = true;
 	T.bMissResumesProgress = true;
 	T.bIgnoreRepeatMiss = true;
@@ -319,6 +374,10 @@ public:
 	/** Cycle grape → round shot → shell → grape while the player serves. */
 	void CycleShot(int32 Delta);
 	EPA250Shot GetSelectedShot() const { return SelectedShot; }
+	/** The kind of piece (a key of battle_rules.json cannon.gun_types); empty means default_gun_type. */
+	FString GetGunType() const;
+	/** Makes this piece another kind (tests, a battle with a howitzer). A load it no longer fires is dropped. */
+	void SetGunType(const FString& Type);
 	/** Where the piece is laid (ground aim mark), or ZeroVector when not serving. */
 	FVector GetAimMark() const { return AimMarkWorld; }
 	/** The player has the crew run the gun up after him (he walks ahead of it), or stand it again. */
@@ -338,12 +397,18 @@ public:
 	/** Rounds this piece holds that the magazine has not been charged for yet: those in its chest
 	 *  and the one in the loader's hands or in the barrel. A round is charged when it is fired. */
 	int32 RoundsHeld() const;
+	/** Pure: the registry clip a post's man shows at a drill step (an EPA250GunStep index; posts are
+	 *  0 sponger, 1 loader, 2 ventsman, 3 captain). */
+	static FName CrewStepClip(int32 Post, int32 Step, bool bDrilling);
+	static FName CrewIdleClip(int32 Post);
 	/** Premature discharge (M6): the sponger first (55% WIA / 45% KIA), then the muzzle blast for the rest. */
 	void DischargePremature(FRandomStream& Hot);
 	/** Tests: an empty barrel and a drill that has not begun. */
 	void ForceEmptyForTest() { bLoaded = false; Drill.Reset(); DrillStepHeard = -1; bRoundInHand = false; }
 
 private:
+	/** Eases each bot of the crew onto his drill station and shows the step's clip on him. */
+	void PoseCrew(float DeltaSeconds);
 	void FitMesh();
 	void CountMen(int32& OutOwn, int32& OutTrained, int32& OutEnemies) const;
 	/** The crew's own judgement: the nearest enemy it can see, or the work he shelters behind. */
@@ -364,6 +429,7 @@ private:
 	TArray<TWeakObjectPtr<ARFCharacter>> Posts;
 	TWeakObjectPtr<ARFCharacter> PlayerGunner;
 	EPA250Shot SelectedShot = EPA250Shot::RoundShot;
+	FString GunType; // empty: battle_rules cannon.default_gun_type
 	bool bPlayerChoseShot = false;
 	float LayPitch = 0.f;
 	FVector AimMarkWorld = FVector::ZeroVector;
@@ -391,6 +457,8 @@ private:
 	TWeakObjectPtr<APA250AmmoChest> Chest;
 	/** The Load step has its round (taken from the chest when the step began). */
 	bool bRoundInHand = false;
+	/** Crew clips this gun has shown (one log line each). */
+	TSet<FName> CrewClipsLogged;
 };
 
 /** Ammunition chest beside a field gun: holds ready rounds. Load takes one; Fire spends through
@@ -459,7 +527,8 @@ private:
 	float Travelled = 0.f;
 };
 
-/** An exploding shell: flies like round shot, bursts when travel reaches its fuse (the aim range). */
+/** An exploding shell: flies like round shot, bursts when travel reaches its fuse (the aim range).
+ *  A dud (cannon.shell_dud_chance, rolled at the gun) flies the same way and lands without bursting. */
 UCLASS()
 class PLAYAMERICA250_API APA250CannonShell : public AActor
 {
@@ -468,11 +537,17 @@ class PLAYAMERICA250_API APA250CannonShell : public AActor
 public:
 	APA250CannonShell();
 	virtual void Tick(float DeltaSeconds) override;
-	void Launch(const FVector& InVelocity, float FuseCm, FName InFaction, ARFCharacter* InGunner, const AActor* InGun);
+	void Launch(const FVector& InVelocity, float FuseCm, FName InFaction, ARFCharacter* InGunner, const AActor* InGun, bool bInDud = false);
+	bool IsDud() const { return bDud; }
+	/** Tests: advance the flight by hand in a world that has not begun play. */
+	void AdvanceForTest(float DeltaSeconds) { AdvanceFlight(DeltaSeconds); }
 
 private:
 	void AdvanceFlight(float DeltaSeconds);
 	void Burst(const FVector& At);
+	/** A dud comes to earth: the thud, no blast, no shake. */
+	void LandDud(const FVector& At);
+	bool bDud = false;
 	UPROPERTY()
 	TObjectPtr<UStaticMeshComponent> Shell;
 	FVector Velocity = FVector::ZeroVector;

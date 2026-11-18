@@ -1,0 +1,1073 @@
+{
+  "note": "Provenance for tools/generate_assets.py",
+  "generated": [
+    {
+      "id": "ph_muzzle_flash",
+      "kind": "image",
+      "model": "gpt-image-2.6-sunburst",
+      "prompt": "Simple transparent sprite of a flintlock muzzle flash, orange-white, soft edges, game VFX, no background.",
+      "settings": {
+        "model": "gpt-image-2.6-sunburst",
+        "size": "1024x1024",
+        "background": "transparent"
+      },
+      "output": "unreal/PlayAmerica250/Content/Generated/Textures/ph_muzzle_flash.png",
+      "date": "2026-11-16",
+      "sha256": "d5be2e30a67cd066aa5a036615cdbe1a7b6e2ca90e477996ddfccf9e5bb9414e"
+    },
+    {
+      "id": "ph_powder_puff",
+      "kind": "image",
+      "model": "gpt-image-2.6-sunburst",
+      "prompt": "Simple transparent sprite of a white-grey black-powder smoke puff, soft, game VFX.",
+      "settings": {
+        "model": "gpt-image-2.6-sunburst",
+        "size": "1024x1024",
+        "background": "transparent"
+      },
+      "output": "unreal/PlayAmerica250/Content/Generated/Textures/ph_powder_puff.png",
+      "date": "2026-11-16",
+      "sha256": "1faff8c7b67162526ff2dfa05a0f45cc75bce52a2ca79aaf4548c757f6f3d0b1"
+    },
+    {
+      "id": "ph_dirt_spray",
+      "kind": "image",
+      "model": "gpt-image-2.6-sunburst",
+      "prompt": "Simple transparent sprite of brown dirt spray from a cannonball strike, game VFX.",
+      "settings": {
+        "model": "gpt-image-2.6-sunburst",
+        "size": "1024x1024",
+        "background": "transparent"
+      },
+      "output": "unreal/PlayAmerica250/Content/Generated/Textures/ph_dirt_spray.png",
+      "date": "2026-11-16",
+      "sha256": "c5d95f2c1ce3b00ceb27129620d4f459ae13de0a538d6205e35bb5721a4fc7c8"
+    },
+    {
+      "id": "icon_order_advance",
+      "kind": "image",
+      "model": "gpt-image-2.6-sunburst",
+      "prompt": "Simple flat HUD icon for military drill order 'advance', 18th century silhouette, transparent background, high contrast.",
+      "settings": {
+        "model": "gpt-image-2.6-sunburst",
+        "size": "1024x1024",
+        "background": "transparent"
+      },
+      "output": "unreal/PlayAmerica250/Content/Generated/Textures/icon_order_advance.png",
+      "date": "2026-11-16",
+      "sha256": "ddc8b9c6c5024b8d4794b1648d1c20844745d7b7f3b9efbf276ac880b1f26496"
+    },
+    {
+      "id": "icon_order_halt",
+      "kind": "image",
+      "model": "gpt-image-2.6-sunburst",
+      "prompt": "Simple flat HUD icon for military drill order 'halt', 18th century silhouette, transparent background, high contrast.",
+      "settings": {
+        "model": "gpt-image-2.6-sunburst",
+        "size": "1024x1024",
+        "background": "transparent"
+      },
+      "output": "unreal/PlayAmerica250/Content/Generated/Textures/icon_order_halt.png",
+      "date": "2026-11-16",
+      "sha256": "62f7bc64b382b0e498c7183bade573fa2b2e232502c813aecf1edf79f34708d3"
+    },
+    {
+      "id": "icon_order_make_ready",
+      "kind": "image",
+      "model": "gpt-image-2.6-sunburst",
+      "prompt": "Simple flat HUD icon for military drill order 'make_ready', 18th century silhouette, transparent background, high contrast.",
+      "settings": {
+        "model": "gpt-image-2.6-sunburst",
+        "size": "1024x1024",
+        "background": "transparent"
+      },
+      "output": "unreal/PlayAmerica250/Content/Generated/Textures/icon_order_make_ready.png",
+      "date": "2026-11-16",
+      "sha256": "deb45cecf87d200d20de83abd6722cda700187ee2c8aff6b2f52cf6e4161ae67"
+    },
+    {
+      "id": "icon_order_present",
+      "kind": "image",
+      "model": "gpt-image-2.6-sunburst",
+      "prompt": "Simple flat HUD icon for military drill order 'present', 18th century silhouette, transparent background, high contrast.",
+      "settings": {
+        "model": "gpt-image-2.6-sunburst",
+        "size": "1024x1024",
+        "background": "transparent"
+      },
+      "output": "unreal/PlayAmerica250/Content/Generated/Textures/icon_order_present.png",
+      "date": "2026-11-16",
+      "sha256": "8b242803e83302389d0d2a843b9960c37c067f656c425c119a7f05b4a0db1aea"
+    },
+    {
+      "id": "icon_order_fire",
+      "kind": "image",
+      "model": "gpt-image-2.6-sunburst",
+      "prompt": "Simple flat HUD icon for military drill order 'fire', 18th century silhouette, transparent background, high contrast.",
+      "settings": {
+        "model": "gpt-image-2.6-sunburst",
+        "size": "1024x1024",
+        "background": "transparent"
+      },
+      "output": "unreal/PlayAmerica250/Content/Generated/Textures/icon_order_fire.png",
+      "date": "2026-11-16",
+      "sha256": "6dcf0b9dba851be9fcd4602c04023be40143671bb209ce4fac39a574f1632d0c"
+    },
+    {
+      "id": "icon_order_rally",
+      "kind": "image",
+      "model": "gpt-image-2.6-sunburst",
+      "prompt": "Simple flat HUD icon for military drill order 'rally', 18th century silhouette, transparent background, high contrast.",
+      "settings": {
+        "model": "gpt-image-2.6-sunburst",
+        "size": "1024x1024",
+        "background": "transparent"
+      },
+      "output": "unreal/PlayAmerica250/Content/Generated/Textures/icon_order_rally.png",
+      "date": "2026-11-16",
+      "sha256": "d69aa2e7026a207d56481e63ea31bffa9511a0d212623ffb53ef52a6178aab22"
+    },
+    {
+      "id": "ph_colours_regimental",
+      "kind": "image",
+      "model": "gpt-image-2.6-sunburst",
+      "prompt": "Placeholder regimental colour flag on a staff, simple colonial era design, not historically verified, transparent background.",
+      "settings": {
+        "model": "gpt-image-2.6-sunburst",
+        "size": "1024x1024",
+        "background": "transparent"
+      },
+      "output": "unreal/PlayAmerica250/Content/Generated/Textures/ph_colours_regimental.png",
+      "date": "2026-11-16",
+      "sha256": "095bb8be05e61cad60a61e14e882f3833211fc8ca05c1fad9a5c7fa92e6c9578",
+      "note": "PLACEHOLDER \u2014 design not historically verified"
+    },
+    {
+      "id": "drum_advance",
+      "kind": "sfx",
+      "model": "eleven_text_to_sound_v3",
+      "prompt": "18th-century rope-tension military snare drum call for 'Advance', short crisp field signal, no modern drums, no melody beyond a drum call, dry outdoor field.",
+      "settings": {
+        "model_id": "eleven_text_to_sound_v3",
+        "duration_seconds": 1.5,
+        "prompt_influence": 0.7
+      },
+      "output": "unreal/PlayAmerica250/SourceAudio/sfx/drum_call_advance.wav",
+      "date": "2026-11-16",
+      "sha256": "abbcec6d8c512e47ed75fb67cd2f24375ab56a6a44f1338369a4fd7b682be82e",
+      "note": "recorded after the fact from the catalog (the generating run's manifest rows were lost); model and prompt are the catalog's, the file is the one on disk"
+    },
+    {
+      "id": "fife_advance",
+      "kind": "sfx",
+      "model": "eleven_text_to_sound_v3",
+      "prompt": "18th-century B-flat fife call for 'Advance', short piercing wooden fife signal, military, no modern instruments.",
+      "settings": {
+        "model_id": "eleven_text_to_sound_v3",
+        "duration_seconds": 1.5,
+        "prompt_influence": 0.7
+      },
+      "output": "unreal/PlayAmerica250/SourceAudio/sfx/fife_call_advance.wav",
+      "date": "2026-11-16",
+      "sha256": "d6894b3971ccf3a1b51748ca3be0fbafa3a81dd0c873b5e5777f6b02eeee821f",
+      "note": "recorded after the fact from the catalog (the generating run's manifest rows were lost); model and prompt are the catalog's, the file is the one on disk"
+    },
+    {
+      "id": "drum_halt",
+      "kind": "sfx",
+      "model": "eleven_text_to_sound_v3",
+      "prompt": "18th-century rope-tension military snare drum call for 'Halt', short crisp field signal, no modern drums, no melody beyond a drum call, dry outdoor field.",
+      "settings": {
+        "model_id": "eleven_text_to_sound_v3",
+        "duration_seconds": 1.5,
+        "prompt_influence": 0.7
+      },
+      "output": "unreal/PlayAmerica250/SourceAudio/sfx/drum_call_halt.wav",
+      "date": "2026-11-16",
+      "sha256": "d6f08bb8da2dbf266c244608a0d5d76f5589e51890a904835a7eff431795d94b",
+      "note": "recorded after the fact from the catalog (the generating run's manifest rows were lost); model and prompt are the catalog's, the file is the one on disk"
+    },
+    {
+      "id": "fife_halt",
+      "kind": "sfx",
+      "model": "eleven_text_to_sound_v3",
+      "prompt": "18th-century B-flat fife call for 'Halt', short piercing wooden fife signal, military, no modern instruments.",
+      "settings": {
+        "model_id": "eleven_text_to_sound_v3",
+        "duration_seconds": 1.5,
+        "prompt_influence": 0.7
+      },
+      "output": "unreal/PlayAmerica250/SourceAudio/sfx/fife_call_halt.wav",
+      "date": "2026-11-16",
+      "sha256": "3f3f6e93ac045ab2ec360ffe2b080b24d3adbbf612ce8b5c961e80f7d45217e6",
+      "note": "recorded after the fact from the catalog (the generating run's manifest rows were lost); model and prompt are the catalog's, the file is the one on disk"
+    },
+    {
+      "id": "drum_make_ready",
+      "kind": "sfx",
+      "model": "eleven_text_to_sound_v3",
+      "prompt": "18th-century rope-tension military snare drum call for 'Make ready', short crisp field signal, no modern drums, no melody beyond a drum call, dry outdoor field.",
+      "settings": {
+        "model_id": "eleven_text_to_sound_v3",
+        "duration_seconds": 1.5,
+        "prompt_influence": 0.7
+      },
+      "output": "unreal/PlayAmerica250/SourceAudio/sfx/drum_call_make_ready.wav",
+      "date": "2026-11-16",
+      "sha256": "8b559647fa3afd1a9238e89d596e226e17c95d292a5e4e3cb6a17d5329d0fa70",
+      "note": "recorded after the fact from the catalog (the generating run's manifest rows were lost); model and prompt are the catalog's, the file is the one on disk"
+    },
+    {
+      "id": "fife_make_ready",
+      "kind": "sfx",
+      "model": "eleven_text_to_sound_v3",
+      "prompt": "18th-century B-flat fife call for 'Make ready', short piercing wooden fife signal, military, no modern instruments.",
+      "settings": {
+        "model_id": "eleven_text_to_sound_v3",
+        "duration_seconds": 1.5,
+        "prompt_influence": 0.7
+      },
+      "output": "unreal/PlayAmerica250/SourceAudio/sfx/fife_call_make_ready.wav",
+      "date": "2026-11-16",
+      "sha256": "5e1d512db5dd9900370cc8aaea6c664eadb997afdc79c68bc3d482a459210736",
+      "note": "recorded after the fact from the catalog (the generating run's manifest rows were lost); model and prompt are the catalog's, the file is the one on disk"
+    },
+    {
+      "id": "drum_present",
+      "kind": "sfx",
+      "model": "eleven_text_to_sound_v3",
+      "prompt": "18th-century rope-tension military snare drum call for 'Present', short crisp field signal, no modern drums, no melody beyond a drum call, dry outdoor field.",
+      "settings": {
+        "model_id": "eleven_text_to_sound_v3",
+        "duration_seconds": 1.5,
+        "prompt_influence": 0.7
+      },
+      "output": "unreal/PlayAmerica250/SourceAudio/sfx/drum_call_present.wav",
+      "date": "2026-11-16",
+      "sha256": "66e416e93543a98d840c552584734f779182cabc3082ce123d3c717245c84a41",
+      "note": "recorded after the fact from the catalog (the generating run's manifest rows were lost); model and prompt are the catalog's, the file is the one on disk"
+    },
+    {
+      "id": "fife_present",
+      "kind": "sfx",
+      "model": "eleven_text_to_sound_v3",
+      "prompt": "18th-century B-flat fife call for 'Present', short piercing wooden fife signal, military, no modern instruments.",
+      "settings": {
+        "model_id": "eleven_text_to_sound_v3",
+        "duration_seconds": 1.5,
+        "prompt_influence": 0.7
+      },
+      "output": "unreal/PlayAmerica250/SourceAudio/sfx/fife_call_present.wav",
+      "date": "2026-11-16",
+      "sha256": "1260d50b6cacbdd38eed94b4d549e753b8c48f28924de5cbd9355cabcf2b520e",
+      "note": "recorded after the fact from the catalog (the generating run's manifest rows were lost); model and prompt are the catalog's, the file is the one on disk"
+    },
+    {
+      "id": "drum_fire",
+      "kind": "sfx",
+      "model": "eleven_text_to_sound_v3",
+      "prompt": "18th-century rope-tension military snare drum call for 'Fire', short crisp field signal, no modern drums, no melody beyond a drum call, dry outdoor field.",
+      "settings": {
+        "model_id": "eleven_text_to_sound_v3",
+        "duration_seconds": 1.5,
+        "prompt_influence": 0.7
+      },
+      "output": "unreal/PlayAmerica250/SourceAudio/sfx/drum_call_fire.wav",
+      "date": "2026-11-16",
+      "sha256": "d81f865af69a57cccdef66f1b37fe2928d0b56ee64cb89a095d7013b10badbfc",
+      "note": "recorded after the fact from the catalog (the generating run's manifest rows were lost); model and prompt are the catalog's, the file is the one on disk"
+    },
+    {
+      "id": "fife_fire",
+      "kind": "sfx",
+      "model": "eleven_text_to_sound_v3",
+      "prompt": "18th-century B-flat fife call for 'Fire', short piercing wooden fife signal, military, no modern instruments.",
+      "settings": {
+        "model_id": "eleven_text_to_sound_v3",
+        "duration_seconds": 1.5,
+        "prompt_influence": 0.7
+      },
+      "output": "unreal/PlayAmerica250/SourceAudio/sfx/fife_call_fire.wav",
+      "date": "2026-11-16",
+      "sha256": "22ed10e1a4f68c1582e229e7792f65a8c3a4a4cade0b79f3e33788770177d320",
+      "note": "recorded after the fact from the catalog (the generating run's manifest rows were lost); model and prompt are the catalog's, the file is the one on disk"
+    },
+    {
+      "id": "drum_rally",
+      "kind": "sfx",
+      "model": "eleven_text_to_sound_v3",
+      "prompt": "18th-century rope-tension military snare drum call for 'Rally / assembly', short crisp field signal, no modern drums, no melody beyond a drum call, dry outdoor field.",
+      "settings": {
+        "model_id": "eleven_text_to_sound_v3",
+        "duration_seconds": 1.5,
+        "prompt_influence": 0.7
+      },
+      "output": "unreal/PlayAmerica250/SourceAudio/sfx/drum_call_rally.wav",
+      "date": "2026-11-16",
+      "sha256": "a5f592cb329b8d339d534a2c19f3b62c08f8021ce13235dc3426296f044a9c4b",
+      "note": "recorded after the fact from the catalog (the generating run's manifest rows were lost); model and prompt are the catalog's, the file is the one on disk"
+    },
+    {
+      "id": "fife_rally",
+      "kind": "sfx",
+      "model": "eleven_text_to_sound_v3",
+      "prompt": "18th-century B-flat fife call for 'Rally / assembly', short piercing wooden fife signal, military, no modern instruments.",
+      "settings": {
+        "model_id": "eleven_text_to_sound_v3",
+        "duration_seconds": 1.5,
+        "prompt_influence": 0.7
+      },
+      "output": "unreal/PlayAmerica250/SourceAudio/sfx/fife_call_rally.wav",
+      "date": "2026-11-16",
+      "sha256": "f8f81e499cd492d0ee6195d6314cc2a8556e8605ba1c81f31faaefba6af50cd2",
+      "note": "recorded after the fact from the catalog (the generating run's manifest rows were lost); model and prompt are the catalog's, the file is the one on disk"
+    },
+    {
+      "id": "musket_shot_1",
+      "kind": "sfx",
+      "model": "eleven_text_to_sound_v3",
+      "prompt": "Single flintlock musket shot, Brown Bess style, sharp crack then short echo on open ground, no modern rifle. Variant 1.",
+      "settings": {
+        "model_id": "eleven_text_to_sound_v3",
+        "duration_seconds": 1.2,
+        "prompt_influence": 0.7
+      },
+      "output": "unreal/PlayAmerica250/SourceAudio/sfx/musket_shot_1.wav",
+      "date": "2026-11-16",
+      "sha256": "087bd1f535fc5c4fd8cdbe3492b1639f10da7634c766b2f27618419454d30033",
+      "note": "recorded after the fact from the catalog (the generating run's manifest rows were lost); model and prompt are the catalog's, the file is the one on disk"
+    },
+    {
+      "id": "musket_shot_2",
+      "kind": "sfx",
+      "model": "eleven_text_to_sound_v3",
+      "prompt": "Single flintlock musket shot, Brown Bess style, sharp crack then short echo on open ground, no modern rifle. Variant 2.",
+      "settings": {
+        "model_id": "eleven_text_to_sound_v3",
+        "duration_seconds": 1.2,
+        "prompt_influence": 0.7
+      },
+      "output": "unreal/PlayAmerica250/SourceAudio/sfx/musket_shot_2.wav",
+      "date": "2026-11-16",
+      "sha256": "cbf494b1bd4b40f5143f15ed70cc725006273cd5aa3c76a80cb88a931adce757",
+      "note": "recorded after the fact from the catalog (the generating run's manifest rows were lost); model and prompt are the catalog's, the file is the one on disk"
+    },
+    {
+      "id": "musket_shot_3",
+      "kind": "sfx",
+      "model": "eleven_text_to_sound_v3",
+      "prompt": "Single flintlock musket shot, Brown Bess style, sharp crack then short echo on open ground, no modern rifle. Variant 3.",
+      "settings": {
+        "model_id": "eleven_text_to_sound_v3",
+        "duration_seconds": 1.2,
+        "prompt_influence": 0.7
+      },
+      "output": "unreal/PlayAmerica250/SourceAudio/sfx/musket_shot_3.wav",
+      "date": "2026-11-16",
+      "sha256": "fab05b19582c278657a587b0c0f0082e6382db376d1e7d4178137e2245cb40b6",
+      "note": "recorded after the fact from the catalog (the generating run's manifest rows were lost); model and prompt are the catalog's, the file is the one on disk"
+    },
+    {
+      "id": "flash_pan_1",
+      "kind": "sfx",
+      "model": "eleven_text_to_sound_v3",
+      "prompt": "Flintlock flash in the pan: flint click, priming powder whoosh, no ball fired, 18th century musket. Variant 1.",
+      "settings": {
+        "model_id": "eleven_text_to_sound_v3",
+        "duration_seconds": 1.0,
+        "prompt_influence": 0.7
+      },
+      "output": "unreal/PlayAmerica250/SourceAudio/sfx/flash_pan_1.wav",
+      "date": "2026-11-16",
+      "sha256": "0a7575e18aaa41db0585a1c31b7bde00e436e276150901db5b85287bebdf61fb",
+      "note": "recorded after the fact from the catalog (the generating run's manifest rows were lost); model and prompt are the catalog's, the file is the one on disk"
+    },
+    {
+      "id": "flash_pan_2",
+      "kind": "sfx",
+      "model": "eleven_text_to_sound_v3",
+      "prompt": "Flintlock flash in the pan: flint click, priming powder whoosh, no ball fired, 18th century musket. Variant 2.",
+      "settings": {
+        "model_id": "eleven_text_to_sound_v3",
+        "duration_seconds": 1.0,
+        "prompt_influence": 0.7
+      },
+      "output": "unreal/PlayAmerica250/SourceAudio/sfx/flash_pan_2.wav",
+      "date": "2026-11-16",
+      "sha256": "220ec4eea20f43d38f48ed1480dec49f32eff36a32439c4c98c279099e9a9552",
+      "note": "recorded after the fact from the catalog (the generating run's manifest rows were lost); model and prompt are the catalog's, the file is the one on disk"
+    },
+    {
+      "id": "flash_pan_3",
+      "kind": "sfx",
+      "model": "eleven_text_to_sound_v3",
+      "prompt": "Flintlock flash in the pan: flint click, priming powder whoosh, no ball fired, 18th century musket. Variant 3.",
+      "settings": {
+        "model_id": "eleven_text_to_sound_v3",
+        "duration_seconds": 1.0,
+        "prompt_influence": 0.7
+      },
+      "output": "unreal/PlayAmerica250/SourceAudio/sfx/flash_pan_3.wav",
+      "date": "2026-11-16",
+      "sha256": "07bb52702b56ae28ed6455461846bf3c2cd235ed8f343db3edb256de3a4509a0",
+      "note": "recorded after the fact from the catalog (the generating run's manifest rows were lost); model and prompt are the catalog's, the file is the one on disk"
+    },
+    {
+      "id": "cannon_fire_1",
+      "kind": "sfx",
+      "model": "eleven_text_to_sound_v3",
+      "prompt": "6-pounder field gun muzzle blast, deep boom, rope and wood carriage, no modern ordnance. Variant 1.",
+      "settings": {
+        "model_id": "eleven_text_to_sound_v3",
+        "duration_seconds": 2.0,
+        "prompt_influence": 0.7
+      },
+      "output": "unreal/PlayAmerica250/SourceAudio/sfx/cannon_fire_1.wav",
+      "date": "2026-11-14",
+      "sha256": "13f0054d37f711dabdcca78e360bc5074feb372ef151048c353f6231924ea3e9",
+      "note": "recorded after the fact from the catalog (the generating run's manifest rows were lost); model and prompt are the catalog's, the file is the one on disk"
+    },
+    {
+      "id": "cannon_fire_2",
+      "kind": "sfx",
+      "model": "eleven_text_to_sound_v3",
+      "prompt": "6-pounder field gun muzzle blast, deep boom, rope and wood carriage, no modern ordnance. Variant 2.",
+      "settings": {
+        "model_id": "eleven_text_to_sound_v3",
+        "duration_seconds": 2.0,
+        "prompt_influence": 0.7
+      },
+      "output": "unreal/PlayAmerica250/SourceAudio/sfx/cannon_fire_2.wav",
+      "date": "2026-11-14",
+      "sha256": "382f4cbe06915d7039735532db3892014a097489e4f98ab5ed185f87ee2bee4b",
+      "note": "recorded after the fact from the catalog (the generating run's manifest rows were lost); model and prompt are the catalog's, the file is the one on disk"
+    },
+    {
+      "id": "cannon_fire_3",
+      "kind": "sfx",
+      "model": "eleven_text_to_sound_v3",
+      "prompt": "6-pounder field gun muzzle blast, deep boom, rope and wood carriage, no modern ordnance. Variant 3.",
+      "settings": {
+        "model_id": "eleven_text_to_sound_v3",
+        "duration_seconds": 2.0,
+        "prompt_influence": 0.7
+      },
+      "output": "unreal/PlayAmerica250/SourceAudio/sfx/cannon_fire_3.wav",
+      "date": "2026-11-16",
+      "sha256": "94c47771565492847faeeb6a1c2448816d2c987089f4417ea818938918496372",
+      "note": "recorded after the fact from the catalog (the generating run's manifest rows were lost); model and prompt are the catalog's, the file is the one on disk"
+    },
+    {
+      "id": "round_shot_ground_1",
+      "kind": "sfx",
+      "model": "eleven_text_to_sound_v3",
+      "prompt": "Iron round shot striking dirt and turf, bounce skip, no explosion. Variant 1.",
+      "settings": {
+        "model_id": "eleven_text_to_sound_v3",
+        "duration_seconds": 1.5,
+        "prompt_influence": 0.7
+      },
+      "output": "unreal/PlayAmerica250/SourceAudio/sfx/round_shot_ground_1.wav",
+      "date": "2026-11-16",
+      "sha256": "848b01e3e4eee8eb551bb8d58aff7022eda0b2baa6b2632cf717b47c79cd10c3",
+      "note": "recorded after the fact from the catalog (the generating run's manifest rows were lost); model and prompt are the catalog's, the file is the one on disk"
+    },
+    {
+      "id": "round_shot_ground_2",
+      "kind": "sfx",
+      "model": "eleven_text_to_sound_v3",
+      "prompt": "Iron round shot striking dirt and turf, bounce skip, no explosion. Variant 2.",
+      "settings": {
+        "model_id": "eleven_text_to_sound_v3",
+        "duration_seconds": 1.5,
+        "prompt_influence": 0.7
+      },
+      "output": "unreal/PlayAmerica250/SourceAudio/sfx/round_shot_ground_2.wav",
+      "date": "2026-11-16",
+      "sha256": "4a72cf7e99f75a47be709a455a6135c8521597cd528a83fef04eb2e6e212bf74",
+      "note": "recorded after the fact from the catalog (the generating run's manifest rows were lost); model and prompt are the catalog's, the file is the one on disk"
+    },
+    {
+      "id": "round_shot_ground_3",
+      "kind": "sfx",
+      "model": "eleven_text_to_sound_v3",
+      "prompt": "Iron round shot striking dirt and turf, bounce skip, no explosion. Variant 3.",
+      "settings": {
+        "model_id": "eleven_text_to_sound_v3",
+        "duration_seconds": 1.5,
+        "prompt_influence": 0.7
+      },
+      "output": "unreal/PlayAmerica250/SourceAudio/sfx/round_shot_ground_3.wav",
+      "date": "2026-11-16",
+      "sha256": "75de2db3e9e20a84fcac22adf5ce66e867db52b40d30353e26efba6ae33db0ba",
+      "note": "recorded after the fact from the catalog (the generating run's manifest rows were lost); model and prompt are the catalog's, the file is the one on disk"
+    },
+    {
+      "id": "canister_1",
+      "kind": "sfx",
+      "model": "eleven_text_to_sound_v3",
+      "prompt": "6-pounder canister/grapeshot discharge, many small balls ripping air, short, period gun. Variant 1.",
+      "settings": {
+        "model_id": "eleven_text_to_sound_v3",
+        "duration_seconds": 1.5,
+        "prompt_influence": 0.7
+      },
+      "output": "unreal/PlayAmerica250/SourceAudio/sfx/canister_1.wav",
+      "date": "2026-11-16",
+      "sha256": "02ce7263a0d3ef04b8c6b812a7a32c05e187ac2ddc3292394a0184ddf4d1ce9c",
+      "note": "recorded after the fact from the catalog (the generating run's manifest rows were lost); model and prompt are the catalog's, the file is the one on disk"
+    },
+    {
+      "id": "canister_2",
+      "kind": "sfx",
+      "model": "eleven_text_to_sound_v3",
+      "prompt": "6-pounder canister/grapeshot discharge, many small balls ripping air, short, period gun. Variant 2.",
+      "settings": {
+        "model_id": "eleven_text_to_sound_v3",
+        "duration_seconds": 1.5,
+        "prompt_influence": 0.7
+      },
+      "output": "unreal/PlayAmerica250/SourceAudio/sfx/canister_2.wav",
+      "date": "2026-11-16",
+      "sha256": "83a9e8b44508e2f647c74f2c5916c1ac545a9b8b465c5a778871cea40b881b80",
+      "note": "recorded after the fact from the catalog (the generating run's manifest rows were lost); model and prompt are the catalog's, the file is the one on disk"
+    },
+    {
+      "id": "canister_3",
+      "kind": "sfx",
+      "model": "eleven_text_to_sound_v3",
+      "prompt": "6-pounder canister/grapeshot discharge, many small balls ripping air, short, period gun. Variant 3.",
+      "settings": {
+        "model_id": "eleven_text_to_sound_v3",
+        "duration_seconds": 1.5,
+        "prompt_influence": 0.7
+      },
+      "output": "unreal/PlayAmerica250/SourceAudio/sfx/canister_3.wav",
+      "date": "2026-11-16",
+      "sha256": "4d233f85abac78dbc6e4177a8cfabe390a25eac05e929163d0a1035e16e4d334",
+      "note": "recorded after the fact from the catalog (the generating run's manifest rows were lost); model and prompt are the catalog's, the file is the one on disk"
+    },
+    {
+      "id": "shell_burst_1",
+      "kind": "sfx",
+      "model": "eleven_text_to_sound_v3",
+      "prompt": "Howitzer shell airburst, powder burst not modern HE, muffled boom and debris. Variant 1.",
+      "settings": {
+        "model_id": "eleven_text_to_sound_v3",
+        "duration_seconds": 2.0,
+        "prompt_influence": 0.7
+      },
+      "output": "unreal/PlayAmerica250/SourceAudio/sfx/shell_burst_1.wav",
+      "date": "2026-11-16",
+      "sha256": "94e5c0514e5712cc4422ba1ba6cf8b2b1cb9d09af2b6781ac7ce26eda3819a97",
+      "note": "recorded after the fact from the catalog (the generating run's manifest rows were lost); model and prompt are the catalog's, the file is the one on disk"
+    },
+    {
+      "id": "shell_burst_2",
+      "kind": "sfx",
+      "model": "eleven_text_to_sound_v3",
+      "prompt": "Howitzer shell airburst, powder burst not modern HE, muffled boom and debris. Variant 2.",
+      "settings": {
+        "model_id": "eleven_text_to_sound_v3",
+        "duration_seconds": 2.0,
+        "prompt_influence": 0.7
+      },
+      "output": "unreal/PlayAmerica250/SourceAudio/sfx/shell_burst_2.wav",
+      "date": "2026-11-16",
+      "sha256": "81a76ebbea47c790b2d9131930f97397e1b57a10aa5f90b2808143daa86f2c9c",
+      "note": "recorded after the fact from the catalog (the generating run's manifest rows were lost); model and prompt are the catalog's, the file is the one on disk"
+    },
+    {
+      "id": "shell_burst_3",
+      "kind": "sfx",
+      "model": "eleven_text_to_sound_v3",
+      "prompt": "Howitzer shell airburst, powder burst not modern HE, muffled boom and debris. Variant 3.",
+      "settings": {
+        "model_id": "eleven_text_to_sound_v3",
+        "duration_seconds": 2.0,
+        "prompt_influence": 0.7
+      },
+      "output": "unreal/PlayAmerica250/SourceAudio/sfx/shell_burst_3.wav",
+      "date": "2026-11-16",
+      "sha256": "8f16b855200bc7e52bdb3d52328176c281ab8630ac19e96c48b74fee912a5c91",
+      "note": "recorded after the fact from the catalog (the generating run's manifest rows were lost); model and prompt are the catalog's, the file is the one on disk"
+    },
+    {
+      "id": "shell_dud_1",
+      "kind": "sfx",
+      "model": "eleven_text_to_sound_v3",
+      "prompt": "Fused shell landing dull thud in dirt, fuse sputter, no explosion, dud. Variant 1.",
+      "settings": {
+        "model_id": "eleven_text_to_sound_v3",
+        "duration_seconds": 1.5,
+        "prompt_influence": 0.7
+      },
+      "output": "unreal/PlayAmerica250/SourceAudio/sfx/shell_dud_1.wav",
+      "date": "2026-11-16",
+      "sha256": "1832729034f2f663684345f577d4c1004f6568c1909a229fb4301be922fb8055",
+      "note": "recorded after the fact from the catalog (the generating run's manifest rows were lost); model and prompt are the catalog's, the file is the one on disk"
+    },
+    {
+      "id": "shell_dud_2",
+      "kind": "sfx",
+      "model": "eleven_text_to_sound_v3",
+      "prompt": "Fused shell landing dull thud in dirt, fuse sputter, no explosion, dud. Variant 2.",
+      "settings": {
+        "model_id": "eleven_text_to_sound_v3",
+        "duration_seconds": 1.5,
+        "prompt_influence": 0.7
+      },
+      "output": "unreal/PlayAmerica250/SourceAudio/sfx/shell_dud_2.wav",
+      "date": "2026-11-16",
+      "sha256": "ab0bc273949499e055d569e4a1e19502a389be965882dea73ab2b592f7395657",
+      "note": "recorded after the fact from the catalog (the generating run's manifest rows were lost); model and prompt are the catalog's, the file is the one on disk"
+    },
+    {
+      "id": "shell_dud_3",
+      "kind": "sfx",
+      "model": "eleven_text_to_sound_v3",
+      "prompt": "Fused shell landing dull thud in dirt, fuse sputter, no explosion, dud. Variant 3.",
+      "settings": {
+        "model_id": "eleven_text_to_sound_v3",
+        "duration_seconds": 1.5,
+        "prompt_influence": 0.7
+      },
+      "output": "unreal/PlayAmerica250/SourceAudio/sfx/shell_dud_3.wav",
+      "date": "2026-11-16",
+      "sha256": "30f2b72be58c8e32ebf9faf2023523a768ab62f617be1504f23fa4fe8314d85f",
+      "note": "recorded after the fact from the catalog (the generating run's manifest rows were lost); model and prompt are the catalog's, the file is the one on disk"
+    },
+    {
+      "id": "gun_swab_1",
+      "kind": "sfx",
+      "model": "eleven_text_to_sound_v3",
+      "prompt": "Gun crew swabbing a field gun bore with wet sponge, wood and water sounds. Variant 1.",
+      "settings": {
+        "model_id": "eleven_text_to_sound_v3",
+        "duration_seconds": 1.5,
+        "prompt_influence": 0.7
+      },
+      "output": "unreal/PlayAmerica250/SourceAudio/sfx/gun_swab_1.wav",
+      "date": "2026-11-16",
+      "sha256": "9309c7c3d325aebf4d9411136db32d640059682d471f22ed5e930cb5c98d4350",
+      "note": "recorded after the fact from the catalog (the generating run's manifest rows were lost); model and prompt are the catalog's, the file is the one on disk"
+    },
+    {
+      "id": "gun_swab_2",
+      "kind": "sfx",
+      "model": "eleven_text_to_sound_v3",
+      "prompt": "Gun crew swabbing a field gun bore with wet sponge, wood and water sounds. Variant 2.",
+      "settings": {
+        "model_id": "eleven_text_to_sound_v3",
+        "duration_seconds": 1.5,
+        "prompt_influence": 0.7
+      },
+      "output": "unreal/PlayAmerica250/SourceAudio/sfx/gun_swab_2.wav",
+      "date": "2026-11-16",
+      "sha256": "0bd217f2fdf319834093d9805eb8b821190fed17e4b7e4db2800d9f1be77f424",
+      "note": "recorded after the fact from the catalog (the generating run's manifest rows were lost); model and prompt are the catalog's, the file is the one on disk"
+    },
+    {
+      "id": "gun_swab_3",
+      "kind": "sfx",
+      "model": "eleven_text_to_sound_v3",
+      "prompt": "Gun crew swabbing a field gun bore with wet sponge, wood and water sounds. Variant 3.",
+      "settings": {
+        "model_id": "eleven_text_to_sound_v3",
+        "duration_seconds": 1.5,
+        "prompt_influence": 0.7
+      },
+      "output": "unreal/PlayAmerica250/SourceAudio/sfx/gun_swab_3.wav",
+      "date": "2026-11-16",
+      "sha256": "495aeb811ff8457f485ec2d4007bfa3820c434683394dc92b3005e7ef6043e3d",
+      "note": "recorded after the fact from the catalog (the generating run's manifest rows were lost); model and prompt are the catalog's, the file is the one on disk"
+    },
+    {
+      "id": "gun_ram_1",
+      "kind": "sfx",
+      "model": "eleven_text_to_sound_v3",
+      "prompt": "Ramming a cartridge home in a 6-pounder with a rammer staff, wood on metal. Variant 1.",
+      "settings": {
+        "model_id": "eleven_text_to_sound_v3",
+        "duration_seconds": 1.2,
+        "prompt_influence": 0.7
+      },
+      "output": "unreal/PlayAmerica250/SourceAudio/sfx/gun_ram_1.wav",
+      "date": "2026-11-16",
+      "sha256": "754d2821c048ec602c5a64b59cd555690388fed79fa28fa44b1874c1115d7f92",
+      "note": "recorded after the fact from the catalog (the generating run's manifest rows were lost); model and prompt are the catalog's, the file is the one on disk"
+    },
+    {
+      "id": "gun_ram_2",
+      "kind": "sfx",
+      "model": "eleven_text_to_sound_v3",
+      "prompt": "Ramming a cartridge home in a 6-pounder with a rammer staff, wood on metal. Variant 2.",
+      "settings": {
+        "model_id": "eleven_text_to_sound_v3",
+        "duration_seconds": 1.2,
+        "prompt_influence": 0.7
+      },
+      "output": "unreal/PlayAmerica250/SourceAudio/sfx/gun_ram_2.wav",
+      "date": "2026-11-16",
+      "sha256": "2ca5e3d0268e38341ce6894a2a872c639c5b7e1faaae90a996cf0e34c9f0cba1",
+      "note": "recorded after the fact from the catalog (the generating run's manifest rows were lost); model and prompt are the catalog's, the file is the one on disk"
+    },
+    {
+      "id": "gun_ram_3",
+      "kind": "sfx",
+      "model": "eleven_text_to_sound_v3",
+      "prompt": "Ramming a cartridge home in a 6-pounder with a rammer staff, wood on metal. Variant 3.",
+      "settings": {
+        "model_id": "eleven_text_to_sound_v3",
+        "duration_seconds": 1.2,
+        "prompt_influence": 0.7
+      },
+      "output": "unreal/PlayAmerica250/SourceAudio/sfx/gun_ram_3.wav",
+      "date": "2026-11-16",
+      "sha256": "b26c364616e24d4be725338c3e453ee7fd1f71c6ca1c9e55db0b2e3c25036f9c",
+      "note": "recorded after the fact from the catalog (the generating run's manifest rows were lost); model and prompt are the catalog's, the file is the one on disk"
+    },
+    {
+      "id": "march_fife_drum",
+      "kind": "music",
+      "model": "music_v1",
+      "prompt": "Instrumental 18th-century fife and rope-tension drum march, American Revolutionary War, no vocals, loopable, period instruments only.",
+      "settings": {
+        "model_id": "music_v1",
+        "music_length_ms": 30000
+      },
+      "output": "unreal/PlayAmerica250/SourceAudio/music/march_fife_drum.wav",
+      "date": "2026-11-16",
+      "sha256": "5977bde98ccad1c1dbe074e70246a197caa14bf3bc14cdc503056cc9a1061caa",
+      "note": "recorded after the fact from the catalog (the generating run's manifest rows were lost); model and prompt are the catalog's, the file is the one on disk"
+    },
+    {
+      "id": "vo_british_officer1_make_ready",
+      "kind": "voice",
+      "model": "eleven_multilingual_v2",
+      "prompt": "Make ready!",
+      "settings": {
+        "model_id": "eleven_multilingual_v2",
+        "voice_id": "JBFqnCBsd6RMkjVDRZzb",
+        "output_format": "pcm_24000"
+      },
+      "output": "unreal/PlayAmerica250/SourceAudio/voice/british/make_ready_1.wav",
+      "date": "2026-11-16",
+      "sha256": "05aa4e1f82dee68009022bf7ac3c1346bb7f39f08e7fc6a68a915e5c2dada37d",
+      "note": "recorded after the fact from the catalog (the generating run's manifest rows were lost); model and prompt are the catalog's, the file is the one on disk"
+    },
+    {
+      "id": "vo_british_officer1_present",
+      "kind": "voice",
+      "model": "eleven_multilingual_v2",
+      "prompt": "Present!",
+      "settings": {
+        "model_id": "eleven_multilingual_v2",
+        "voice_id": "JBFqnCBsd6RMkjVDRZzb",
+        "output_format": "pcm_24000"
+      },
+      "output": "unreal/PlayAmerica250/SourceAudio/voice/british/present_1.wav",
+      "date": "2026-11-16",
+      "sha256": "6c145a57fcde177e8a0def752ab89046cbe614ae3fe2c3d32ee9e35b2066b89d",
+      "note": "recorded after the fact from the catalog (the generating run's manifest rows were lost); model and prompt are the catalog's, the file is the one on disk"
+    },
+    {
+      "id": "vo_british_officer1_fire",
+      "kind": "voice",
+      "model": "eleven_multilingual_v2",
+      "prompt": "Fire!",
+      "settings": {
+        "model_id": "eleven_multilingual_v2",
+        "voice_id": "JBFqnCBsd6RMkjVDRZzb",
+        "output_format": "pcm_24000"
+      },
+      "output": "unreal/PlayAmerica250/SourceAudio/voice/british/fire_1.wav",
+      "date": "2026-11-16",
+      "sha256": "ec84aaef90ad386b6b38c61e4f78df47d3bef753065ccfe8ae139a767a872696",
+      "note": "recorded after the fact from the catalog (the generating run's manifest rows were lost); model and prompt are the catalog's, the file is the one on disk"
+    },
+    {
+      "id": "vo_british_officer1_rally",
+      "kind": "voice",
+      "model": "eleven_multilingual_v2",
+      "prompt": "Rally on the colours!",
+      "settings": {
+        "model_id": "eleven_multilingual_v2",
+        "voice_id": "JBFqnCBsd6RMkjVDRZzb",
+        "output_format": "pcm_24000"
+      },
+      "output": "unreal/PlayAmerica250/SourceAudio/voice/british/rally_1.wav",
+      "date": "2026-11-16",
+      "sha256": "788e26455518c09ae0a74d169915692ec0f7732828c4b7dfceed0b32d6f08bb3",
+      "note": "recorded after the fact from the catalog (the generating run's manifest rows were lost); model and prompt are the catalog's, the file is the one on disk"
+    },
+    {
+      "id": "vo_british_officer1_hold",
+      "kind": "voice",
+      "model": "eleven_multilingual_v2",
+      "prompt": "Hold!",
+      "settings": {
+        "model_id": "eleven_multilingual_v2",
+        "voice_id": "JBFqnCBsd6RMkjVDRZzb",
+        "output_format": "pcm_24000"
+      },
+      "output": "unreal/PlayAmerica250/SourceAudio/voice/british/steady_1.wav",
+      "date": "2026-11-16",
+      "sha256": "ed077d7f97689cdd81b93a375c2c5cec868f35d16b647c43f24aca5a802cd2c4",
+      "note": "recorded after the fact from the catalog (the generating run's manifest rows were lost); model and prompt are the catalog's, the file is the one on disk"
+    },
+    {
+      "id": "vo_british_officer2_make_ready",
+      "kind": "voice",
+      "model": "eleven_multilingual_v2",
+      "prompt": "Make ready!",
+      "settings": {
+        "model_id": "eleven_multilingual_v2",
+        "voice_id": "nPczCjzI2devNBz1zQrb",
+        "output_format": "pcm_24000"
+      },
+      "output": "unreal/PlayAmerica250/SourceAudio/voice/british/make_ready_2.wav",
+      "date": "2026-11-16",
+      "sha256": "164d350cf01e13e9d064484b45f057e9d3ecc8c48bed3af2a796b89ed62f67bf",
+      "note": "recorded after the fact from the catalog (the generating run's manifest rows were lost); model and prompt are the catalog's, the file is the one on disk"
+    },
+    {
+      "id": "vo_british_officer2_present",
+      "kind": "voice",
+      "model": "eleven_multilingual_v2",
+      "prompt": "Present!",
+      "settings": {
+        "model_id": "eleven_multilingual_v2",
+        "voice_id": "nPczCjzI2devNBz1zQrb",
+        "output_format": "pcm_24000"
+      },
+      "output": "unreal/PlayAmerica250/SourceAudio/voice/british/present_2.wav",
+      "date": "2026-11-16",
+      "sha256": "ab616aeeecdc92093fe88289c8fbc114fdb256fe900c1e27c0096e6edc7225af",
+      "note": "recorded after the fact from the catalog (the generating run's manifest rows were lost); model and prompt are the catalog's, the file is the one on disk"
+    },
+    {
+      "id": "vo_british_officer2_fire",
+      "kind": "voice",
+      "model": "eleven_multilingual_v2",
+      "prompt": "Fire!",
+      "settings": {
+        "model_id": "eleven_multilingual_v2",
+        "voice_id": "nPczCjzI2devNBz1zQrb",
+        "output_format": "pcm_24000"
+      },
+      "output": "unreal/PlayAmerica250/SourceAudio/voice/british/fire_2.wav",
+      "date": "2026-11-16",
+      "sha256": "9710ec61c2742fd859c02bfd2c019e49197b46c45c4c7ff0992b94ee37d3b1b8",
+      "note": "recorded after the fact from the catalog (the generating run's manifest rows were lost); model and prompt are the catalog's, the file is the one on disk"
+    },
+    {
+      "id": "vo_british_officer2_rally",
+      "kind": "voice",
+      "model": "eleven_multilingual_v2",
+      "prompt": "Rally on the colours!",
+      "settings": {
+        "model_id": "eleven_multilingual_v2",
+        "voice_id": "nPczCjzI2devNBz1zQrb",
+        "output_format": "pcm_24000"
+      },
+      "output": "unreal/PlayAmerica250/SourceAudio/voice/british/rally_2.wav",
+      "date": "2026-11-16",
+      "sha256": "5451116ab5870957dba07b6828dda889010dacbc841284824c5756f47cd1f37b",
+      "note": "recorded after the fact from the catalog (the generating run's manifest rows were lost); model and prompt are the catalog's, the file is the one on disk"
+    },
+    {
+      "id": "vo_british_officer2_hold",
+      "kind": "voice",
+      "model": "eleven_multilingual_v2",
+      "prompt": "Hold!",
+      "settings": {
+        "model_id": "eleven_multilingual_v2",
+        "voice_id": "nPczCjzI2devNBz1zQrb",
+        "output_format": "pcm_24000"
+      },
+      "output": "unreal/PlayAmerica250/SourceAudio/voice/british/steady_2.wav",
+      "date": "2026-11-16",
+      "sha256": "9487a3b6c71bd7ba4ba400accd84a4d2e6bc595d296a51cba59686b165814cb0",
+      "note": "recorded after the fact from the catalog (the generating run's manifest rows were lost); model and prompt are the catalog's, the file is the one on disk"
+    },
+    {
+      "id": "vo_continental_officer1_make_ready",
+      "kind": "voice",
+      "model": "eleven_multilingual_v2",
+      "prompt": "Make ready!",
+      "settings": {
+        "model_id": "eleven_multilingual_v2",
+        "voice_id": "EXAVITQu4vr4xnSDxMaL",
+        "output_format": "pcm_24000"
+      },
+      "output": "unreal/PlayAmerica250/SourceAudio/voice/continental/make_ready_1.wav",
+      "date": "2026-11-16",
+      "sha256": "118a441175c0331bd783fdb53a37ec8fbf1700d76a0ab3554435f4a859df87d1",
+      "note": "recorded after the fact from the catalog (the generating run's manifest rows were lost); model and prompt are the catalog's, the file is the one on disk"
+    },
+    {
+      "id": "vo_continental_officer1_present",
+      "kind": "voice",
+      "model": "eleven_multilingual_v2",
+      "prompt": "Present!",
+      "settings": {
+        "model_id": "eleven_multilingual_v2",
+        "voice_id": "EXAVITQu4vr4xnSDxMaL",
+        "output_format": "pcm_24000"
+      },
+      "output": "unreal/PlayAmerica250/SourceAudio/voice/continental/present_1.wav",
+      "date": "2026-11-16",
+      "sha256": "993f05d69a704be7021ac13717ea3369236e7bad22ca3bffd6715738e424d642",
+      "note": "recorded after the fact from the catalog (the generating run's manifest rows were lost); model and prompt are the catalog's, the file is the one on disk"
+    },
+    {
+      "id": "vo_continental_officer1_fire",
+      "kind": "voice",
+      "model": "eleven_multilingual_v2",
+      "prompt": "Fire!",
+      "settings": {
+        "model_id": "eleven_multilingual_v2",
+        "voice_id": "EXAVITQu4vr4xnSDxMaL",
+        "output_format": "pcm_24000"
+      },
+      "output": "unreal/PlayAmerica250/SourceAudio/voice/continental/fire_1.wav",
+      "date": "2026-11-16",
+      "sha256": "b539af2703ad2536b0396b0d1076b40b4c87968100cd9b0fc04900f32337f830",
+      "note": "recorded after the fact from the catalog (the generating run's manifest rows were lost); model and prompt are the catalog's, the file is the one on disk"
+    },
+    {
+      "id": "vo_continental_officer1_rally",
+      "kind": "voice",
+      "model": "eleven_multilingual_v2",
+      "prompt": "Rally on the colours!",
+      "settings": {
+        "model_id": "eleven_multilingual_v2",
+        "voice_id": "EXAVITQu4vr4xnSDxMaL",
+        "output_format": "pcm_24000"
+      },
+      "output": "unreal/PlayAmerica250/SourceAudio/voice/continental/rally_1.wav",
+      "date": "2026-11-16",
+      "sha256": "ad2d7ffc40a854bbfd90ce3571eaee1d37f2689c50a9cf5cd11d28d6e27edbe0",
+      "note": "recorded after the fact from the catalog (the generating run's manifest rows were lost); model and prompt are the catalog's, the file is the one on disk"
+    },
+    {
+      "id": "vo_continental_officer1_hold",
+      "kind": "voice",
+      "model": "eleven_multilingual_v2",
+      "prompt": "Hold!",
+      "settings": {
+        "model_id": "eleven_multilingual_v2",
+        "voice_id": "EXAVITQu4vr4xnSDxMaL",
+        "output_format": "pcm_24000"
+      },
+      "output": "unreal/PlayAmerica250/SourceAudio/voice/continental/steady_1.wav",
+      "date": "2026-11-16",
+      "sha256": "f070246a8df97aa14b21c997b2c83b73231f74de0d0fd1ab739ac604244181eb",
+      "note": "recorded after the fact from the catalog (the generating run's manifest rows were lost); model and prompt are the catalog's, the file is the one on disk"
+    },
+    {
+      "id": "vo_continental_officer2_make_ready",
+      "kind": "voice",
+      "model": "eleven_multilingual_v2",
+      "prompt": "Make ready!",
+      "settings": {
+        "model_id": "eleven_multilingual_v2",
+        "voice_id": "VR6AewLTigWG4xSOukaG",
+        "output_format": "pcm_24000"
+      },
+      "output": "unreal/PlayAmerica250/SourceAudio/voice/continental/make_ready_2.wav",
+      "date": "2026-11-16",
+      "sha256": "960758e52a37b37bd4f5f7a2c1136a613b0a8141aad71616dd6e3944cc5caa66",
+      "note": "recorded after the fact from the catalog (the generating run's manifest rows were lost); model and prompt are the catalog's, the file is the one on disk"
+    },
+    {
+      "id": "vo_continental_officer2_present",
+      "kind": "voice",
+      "model": "eleven_multilingual_v2",
+      "prompt": "Present!",
+      "settings": {
+        "model_id": "eleven_multilingual_v2",
+        "voice_id": "VR6AewLTigWG4xSOukaG",
+        "output_format": "pcm_24000"
+      },
+      "output": "unreal/PlayAmerica250/SourceAudio/voice/continental/present_2.wav",
+      "date": "2026-11-16",
+      "sha256": "fcf7b0095f16f9938b13d8d95c9060721ccc4752cdfd017d54e3827bdeb41875",
+      "note": "recorded after the fact from the catalog (the generating run's manifest rows were lost); model and prompt are the catalog's, the file is the one on disk"
+    },
+    {
+      "id": "vo_continental_officer2_fire",
+      "kind": "voice",
+      "model": "eleven_multilingual_v2",
+      "prompt": "Fire!",
+      "settings": {
+        "model_id": "eleven_multilingual_v2",
+        "voice_id": "VR6AewLTigWG4xSOukaG",
+        "output_format": "pcm_24000"
+      },
+      "output": "unreal/PlayAmerica250/SourceAudio/voice/continental/fire_2.wav",
+      "date": "2026-11-16",
+      "sha256": "ea22c99c0531c82d867e3c723e24c5aae7b1f98634edb9ebe71dc9ef59350ae2",
+      "note": "recorded after the fact from the catalog (the generating run's manifest rows were lost); model and prompt are the catalog's, the file is the one on disk"
+    },
+    {
+      "id": "vo_continental_officer2_rally",
+      "kind": "voice",
+      "model": "eleven_multilingual_v2",
+      "prompt": "Rally on the colours!",
+      "settings": {
+        "model_id": "eleven_multilingual_v2",
+        "voice_id": "VR6AewLTigWG4xSOukaG",
+        "output_format": "pcm_24000"
+      },
+      "output": "unreal/PlayAmerica250/SourceAudio/voice/continental/rally_2.wav",
+      "date": "2026-11-16",
+      "sha256": "2bf9956c38e049b614c07d51a4acb0ae4f4751277d78f33a80cd4a9ec380d704",
+      "note": "recorded after the fact from the catalog (the generating run's manifest rows were lost); model and prompt are the catalog's, the file is the one on disk"
+    },
+    {
+      "id": "vo_continental_officer2_hold",
+      "kind": "voice",
+      "model": "eleven_multilingual_v2",
+      "prompt": "Hold!",
+      "settings": {
+        "model_id": "eleven_multilingual_v2",
+        "voice_id": "VR6AewLTigWG4xSOukaG",
+        "output_format": "pcm_24000"
+      },
+      "output": "unreal/PlayAmerica250/SourceAudio/voice/continental/steady_2.wav",
+      "date": "2026-11-16",
+      "sha256": "ef8370c38d9f6c8bdcadbecf2b5135a4544a8c1ee080f266d4e07352c29d56c5",
+      "note": "recorded after the fact from the catalog (the generating run's manifest rows were lost); model and prompt are the catalog's, the file is the one on disk"
+    }
+  ],
+  "missing": [
+    {
+      "id": "MS_PH_order_variant",
+      "kind": "metasound",
+      "note": "MetaSound graphs for order/combat variant+distance; battle_look.audio.metasound null until authored"
+    },
+    {
+      "id": "NS_PH_MuzzleFlash",
+      "kind": "niagara",
+      "note": "Placeholder Niagara; EmberGen flipbook swaps via battle_look.fx"
+    },
+    {
+      "id": "NS_PH_PowderPuff",
+      "kind": "niagara",
+      "note": "Placeholder Niagara; EmberGen swap via battle_look.fx"
+    },
+    {
+      "id": "NS_PH_DirtSpray",
+      "kind": "niagara",
+      "note": "Placeholder Niagara; EmberGen swap via battle_look.fx"
+    },
+    {
+      "id": "gun_crew_tools",
+      "kind": "mesh",
+      "note": "Swab/rammer/linstock meshes for gun crews if not on PTM_Cannon sockets"
+    }
+  ],
+  "skipped_kinds": []
+}

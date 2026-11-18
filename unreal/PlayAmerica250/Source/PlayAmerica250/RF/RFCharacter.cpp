@@ -3,6 +3,10 @@
 #include "Battle/PA250AnimClips.h"
 #include "Misc/Paths.h"
 #include "Battle/PA250BattleFeel.h"
+#include "Battle/PA250BattleWeather.h"
+#include "Battle/PA250BattleRng.h"
+#include "Battle/PA250MusketFeel.h"
+#include "Battle/PA250Intensity.h"
 #include "Engine/Engine.h"
 #include "Engine/StaticMesh.h"
 #include "Mounted/PA250MountedSoldier.h"
@@ -10,6 +14,7 @@
 #include "Animation/AnimSequence.h"
 #include "PA250SoldierAnimInstance.h"
 #include "Engine/GameViewportClient.h"
+#include "Framework/Application/SlateApplication.h"
 #include "UnrealClient.h"
 #include "Camera/CameraComponent.h"
 #include "Camera/CameraActor.h"
@@ -461,6 +466,7 @@ void ARFCharacter::TickViewFeedback(float DeltaTime)
 	{
 		return;
 	}
+	TickSuppression(DeltaTime);
 	const float HealthFraction = HealthComponent && HealthComponent->MaxHealth > 0.f ? HealthComponent->CurrentHealth / HealthComponent->MaxHealth : 1.f;
 	const float Want = bIsDead ? 0.f : ViewStress(HealthFraction, SuppressionTimer > 0.f, HitPulse);
 	// Snaps in on a hit, eases out as the danger passes.
@@ -472,6 +478,17 @@ void ARFCharacter::TickViewFeedback(float DeltaTime)
 	PP.bOverride_VignetteIntensity = bOn;
 	PP.bOverride_ColorSaturation = bOn;
 	PP.bOverride_SceneFringeIntensity = bOn;
+	// Suppression blurs the view (intensity.suppression.blur_amount at full): a shallow focus that
+	// opens as it falls away. Only while suppressed; otherwise the level's own focus stands.
+	const float Blur = FMath::Clamp(SuppressionLevel * PA250BattleFeel::Get().SuppressionBlurAmount, 0.f, 1.f);
+	const bool bBlur = !bIsDead && Blur > 0.01f;
+	PP.bOverride_DepthOfFieldFocalDistance = bBlur;
+	PP.bOverride_DepthOfFieldFstop = bBlur;
+	if (bBlur)
+	{
+		PP.DepthOfFieldFocalDistance = 150.f;
+		PP.DepthOfFieldFstop = FMath::Lerp(16.f, 1.2f, Blur);
+	}
 	if (bOn)
 	{
 		PP.VignetteIntensity = 0.4f + 0.75f * ViewStressSmoothed;
@@ -1230,9 +1247,26 @@ void ARFCharacter::EnsureGameMouseCapture()
 	if (!PC || !PC->IsLocalController() || PC->bShowMouseCursor || bIsDead) return;
 	UGameViewportClient* GVC = GetWorld() ? GetWorld()->GetGameViewport() : nullptr;
 	FViewport* VP = GVC ? GVC->Viewport : nullptr;
-	if (!VP || VP->HasMouseCapture() || !VP->HasFocus()) return;
+	if (!VP || !VP->HasFocus()) return;
+	// Capture alone is not enough. Look needs the mouse in relative ("high precision") mode: without
+	// it the deltas come from the pointer's place on the screen, and the hidden pointer stops at the
+	// top edge. The view then turns and looks down but will not look any higher, which is the
+	// "can't aim higher" report that used to clear only by restarting. The mode is lost without the
+	// capture being lost (a menu shown and closed, the window left and returned to, the campaign
+	// map's own mouse settings), so both are checked.
+	const bool bCaptured = VP->HasMouseCapture();
+	const bool bRelative = !FSlateApplication::IsInitialized() || FSlateApplication::Get().IsUsingHighPrecisionMouseMovment();
+	if (bCaptured && bRelative) return;
+	// Not every frame: a platform that never reports the mode (a streamed desktop) is asked once a second.
+	const double Now = FPlatformTime::Seconds();
+	if (Now - LastMouseCaptureFix < 1.0) return;
+	LastMouseCaptureFix = Now;
 	PC->SetInputMode(FInputModeGameOnly());
-	UE_LOG(LogTemp, Display, TEXT("PA250 input: game viewport had no mouse capture; took it for mouse/trackpad look"));
+	if (MouseCaptureFixes++ < 8)
+	{
+		UE_LOG(LogTemp, Display, TEXT("PA250 input: look needed the mouse back (capture=%d relative=%d, capture mode %d, lock mode %d); game-only input set again"),
+			bCaptured ? 1 : 0, bRelative ? 1 : 0, static_cast<int32>(GVC->GetMouseCaptureMode()), static_cast<int32>(GVC->GetMouseLockMode()));
+	}
 }
 
 void ARFCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
@@ -1246,6 +1280,7 @@ void ARFCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompone
 	PlayerInputComponent->BindKey(EKeys::T, IE_Pressed, this, &ARFCharacter::OnAbilityPressed);
 	PlayerInputComponent->BindKey(EKeys::Y, IE_Pressed, this, &ARFCharacter::OnHeroPressed);        // the general, when earned
 	PlayerInputComponent->BindKey(EKeys::U, IE_Pressed, this, &ARFCharacter::OnHeroAbilityPressed); // his own ability, as him
+	PlayerInputComponent->BindKey(EKeys::K, IE_Pressed, this, &ARFCharacter::OnFallInPressed);      // fall in with a line / fall out
 	PlayerInputComponent->BindKey(EKeys::One, IE_Pressed, this, &ARFCharacter::OnKey1);
 	PlayerInputComponent->BindKey(EKeys::Two, IE_Pressed, this, &ARFCharacter::OnKey2);
 	PlayerInputComponent->BindKey(EKeys::Three, IE_Pressed, this, &ARFCharacter::OnKey3);
@@ -1332,6 +1367,7 @@ void ARFCharacter::AdjustLookSensitivity(float Factor)
 
 void ARFCharacter::Look(const FInputActionValue& Value)
 {
+	EnsureGameMouseCapture(); // a look that arrives while the mouse is not in relative mode stops at the screen's edge
 	const FVector2D V = Value.Get<FVector2D>();
 	if (Controller)
 	{
@@ -1414,7 +1450,24 @@ bool ARFCharacter::TryFireNow()
 		MountedVisual->Slash();
 		return true;
 	}
+	// Fallen in with a line at Make ready or Present: his shot is held and goes with the volley.
+	if (!MountedVisual && !bIsDead)
+	{
+		if (APA250BattleGameMode* GM = GetWorld() ? GetWorld()->GetAuthGameMode<APA250BattleGameMode>() : nullptr)
+		{
+			if (GM->HoldFallenInShot(this)) return true;
+		}
+	}
 	return FireMusket();
+}
+
+void ARFCharacter::OnFallInPressed()
+{
+	if (bIsDead || MountedVisual) return;
+	if (APA250BattleGameMode* GM = GetWorld() ? GetWorld()->GetAuthGameMode<APA250BattleGameMode>() : nullptr)
+	{
+		GM->TryPlayerFallIn(this);
+	}
 }
 
 void ARFCharacter::OnFirePressed()
@@ -1765,6 +1818,23 @@ void ARFCharacter::ApplySuppression(float Seconds, float SwayDegrees)
 	SuppressionSwayDegrees = FMath::Max(SuppressionSwayDegrees, SwayDegrees);
 }
 
+void ARFCharacter::AddSuppression(float Amount)
+{
+	const FPA250BattleFeel& Feel = PA250BattleFeel::Get();
+	SuppressionLevel = PA250Intensity::SuppressionStep(SuppressionLevel, Amount, Feel.SuppressionMax, 0.f, 0.f);
+}
+
+void ARFCharacter::TickSuppression(float DeltaTime)
+{
+	const FPA250BattleFeel& Feel = PA250BattleFeel::Get();
+	SuppressionLevel = PA250Intensity::SuppressionStep(SuppressionLevel, 0.f, Feel.SuppressionMax, Feel.SuppressionDecayPerSecond, DeltaTime);
+}
+
+float ARFCharacter::SuppressionSwayNow() const
+{
+	return SuppressionLevel * PA250BattleFeel::Get().SuppressionAimSwayDeg;
+}
+
 bool ARFCharacter::FireMusket()
 {
     AMusketWeapon* Equipped = GetEquippedFirearm();
@@ -1820,32 +1890,37 @@ bool ARFCharacter::FireMusketAt(FVector TargetLocation, bool bCompensateDrop)
 	{
 		AMusketWeapon::SolveLaunchDirection(Muzzle, TargetLocation, Equipped->GetProjectileSpeed(), Equipped->GetProjectileGravityZ(), Dir);
 	}
-	if (SuppressionTimer > 0.f && SuppressionSwayDegrees > 0.f)
 	{
-		Dir = FMath::VRandCone(Dir, FMath::DegreesToRadians(SuppressionSwayDegrees));
+		// Shaken aim: the timed sway (volleys, blasts) or the player's suppression, whichever is worse.
+		const float Sway = FMath::Max(SuppressionTimer > 0.f ? SuppressionSwayDegrees : 0.f, SuppressionSwayNow());
+		if (Sway > 0.f) Dir = PA250BattleRng::Get().VRandCone(Dir, FMath::DegreesToRadians(Sway));
 	}
 	// A moving saddle throws the aim off: nothing at a stand, up to 4 degrees at a gallop.
 	if (MountedVisual)
 	{
 		if (const float Sway = MountedFireSwayDegrees(GetVelocity().Size2D()); Sway > 0.01f)
 		{
-			Dir = FMath::VRandCone(Dir, FMath::DegreesToRadians(Sway));
+			Dir = PA250BattleRng::Get().VRandCone(Dir, FMath::DegreesToRadians(Sway));
 		}
 	}
-	// AI only: now and then the priming flashes in the pan and the charge does not catch.
-	if (MisfireChance > 0.f && !IsPlayerControlled()
-		&& FMath::FRand() < UPA250CombatProfiles::MisfireChanceAt(MisfireChance, MisfireStress))
+	// Flash in the pan or misfire (battle_feel.json musket; PA250MusketFeel): bots and the player alike,
+	// rain from PA250BattleWeather. His Nth pull has its own roll from the battle seed.
 	{
-		if (Equipped->Misfire())
+		const PA250MusketFeel::FChances Chances = PA250MusketFeel::ChancesFor(PA250BattleFeel::Get(), MisfireChance, MisfireStress, PA250BattleWeather::Get(GetWorld()));
+		APA250BattleGameMode* GM = GetWorld() ? GetWorld()->GetAuthGameMode<APA250BattleGameMode>() : nullptr;
+		const uint64 BattleSeed = GM ? GM->GetBattleSeed() : static_cast<uint64>(PA250BattleRng::FallbackSeed);
+		const float Roll = PA250MusketFeel::RollFor(BattleSeed, GetTypeHash(GetFName()), static_cast<uint32>(TriggerPulls++));
+		const EPA250TriggerResult Pull = PA250MusketFeel::Resolve(Roll, Chances);
+		if (Pull != EPA250TriggerResult::Fires)
 		{
-			++Misfires;
-			LockMovement(0.4f);
-			if (APA250BattleGameMode* GM = GetWorld() ? GetWorld()->GetAuthGameMode<APA250BattleGameMode>() : nullptr)
+			if (Equipped->Misfire(Pull == EPA250TriggerResult::FlashInPan))
 			{
-				GM->RecordMisfire(FactionId);
+				++Misfires;
+				LockMovement(0.4f);
+				if (GM) GM->RecordMisfire(FactionId);
 			}
+			return false;
 		}
-		return false;
 	}
 	// Spread uses the speed at the trigger pull, so firing on the run is still inaccurate.
 	const float OwnerSpeed = GetVelocity().Size2D();

@@ -1013,6 +1013,28 @@ struct BattleRules {
     float blast_dirt_spray_cm = 300.f;
     float blast_leg_wound_crawl_seconds = 3.f;
     float blast_volley_stage_jitter_ms = 150.f;
+    // Drill (battle_rules.json "drill"; Battle Feel Pass). make_ready_s / present_s moved 1:1 from
+    // FVolleyTuning (DA_MusketTuning held no override); the volley coordinator reads only these.
+    float drill_make_ready_s = 1.2f;
+    float drill_present_s = 0.9f;
+    float drill_volley_spread_s = 1.0f;
+    float drill_response_advance_s = 0.4f;
+    float drill_response_halt_s = 0.35f;
+    float drill_response_fire_s = 0.25f;
+    float drill_officer_replace_s = 8.f;
+    float drill_ragged_spread_scale = 2.5f;
+    float drill_ragged_response_scale = 1.75f;
+    float drill_fall_in_radius_m = 4.f;
+    float drill_fall_in_break_m = 6.f;
+    // Cannon extras (Battle Feel M6). gun_types: the loads each kind of piece may fire
+    // ("round_shot", "canister", "shell"); a type not listed fires round shot and canister.
+    float cannon_shell_fuse_variance = 0.15f;
+    float cannon_shell_dud_chance = 0.08f;
+    float cannon_bounce_min_speed_mps = 12.f;
+    float cannon_run_out_seconds = 3.f;
+    float cannon_missing_roles_scale = 1.25f;
+    std::string cannon_default_gun_type = "six_pounder";
+    std::map<std::string, std::vector<std::string>> cannon_gun_types;
 };
 // Why a side's number is what it is (pre-battle card). Rows with the same label belong together:
 // the first is the base value, later ones are signed changes to it.

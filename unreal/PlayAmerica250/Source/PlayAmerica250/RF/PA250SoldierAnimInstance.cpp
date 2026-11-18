@@ -2,7 +2,11 @@
 #include "Battle/PA250BattleFeel.h"
 
 #include "Animation/AnimNodeBase.h"
+#include "Animation/AnimNotifies/AnimNotify.h"
+#include "Animation/AnimNotifies/AnimNotifyState.h"
 #include "Animation/AnimSequence.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "GameFramework/Actor.h"
 #include "PoseSearch/PoseSearchDatabase.h"
 #include "BonePose.h"
 #include "TwoBoneIK.h"
@@ -167,6 +171,178 @@ void UPA250SoldierAnimInstance::SetUpperBodyClip(UAnimSequence* InClip, float In
 	bUpperLoop = bInLoop;
 }
 
+float UPA250SoldierAnimInstance::ActionWeightAt(float Elapsed, float Total, float BlendIn, float BlendOut)
+{
+	if (Total <= 0.f || Elapsed < 0.f || Elapsed >= Total) return 0.f;
+	const float In = BlendIn > UE_KINDA_SMALL_NUMBER ? Elapsed / BlendIn : 1.f;
+	const float Out = BlendOut > UE_KINDA_SMALL_NUMBER ? (Total - Elapsed) / BlendOut : 1.f;
+	return FMath::Clamp(FMath::Min(In, Out), 0.f, 1.f);
+}
+
+FName UPA250SoldierAnimInstance::NotifyNameOf(const FAnimNotifyEvent& Event)
+{
+	// A Blueprint notify class is "Notify_Volley_Discharge_C"; a native one "AnimNotify_VolleyDischarge".
+	const UClass* Class = Event.Notify ? Event.Notify->GetClass() : (Event.NotifyStateClass ? Event.NotifyStateClass->GetClass() : nullptr);
+	if (!Class) return Event.NotifyName;
+	FString Name = Class->GetName();
+	Name.RemoveFromEnd(TEXT("_C"));
+	return FName(*Name);
+}
+
+void UPA250SoldierAnimInstance::NotifiesBetween(const UAnimSequence* Clip, float From, float To, TArray<FName>& OutNames)
+{
+	OutNames.Reset();
+	if (!Clip || To <= From) return;
+	TArray<TPair<float, FName>> Found;
+	for (const FAnimNotifyEvent& Event : Clip->Notifies)
+	{
+		const float At = Event.GetTriggerTime();
+		// A notify at time 0 belongs to the first step (From is then just below 0).
+		if (At > From && At <= To) Found.Emplace(At, NotifyNameOf(Event));
+	}
+	Found.StableSort([](const TPair<float, FName>& A, const TPair<float, FName>& B) { return A.Key < B.Key; });
+	for (const TPair<float, FName>& Pair : Found) OutNames.Add(Pair.Value);
+}
+
+float UPA250SoldierAnimInstance::NotifyTime(const UAnimSequence* Clip, FName NotifyName)
+{
+	if (!Clip) return -1.f;
+	for (const FAnimNotifyEvent& Event : Clip->Notifies)
+	{
+		if (NotifyNameOf(Event) == NotifyName) return Event.GetTriggerTime();
+	}
+	return -1.f;
+}
+
+float UPA250SoldierAnimInstance::PlayAction(UAnimSequence* InClip, const FPA250ActionParams& Params, TFunction<void(FName)> OnNotify)
+{
+	if (!InClip || (CurrentSkeleton && InClip->GetSkeleton() != CurrentSkeleton))
+	{
+		if (InClip && !bUpperRefusedLogged)
+		{
+			bUpperRefusedLogged = true;
+			UE_LOG(LogTemp, Error, TEXT("PA250 anim clips: %s is on another skeleton than the soldier's; it is not played"), *InClip->GetPathName());
+		}
+		return 0.f;
+	}
+	const float Rate = FMath::Max(0.05f, Params.Rate);
+	const float Length = InClip->GetPlayLength();
+	const float Start = FMath::Clamp(Params.StartTime, 0.f, Length);
+	ActionClip = InClip;
+	ActionParams = Params;
+	ActionNotify = MoveTemp(OnNotify);
+	ActionTime = Start;
+	ActionElapsed = 0.f;
+	ActionTotal = Params.bLoop ? FMath::Max(0.1f, Params.LoopSeconds) : (Length - Start) / Rate;
+	ActionWeight = Params.BlendIn > UE_KINDA_SMALL_NUMBER ? 0.f : 1.f;
+	bActionLoop = Params.bLoop;
+	bActionPosed = false;
+	ActionClock = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
+	return ActionTotal;
+}
+
+void UPA250SoldierAnimInstance::StopAction(float BlendOutSeconds)
+{
+	if (!ActionClip || bActionPosed) return;
+	// What is left of it is the blend out.
+	ActionParams.BlendOut = FMath::Max(0.f, BlendOutSeconds);
+	ActionTotal = FMath::Min(ActionTotal, ActionElapsed + ActionParams.BlendOut);
+	ActionNotify = nullptr;
+}
+
+void UPA250SoldierAnimInstance::SetPosedAction(UAnimSequence* InClip, float InTime, float InWeight, bool bInLoop)
+{
+	if (ActionClip && !bActionPosed) return; // a played action (a flinch, a fall) is not interrupted by a held pose
+	if (!InClip || (CurrentSkeleton && InClip->GetSkeleton() != CurrentSkeleton))
+	{
+		if (bActionPosed) PosedAge = 1.f; // let it fade
+		return;
+	}
+	ActionClip = InClip;
+	ActionParams = FPA250ActionParams();
+	ActionNotify = nullptr;
+	ActionTime = InTime;
+	ActionWeight = FMath::Clamp(InWeight, 0.f, 1.f);
+	bActionLoop = bInLoop;
+	bActionPosed = true;
+	PosedAge = 0.f;
+}
+
+void UPA250SoldierAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
+{
+	Super::NativeUpdateAnimation(DeltaSeconds);
+	if (!ActionClip) return;
+	if (bActionPosed)
+	{
+		// Whoever holds the pose sets it every frame; left alone it fades in a quarter of a second.
+		PosedAge += DeltaSeconds;
+		if (PosedAge > 0.1f) ActionWeight = FMath::Max(0.f, ActionWeight - DeltaSeconds * 4.f);
+		if (ActionWeight <= 0.f)
+		{
+			ActionClip = nullptr;
+			bActionPosed = false;
+		}
+		return;
+	}
+	// By the world's clock, not this update's step: a man out of sight is not updated every frame,
+	// and his action must not be found half-played when he comes back into view.
+	const double Now = GetWorld() ? GetWorld()->GetTimeSeconds() : ActionClock + DeltaSeconds;
+	const float Step = FMath::Max(0.f, static_cast<float>(Now - ActionClock));
+	ActionClock = Now;
+	const float Length = ActionClip->GetPlayLength();
+	const float From = ActionTime;
+	const float Left = FMath::Max(0.f, ActionTotal - ActionElapsed);
+	const float Advance = FMath::Min(Step, Left) * FMath::Max(0.05f, ActionParams.Rate);
+	ActionElapsed += Step;
+	float To = From + Advance;
+	UAnimSequence* Clip = ActionClip;
+	TArray<FName> Fired;
+	if (bActionLoop && Length > UE_KINDA_SMALL_NUMBER)
+	{
+		To = FMath::Fmod(To, Length);
+	}
+	else
+	{
+		To = FMath::Min(To, Length);
+		NotifiesBetween(Clip, From <= 0.f ? -1.f : From, To, Fired);
+	}
+	ActionTime = To;
+	ActionWeight = ActionWeightAt(ActionElapsed, ActionTotal, ActionParams.BlendIn, ActionParams.BlendOut);
+	if (ActionParams.bRootMotion && Advance > 0.f)
+	{
+		if (USkeletalMeshComponent* Mesh = GetSkelMeshComponent())
+		{
+			if (AActor* Owner = Mesh->GetOwner())
+			{
+				// A wrapped loop is two ranges: to the end, then from the start.
+				FTransform Local = (bActionLoop && To < From)
+					? Clip->ExtractRootMotionFromRange(From, Length, FAnimExtractContext()) * Clip->ExtractRootMotionFromRange(0.0, To, FAnimExtractContext())
+					: Clip->ExtractRootMotionFromRange(From, To, FAnimExtractContext());
+				const FTransform World = Mesh->ConvertLocalRootMotionToWorld(Local);
+				FVector Move = World.GetTranslation();
+				Move.Z = 0.f; // the capsule keeps to the ground by itself
+				if (!Move.IsNearlyZero(0.01)) Owner->AddActorWorldOffset(Move, true);
+				const float Yaw = World.GetRotation().Rotator().Yaw;
+				if (!FMath::IsNearlyZero(Yaw, 0.01f)) Owner->AddActorWorldRotation(FRotator(0.f, Yaw, 0.f));
+			}
+		}
+	}
+	const bool bDone = ActionElapsed >= ActionTotal;
+	// The callback may start another action (a fall, then the crawl): it is called last, from a copy.
+	TFunction<void(FName)> Notify = ActionNotify;
+	if (bDone)
+	{
+		ActionClip = nullptr;
+		ActionNotify = nullptr;
+		ActionWeight = 0.f;
+	}
+	if (Notify)
+	{
+		for (const FName Name : Fired) Notify(Name);
+		if (bDone) Notify(NAME_None); // NAME_None: the action is over
+	}
+}
+
 void FPA250SoldierAnimProxy::UpperBodyMask(const FBoneContainer& Bones, FName UpperRoot, TArray<bool>& OutMask)
 {
 	OutMask.Reset();
@@ -272,6 +448,11 @@ void FPA250SoldierAnimProxy::PreUpdate(UAnimInstance* InAnimInstance, float Delt
 	UpperTime = Inst->GetUpperBodyTime();
 	UpperWeight = Inst->GetUpperBodyWeight();
 	bUpperLoop = Inst->GetUpperBodyLoop();
+	ActionClip = Inst->GetActionClip();
+	ActionTime = Inst->GetActionTime();
+	ActionWeight = ActionClip ? Inst->GetActionWeight() : 0.f;
+	bActionLoop = Inst->GetActionLoop();
+	bActionKeepsHand = Inst->ActionKeepsSupportHand();
 }
 
 void FPA250SoldierAnimProxy::Update(float DeltaSeconds)
@@ -393,7 +574,26 @@ bool FPA250SoldierAnimProxy::Evaluate(FPoseContext& Output)
 			Output.Pose[Bone] = BlendBone(Output.Pose[Bone], Over[Bone], TraversalWeight);
 		}
 	}
-	const bool bMelee = Melee.IsActive();
+	if (ActionClip && ActionWeight > 0.f)
+	{
+		// A whole-body action over everything so far. Its root is locked here: the game thread moves
+		// the capsule by the clip's root motion (UPA250SoldierAnimInstance::NativeUpdateAnimation).
+		FCompactPose Act;
+		Act.SetBoneContainer(&Output.Pose.GetBoneContainer());
+		FBlendedCurve ActCurve;
+		ActCurve.InitFrom(Output.Curve);
+		UE::Anim::FStackAttributeContainer ActAttributes;
+		FAnimationPoseData ActData(Act, ActCurve, ActAttributes);
+		ActionClip->GetAnimationPose(ActData, FAnimExtractContext(ActionTime, true, {}, bActionLoop));
+		for (const FCompactPoseBoneIndex Bone : Output.Pose.ForEachBoneIndex())
+		{
+			Output.Pose[Bone] = BlendBone(Output.Pose[Bone], Act[Bone], ActionWeight);
+		}
+	}
+	// While an action has the body, the poses made in code (carry, shoulder, lunge) stand down by
+	// its weight: they were made for the movement clips and would bend the action out of shape.
+	const bool bActing = ActionClip && ActionWeight > 0.5f;
+	const bool bMelee = Melee.IsActive() && !bActing;
 	if (bMelee || Hand.bEnabled || MountedAim.bEnabled)
 	{
 		// One trip through component space: body first, then the left hand onto the moved musket.
@@ -416,7 +616,7 @@ bool FPA250SoldierAnimProxy::Evaluate(FPoseContext& Output)
 			}
 			GripRightHand(CS.Pose, Support);
 			// Over an obstacle the left hand is the clip's (it goes to the wall); the right keeps the musket.
-			if (TraversalWeight < 0.5f) SolveSupportHand(CS.Pose, Support);
+			if (TraversalWeight < 0.5f && (!bActing || bActionKeepsHand)) SolveSupportHand(CS.Pose, Support);
 		}
 		FCSPose<FCompactPose>::ConvertComponentPosesToLocalPoses(MoveTemp(CS.Pose), Output.Pose);
 		Output.Pose.NormalizeRotations();

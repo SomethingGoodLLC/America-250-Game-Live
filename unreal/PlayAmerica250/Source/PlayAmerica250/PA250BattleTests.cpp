@@ -50,6 +50,15 @@ PA250_BATTLE_TEST(FPA250BattleCannonAim, "PA250.Battle.CannonAim", RunCannonAim)
 PA250_BATTLE_TEST(FPA250BattleCanister, "PA250.Battle.Canister", RunCanister)
 PA250_BATTLE_TEST(FPA250BattleBlast, "PA250.Battle.Blast", RunBlast)
 PA250_BATTLE_TEST(FPA250BattleVolleySync, "PA250.Battle.VolleySync", RunVolleySync)
+PA250_BATTLE_TEST(FPA250BattleClipActions, "PA250.Battle.ClipActions", RunClipActions)
+PA250_BATTLE_TEST(FPA250BattleVolley, "PA250.Battle.Volley", RunVolley)
+PA250_BATTLE_TEST(FPA250BattleOfficerLoss, "PA250.Battle.OfficerLoss", RunOfficerLoss)
+PA250_BATTLE_TEST(FPA250BattleFallIn, "PA250.Battle.FallIn", RunFallIn)
+PA250_BATTLE_TEST(FPA250BattleSuppression, "PA250.Battle.Suppression", RunSuppression)
+PA250_BATTLE_TEST(FPA250BattleMusketFeel, "PA250.Battle.MusketFeel", RunMusketFeel)
+PA250_BATTLE_TEST(FPA250BattleFXEvents, "PA250.Battle.FXEvents", RunFXEvents)
+PA250_BATTLE_TEST(FPA250BattleShells, "PA250.Battle.Shells", RunShells)
+PA250_BATTLE_TEST(FPA250BattleGunCrewFeel, "PA250.Battle.GunCrew", RunGunCrew)
 
 #undef PA250_BATTLE_TEST
 

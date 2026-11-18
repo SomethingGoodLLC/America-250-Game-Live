@@ -83,8 +83,18 @@
     "man_radius_cm": 2200,
     "slot_ring_cm": 1400,
     "breastwork_slots": 6,
-    "breastworks_by_level": [0, 2, 4, 4],
-    "redoubts_by_level": [0, 0, 0, 1]
+    "breastworks_by_level": [
+      0,
+      2,
+      4,
+      4
+    ],
+    "redoubts_by_level": [
+      0,
+      0,
+      0,
+      1
+    ]
   },
   "smoke": {
     "note": "GAME INVENTION. Powder smoke hides men from the bots (the player sees it for himself). Each puff counts as thick within sight_radius_scale of its width; when the smoke lying on a line of sight adds up to sight_block_opacity or more (0 clear, 1 solid), the man beyond it cannot be seen or fired at. One fresh puff is not enough; the bank a volley leaves is, for some seconds, until it thins and drifts.",
@@ -118,10 +128,16 @@
   },
   "modes": {
     "note": "The kind of fight (BattleSetup.mode, chosen by the sim's choose_battle_mode). landing: the attacker arrived by an edge of one of landing_edge_types into a town with the landing_town_tag terrain tag; this comes first, so a fortified harbour town reached over the water is a landing. assault: otherwise, the defender's fortification level is assault_min_fort_level or more. conquest: everything else, and always for the presets in conquest_presets (the scripted North Bridge and Battle Road fights).",
-    "landing_edge_types": ["boat", "ferry"],
+    "landing_edge_types": [
+      "boat",
+      "ferry"
+    ],
     "landing_town_tag": "harbor",
     "assault_min_fort_level": 1,
-    "conquest_presets": ["concord_bridge", "battle_road"],
+    "conquest_presets": [
+      "concord_bridge",
+      "battle_road"
+    ],
     "bridge_company": {
       "note": "GAME INVENTION. At Concord (concord_bridge) only part of the British column goes down to the North Bridge; the rest waits in the town. When match_defender_units is true the company matches the provincial units on the field (never outnumbers them), so the opening fight is at least parity when the column is large enough. fallback_units is used only if the defender has no units.",
       "match_defender_units": true,
@@ -149,7 +165,7 @@
     "crew_class": "artilleryman"
   },
   "cannon": {
-    "note": "The field gun in a battle (a light 3- or 6-pounder). GAME INVENTION throughout: times and ranges are shortened to the size of the field. crew_men serve one gun; with fewer than min_crew at it, it can be neither worked nor moved. The drill (sponge and load, ram home, prime and lay) takes the three *_seconds with a full crew of gunners; a short crew is slower in proportion and men who are not gunners are slower by untrained_drill_scale. Round shot flies round_shot_range_m at round_shot_speed_m a second, scatters within round_shot_spread_degrees of where the piece was laid, goes through round_shot_pierce_men men, knocks down men within knockdown_radius_cm, batters works, and puts morale_pressure for morale_seconds. Inside grape_range_m the crew fires grape: grape_balls musket balls in a cone of grape_cone_degrees. Past that, round shot out to round_shot_range_m. Shell is a timed fuse to the mark (shell_*). The crew loads shell only past round shot, and only when shell_range_m is longer than round_shot_range_m (a howitzer's reach). These numbers keep shell inside the round, so the crew never loads shell; the player still can. A chosen load past its range is refused (grape still fires a little past grape_range_m, 1.25 times). The mesh is one piece, so it stays level: elevation_* is the ballistic lay onto the aim mark, not a pitched carriage. An idle crew pushes at push_speed_cm once own men are follow_gap_m ahead. Capture and crew_radius as before. length_cm fits the purchased mesh (333 is its own length).",
+    "note": "The field gun in a battle (a light 3- or 6-pounder). GAME INVENTION throughout: times and ranges are shortened to the size of the field. crew_men serve one gun; with fewer than min_crew at it, it can be neither worked nor moved. The drill (sponge and load, ram home, prime and lay) takes the three *_seconds with a full crew of gunners; a short crew is slower in proportion and men who are not gunners are slower by untrained_drill_scale. Round shot flies round_shot_range_m at round_shot_speed_m a second, scatters within round_shot_spread_degrees of where the piece was laid, goes through round_shot_pierce_men men, knocks down men within knockdown_radius_cm, batters works, and puts morale_pressure for morale_seconds. Inside grape_range_m the crew fires grape: grape_balls musket balls in a cone of grape_cone_degrees. Past that, round shot out to round_shot_range_m. Shell is a timed fuse to the mark (shell_*). The crew loads shell only past round shot, and only when shell_range_m is longer than round_shot_range_m (a howitzer's reach). These numbers keep shell inside the round, so the crew never loads shell; the player still can. A chosen load past its range is refused (grape still fires a little past grape_range_m, 1.25 times). The mesh is one piece, so it stays level: elevation_* is the ballistic lay onto the aim mark, not a pitched carriage. An idle crew pushes at push_speed_cm once own men are follow_gap_m ahead. Capture and crew_radius as before. length_cm fits the purchased mesh (333 is its own length). Gun types (Battle Feel 2026-11-16, GAME INVENTION): gun_types lists the loads each kind of piece fires; default_gun_type is every piece's kind unless a battle sets another (Percy's Lexington guns are six-pounders, so no shell there). Shell fuse variance (shell_fuse_variance, a fraction of the fuse either way) and duds (shell_dud_chance: the shell flies and lands unburst) apply only to shell. A ball grazes and goes on only above bounce_min_speed_mps. The drill is Swab, Load, Ram, Run out (run_out_seconds), Prime, Fire. missing_roles_scale: a crew short of a full crew (but at least min_crew) is slower by this factor on top of the manning share (moved 1:1 from a C++ constant). Tracker 'grapeshot' is the canister load (EPA250Shot::Grape in code).",
     "crew_men": 4,
     "min_crew": 2,
     "sponge_load_seconds": 6.0,
@@ -199,12 +215,44 @@
     "crew_radius_cm": 450.0,
     "length_cm": 333.0,
     "knockdown_push_cm": 320.0,
-    "dirt_burst_scale": 3.0
+    "dirt_burst_scale": 3.0,
+    "gun_types": {
+      "six_pounder": {
+        "allowed_shots": [
+          "round_shot",
+          "canister"
+        ]
+      },
+      "howitzer": {
+        "allowed_shots": [
+          "round_shot",
+          "canister",
+          "shell"
+        ]
+      },
+      "mortar": {
+        "allowed_shots": [
+          "shell"
+        ]
+      }
+    },
+    "default_gun_type": "six_pounder",
+    "shell_fuse_variance": 0.15,
+    "shell_dud_chance": 0.08,
+    "bounce_min_speed_mps": 12.0,
+    "run_out_seconds": 3.0,
+    "missing_roles_scale": 1.25
   },
   "blast": {
     "note": "GAME INVENTION (Artillery pass M9). Shared blast path for shell burst, premature muzzle discharge, and ammunition-chest detonation. Outer radii and impulses scale by size; outcome rings are fractions of the outer radius. Cover (LOS blocked) drops one ring. Knockdown/stagger/flinch spend no ticket. Ragdoll cap and 1.5 s settle apply only to blast knockdowns (horse throws keep their own constants). Chest ready_rounds and refill are GAME INVENTION: Load takes one from the chest; Fire spends through GunShots/magazine; chest refills near a friendly command post while the magazine holds spare rounds beyond those already in chests. chest.resolve_own is the Resolve the chest's own side loses when it blows; chest.resolve_enemy is what the other side loses, 0 since 2026-11-16 (it was 8: a side lost Resolve because its enemy's chest blew).",
-    "shell": { "radius_cm": 400.0, "impulse_cm": 320.0 },
-    "premature": { "radius_cm": 180.0, "impulse_cm": 200.0 },
+    "shell": {
+      "radius_cm": 400.0,
+      "impulse_cm": 320.0
+    },
+    "premature": {
+      "radius_cm": 180.0,
+      "impulse_cm": 200.0
+    },
     "chest": {
       "radius_cm": 700.0,
       "impulse_cm": 480.0,
@@ -232,5 +280,21 @@
     "dirt_spray_cm": 300.0,
     "leg_wound_crawl_seconds": 3.0,
     "volley_stage_jitter_ms": 150.0
+  },
+  "drill": {
+    "note": "Drill orders and volley timing (Battle Feel Pass, 2026-11-16). make_ready_s / present_s moved 1:1 from FVolleyTuning (DA_MusketTuning held no override of them; the struct fields are gone, so this is the only source). GAME TUNING: response_delay_s is how long men take to obey a word of command (advance = Form line, halt = Hold; fire = from the word to the first musket). volley_spread_s: every presented man of a steady line fires inside this window. While a squad has lost its officer (officer_replace_s, then a sergeant takes the file) it fires raggedly: spread x ragged_spread_scale and its stage times and order responses x ragged_response_scale. Fall in (K): the player joins the nearest friendly line within fall_in_radius_m; he falls out when he strays fall_in_break_m from his place or presses K again.",
+    "make_ready_s": 1.2,
+    "present_s": 0.9,
+    "volley_spread_s": 1.0,
+    "response_delay_s": {
+      "advance": 0.4,
+      "halt": 0.35,
+      "fire": 0.25
+    },
+    "officer_replace_s": 8.0,
+    "ragged_spread_scale": 2.5,
+    "ragged_response_scale": 1.75,
+    "fall_in_radius_m": 4.0,
+    "fall_in_break_m": 6.0
   }
 }

@@ -28,6 +28,8 @@ VECTOR: dict[str, Any] = json.loads(
 GROUPS = {
     "loading_drill",
     "gun_crew",
+    "volley",
+    "reaction",
     "rowing",
     "rout",
     "surrender",
@@ -75,14 +77,37 @@ def test_every_name_has_a_placeholder_and_says_what_shows() -> None:
         assert clip["placeholder"] in {"procedural", "locomotion", "none"}, name
         assert len(clip["shows"]) >= 8, name
         assert clip["group"] in GROUPS, name
-        if clip["asset"] is not None:
-            # An imported clip sits in one of the importer's two folders and says where it came from.
-            assert clip["asset"].startswith(
-                ("/Game/PA250/Anim/Clips/", "/Game/PA250/Anim/Local/")
-            ), name
-            assert clip["source"]["rig"] in CLIPS["source_rigs"], name
-            local = clip["asset"].startswith("/Game/PA250/Anim/Local/")
-            assert clip["source"]["local"] == local, name
+        if clip["asset"] is None:
+            assert "variants" not in clip, name
+            continue
+        if clip["asset"].startswith("/Game/PA250/Anim/Generated/"):
+            # A clip made in the repository (tools/anim): the assets themselves are tracked, so every
+            # take must be a file here, and the first take is the asset.
+            takes = clip.get("variants", [clip["asset"]])
+            assert takes[0] == clip["asset"], name
+            for take in takes:
+                assert take.startswith("/Game/PA250/Anim/Generated/"), name
+                on_disk = ROOT / "unreal" / "PlayAmerica250" / "Content" / (take[len("/Game/"):] + ".uasset")
+                assert on_disk.is_file(), f"{name}: {take} is not in the repository"
+            continue
+        # An imported clip sits in one of the importer's two folders and says where it came from.
+        assert clip["asset"].startswith(
+            ("/Game/PA250/Anim/Clips/", "/Game/PA250/Anim/Local/")
+        ), name
+        assert clip["source"]["rig"] in CLIPS["source_rigs"], name
+        local = clip["asset"].startswith("/Game/PA250/Anim/Local/")
+        assert clip["source"]["local"] == local, name
+
+
+def test_gun_crew_clips_say_where_the_man_stands() -> None:
+    # A crew clip the battle plays is shown from a station, facing a point: both or neither.
+    for name, clip in CLIPS["clips"].items():
+        assert ("station_cm" in clip) == ("face_cm" in clip), name
+        if "station_cm" in clip:
+            assert clip["group"] == "gun_crew", name
+            assert clip["station_cm"] != clip["face_cm"], name
+    for role in ("sponger", "loader", "ventsman", "captain"):
+        assert "station_cm" in CLIPS["clips"][f"gun_crew_idle_{role}"], role
 
 
 def test_every_group_that_needs_clips_names_at_least_one() -> None:

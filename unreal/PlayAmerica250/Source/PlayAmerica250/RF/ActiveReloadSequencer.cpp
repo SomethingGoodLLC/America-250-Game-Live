@@ -1,4 +1,5 @@
 #include "ActiveReloadSequencer.h"
+#include "Battle/PA250BattleRng.h"
 
 void FActiveReloadSequencer::Reset()
 {
@@ -197,7 +198,7 @@ void FActiveReloadSequencer::AdvanceAfterHit(EActiveReloadHit Hit, FRandomStream
 		bMissedInPhase = true;
 		ResumeTime = Tuning.bMissResumesProgress ? PhaseTime : 0.f;
 		{
-			const float Roll = JamRng ? JamRng->FRand() : FMath::FRand();
+			const float Roll = JamRng ? JamRng->FRand() : PA250BattleRng::Get().FRand(); // a jam is an outcome: the battle stream
 			if (Roll < Tuning.JamChanceOnMiss)
 			{
 				++Stats.Jam;

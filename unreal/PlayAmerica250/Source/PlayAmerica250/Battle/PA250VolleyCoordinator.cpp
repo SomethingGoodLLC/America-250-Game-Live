@@ -1,4 +1,8 @@
 #include "PA250VolleyCoordinator.h"
+#include "Battle/PA250BattleRng.h"
+#include "Battle/PA250BattleFX.h"
+#include "Battle/PA250AnimClips.h"
+#include "RF/PA250SoldierAnimInstance.h"
 #include "Battle/PA250TraversalLinks.h"
 #include "PA250MeleeComponent.h"
 #include "Battle/PA250BattleFeel.h"
@@ -56,6 +60,60 @@ void UPA250VolleyCoordinator::NotifyVolleyDischarge(ARFCharacter* Shooter)
 	}
 }
 
+namespace
+{
+/** A man who can act a volley clip: a bot on foot, alive, with his musket. */
+bool ActsVolley(const ARFCharacter* C)
+{
+	return C && !C->IsDead() && !C->IsPlayerControlled() && !C->IsMounted() && C->Musket && C->IsUsingPeriodSoldier();
+}
+}
+
+void UPA250VolleyCoordinator::PlayVolleyStageClips(FSquad& Sq, const TArray<ARFCharacter*>& Live)
+{
+	const bool bReady = Sq.Stage == EVolleyCall::MakeReady;
+	FPA250ActionParams Params;
+	Params.bRootMotion = false;      // he keeps his place in the rank
+	Params.bKeepSupportHand = true;  // clips made for a musket hold: the left hand stays on the stock
+	for (int32 i = 0; i < Live.Num(); ++i)
+	{
+		ARFCharacter* C = Live[i];
+		if (!ActsVolley(C) || !C->Musket->CanFire()) continue; // a man still loading goes on loading
+		const FName Name = C->bIsCrouched ? (bReady ? FName(TEXT("volley_kneel_make_ready")) : FName(TEXT("volley_kneel_present")))
+			: (bReady ? FName(TEXT("volley_make_ready")) : FName(TEXT("volley_present")));
+		PA250AnimClips::PlayCombatClip(C, Name, HashCombine(GetTypeHash(Sq.Id), GetTypeHash(i)), &Params);
+	}
+}
+
+void UPA250VolleyCoordinator::StartFireClip(FSquad& Sq, FPendingVolleyShot& P, float Now)
+{
+	if (P.bClipStarted) return;
+	ARFCharacter* C = P.Shooter.Get();
+	if (!ActsVolley(C)) { P.bClipStarted = true; return; }
+	const FName Name = C->bIsCrouched ? FName(TEXT("volley_kneel_fire")) : FName(TEXT("volley_fire"));
+	const uint32 Seed = HashCombine(GetTypeHash(Sq.Id), HashCombine(GetTypeHash(Sq.VolleyEpoch), GetTypeHash(C->GetUniqueID())));
+	UAnimSequence* Take = PA250AnimClips::ClipVariant(Name, Seed);
+	if (!Take) { P.bClipStarted = true; return; }
+	// The clip is entered so that its discharge frame falls on FireAtTime: begun early when there
+	// is time, or part-way in when the shot is nearer than the clip's lead-in.
+	const float Lead = FMath::Max(0.f, UPA250SoldierAnimInstance::NotifyTime(Take, TEXT("Notify_Volley_Discharge")));
+	const float Until = P.FireAtTime - Now;
+	if (Until > Lead) return; // not yet
+	P.bClipStarted = true;
+	FPA250ActionParams Params;
+	Params.bRootMotion = false;
+	Params.bKeepSupportHand = true;
+	Params.BlendIn = 0.08f;
+	Params.StartTime = FMath::Max(0.f, Lead - FMath::Max(0.f, Until));
+	TWeakObjectPtr<UPA250VolleyCoordinator> WeakThis(this);
+	TWeakObjectPtr<ARFCharacter> WeakMan(C);
+	PA250AnimClips::PlayCombatClip(C, Name, Seed, &Params, [WeakThis, WeakMan](FName Notify)
+	{
+		// Whichever comes first, this or the shot's timer, fires it; the other finds nothing pending.
+		if (Notify == TEXT("Notify_Volley_Discharge") && WeakThis.IsValid() && WeakMan.IsValid()) WeakThis->NotifyVolleyDischarge(WeakMan.Get());
+	});
+}
+
 float UPA250VolleyCoordinator::StageJitterSeconds(int32 SquadId, int32 VolleyEpoch, int32 OrderFromRight, float MaxMs)
 {
 	FRandomStream Rng(static_cast<int32>(HashCombine(HashCombine(GetTypeHash(SquadId), GetTypeHash(VolleyEpoch)), GetTypeHash(OrderFromRight))));
@@ -67,6 +125,19 @@ void UPA250VolleyCoordinator::FirePendingShot(FSquad& Sq, const FPendingVolleySh
 	UWorld* World = GameMode.IsValid() ? GameMode->GetWorld() : nullptr;
 	if (!World) return;
 	ARFCharacter* C = P.Shooter.Get();
+	if (P.bHeldTrigger)
+	{
+		// The fallen-in man's own shot, held for the volley: he fires where he is aiming.
+		bool bWent = false;
+		if (C && !C->IsDead() && Sq.VolleyEpoch == P.Epoch && C->Musket && C->Musket->CanFire())
+		{
+			bWent = C->GetController() ? C->FireMusket() : C->FireMusketAt(C->GetActorLocation() + Sq.Facing * 5000.f); // no controller: tests
+		}
+		UE_LOG(LogTemp, Display, TEXT("PA250 fall-in: held shot with squad %d's volley: %s"), Sq.Id,
+			bWent ? TEXT("fired") : !C || C->IsDead() ? TEXT("he is down") : Sq.VolleyEpoch != P.Epoch ? TEXT("the volley was called off")
+			: !(C->Musket && C->Musket->CanFire()) ? TEXT("not loaded") : TEXT("no shot (misfire, or he could not fire there)"));
+		return;
+	}
 	ARFCharacter* Enemy = P.Target.Get();
 	const bool bAlive = C && !C->IsDead();
 	const bool bTargetAlive = Enemy && !Enemy->IsDead();
@@ -267,6 +338,7 @@ void UPA250VolleyCoordinator::CancelVolleyOrders(FSquad& Sq, const TCHAR* Reason
 	Sq.StageTimer = 0.f;
 	Sq.NotReadyTime = 0.f;
 	Sq.DebugReason = Reason;
+	if (Sq.Id == FallInSquadId) bFallInShotHeld = false; // the volley he held his shot for is called off
 }
 
 void UPA250VolleyCoordinator::DischargeOne(ARFCharacter* Shooter, ARFCharacter* Enemy, const FVector& AimAt)
@@ -280,7 +352,7 @@ void UPA250VolleyCoordinator::DischargeOne(ARFCharacter* Shooter, ARFCharacter* 
 	const APA250BotController* Bot = Cast<APA250BotController>(Shooter->GetController());
 	const float AimErr = (Bot ? Bot->AimErrorDegrees : 2.5f) * Shooter->Musket->RangeSpreadScale(Dist);
 	const FVector Muzzle = Shooter->Musket->GetMuzzleLocation()->GetComponentLocation();
-	const FVector Dir = FMath::VRandCone((AimAt - Muzzle).GetSafeNormal(), FMath::DegreesToRadians(AimErr));
+	const FVector Dir = PA250BattleRng::Get().VRandCone((AimAt - Muzzle).GetSafeNormal(), FMath::DegreesToRadians(AimErr));
 	const bool bHit = Shooter->FireMusketAt(Muzzle + Dir * FVector::Dist(Muzzle, AimAt));
 	const FVector ShotDir = Enemy
 		? (Enemy->GetActorLocation() - Shooter->GetActorLocation()).GetSafeNormal()
@@ -320,6 +392,7 @@ void UPA250VolleyCoordinator::ScheduleVolley(FSquad& Sq, const TArray<ARFCharact
 	for (ARFCharacter* C : Shooters)
 	{
 		if (!C || C->IsDead() || !C->Musket || !C->Musket->CanFire()) continue;
+		if (C == FallenIn.Get()) continue; // his trigger is his own (AddHeldTrigger)
 		ARFCharacter* Enemy = ResolveVolleyTarget(Sq, C, EngageMax);
 		if (!Enemy) continue;
 		const FVector AimAt = Enemy->GetActorLocation() + FVector(0.f, 0.f, 20.f);
@@ -329,10 +402,11 @@ void UPA250VolleyCoordinator::ScheduleVolley(FSquad& Sq, const TArray<ARFCharact
 		P.Shooter = C;
 		P.Target = Enemy;
 		P.AimPoint = AimAt;
-		P.FireAtTime = Now + VolleyTotalOffset(Sq.Id, Sq.VolleyEpoch, Sq.PendingShots.Num(), Rolling, StageJitterMs);
+		P.FireAtTime = Now + VolleyShotSeconds(Sq, Sq.PendingShots.Num(), Rolling, StageJitterMs);
 		P.Epoch = Sq.VolleyEpoch;
 		Sq.PendingShots.Add(P);
 	}
+	AddHeldTrigger(Sq, Now);
 	if (Sq.PendingShots.Num() > 0) ++Sq.VolleysThisFight;
 	Sq.DebugReason = Sq.PendingShots.Num() > 0 ? TEXT("firing") : TEXT("waiting_lane");
 	// The regular's verb: enough muskets in one volley force a morale check on the squad fired on.
@@ -348,6 +422,7 @@ void UPA250VolleyCoordinator::TickPendingVolley(FSquad& Sq)
 	const float Now = GameMode->GetWorld()->GetTimeSeconds();
 	for (int32 i = Sq.PendingShots.Num() - 1; i >= 0; --i)
 	{
+		StartFireClip(Sq, Sq.PendingShots[i], Now);
 		if (Sq.PendingShots[i].FireAtTime > Now) continue;
 		// Removed before it fires, so the clip's discharge notify cannot fire it a second time.
 		const FPendingVolleyShot P = Sq.PendingShots[i];
@@ -842,7 +917,7 @@ void UPA250VolleyCoordinator::RebuildSquads(int32 MinSize, int32 MaxSize)
 				NewSq.PreferMinCm = FMath::Max(0.f, K.PreferMinM * 100.f);
 			}
 			NewSq.Stage = EVolleyCall::MakeReady;
-			NewSq.StageTimer = GameMode->GetTuning() ? GameMode->GetTuning()->Values.Volley.MakeReadySeconds : 1.f;
+			NewSq.StageTimer = pa250::battle_rules().drill_make_ready_s;
 			Join = &Squads.Add_GetRef(NewSq);
 		}
 		Join->Members.Add(B);
@@ -976,13 +1051,23 @@ void UPA250VolleyCoordinator::FormationOffsets(int32 N, float FileCm, float Rank
 	Out.Reset();
 	if (N <= 0) return;
 	const int32 PerRank = N < 4 ? N : FMath::Clamp(FMath::DivideAndRoundUp(N, 2), 1, FMath::Max(1, MaxPerRank));
-	for (int32 i = 0; i < N; ++i)
+	// Each rank stands in the gaps of the rank before it, so every man has a lane past the men in
+	// front. A rank centred on the line has its men on whole files when it holds an odd number and on
+	// half files when even; it is shifted half a file only when that puts it off the rank in front's
+	// grid. A full rank behind a full rank is shifted (as before 2026-11-17); a short rear rank (5 men:
+	// 3 and 2) is already in the gaps centred, and the old fixed shift stood it behind the front men.
+	int32 PrevHalf = -1; // 1: the rank in front stands on half files, 0: on whole files
+	for (int32 Rank = 0; Rank * PerRank < N; ++Rank)
 	{
-		const int32 Rank = i / PerRank;
-		const int32 File = i % PerRank;
 		const int32 InRank = FMath::Min(PerRank, N - Rank * PerRank);
-		const float Stagger = (Rank % 2) ? 0.5f * FileCm : 0.f; // rear rank covers the gaps
-		Out.Add(FVector2D((File - 0.5f * (InRank - 1)) * FileCm + Stagger, Rank * RankCm));
+		const int32 CentredHalf = (InRank % 2 == 0) ? 1 : 0;
+		const bool bShift = PrevHalf >= 0 && CentredHalf == PrevHalf;
+		const float Stagger = bShift ? 0.5f * FileCm : 0.f;
+		for (int32 File = 0; File < InRank; ++File)
+		{
+			Out.Add(FVector2D((File - 0.5f * (InRank - 1)) * FileCm + Stagger, Rank * RankCm));
+		}
+		PrevHalf = bShift ? 1 - CentredHalf : CentredHalf;
 	}
 }
 
@@ -1171,7 +1256,7 @@ void UPA250VolleyCoordinator::TickFormation(FSquad& Sq, const TArray<ARFCharacte
 	const FVector* Flying = ColoursFlying.Find(Sq.Faction);
 	const float RallySeconds = PA250Support::RallySecondsNearColours(Tr.RallySeconds,
 		Flying && FVector::Dist2D(*Flying, Center) <= Verbs.EnsignRadiusM * 100.f, Verbs.EnsignRallyScale);
-	if (Sq.Morale.Tick(DeltaSeconds, Pressure, Resolve, RallySeconds, Tr.ReformSeconds, bWithdrawOrder, bWithdrawDone))
+	if (Sq.Morale.Tick(DeltaSeconds, Pressure, Resolve, RallySeconds, Tr.ReformSeconds, bWithdrawOrder, bWithdrawDone, Verbs.Morale))
 	{
 		MoraleTransitions.FindOrAdd(FString::Printf(TEXT("%s.%s"), *Sq.Faction.ToString(), MoraleName(Sq.Morale.State)))++;
 		if (Sq.Morale.State == EPA250Morale::Withdrawing)
@@ -1527,6 +1612,8 @@ void UPA250VolleyCoordinator::TickFormation(FSquad& Sq, const TArray<ARFCharacte
 
 	// ---- Fire: line roles volley together; skirmish roles fire at will from their positions ----
 	auto TargetFor = [&](int32 i) { return Sq.bHasCover.IsValidIndex(i) && Sq.bHasCover[i] ? Sq.CoverSpot[i] : SpotFor(i); };
+	Sq.LastSpots.SetNum(Sq.FileOrder.Num());
+	for (int32 i = 0; i < Sq.FileOrder.Num(); ++i) Sq.LastSpots[i] = TargetFor(i);
 	int32 Loaded = 0, FormedReady = 0, SafeReady = 0;
 	TArray<ARFCharacter*> SafeShooters;
 	for (int32 i = 0; i < Sq.FileOrder.Num(); ++i)
@@ -1582,16 +1669,18 @@ void UPA250VolleyCoordinator::TickFormation(FSquad& Sq, const TArray<ARFCharacte
 		Sq.Stage = PA250Squad::LedVolleyNext(StageBefore, bLedAim, bFiredNow, Sq.PendingShots.Num() > 0, Loaded > 0, Sq.StageTimer, bFire);
 		if (Sq.Stage != StageBefore && Sq.Stage == EVolleyCall::MakeReady)
 		{
-			Sq.StageTimer = VT.MakeReadySeconds;
-			Shout(Sq.Faction, TEXT("make_ready"), TEXT("Make ready!"), Sq.Anchor, VT.MakeReadySeconds);
+			// Stage times: battle_rules.drill (moved 1:1 from FVolleyTuning, which no longer has them).
+			const float ReadyS = pa250::battle_rules().drill_make_ready_s;
+			Sq.StageTimer = ReadyS;
+			{ Shout(Sq.Faction, TEXT("make_ready"), TEXT("Make ready!"), Sq.Anchor, ReadyS); SoundDrillCall(Sq, TEXT("make_ready")); }
 		}
 		else if (Sq.Stage != StageBefore && Sq.Stage == EVolleyCall::Present)
 		{
-			Shout(Sq.Faction, TEXT("present"), TEXT("Present!"), Sq.Anchor, 3.f);
+			{ Shout(Sq.Faction, TEXT("present"), TEXT("Present!"), Sq.Anchor, 3.f); SoundDrillCall(Sq, TEXT("present")); }
 		}
 		if (bFire)
 		{
-			Shout(Sq.Faction, TEXT("fire"), TEXT("FIRE!"), Sq.Anchor, 1.f);
+			{ Shout(Sq.Faction, TEXT("fire"), TEXT("FIRE!"), Sq.Anchor, 1.f); SoundDrillCall(Sq, TEXT("fire")); }
 			ScheduleLedVolley(Sq, Presented);
 			if (Sq.PendingShots.Num() == 0) Sq.Stage = EVolleyCall::None;
 		}
@@ -1637,10 +1726,12 @@ void UPA250VolleyCoordinator::TickFormation(FSquad& Sq, const TArray<ARFCharacte
 				Sq.Stage = EVolleyCall::MakeReady;
 				FRandomStream StageSeed(HashCombine(Sq.Id, GetTypeHash(Sq.Faction.GetComparisonIndex())));
 				const float JitterSec = FMath::Max(0.f, pa250::battle_rules().blast_volley_stage_jitter_ms) * 0.001f;
-				Sq.StageTimer = VT.MakeReadySeconds + JitterSec * StageSeed.FRand();
+				// battle_rules.drill; an officerless squad is slower to the word (ragged_response_scale).
+				const float ReadyS = pa250::battle_rules().drill_make_ready_s * (Sq.OfficerReplaceLeft > 0.f ? pa250::battle_rules().drill_ragged_response_scale : 1.f);
+				Sq.StageTimer = ReadyS + JitterSec * StageSeed.FRand();
 				Sq.NotReadyTime = 0.f;
 				Sq.DebugReason = TEXT("make_ready");
-				if (bNear) Shout(Sq.Faction, TEXT("make_ready"), TEXT("Make ready!"), Sq.Anchor, VT.MakeReadySeconds);
+				if (bNear) { Shout(Sq.Faction, TEXT("make_ready"), TEXT("Make ready!"), Sq.Anchor, ReadyS); SoundDrillCall(Sq, TEXT("make_ready")); }
 			}
 			else if (bNear && Sq.NotReadyTime >= 2.f && CalloutTimer <= 0.f)
 			{
@@ -1656,16 +1747,17 @@ void UPA250VolleyCoordinator::TickFormation(FSquad& Sq, const TArray<ARFCharacte
 				Sq.Stage = EVolleyCall::Present;
 				FRandomStream StageSeed(HashCombine(Sq.Id + 17, GetTypeHash(Sq.Faction.GetComparisonIndex())));
 				const float JitterSec = FMath::Max(0.f, pa250::battle_rules().blast_volley_stage_jitter_ms) * 0.001f;
-				Sq.StageTimer = VT.PresentSeconds + JitterSec * StageSeed.FRand();
+				const float PresentS = pa250::battle_rules().drill_present_s * (Sq.OfficerReplaceLeft > 0.f ? pa250::battle_rules().drill_ragged_response_scale : 1.f);
+				Sq.StageTimer = PresentS + JitterSec * StageSeed.FRand();
 				Sq.DebugReason = TEXT("present");
-				if (bNear) Shout(Sq.Faction, TEXT("present"), TEXT("Present!"), Sq.Anchor, VT.PresentSeconds);
+				if (bNear) { Shout(Sq.Faction, TEXT("present"), TEXT("Present!"), Sq.Anchor, PresentS); SoundDrillCall(Sq, TEXT("present")); }
 			}
 			break;
 		case EVolleyCall::Present:
 			Sq.DebugReason = TEXT("present");
 			if (Sq.StageTimer <= 0.f)
 			{
-				if (bNear) Shout(Sq.Faction, TEXT("fire"), TEXT("FIRE!"), Sq.Anchor, 1.f);
+				if (bNear) { Shout(Sq.Faction, TEXT("fire"), TEXT("FIRE!"), Sq.Anchor, 1.f); SoundDrillCall(Sq, TEXT("fire")); }
 				ScheduleVolley(Sq, SafeShooters);
 				Sq.Stage = Sq.PendingShots.Num() > 0 ? EVolleyCall::Fire : EVolleyCall::None;
 				if (Sq.Stage == EVolleyCall::Fire) TickPendingVolley(Sq); // fire any zero-delay shots now
@@ -1679,6 +1771,14 @@ void UPA250VolleyCoordinator::TickFormation(FSquad& Sq, const TArray<ARFCharacte
 			CancelVolleyOrders(Sq, TEXT("cancelled_contact"));
 			break;
 		}
+	}
+
+	// The word of command is acted: "Make ready" and "Present" each start their clip on the men
+	// (the fire clip is started shot by shot, timed to its discharge; TickPendingVolley).
+	if (Sq.Stage != Sq.ClipStage)
+	{
+		if (Sq.Stage == EVolleyCall::MakeReady || Sq.Stage == EVolleyCall::Present) PlayVolleyStageClips(Sq, Live);
+		Sq.ClipStage = Sq.Stage;
 	}
 
 	// ---- Orders to each man ----
@@ -1759,6 +1859,24 @@ void UPA250VolleyCoordinator::AnnounceMorale(const FSquad& Sq, EPA250Morale Befo
 		if (bOurs && Before == EPA250Morale::Rallying) Shout(Sq.Faction, TEXT("reformed"), TEXT("Line re-formed!"), Sq.Anchor);
 		break;
 	}
+}
+
+void UPA250VolleyCoordinator::SoundDrillCall(const FSquad& Sq, const TCHAR* Word)
+{
+	// A musician standing with the line beats (and fifes) the word: battle_look.json audio.orders.
+	if (!GameMode.IsValid()) return;
+	const ARFCharacter* Musician = nullptr;
+	for (const TWeakObjectPtr<ARFCharacter>& W : Sq.Members)
+	{
+		const ARFCharacter* C = W.Get();
+		if (C && !C->IsDead() && PA250UnitClasses::KitFor(C->FactionId, C->UnitClass).bRelaysOrders) { Musician = C; break; }
+	}
+	FString Drum, Fife;
+	if (!Musician || !PA250BattleFX::OrderCue(Word, Drum, Fife)) return;
+	const FVector At = Musician->GetActorLocation() + FVector(0.f, 0.f, 100.f);
+	if (!Drum.IsEmpty()) FPA250BattleAudio::PlayAtOr(GameMode.Get(), Drum, TEXT("drum_roll"), At, EPA250SoundRange::Gunfire, 0.8f, 0.02f);
+	if (!Fife.IsEmpty()) FPA250BattleAudio::PlayAt(GameMode.Get(), Fife, At + FVector(0.f, 0.f, 20.f), EPA250SoundRange::Gunfire, 0.6f, 0.02f);
+	MoraleTransitions.FindOrAdd(FString::Printf(TEXT("%s.DrillCall"), *Sq.Faction.ToString()))++;
 }
 
 void UPA250VolleyCoordinator::Shout(FName VoiceFaction, const TCHAR* Key, const TCHAR* Text, const FVector& Where, float Seconds)
@@ -2285,6 +2403,246 @@ ARFCharacter* UPA250VolleyCoordinator::EnemyNear(FName Faction, const FVector& P
 	return Best;
 }
 
+int32 UPA250VolleyCoordinator::TryFallIn(ARFCharacter* Man)
+{
+	if (!Man || Man->IsDead() || !GameMode.IsValid()) return INDEX_NONE;
+	if (FallenIn.Get() == Man)
+	{
+		FallOut(TEXT("fell out"));
+		return INDEX_NONE;
+	}
+	const float RadiusCm = pa250::battle_rules().drill_fall_in_radius_m * 100.f;
+	// The nearest friendly line with a man within reach: its own drill (no living leader but him),
+	// in a state to stand in ranks.
+	FSquad* Best = nullptr;
+	float BestD = RadiusCm;
+	for (FSquad& Sq : Squads)
+	{
+		if (Sq.Faction != Man->FactionId || Sq.Morale.State == EPA250Morale::Routing) continue;
+		if (Sq.Leader.IsValid() && !Sq.Leader->IsDead() && Sq.Leader.Get() != Man) continue; // another leader's file
+		int32 Standing = 0;
+		for (const TWeakObjectPtr<ARFCharacter>& W : Sq.Members)
+		{
+			const ARFCharacter* C = W.Get();
+			if (!C || C->IsDead() || C == Man) continue;
+			++Standing;
+			const float D = FVector::Dist2D(C->GetActorLocation(), Man->GetActorLocation());
+			if (D < BestD) { BestD = D; Best = &Sq; }
+		}
+		if (Standing < 2 && Best == &Sq) Best = nullptr; // a line, not a man or two
+	}
+	if (!Best) return INDEX_NONE;
+	// He stands in its ranks, not before a file of his own: a file he led keeps to its own drill.
+	for (FSquad& Sq : Squads)
+	{
+		if (Sq.Leader.Get() == Man)
+		{
+			Sq.Leader = nullptr;
+			Sq.Order = EPA250SquadOrder::None;
+			Sq.OrderedBy = nullptr;
+		}
+		if (&Sq != Best)
+		{
+			Sq.Members.Remove(Man);
+			Sq.FileOrder.Remove(Man);
+		}
+	}
+	Best->Members.AddUnique(Man);
+	Best->FileOrder.Reset(); // sorted again with him in it: he takes the place nearest where he stands
+	Man->SquadId = Best->Id;
+	Man->Tags.AddUnique(TEXT("PA250FallenIn"));
+	FallenIn = Man;
+	FallInSquadId = Best->Id;
+	bFallInShotHeld = false;
+	MoraleTransitions.FindOrAdd(FString::Printf(TEXT("%s.FallIn"), *Man->FactionId.ToString()))++;
+	UE_LOG(LogTemp, Display, TEXT("PA250 fall-in: %s joins squad %d (%d men) %.0f cm from its nearest man"), *Man->GetName(), Best->Id, Best->Members.Num(), BestD);
+	return Best->Id;
+}
+
+void UPA250VolleyCoordinator::FallOut(const TCHAR* Why)
+{
+	ARFCharacter* Man = FallenIn.Get();
+	if (FSquad* Sq = FindSquad(FallInSquadId))
+	{
+		if (Man)
+		{
+			Sq->Members.Remove(Man);
+			Sq->FileOrder.Remove(Man);
+		}
+		Sq->PendingShots.RemoveAll([](const FPendingVolleyShot& P) { return P.bHeldTrigger; });
+	}
+	if (Man)
+	{
+		Man->Tags.Remove(TEXT("PA250FallenIn"));
+		Man->SquadId = -1;
+		UE_LOG(LogTemp, Display, TEXT("PA250 fall-in: %s leaves squad %d (%s)"), *Man->GetName(), FallInSquadId, Why);
+	}
+	FallenIn = nullptr;
+	FallInSquadId = INDEX_NONE;
+	bFallInShotHeld = false;
+}
+
+bool UPA250VolleyCoordinator::HoldFallenInShot(ARFCharacter* Man)
+{
+	if (!Man || Man != FallenIn.Get() || !Man->Musket || !Man->Musket->CanFire()) return false;
+	const FSquad* Sq = FindSquad(FallInSquadId);
+	if (!Sq || (Sq->Stage != EVolleyCall::MakeReady && Sq->Stage != EVolleyCall::Present)) return false;
+	bFallInShotHeld = true;
+	UE_LOG(LogTemp, Display, TEXT("PA250 fall-in: shot held for squad %d's volley"), Sq->Id);
+	return true;
+}
+
+void UPA250VolleyCoordinator::AddHeldTrigger(FSquad& Sq, float Now)
+{
+	ARFCharacter* Man = FallenIn.Get();
+	if (!bFallInShotHeld || Sq.Id != FallInSquadId || !Man || Man->IsDead()) return;
+	bFallInShotHeld = false;
+	FPendingVolleyShot P;
+	P.Shooter = Man;
+	P.Epoch = Sq.VolleyEpoch;
+	P.bHeldTrigger = true;
+	P.bClipStarted = true; // the player's own animation fires his musket
+	P.FireAtTime = Now + VolleyShotSeconds(Sq, Sq.PendingShots.Num(), 0.f, pa250::battle_rules().blast_volley_stage_jitter_ms);
+	Sq.PendingShots.Add(P);
+}
+
+float UPA250VolleyCoordinator::VolleyShotSeconds(const FSquad& Sq, int32 Index, float RollingFileSeconds, float StageJitterMs) const
+{
+	const pa250::BattleRules& R = pa250::battle_rules();
+	const bool bRagged = Sq.OfficerReplaceLeft > 0.f;
+	const float Response = FMath::Max(0.f, R.drill_response_fire_s) * (bRagged ? R.drill_ragged_response_scale : 1.f);
+	if (bRagged)
+	{
+		// No officer to give the word as one: each man fires when he is ready, over a wider spread.
+		FRandomStream Rng = PA250BattleRng::Derived(HashCombine(HashCombine(GetTypeHash(Sq.Id), GetTypeHash(Sq.VolleyEpoch)), GetTypeHash(Index)));
+		return Response + Rng.FRand() * FMath::Max(0.f, R.drill_volley_spread_s * R.drill_ragged_spread_scale);
+	}
+	const float Offset = VolleyTotalOffset(Sq.Id, Sq.VolleyEpoch, Index, RollingFileSeconds, StageJitterMs);
+	// A steady line's volley falls inside volley_spread_s; rolling fire by files is meant to run longer.
+	return Response + (RollingFileSeconds > 0.f ? Offset : FMath::Min(Offset, FMath::Max(0.f, R.drill_volley_spread_s)));
+}
+
+void UPA250VolleyCoordinator::NotifyOfficerDown(const ARFCharacter* Officer)
+{
+	if (!Officer) return;
+	FSquad* Sq = FindLedSquad(Officer);
+	if (!Sq)
+	{
+		Sq = FindSquad(Officer->SquadId);
+		if (Sq && Sq->Faction != Officer->FactionId) Sq = nullptr;
+	}
+	if (!Sq || Sq->OfficerReplaceLeft > 0.f) return;
+	Sq->OfficerReplaceLeft = FMath::Max(KINDA_SMALL_NUMBER, pa250::battle_rules().drill_officer_replace_s);
+	Sq->bFallenOfficerWasPlayer = Officer->IsPlayerControlled() || Officer == FallenIn.Get()
+		|| (GameMode.IsValid() && GameMode->GetWorld() && GameMode->GetWorld()->GetFirstPlayerController()
+			&& GameMode->GetWorld()->GetFirstPlayerController()->GetPawn() == Officer);
+	MoraleTransitions.FindOrAdd(FString::Printf(TEXT("%s.OfficerlessFire"), *Sq->Faction.ToString()))++;
+	UE_LOG(LogTemp, Display, TEXT("PA250 officer loss: squad %d fires raggedly for %.1f s (%s fell)"), Sq->Id, Sq->OfficerReplaceLeft, *Officer->GetName());
+}
+
+void UPA250VolleyCoordinator::ResumeAfterOfficer(FSquad& Sq)
+{
+	Sq.OfficerReplaceLeft = 0.f;
+	const ARFCharacter* Fallen = Sq.Leader.Get();
+	const TCHAR* How = TEXT("a sergeant gives the word");
+	if (Fallen && Fallen->IsDead())
+	{
+		ARFCharacter* Sgt = Sq.bFallenOfficerWasPlayer ? nullptr : PickSuccessor(Fallen);
+		if (Sgt)
+		{
+			TransferLeadership(Fallen, Sgt);
+			How = TEXT("a sergeant leads the file");
+		}
+		else
+		{
+			// The player's file (or no man to take it): it keeps to its own drill, its men free for
+			// the man he plays next to lead (EnsureLeaderFile takes no man of a living leader's file).
+			Sq.Leader = nullptr;
+			Sq.Order = EPA250SquadOrder::None;
+			Sq.OrderedBy = nullptr;
+			How = TEXT("the file keeps to its own drill");
+		}
+	}
+	else if (!Sq.Leader.IsValid())
+	{
+		Sq.Leader = nullptr;
+	}
+	Sq.bFallenOfficerWasPlayer = false;
+	MoraleTransitions.FindOrAdd(FString::Printf(TEXT("%s.SergeantResumed"), *Sq.Faction.ToString()))++;
+	UE_LOG(LogTemp, Display, TEXT("PA250 officer loss: squad %d steady again (%s)"), Sq.Id, How);
+}
+
+float UPA250VolleyCoordinator::OrderResponseSeconds(EPA250SquadOrder Order, bool bRagged)
+{
+	const pa250::BattleRules& R = pa250::battle_rules();
+	const float D = Order == EPA250SquadOrder::Hold ? R.drill_response_halt_s
+		: Order == EPA250SquadOrder::FormLine ? R.drill_response_advance_s : 0.f;
+	return FMath::Max(0.f, D) * (bRagged ? R.drill_ragged_response_scale : 1.f);
+}
+
+void UPA250VolleyCoordinator::SetOrderAfterResponse(FSquad& Sq, EPA250SquadOrder Order, ARFCharacter* Giver, const FVector& AimPoint, float Until)
+{
+	const float Delay = OrderResponseSeconds(Order, Sq.OfficerReplaceLeft > 0.f);
+	PendingOrders.RemoveAll([&Sq](const FPendingOrder& O) { return O.SquadId == Sq.Id; }); // a newer word replaces one not yet obeyed
+	if (Delay <= 0.f || !GameMode.IsValid() || !GameMode->GetWorld())
+	{
+		SetOrder(Sq, Order, Giver, AimPoint, Until);
+		return;
+	}
+	FPendingOrder O;
+	O.SquadId = Sq.Id;
+	O.Order = Order;
+	O.Giver = Giver;
+	O.AimPoint = AimPoint;
+	O.Until = Until;
+	O.ApplyAt = GameMode->GetWorld()->GetTimeSeconds() + Delay;
+	PendingOrders.Add(O);
+}
+
+float UPA250VolleyCoordinator::GetOfficerReplaceLeft(int32 SquadId) const
+{
+	const FSquad* Sq = const_cast<UPA250VolleyCoordinator*>(this)->FindSquad(SquadId);
+	return Sq ? Sq->OfficerReplaceLeft : 0.f;
+}
+
+EVolleyCall UPA250VolleyCoordinator::GetSquadStage(int32 SquadId) const
+{
+	const FSquad* Sq = const_cast<UPA250VolleyCoordinator*>(this)->FindSquad(SquadId);
+	return Sq ? Sq->Stage : EVolleyCall::None;
+}
+
+FString UPA250VolleyCoordinator::GetSquadReason(int32 SquadId) const
+{
+	const FSquad* Sq = const_cast<UPA250VolleyCoordinator*>(this)->FindSquad(SquadId);
+	return Sq ? FString(Sq->DebugReason) : FString();
+}
+
+EPA250SquadOrder UPA250VolleyCoordinator::GetSquadOrder(int32 SquadId) const
+{
+	const FSquad* Sq = const_cast<UPA250VolleyCoordinator*>(this)->FindSquad(SquadId);
+	return Sq ? Sq->Order : EPA250SquadOrder::None;
+}
+
+TArray<TPair<ARFCharacter*, FVector>> UPA250VolleyCoordinator::GetSquadSpotsForTest(int32 SquadId) const
+{
+	TArray<TPair<ARFCharacter*, FVector>> Out;
+	if (const FSquad* Sq = const_cast<UPA250VolleyCoordinator*>(this)->FindSquad(SquadId))
+	{
+		for (int32 i = 0; i < Sq->FileOrder.Num() && i < Sq->LastSpots.Num(); ++i) Out.Emplace(Sq->FileOrder[i].Get(), Sq->LastSpots[i]);
+	}
+	return Out;
+}
+
+TArray<float> UPA250VolleyCoordinator::GetPendingFireTimesForTest(int32 SquadId) const
+{
+	TArray<float> Out;
+	if (const FSquad* Sq = const_cast<UPA250VolleyCoordinator*>(this)->FindSquad(SquadId))
+	{
+		for (const FPendingVolleyShot& P : Sq->PendingShots) Out.Add(P.FireAtTime);
+	}
+	return Out;
+}
+
 int32 UPA250VolleyCoordinator::EnsureLeaderFile(ARFCharacter* Leader)
 {
 	UWorld* World = GameMode.IsValid() ? GameMode->GetWorld() : nullptr;
@@ -2436,7 +2794,7 @@ int32 UPA250VolleyCoordinator::GiveOrder(ARFCharacter* Leader, EPA250SquadOrder 
 	int32 Took = 0;
 	if (FSquad* Mine = FindLedSquad(Leader))
 	{
-		SetOrder(*Mine, Order, Leader, AimPoint, -1.f);
+		SetOrderAfterResponse(*Mine, Order, Leader, AimPoint, -1.f);
 		++Took;
 	}
 	// An officer's word carries to every friendly line within his order radius. Anyone's order carries
@@ -2462,7 +2820,7 @@ int32 UPA250VolleyCoordinator::GiveOrder(ARFCharacter* Leader, EPA250SquadOrder 
 			{
 				continue;
 			}
-			SetOrder(Sq, Order, Leader, AimPoint, Now + Verbs.SquadOrderSeconds);
+			SetOrderAfterResponse(Sq, Order, Leader, AimPoint, Now + Verbs.SquadOrderSeconds);
 			++Took;
 			Relayed += bRelayed ? 1 : 0;
 		}
@@ -2486,7 +2844,19 @@ int32 UPA250VolleyCoordinator::GiveOrder(ARFCharacter* Leader, EPA250SquadOrder 
 		if (Drummer)
 		{
 			MoraleTransitions.FindOrAdd(FString::Printf(TEXT("%s.DrumCall"), *Leader->FactionId.ToString()))++;
-			FPA250BattleAudio::PlayAtOr(GameMode.Get(), PA250Squad::OrderDrumCall(Order), TEXT("drum_roll"), *Drummer + FVector(0.f, 0.f, 100.f), EPA250SoundRange::Gunfire, 0.9f, 0.02f);
+			// The word's own call from battle_look.json audio.orders (Form line = advance, Hold = halt),
+			// else the call each order always had.
+			FString Drum, Fife;
+			const TCHAR* Word = Order == EPA250SquadOrder::FormLine ? TEXT("advance") : Order == EPA250SquadOrder::Hold ? TEXT("halt") : nullptr;
+			if (Word && PA250BattleFX::OrderCue(Word, Drum, Fife))
+			{
+				FPA250BattleAudio::PlayAtOr(GameMode.Get(), Drum, PA250Squad::OrderDrumCall(Order), *Drummer + FVector(0.f, 0.f, 100.f), EPA250SoundRange::Gunfire, 0.9f, 0.02f);
+				if (!Fife.IsEmpty()) FPA250BattleAudio::PlayAt(GameMode.Get(), Fife, *Drummer + FVector(0.f, 0.f, 120.f), EPA250SoundRange::Gunfire, 0.7f, 0.02f);
+			}
+			else
+			{
+				FPA250BattleAudio::PlayAtOr(GameMode.Get(), PA250Squad::OrderDrumCall(Order), TEXT("drum_roll"), *Drummer + FVector(0.f, 0.f, 100.f), EPA250SoundRange::Gunfire, 0.9f, 0.02f);
+			}
 		}
 	}
 	if (Took > 0)
@@ -2633,6 +3003,7 @@ void UPA250VolleyCoordinator::ScheduleLedVolley(FSquad& Sq, const TArray<ARFChar
 	for (ARFCharacter* C : Shooters)
 	{
 		if (C->IsDead() || !C->Musket || !C->Musket->CanFire()) continue;
+		if (C == FallenIn.Get()) continue; // his trigger is his own (AddHeldTrigger)
 		FPendingVolleyShot P;
 		P.Shooter = C;
 		P.Epoch = Sq.VolleyEpoch;
@@ -2652,9 +3023,10 @@ void UPA250VolleyCoordinator::ScheduleLedVolley(FSquad& Sq, const TArray<ARFChar
 			P.bAtPoint = true;
 			P.AimPoint = Sq.LeaderAimPoint;
 		}
-		P.FireAtTime = Now + VolleyTotalOffset(Sq.Id, Sq.VolleyEpoch, Sq.PendingShots.Num(), 0.f, StageJitterMs);
+		P.FireAtTime = Now + VolleyShotSeconds(Sq, Sq.PendingShots.Num(), 0.f, StageJitterMs);
 		Sq.PendingShots.Add(P);
 	}
+	AddHeldTrigger(Sq, Now);
 	if (Sq.PendingShots.Num() == 0) return;
 	++Sq.VolleysThisFight;
 	MoraleTransitions.FindOrAdd(FString::Printf(TEXT("%s.LedVolley"), *Sq.Faction.ToString()))++;
@@ -2681,6 +3053,50 @@ void UPA250VolleyCoordinator::Tick(float DeltaSeconds)
 	CalloutTimer = FMath::Max(0.f, CalloutTimer - DeltaSeconds);
 	RefreshFormations();
 	TickSquads(DeltaSeconds);
+
+	// The drill: words of command take effect after the men's response; an officerless squad counts
+	// down to its sergeant; the fallen-in man keeps his place or falls out.
+	if (GameMode.IsValid() && GameMode->GetWorld())
+	{
+		const float Now = GameMode->GetWorld()->GetTimeSeconds();
+		for (int32 i = PendingOrders.Num() - 1; i >= 0; --i)
+		{
+			if (PendingOrders[i].ApplyAt > Now) continue;
+			const FPendingOrder O = PendingOrders[i];
+			PendingOrders.RemoveAt(i);
+			FSquad* Sq = FindSquad(O.SquadId);
+			if (Sq && O.Giver.IsValid()) SetOrder(*Sq, O.Order, O.Giver.Get(), O.AimPoint, O.Until);
+		}
+	}
+	for (FSquad& Sq : Squads)
+	{
+		// A led file whose leader fell without word reaching us (destroyed, or a path that skipped
+		// the game mode's death handling) is caught here; NotifyOfficerDown ignores a second call.
+		if (Sq.Leader.IsValid() && Sq.Leader->IsDead() && Sq.OfficerReplaceLeft <= 0.f) NotifyOfficerDown(Sq.Leader.Get());
+		if (Sq.OfficerReplaceLeft <= 0.f) continue;
+		Sq.OfficerReplaceLeft = FMath::Max(0.f, Sq.OfficerReplaceLeft - DeltaSeconds);
+		if (Sq.OfficerReplaceLeft > 0.f) continue;
+		// The full officer_replace_s has run. A volley in hand is finished raggedly first.
+		if (Sq.Stage == EVolleyCall::Fire || Sq.PendingShots.Num() > 0)
+		{
+			Sq.OfficerReplaceLeft = KINDA_SMALL_NUMBER;
+			continue;
+		}
+		ResumeAfterOfficer(Sq);
+	}
+	if (FallenIn.IsValid() || FallInSquadId != INDEX_NONE)
+	{
+		ARFCharacter* Man = FallenIn.Get();
+		const FSquad* Sq = FindSquad(FallInSquadId);
+		const int32 Place = (Sq && Man) ? Sq->FileOrder.IndexOfByKey(Man) : INDEX_NONE;
+		const float BreakCm = pa250::battle_rules().drill_fall_in_break_m * 100.f;
+		if (!Man || Man->IsDead()) FallOut(TEXT("fell"));
+		else if (!Sq) FallOut(TEXT("the line is gone"));
+		else if (Place != INDEX_NONE && Sq->LastSpots.IsValidIndex(Place) && FVector::Dist2D(Man->GetActorLocation(), Sq->LastSpots[Place]) > BreakCm)
+		{
+			FallOut(TEXT("strayed from his place"));
+		}
+	}
 
 	// Decay capture suppression.
 	if (GameMode.IsValid())

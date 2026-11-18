@@ -1,4 +1,5 @@
 #include "PA250BotController.h"
+#include "PA250BattleRng.h"
 #include "Mounted/PA250MountedSoldier.h"
 #include "EngineUtils.h"
 #include "GameFramework/CharacterMovementComponent.h"
@@ -358,8 +359,8 @@ void APA250BotController::Tick(float DeltaSeconds)
 		if (bWasMeleeBusy && !bBusyNow)
 		{
 			const bool bFollowUp = bLastMoveWasButt && Melee->GetLastBlow() == EPA250Blow::Hit;
-			MeleeRest = bFollowUp ? 0.f : Training.MeleeRecoverSeconds * FMath::FRandRange(0.7f, 1.3f);
-			bReadsGuard = FMath::FRand() < Training.MeleeSkill;
+			MeleeRest = bFollowUp ? 0.f : Training.MeleeRecoverSeconds * PA250BattleRng::Get().FRandRange(0.7f, 1.3f);
+			bReadsGuard = PA250BattleRng::Get().FRand() < Training.MeleeSkill;
 			bLastMoveWasButt = false;
 		}
 		bWasMeleeBusy = bBusyNow;
@@ -384,7 +385,7 @@ void APA250BotController::Tick(float DeltaSeconds)
 	{
 		return;
 	}
-	ThinkTimer = 0.2f + FMath::FRand() * 0.15f;
+	ThinkTimer = 0.2f + PA250BattleRng::Get().FRand() * 0.15f;
 
 	const FPA250BotTuningValues& T = BotTuning ? BotTuning->Values : FPA250BotTuningValues();
 	// The class's own band (unit_classes.json): open fire inside the far edge, close to the near one.
@@ -514,7 +515,7 @@ void APA250BotController::Tick(float DeltaSeconds)
 		{
 			if (!bReactionRolled)
 			{
-				ReactionTimer = FMath::FRandRange(T.ReactionMinSeconds, T.ReactionMaxSeconds);
+				ReactionTimer = PA250BattleRng::Get().FRandRange(T.ReactionMinSeconds, T.ReactionMaxSeconds);
 				bReactionRolled = true;
 			}
 			if (ReactionTimer <= 0.f)
@@ -524,7 +525,7 @@ void APA250BotController::Tick(float DeltaSeconds)
 					+ Enemy->GetVelocity() * (Dist / FMath::Max(Me->Musket->GetProjectileSpeed(), 1.f));
 				// Rested on the wall he is behind, a skirmisher's aim tightens.
 				const float Rested = Form.bInCover ? Role.RestedAimScale : 1.f;
-				const FVector Dir = FMath::VRandCone((Aim - Muzzle).GetSafeNormal(), FMath::DegreesToRadians(AimErrorDegrees * Rested * RangeAim));
+				const FVector Dir = PA250BattleRng::Get().VRandCone((Aim - Muzzle).GetSafeNormal(), FMath::DegreesToRadians(AimErrorDegrees * Rested * RangeAim));
 				if (Me->FireMusketAt(Muzzle + Dir * Dist))
 				{
 					State = EBotState::Fire;
@@ -550,8 +551,8 @@ void APA250BotController::Tick(float DeltaSeconds)
 		if (LooseGoal.Get() != Anchor)
 		{
 			LooseGoal = Anchor;
-			const FVector Rand = FVector(FMath::FRandRange(-1.f, 1.f), FMath::FRandRange(-1.f, 1.f), 0.f).GetSafeNormal();
-			LooseSlotOffset = Rand * FMath::FRandRange(700.f, 1600.f);
+			const FVector Rand = FVector(PA250BattleRng::Get().FRandRange(-1.f, 1.f), PA250BattleRng::Get().FRandRange(-1.f, 1.f), 0.f).GetSafeNormal();
+			LooseSlotOffset = Rand * PA250BattleRng::Get().FRandRange(700.f, 1600.f);
 		}
 	}
 	const FVector SlotLoc = DesiredSlotLocation(Me, Goal);
@@ -573,9 +574,9 @@ void APA250BotController::Tick(float DeltaSeconds)
 		{
 			const FVector Muzzle = Me->Musket->GetMuzzleLocation()->GetComponentLocation();
 			const FVector Aim = Enemy->GetActorLocation() + FVector(0.f, 0.f, 20.f);
-			const FVector Dir = FMath::VRandCone((Aim - Muzzle).GetSafeNormal(), FMath::DegreesToRadians(AimErrorDegrees * 1.5f * RangeAim));
+			const FVector Dir = PA250BattleRng::Get().VRandCone((Aim - Muzzle).GetSafeNormal(), FMath::DegreesToRadians(AimErrorDegrees * 1.5f * RangeAim));
 			if (Me->FireMusketAt(Muzzle + Dir * Dist) && Volleys) Volleys->RecordEngagement(Dist);
-			ReactionTimer = FMath::FRandRange(T.ReactionMinSeconds, T.ReactionMaxSeconds);
+			ReactionTimer = PA250BattleRng::Get().FRandRange(T.ReactionMinSeconds, T.ReactionMaxSeconds);
 		}
 		return;
 	}
@@ -599,8 +600,8 @@ void APA250BotController::Tick(float DeltaSeconds)
 		StopMovement();
 		if (!bReactionRolled)
 		{
-			ReactionTimer = FMath::FRandRange(T.ReactionMinSeconds, T.ReactionMaxSeconds);
-			VolleyJitter = FMath::FRandRange(0.f, T.VolleyWindowSeconds);
+			ReactionTimer = PA250BattleRng::Get().FRandRange(T.ReactionMinSeconds, T.ReactionMaxSeconds);
+			VolleyJitter = PA250BattleRng::Get().FRandRange(0.f, T.VolleyWindowSeconds);
 			bReactionRolled = true;
 			State = EBotState::FormLine;
 		}
@@ -614,7 +615,7 @@ void APA250BotController::Tick(float DeltaSeconds)
 		const FVector Lead = Enemy->GetVelocity() * (Dist / FMath::Max(Speed, 1.f));
 		const FVector Aim = Enemy->GetActorLocation() + FVector(0.f, 0.f, 20.f) + Lead;
 		const FVector Muzzle = Me->Musket->GetMuzzleLocation()->GetComponentLocation();
-		const FVector Dir = FMath::VRandCone((Aim - Muzzle).GetSafeNormal(), FMath::DegreesToRadians(AimErrorDegrees * RangeAim));
+		const FVector Dir = PA250BattleRng::Get().VRandCone((Aim - Muzzle).GetSafeNormal(), FMath::DegreesToRadians(AimErrorDegrees * RangeAim));
 		if (Me->FireMusketAt(Muzzle + Dir * Dist) && Volleys)
 		{
 			Volleys->RecordEngagement(Dist);

@@ -1,4 +1,5 @@
 #include "RFGameMode.h"
+#include "Battle/PA250BattleRng.h"
 #include "EngineUtils.h"
 #include "GameFramework/Controller.h"
 #include "GameFramework/PlayerStart.h"
@@ -61,7 +62,7 @@ AActor* ARFGameMode::ChooseRespawnPoint(AController* Controller)
 	{
 		return nullptr;
 	}
-	return Starts[FMath::RandRange(0, Starts.Num() - 1)];
+	return Starts[PA250BattleRng::Get().RandRange(0, Starts.Num() - 1)];
 }
 
 TSubclassOf<APawn> ARFGameMode::ChooseRespawnPawnClass(AController* Controller)

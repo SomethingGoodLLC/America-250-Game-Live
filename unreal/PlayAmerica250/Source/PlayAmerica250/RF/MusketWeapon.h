@@ -40,8 +40,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Weapon")
 	bool Fire(FVector Direction = FVector::ZeroVector, bool bIsAiming = false, float OwnerSpeed = 0.f, float AccuracyScale = 1.f);
 
-	/** Flash in the pan: the priming burns, the charge does not. No ball; the piece must be loaded again. */
-	bool Misfire();
+	/** No shot: a flash in the pan (the priming burns, the charge does not) or, with bFlashInPan false,
+	 *  a misfire (the flint gives no spark). No ball either way; the piece must be loaded again. */
+	bool Misfire(bool bFlashInPan = true);
 
 	UFUNCTION(BlueprintCallable, Category = "Weapon")
 	void StartReload();
@@ -68,6 +69,8 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Weapon")
 	bool CanFire() const { return State == EMusketState::Loaded && !Sequencer.IsJammed(); }
+	/** Tests: loaded at once (the cases tick no actors, so no reload ever finishes by itself). */
+	void ForceLoadedForTest() { Sequencer.Reset(); SetState(EMusketState::Loaded); }
 
 	UFUNCTION(BlueprintPure, Category = "Weapon")
 	bool IsJammed() const { return State == EMusketState::Jammed || Sequencer.IsJammed(); }

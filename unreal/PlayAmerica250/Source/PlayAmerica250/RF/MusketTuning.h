@@ -163,11 +163,8 @@ struct PLAYAMERICA250_API FVolleyTuning
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volley")
 	float SuppressionCaptureScale = 0.45f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volley")
-	float MakeReadySeconds = 1.2f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volley")
-	float PresentSeconds = 0.9f;
+	// MakeReadySeconds / PresentSeconds moved 1:1 to battle_rules.json drill.make_ready_s / present_s
+	// (2026-11-16; DA_MusketTuning held no override). They are gone here so no asset can override the data.
 };
 
 /** Legacy flat struct kept for weapon DefaultTuning compatibility; mirrors core musket fields. */

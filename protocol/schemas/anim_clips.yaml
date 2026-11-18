@@ -120,10 +120,34 @@ properties:
       required: [group, asset, placeholder, shows, loop]
       properties:
         group:
-          enum: [loading_drill, gun_crew, rowing, rout, surrender, crawl, drummer, ensign, locomotion, traversal]
+          enum: [loading_drill, gun_crew, volley, reaction, rowing, rout, surrender, crawl, drummer, ensign, locomotion, traversal]
         asset:
           description: "The imported clip, or null: the placeholder shows."
           oneOf: [{type: "null"}, {$ref: "#/definitions/package"}]
+        station_cm:
+          description: >-
+            Gun crew only. Where the man stands for this clip, in the cannon's mesh space (x toward the
+            muzzle, y to its right, cm): the place the clip's hands were pinned from
+            (tools/anim/gun_geometry.json stations). The four posts are sponger (muzzle right), loader
+            (muzzle left), ventsman (vent) and captain (trail); the firer's and handspike man's clips
+            are played from the ventsman's and the captain's posts.
+          type: array
+          minItems: 2
+          maxItems: 2
+          items: {type: number}
+        face_cm:
+          description: "Gun crew only. The point he faces from his station, same space."
+          type: array
+          minItems: 2
+          maxItems: 2
+          items: {type: number}
+        variants:
+          description: >-
+            Takes of the same clip (asset is the first). The battle picks one for each man from a seed,
+            so a rank does not move as one body. Absent: the asset alone.
+          type: array
+          minItems: 1
+          items: {$ref: "#/definitions/package"}
         placeholder:
           description: >-
             What stands in while there is no clip. procedural: a pose made in code. locomotion: the

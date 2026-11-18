@@ -183,6 +183,29 @@ private:
 	const UAnimSequence* TraversalClip = nullptr;
 	double TraversalTime = 0.0;
 	float TraversalWeight = 0.f;
+	/** A whole-body action clip (a reaction, a volley motion, a gun crew's drill), root locked. */
+	const UAnimSequence* ActionClip = nullptr;
+	double ActionTime = 0.0;
+	float ActionWeight = 0.f;
+	bool bActionLoop = false;
+	bool bActionKeepsHand = false;
+};
+
+/** How a whole-body action clip is played (UPA250SoldierAnimInstance::PlayAction). */
+struct FPA250ActionParams
+{
+	float BlendIn = 0.15f;
+	float BlendOut = 0.25f;
+	float Rate = 1.f;
+	/** Where in the clip it starts (a clip entered part-way, to land a notify on a set moment). */
+	float StartTime = 0.f;
+	/** The clip's root motion moves the man (his capsule, swept). False: he stays where he stands. */
+	bool bRootMotion = true;
+	/** Loops for LoopSeconds (a crawl), instead of playing once to its end. */
+	bool bLoop = false;
+	float LoopSeconds = 0.f;
+	/** The left hand stays on the musket (a clip made for a musket hold). False: the clip's own arms. */
+	bool bKeepSupportHand = false;
 };
 
 /** Native body anim for the period soldier: one looping locomotion clip (cross-faded when it changes), the melee pose layer and the support-hand IK. */
@@ -230,6 +253,36 @@ public:
 	bool GetUpperBodyLoop() const { return bUpperLoop; }
 	float GetTraversalTime() const { return TraversalTime; }
 	float GetTraversalWeight() const { return TraversalWeight; }
+	/**
+	 * Game thread. A registered clip over the whole body (a reaction, a volley motion): it plays
+	 * itself, by the world's clock, blends in and out, moves the man by its root motion and calls
+	 * OnNotify with the name of each notify it passes (the clip's Blueprint notify classes are told
+	 * by name, so "Notify_Volley_Discharge" is the same whatever class carries it). The soldier has
+	 * no montage slot: this layer is how a clip reaches him. Returns the seconds it will show, 0 when
+	 * refused (no clip, or one on another skeleton).
+	 */
+	float PlayAction(UAnimSequence* InClip, const FPA250ActionParams& Params, TFunction<void(FName)> OnNotify = nullptr);
+	void StopAction(float BlendOutSeconds = 0.2f);
+	bool IsActionPlaying() const { return ActionClip != nullptr && !bActionPosed; }
+	/**
+	 * Game thread. A clip over the whole body held at a time someone else keeps (a gun crew's drill,
+	 * scrubbed by the step's progress). Set every frame it should show; it fades out by itself when
+	 * no longer set. It never interrupts a played action.
+	 */
+	void SetPosedAction(UAnimSequence* InClip, float InTime, float InWeight, bool bInLoop);
+	const UAnimSequence* GetActionClip() const { return ActionClip; }
+	float GetActionTime() const { return ActionTime; }
+	float GetActionWeight() const { return ActionWeight; }
+	bool GetActionLoop() const { return bActionLoop; }
+	bool ActionKeepsSupportHand() const { return ActionParams.bKeepSupportHand; }
+	/** Pure: the notifies of a clip whose trigger time lies in (From, To], by name, in order of time. */
+	static void NotifiesBetween(const UAnimSequence* Clip, float From, float To, TArray<FName>& OutNames);
+	/** Pure: the name a notify goes by ("Notify_Volley_Discharge"), from its class when it has one. */
+	static FName NotifyNameOf(const struct FAnimNotifyEvent& Event);
+	/** Pure: when a named notify fires in a clip, or -1. */
+	static float NotifyTime(const UAnimSequence* Clip, FName NotifyName);
+	/** Pure: how much of an action shows Elapsed seconds into one of Total seconds. */
+	static float ActionWeightAt(float Elapsed, float Total, float BlendIn, float BlendOut);
 	bool WantsFullQuality() const { return bFullQuality; }
 	const TArray<TObjectPtr<UPoseSearchDatabase>>& GetLocomotionDatabases() const { return LocomotionDatabases; }
 	float GetSearchThrottleSeconds() const { return SearchThrottleSeconds; }
@@ -246,6 +299,7 @@ public:
 	void SetLocomotionReport(const FLocomotionReport& In) { LocomotionReport = In; }
 
 protected:
+	virtual void NativeUpdateAnimation(float DeltaSeconds) override;
 	virtual FAnimInstanceProxy* CreateAnimInstanceProxy() override { return new FPA250SoldierAnimProxy(this); }
 	virtual void DestroyAnimInstanceProxy(FAnimInstanceProxy* InProxy) override { delete static_cast<FPA250SoldierAnimProxy*>(InProxy); }
 
@@ -260,6 +314,18 @@ private:
 	float UpperWeight = 0.f;
 	bool bUpperLoop = false;
 	bool bUpperRefusedLogged = false;
+	UPROPERTY(Transient)
+	TObjectPtr<UAnimSequence> ActionClip;
+	FPA250ActionParams ActionParams;
+	TFunction<void(FName)> ActionNotify;
+	float ActionTime = 0.f;
+	float ActionWeight = 0.f;
+	float ActionTotal = 0.f;      // seconds it shows, start to end of the blend out
+	float ActionElapsed = 0.f;
+	double ActionClock = 0.0;     // world seconds at the last update
+	bool bActionLoop = false;
+	bool bActionPosed = false;
+	float PosedAge = 0.f;         // seconds since SetPosedAction was last called
 	float TraversalTime = 0.f;
 	float TraversalWeight = 0.f;
 	/** Kept alive here while the anim thread searches them. */

@@ -33,10 +33,10 @@
    "file_min": 6,
    "file_max": 8,
    "follow_behind_m": 0.5,
-  "follow_spacing_m": 1.2,
-  "follow_turn_degrees": 45.0,
-  "run_when_behind_m": 4.0,
-  "with_you_m": 10.0,
+   "follow_spacing_m": 1.2,
+   "follow_turn_degrees": 45.0,
+   "run_when_behind_m": 4.0,
+   "with_you_m": 10.0,
    "line_ahead_m": 4.0,
    "order_seconds": 45.0,
    "aim_snap_m": 8.0,
@@ -72,6 +72,13 @@
    "treat_seconds": 4.0,
    "reach_m": 2.5,
    "seek_m": 50.0
+  },
+  "morale": {
+   "note": "A squad's morale thresholds on pressure / resolve (FPA250MoraleState), the same for every class. Moved 1:1 from FPA250MoraleTuning (2026-11-16); GAME TUNING. shaken_exit < shaken_enter < rout_enter (hysteresis); min_state_seconds before the next change. Class differences (militia steady in cover, fragile in the open) come from verbs.militia and each class's resolve, not from these.",
+   "shaken_enter": 0.45,
+   "shaken_exit": 0.3,
+   "rout_enter": 0.85,
+   "min_state_seconds": 3.0
   }
  },
  "factions": {

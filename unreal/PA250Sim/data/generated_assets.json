@@ -1,0 +1,776 @@
+{
+ "note": "Battle Feel Pass generated assets. Numbers in settings are game/art production values. Combat SFX use 18th-century equipment prompts. Officer voices are written as variants of the shout banks the game already plays (voice/<side>/<key>_<n>.wav, imported as VO_<key>_<n>; Hold's shout is 'steady'), so every new line is heard without code naming it.",
+ "max_generations_per_run": 60,
+ "assets": [
+  {
+   "id": "drum_advance",
+   "kind": "sfx",
+   "prompt": "18th-century rope-tension military snare drum call for 'Advance', short crisp field signal, no modern drums, no melody beyond a drum call, dry outdoor field.",
+   "settings": {
+    "model_id": "eleven_text_to_sound_v3",
+    "duration_seconds": 1.5,
+    "prompt_influence": 0.7
+   },
+   "output": "unreal/PlayAmerica250/SourceAudio/sfx/drum_call_advance.wav"
+  },
+  {
+   "id": "fife_advance",
+   "kind": "sfx",
+   "prompt": "18th-century B-flat fife call for 'Advance', short piercing wooden fife signal, military, no modern instruments.",
+   "settings": {
+    "model_id": "eleven_text_to_sound_v3",
+    "duration_seconds": 1.5,
+    "prompt_influence": 0.7
+   },
+   "output": "unreal/PlayAmerica250/SourceAudio/sfx/fife_call_advance.wav"
+  },
+  {
+   "id": "drum_halt",
+   "kind": "sfx",
+   "prompt": "18th-century rope-tension military snare drum call for 'Halt', short crisp field signal, no modern drums, no melody beyond a drum call, dry outdoor field.",
+   "settings": {
+    "model_id": "eleven_text_to_sound_v3",
+    "duration_seconds": 1.5,
+    "prompt_influence": 0.7
+   },
+   "output": "unreal/PlayAmerica250/SourceAudio/sfx/drum_call_halt.wav"
+  },
+  {
+   "id": "fife_halt",
+   "kind": "sfx",
+   "prompt": "18th-century B-flat fife call for 'Halt', short piercing wooden fife signal, military, no modern instruments.",
+   "settings": {
+    "model_id": "eleven_text_to_sound_v3",
+    "duration_seconds": 1.5,
+    "prompt_influence": 0.7
+   },
+   "output": "unreal/PlayAmerica250/SourceAudio/sfx/fife_call_halt.wav"
+  },
+  {
+   "id": "drum_make_ready",
+   "kind": "sfx",
+   "prompt": "18th-century rope-tension military snare drum call for 'Make ready', short crisp field signal, no modern drums, no melody beyond a drum call, dry outdoor field.",
+   "settings": {
+    "model_id": "eleven_text_to_sound_v3",
+    "duration_seconds": 1.5,
+    "prompt_influence": 0.7
+   },
+   "output": "unreal/PlayAmerica250/SourceAudio/sfx/drum_call_make_ready.wav"
+  },
+  {
+   "id": "fife_make_ready",
+   "kind": "sfx",
+   "prompt": "18th-century B-flat fife call for 'Make ready', short piercing wooden fife signal, military, no modern instruments.",
+   "settings": {
+    "model_id": "eleven_text_to_sound_v3",
+    "duration_seconds": 1.5,
+    "prompt_influence": 0.7
+   },
+   "output": "unreal/PlayAmerica250/SourceAudio/sfx/fife_call_make_ready.wav"
+  },
+  {
+   "id": "drum_present",
+   "kind": "sfx",
+   "prompt": "18th-century rope-tension military snare drum call for 'Present', short crisp field signal, no modern drums, no melody beyond a drum call, dry outdoor field.",
+   "settings": {
+    "model_id": "eleven_text_to_sound_v3",
+    "duration_seconds": 1.5,
+    "prompt_influence": 0.7
+   },
+   "output": "unreal/PlayAmerica250/SourceAudio/sfx/drum_call_present.wav"
+  },
+  {
+   "id": "fife_present",
+   "kind": "sfx",
+   "prompt": "18th-century B-flat fife call for 'Present', short piercing wooden fife signal, military, no modern instruments.",
+   "settings": {
+    "model_id": "eleven_text_to_sound_v3",
+    "duration_seconds": 1.5,
+    "prompt_influence": 0.7
+   },
+   "output": "unreal/PlayAmerica250/SourceAudio/sfx/fife_call_present.wav"
+  },
+  {
+   "id": "drum_fire",
+   "kind": "sfx",
+   "prompt": "18th-century rope-tension military snare drum call for 'Fire', short crisp field signal, no modern drums, no melody beyond a drum call, dry outdoor field.",
+   "settings": {
+    "model_id": "eleven_text_to_sound_v3",
+    "duration_seconds": 1.5,
+    "prompt_influence": 0.7
+   },
+   "output": "unreal/PlayAmerica250/SourceAudio/sfx/drum_call_fire.wav"
+  },
+  {
+   "id": "fife_fire",
+   "kind": "sfx",
+   "prompt": "18th-century B-flat fife call for 'Fire', short piercing wooden fife signal, military, no modern instruments.",
+   "settings": {
+    "model_id": "eleven_text_to_sound_v3",
+    "duration_seconds": 1.5,
+    "prompt_influence": 0.7
+   },
+   "output": "unreal/PlayAmerica250/SourceAudio/sfx/fife_call_fire.wav"
+  },
+  {
+   "id": "drum_rally",
+   "kind": "sfx",
+   "prompt": "18th-century rope-tension military snare drum call for 'Rally / assembly', short crisp field signal, no modern drums, no melody beyond a drum call, dry outdoor field.",
+   "settings": {
+    "model_id": "eleven_text_to_sound_v3",
+    "duration_seconds": 1.5,
+    "prompt_influence": 0.7
+   },
+   "output": "unreal/PlayAmerica250/SourceAudio/sfx/drum_call_rally.wav"
+  },
+  {
+   "id": "fife_rally",
+   "kind": "sfx",
+   "prompt": "18th-century B-flat fife call for 'Rally / assembly', short piercing wooden fife signal, military, no modern instruments.",
+   "settings": {
+    "model_id": "eleven_text_to_sound_v3",
+    "duration_seconds": 1.5,
+    "prompt_influence": 0.7
+   },
+   "output": "unreal/PlayAmerica250/SourceAudio/sfx/fife_call_rally.wav"
+  },
+  {
+   "id": "musket_shot_1",
+   "kind": "sfx",
+   "prompt": "Single flintlock musket shot, Brown Bess style, sharp crack then short echo on open ground, no modern rifle. Variant 1.",
+   "settings": {
+    "model_id": "eleven_text_to_sound_v3",
+    "duration_seconds": 1.2,
+    "prompt_influence": 0.7
+   },
+   "output": "unreal/PlayAmerica250/SourceAudio/sfx/musket_shot_1.wav"
+  },
+  {
+   "id": "musket_shot_2",
+   "kind": "sfx",
+   "prompt": "Single flintlock musket shot, Brown Bess style, sharp crack then short echo on open ground, no modern rifle. Variant 2.",
+   "settings": {
+    "model_id": "eleven_text_to_sound_v3",
+    "duration_seconds": 1.2,
+    "prompt_influence": 0.7
+   },
+   "output": "unreal/PlayAmerica250/SourceAudio/sfx/musket_shot_2.wav"
+  },
+  {
+   "id": "musket_shot_3",
+   "kind": "sfx",
+   "prompt": "Single flintlock musket shot, Brown Bess style, sharp crack then short echo on open ground, no modern rifle. Variant 3.",
+   "settings": {
+    "model_id": "eleven_text_to_sound_v3",
+    "duration_seconds": 1.2,
+    "prompt_influence": 0.7
+   },
+   "output": "unreal/PlayAmerica250/SourceAudio/sfx/musket_shot_3.wav"
+  },
+  {
+   "id": "flash_pan_1",
+   "kind": "sfx",
+   "prompt": "Flintlock flash in the pan: flint click, priming powder whoosh, no ball fired, 18th century musket. Variant 1.",
+   "settings": {
+    "model_id": "eleven_text_to_sound_v3",
+    "duration_seconds": 1.0,
+    "prompt_influence": 0.7
+   },
+   "output": "unreal/PlayAmerica250/SourceAudio/sfx/flash_pan_1.wav"
+  },
+  {
+   "id": "flash_pan_2",
+   "kind": "sfx",
+   "prompt": "Flintlock flash in the pan: flint click, priming powder whoosh, no ball fired, 18th century musket. Variant 2.",
+   "settings": {
+    "model_id": "eleven_text_to_sound_v3",
+    "duration_seconds": 1.0,
+    "prompt_influence": 0.7
+   },
+   "output": "unreal/PlayAmerica250/SourceAudio/sfx/flash_pan_2.wav"
+  },
+  {
+   "id": "flash_pan_3",
+   "kind": "sfx",
+   "prompt": "Flintlock flash in the pan: flint click, priming powder whoosh, no ball fired, 18th century musket. Variant 3.",
+   "settings": {
+    "model_id": "eleven_text_to_sound_v3",
+    "duration_seconds": 1.0,
+    "prompt_influence": 0.7
+   },
+   "output": "unreal/PlayAmerica250/SourceAudio/sfx/flash_pan_3.wav"
+  },
+  {
+   "id": "cannon_fire_1",
+   "kind": "sfx",
+   "prompt": "6-pounder field gun muzzle blast, deep boom, rope and wood carriage, no modern ordnance. Variant 1.",
+   "settings": {
+    "model_id": "eleven_text_to_sound_v3",
+    "duration_seconds": 2.0,
+    "prompt_influence": 0.7
+   },
+   "output": "unreal/PlayAmerica250/SourceAudio/sfx/cannon_fire_1.wav"
+  },
+  {
+   "id": "cannon_fire_2",
+   "kind": "sfx",
+   "prompt": "6-pounder field gun muzzle blast, deep boom, rope and wood carriage, no modern ordnance. Variant 2.",
+   "settings": {
+    "model_id": "eleven_text_to_sound_v3",
+    "duration_seconds": 2.0,
+    "prompt_influence": 0.7
+   },
+   "output": "unreal/PlayAmerica250/SourceAudio/sfx/cannon_fire_2.wav"
+  },
+  {
+   "id": "cannon_fire_3",
+   "kind": "sfx",
+   "prompt": "6-pounder field gun muzzle blast, deep boom, rope and wood carriage, no modern ordnance. Variant 3.",
+   "settings": {
+    "model_id": "eleven_text_to_sound_v3",
+    "duration_seconds": 2.0,
+    "prompt_influence": 0.7
+   },
+   "output": "unreal/PlayAmerica250/SourceAudio/sfx/cannon_fire_3.wav"
+  },
+  {
+   "id": "round_shot_ground_1",
+   "kind": "sfx",
+   "prompt": "Iron round shot striking dirt and turf, bounce skip, no explosion. Variant 1.",
+   "settings": {
+    "model_id": "eleven_text_to_sound_v3",
+    "duration_seconds": 1.5,
+    "prompt_influence": 0.7
+   },
+   "output": "unreal/PlayAmerica250/SourceAudio/sfx/round_shot_ground_1.wav"
+  },
+  {
+   "id": "round_shot_ground_2",
+   "kind": "sfx",
+   "prompt": "Iron round shot striking dirt and turf, bounce skip, no explosion. Variant 2.",
+   "settings": {
+    "model_id": "eleven_text_to_sound_v3",
+    "duration_seconds": 1.5,
+    "prompt_influence": 0.7
+   },
+   "output": "unreal/PlayAmerica250/SourceAudio/sfx/round_shot_ground_2.wav"
+  },
+  {
+   "id": "round_shot_ground_3",
+   "kind": "sfx",
+   "prompt": "Iron round shot striking dirt and turf, bounce skip, no explosion. Variant 3.",
+   "settings": {
+    "model_id": "eleven_text_to_sound_v3",
+    "duration_seconds": 1.5,
+    "prompt_influence": 0.7
+   },
+   "output": "unreal/PlayAmerica250/SourceAudio/sfx/round_shot_ground_3.wav"
+  },
+  {
+   "id": "canister_1",
+   "kind": "sfx",
+   "prompt": "6-pounder canister/grapeshot discharge, many small balls ripping air, short, period gun. Variant 1.",
+   "settings": {
+    "model_id": "eleven_text_to_sound_v3",
+    "duration_seconds": 1.5,
+    "prompt_influence": 0.7
+   },
+   "output": "unreal/PlayAmerica250/SourceAudio/sfx/canister_1.wav"
+  },
+  {
+   "id": "canister_2",
+   "kind": "sfx",
+   "prompt": "6-pounder canister/grapeshot discharge, many small balls ripping air, short, period gun. Variant 2.",
+   "settings": {
+    "model_id": "eleven_text_to_sound_v3",
+    "duration_seconds": 1.5,
+    "prompt_influence": 0.7
+   },
+   "output": "unreal/PlayAmerica250/SourceAudio/sfx/canister_2.wav"
+  },
+  {
+   "id": "canister_3",
+   "kind": "sfx",
+   "prompt": "6-pounder canister/grapeshot discharge, many small balls ripping air, short, period gun. Variant 3.",
+   "settings": {
+    "model_id": "eleven_text_to_sound_v3",
+    "duration_seconds": 1.5,
+    "prompt_influence": 0.7
+   },
+   "output": "unreal/PlayAmerica250/SourceAudio/sfx/canister_3.wav"
+  },
+  {
+   "id": "shell_burst_1",
+   "kind": "sfx",
+   "prompt": "Howitzer shell airburst, powder burst not modern HE, muffled boom and debris. Variant 1.",
+   "settings": {
+    "model_id": "eleven_text_to_sound_v3",
+    "duration_seconds": 2.0,
+    "prompt_influence": 0.7
+   },
+   "output": "unreal/PlayAmerica250/SourceAudio/sfx/shell_burst_1.wav"
+  },
+  {
+   "id": "shell_burst_2",
+   "kind": "sfx",
+   "prompt": "Howitzer shell airburst, powder burst not modern HE, muffled boom and debris. Variant 2.",
+   "settings": {
+    "model_id": "eleven_text_to_sound_v3",
+    "duration_seconds": 2.0,
+    "prompt_influence": 0.7
+   },
+   "output": "unreal/PlayAmerica250/SourceAudio/sfx/shell_burst_2.wav"
+  },
+  {
+   "id": "shell_burst_3",
+   "kind": "sfx",
+   "prompt": "Howitzer shell airburst, powder burst not modern HE, muffled boom and debris. Variant 3.",
+   "settings": {
+    "model_id": "eleven_text_to_sound_v3",
+    "duration_seconds": 2.0,
+    "prompt_influence": 0.7
+   },
+   "output": "unreal/PlayAmerica250/SourceAudio/sfx/shell_burst_3.wav"
+  },
+  {
+   "id": "shell_dud_1",
+   "kind": "sfx",
+   "prompt": "Fused shell landing dull thud in dirt, fuse sputter, no explosion, dud. Variant 1.",
+   "settings": {
+    "model_id": "eleven_text_to_sound_v3",
+    "duration_seconds": 1.5,
+    "prompt_influence": 0.7
+   },
+   "output": "unreal/PlayAmerica250/SourceAudio/sfx/shell_dud_1.wav"
+  },
+  {
+   "id": "shell_dud_2",
+   "kind": "sfx",
+   "prompt": "Fused shell landing dull thud in dirt, fuse sputter, no explosion, dud. Variant 2.",
+   "settings": {
+    "model_id": "eleven_text_to_sound_v3",
+    "duration_seconds": 1.5,
+    "prompt_influence": 0.7
+   },
+   "output": "unreal/PlayAmerica250/SourceAudio/sfx/shell_dud_2.wav"
+  },
+  {
+   "id": "shell_dud_3",
+   "kind": "sfx",
+   "prompt": "Fused shell landing dull thud in dirt, fuse sputter, no explosion, dud. Variant 3.",
+   "settings": {
+    "model_id": "eleven_text_to_sound_v3",
+    "duration_seconds": 1.5,
+    "prompt_influence": 0.7
+   },
+   "output": "unreal/PlayAmerica250/SourceAudio/sfx/shell_dud_3.wav"
+  },
+  {
+   "id": "gun_swab_1",
+   "kind": "sfx",
+   "prompt": "Gun crew swabbing a field gun bore with wet sponge, wood and water sounds. Variant 1.",
+   "settings": {
+    "model_id": "eleven_text_to_sound_v3",
+    "duration_seconds": 1.5,
+    "prompt_influence": 0.7
+   },
+   "output": "unreal/PlayAmerica250/SourceAudio/sfx/gun_swab_1.wav"
+  },
+  {
+   "id": "gun_swab_2",
+   "kind": "sfx",
+   "prompt": "Gun crew swabbing a field gun bore with wet sponge, wood and water sounds. Variant 2.",
+   "settings": {
+    "model_id": "eleven_text_to_sound_v3",
+    "duration_seconds": 1.5,
+    "prompt_influence": 0.7
+   },
+   "output": "unreal/PlayAmerica250/SourceAudio/sfx/gun_swab_2.wav"
+  },
+  {
+   "id": "gun_swab_3",
+   "kind": "sfx",
+   "prompt": "Gun crew swabbing a field gun bore with wet sponge, wood and water sounds. Variant 3.",
+   "settings": {
+    "model_id": "eleven_text_to_sound_v3",
+    "duration_seconds": 1.5,
+    "prompt_influence": 0.7
+   },
+   "output": "unreal/PlayAmerica250/SourceAudio/sfx/gun_swab_3.wav"
+  },
+  {
+   "id": "gun_ram_1",
+   "kind": "sfx",
+   "prompt": "Ramming a cartridge home in a 6-pounder with a rammer staff, wood on metal. Variant 1.",
+   "settings": {
+    "model_id": "eleven_text_to_sound_v3",
+    "duration_seconds": 1.2,
+    "prompt_influence": 0.7
+   },
+   "output": "unreal/PlayAmerica250/SourceAudio/sfx/gun_ram_1.wav"
+  },
+  {
+   "id": "gun_ram_2",
+   "kind": "sfx",
+   "prompt": "Ramming a cartridge home in a 6-pounder with a rammer staff, wood on metal. Variant 2.",
+   "settings": {
+    "model_id": "eleven_text_to_sound_v3",
+    "duration_seconds": 1.2,
+    "prompt_influence": 0.7
+   },
+   "output": "unreal/PlayAmerica250/SourceAudio/sfx/gun_ram_2.wav"
+  },
+  {
+   "id": "gun_ram_3",
+   "kind": "sfx",
+   "prompt": "Ramming a cartridge home in a 6-pounder with a rammer staff, wood on metal. Variant 3.",
+   "settings": {
+    "model_id": "eleven_text_to_sound_v3",
+    "duration_seconds": 1.2,
+    "prompt_influence": 0.7
+   },
+   "output": "unreal/PlayAmerica250/SourceAudio/sfx/gun_ram_3.wav"
+  },
+  {
+   "id": "march_fife_drum",
+   "kind": "music",
+   "prompt": "Instrumental 18th-century fife and rope-tension drum march, American Revolutionary War, no vocals, loopable, period instruments only.",
+   "settings": {
+    "model_id": "music_v1",
+    "music_length_ms": 30000
+   },
+   "output": "unreal/PlayAmerica250/SourceAudio/music/march_fife_drum.wav"
+  },
+  {
+   "id": "vo_british_officer1_make_ready",
+   "kind": "voice",
+   "prompt": "Make ready!",
+   "settings": {
+    "model_id": "eleven_multilingual_v2",
+    "voice_id": "JBFqnCBsd6RMkjVDRZzb",
+    "output_format": "pcm_24000"
+   },
+   "output": "unreal/PlayAmerica250/SourceAudio/voice/british/make_ready_1.wav"
+  },
+  {
+   "id": "vo_british_officer1_present",
+   "kind": "voice",
+   "prompt": "Present!",
+   "settings": {
+    "model_id": "eleven_multilingual_v2",
+    "voice_id": "JBFqnCBsd6RMkjVDRZzb",
+    "output_format": "pcm_24000"
+   },
+   "output": "unreal/PlayAmerica250/SourceAudio/voice/british/present_1.wav"
+  },
+  {
+   "id": "vo_british_officer1_fire",
+   "kind": "voice",
+   "prompt": "Fire!",
+   "settings": {
+    "model_id": "eleven_multilingual_v2",
+    "voice_id": "JBFqnCBsd6RMkjVDRZzb",
+    "output_format": "pcm_24000"
+   },
+   "output": "unreal/PlayAmerica250/SourceAudio/voice/british/fire_1.wav"
+  },
+  {
+   "id": "vo_british_officer1_rally",
+   "kind": "voice",
+   "prompt": "Rally on the colours!",
+   "settings": {
+    "model_id": "eleven_multilingual_v2",
+    "voice_id": "JBFqnCBsd6RMkjVDRZzb",
+    "output_format": "pcm_24000"
+   },
+   "output": "unreal/PlayAmerica250/SourceAudio/voice/british/rally_1.wav"
+  },
+  {
+   "id": "vo_british_officer1_hold",
+   "kind": "voice",
+   "prompt": "Hold!",
+   "settings": {
+    "model_id": "eleven_multilingual_v2",
+    "voice_id": "JBFqnCBsd6RMkjVDRZzb",
+    "output_format": "pcm_24000"
+   },
+   "output": "unreal/PlayAmerica250/SourceAudio/voice/british/steady_1.wav"
+  },
+  {
+   "id": "vo_british_officer2_make_ready",
+   "kind": "voice",
+   "prompt": "Make ready!",
+   "settings": {
+    "model_id": "eleven_multilingual_v2",
+    "voice_id": "nPczCjzI2devNBz1zQrb",
+    "output_format": "pcm_24000"
+   },
+   "output": "unreal/PlayAmerica250/SourceAudio/voice/british/make_ready_2.wav"
+  },
+  {
+   "id": "vo_british_officer2_present",
+   "kind": "voice",
+   "prompt": "Present!",
+   "settings": {
+    "model_id": "eleven_multilingual_v2",
+    "voice_id": "nPczCjzI2devNBz1zQrb",
+    "output_format": "pcm_24000"
+   },
+   "output": "unreal/PlayAmerica250/SourceAudio/voice/british/present_2.wav"
+  },
+  {
+   "id": "vo_british_officer2_fire",
+   "kind": "voice",
+   "prompt": "Fire!",
+   "settings": {
+    "model_id": "eleven_multilingual_v2",
+    "voice_id": "nPczCjzI2devNBz1zQrb",
+    "output_format": "pcm_24000"
+   },
+   "output": "unreal/PlayAmerica250/SourceAudio/voice/british/fire_2.wav"
+  },
+  {
+   "id": "vo_british_officer2_rally",
+   "kind": "voice",
+   "prompt": "Rally on the colours!",
+   "settings": {
+    "model_id": "eleven_multilingual_v2",
+    "voice_id": "nPczCjzI2devNBz1zQrb",
+    "output_format": "pcm_24000"
+   },
+   "output": "unreal/PlayAmerica250/SourceAudio/voice/british/rally_2.wav"
+  },
+  {
+   "id": "vo_british_officer2_hold",
+   "kind": "voice",
+   "prompt": "Hold!",
+   "settings": {
+    "model_id": "eleven_multilingual_v2",
+    "voice_id": "nPczCjzI2devNBz1zQrb",
+    "output_format": "pcm_24000"
+   },
+   "output": "unreal/PlayAmerica250/SourceAudio/voice/british/steady_2.wav"
+  },
+  {
+   "id": "vo_continental_officer1_make_ready",
+   "kind": "voice",
+   "prompt": "Make ready!",
+   "settings": {
+    "model_id": "eleven_multilingual_v2",
+    "voice_id": "EXAVITQu4vr4xnSDxMaL",
+    "output_format": "pcm_24000"
+   },
+   "output": "unreal/PlayAmerica250/SourceAudio/voice/continental/make_ready_1.wav"
+  },
+  {
+   "id": "vo_continental_officer1_present",
+   "kind": "voice",
+   "prompt": "Present!",
+   "settings": {
+    "model_id": "eleven_multilingual_v2",
+    "voice_id": "EXAVITQu4vr4xnSDxMaL",
+    "output_format": "pcm_24000"
+   },
+   "output": "unreal/PlayAmerica250/SourceAudio/voice/continental/present_1.wav"
+  },
+  {
+   "id": "vo_continental_officer1_fire",
+   "kind": "voice",
+   "prompt": "Fire!",
+   "settings": {
+    "model_id": "eleven_multilingual_v2",
+    "voice_id": "EXAVITQu4vr4xnSDxMaL",
+    "output_format": "pcm_24000"
+   },
+   "output": "unreal/PlayAmerica250/SourceAudio/voice/continental/fire_1.wav"
+  },
+  {
+   "id": "vo_continental_officer1_rally",
+   "kind": "voice",
+   "prompt": "Rally on the colours!",
+   "settings": {
+    "model_id": "eleven_multilingual_v2",
+    "voice_id": "EXAVITQu4vr4xnSDxMaL",
+    "output_format": "pcm_24000"
+   },
+   "output": "unreal/PlayAmerica250/SourceAudio/voice/continental/rally_1.wav"
+  },
+  {
+   "id": "vo_continental_officer1_hold",
+   "kind": "voice",
+   "prompt": "Hold!",
+   "settings": {
+    "model_id": "eleven_multilingual_v2",
+    "voice_id": "EXAVITQu4vr4xnSDxMaL",
+    "output_format": "pcm_24000"
+   },
+   "output": "unreal/PlayAmerica250/SourceAudio/voice/continental/steady_1.wav"
+  },
+  {
+   "id": "vo_continental_officer2_make_ready",
+   "kind": "voice",
+   "prompt": "Make ready!",
+   "settings": {
+    "model_id": "eleven_multilingual_v2",
+    "voice_id": "VR6AewLTigWG4xSOukaG",
+    "output_format": "pcm_24000"
+   },
+   "output": "unreal/PlayAmerica250/SourceAudio/voice/continental/make_ready_2.wav"
+  },
+  {
+   "id": "vo_continental_officer2_present",
+   "kind": "voice",
+   "prompt": "Present!",
+   "settings": {
+    "model_id": "eleven_multilingual_v2",
+    "voice_id": "VR6AewLTigWG4xSOukaG",
+    "output_format": "pcm_24000"
+   },
+   "output": "unreal/PlayAmerica250/SourceAudio/voice/continental/present_2.wav"
+  },
+  {
+   "id": "vo_continental_officer2_fire",
+   "kind": "voice",
+   "prompt": "Fire!",
+   "settings": {
+    "model_id": "eleven_multilingual_v2",
+    "voice_id": "VR6AewLTigWG4xSOukaG",
+    "output_format": "pcm_24000"
+   },
+   "output": "unreal/PlayAmerica250/SourceAudio/voice/continental/fire_2.wav"
+  },
+  {
+   "id": "vo_continental_officer2_rally",
+   "kind": "voice",
+   "prompt": "Rally on the colours!",
+   "settings": {
+    "model_id": "eleven_multilingual_v2",
+    "voice_id": "VR6AewLTigWG4xSOukaG",
+    "output_format": "pcm_24000"
+   },
+   "output": "unreal/PlayAmerica250/SourceAudio/voice/continental/rally_2.wav"
+  },
+  {
+   "id": "vo_continental_officer2_hold",
+   "kind": "voice",
+   "prompt": "Hold!",
+   "settings": {
+    "model_id": "eleven_multilingual_v2",
+    "voice_id": "VR6AewLTigWG4xSOukaG",
+    "output_format": "pcm_24000"
+   },
+   "output": "unreal/PlayAmerica250/SourceAudio/voice/continental/steady_2.wav"
+  },
+  {
+   "id": "ph_muzzle_flash",
+   "kind": "image",
+   "prompt": "Simple transparent sprite of a flintlock muzzle flash, orange-white, soft edges, game VFX, no background.",
+   "settings": {
+    "model": "gpt-image-2.6-sunburst",
+    "size": "1024x1024",
+    "background": "transparent"
+   },
+   "output": "unreal/PlayAmerica250/Content/Generated/Textures/ph_muzzle_flash.png"
+  },
+  {
+   "id": "ph_powder_puff",
+   "kind": "image",
+   "prompt": "Simple transparent sprite of a white-grey black-powder smoke puff, soft, game VFX.",
+   "settings": {
+    "model": "gpt-image-2.6-sunburst",
+    "size": "1024x1024",
+    "background": "transparent"
+   },
+   "output": "unreal/PlayAmerica250/Content/Generated/Textures/ph_powder_puff.png"
+  },
+  {
+   "id": "ph_dirt_spray",
+   "kind": "image",
+   "prompt": "Simple transparent sprite of brown dirt spray from a cannonball strike, game VFX.",
+   "settings": {
+    "model": "gpt-image-2.6-sunburst",
+    "size": "1024x1024",
+    "background": "transparent"
+   },
+   "output": "unreal/PlayAmerica250/Content/Generated/Textures/ph_dirt_spray.png"
+  },
+  {
+   "id": "icon_order_advance",
+   "kind": "image",
+   "prompt": "Simple flat HUD icon for military drill order 'advance', 18th century silhouette, transparent background, high contrast.",
+   "settings": {
+    "model": "gpt-image-2.6-sunburst",
+    "size": "1024x1024",
+    "background": "transparent"
+   },
+   "output": "unreal/PlayAmerica250/Content/Generated/Textures/icon_order_advance.png"
+  },
+  {
+   "id": "icon_order_halt",
+   "kind": "image",
+   "prompt": "Simple flat HUD icon for military drill order 'halt', 18th century silhouette, transparent background, high contrast.",
+   "settings": {
+    "model": "gpt-image-2.6-sunburst",
+    "size": "1024x1024",
+    "background": "transparent"
+   },
+   "output": "unreal/PlayAmerica250/Content/Generated/Textures/icon_order_halt.png"
+  },
+  {
+   "id": "icon_order_make_ready",
+   "kind": "image",
+   "prompt": "Simple flat HUD icon for military drill order 'make_ready', 18th century silhouette, transparent background, high contrast.",
+   "settings": {
+    "model": "gpt-image-2.6-sunburst",
+    "size": "1024x1024",
+    "background": "transparent"
+   },
+   "output": "unreal/PlayAmerica250/Content/Generated/Textures/icon_order_make_ready.png"
+  },
+  {
+   "id": "icon_order_present",
+   "kind": "image",
+   "prompt": "Simple flat HUD icon for military drill order 'present', 18th century silhouette, transparent background, high contrast.",
+   "settings": {
+    "model": "gpt-image-2.6-sunburst",
+    "size": "1024x1024",
+    "background": "transparent"
+   },
+   "output": "unreal/PlayAmerica250/Content/Generated/Textures/icon_order_present.png"
+  },
+  {
+   "id": "icon_order_fire",
+   "kind": "image",
+   "prompt": "Simple flat HUD icon for military drill order 'fire', 18th century silhouette, transparent background, high contrast.",
+   "settings": {
+    "model": "gpt-image-2.6-sunburst",
+    "size": "1024x1024",
+    "background": "transparent"
+   },
+   "output": "unreal/PlayAmerica250/Content/Generated/Textures/icon_order_fire.png"
+  },
+  {
+   "id": "icon_order_rally",
+   "kind": "image",
+   "prompt": "Simple flat HUD icon for military drill order 'rally', 18th century silhouette, transparent background, high contrast.",
+   "settings": {
+    "model": "gpt-image-2.6-sunburst",
+    "size": "1024x1024",
+    "background": "transparent"
+   },
+   "output": "unreal/PlayAmerica250/Content/Generated/Textures/icon_order_rally.png"
+  },
+  {
+   "id": "ph_colours_regimental",
+   "kind": "image",
+   "prompt": "Placeholder regimental colour flag on a staff, simple colonial era design, not historically verified, transparent background.",
+   "settings": {
+    "model": "gpt-image-2.6-sunburst",
+    "size": "1024x1024",
+    "background": "transparent"
+   },
+   "output": "unreal/PlayAmerica250/Content/Generated/Textures/ph_colours_regimental.png",
+   "placeholder_note": "PLACEHOLDER — design not historically verified"
+  }
+ ]
+}

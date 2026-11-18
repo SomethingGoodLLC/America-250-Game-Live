@@ -43,6 +43,14 @@ inline float ShakeScaleAt(float DistM, float InnerM, float OuterM, float Scale)
 	return Scale * (1.f - (DistM - InnerM) / (OuterM - InnerM));
 }
 
+/** Pure: the player's suppression after Dt seconds (battle_feel.intensity.suppression): Add is what
+ *  arrived this step (a near miss, a strike close by), clamped to Max, then it falls DecayPerSecond. */
+inline float SuppressionStep(float Level, float Add, float Max, float DecayPerSecond, float Dt)
+{
+	const float Raised = FMath::Clamp(Level + FMath::Max(0.f, Add), 0.f, FMath::Max(0.f, Max));
+	return FMath::Max(0.f, Raised - FMath::Max(0.f, DecayPerSecond) * FMath::Max(0.f, Dt));
+}
+
 /** Pure: may the same shout be given again? */
 inline bool MayShout(float Now, float LastAt, float CooldownSeconds)
 {
@@ -54,6 +62,9 @@ inline bool MayShout(float Now, float LastAt, float CooldownSeconds)
 PLAYAMERICA250_API bool NearMiss(ARFCharacter* Player, const FVector& ShotFrom, const FVector& Closest, const FVector& Listener);
 /** Round shot has struck at At: the local player's camera shakes by his distance, and close to it earth is thrown over his view. */
 PLAYAMERICA250_API void RoundShotStrike(UWorld* World, const FVector& At);
+/** Something struck close to the player (Fraction 1 at the strike's inner radius): his suppression
+ *  rises by intensity.suppression.impact_add times it. */
+PLAYAMERICA250_API void ImpactNear(UWorld* World, float Fraction);
 /** The one shake, at a scale. */
 PLAYAMERICA250_API void Shake(UWorld* World, float Scale);
 /** How often each has happened (for the trace and the cases). */

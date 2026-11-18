@@ -1,4 +1,5 @@
 #include "MusketWeapon.h"
+#include "Battle/PA250BattleRng.h"
 #include "Battle/PA250BattleFeel.h"
 #include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -330,7 +331,7 @@ bool AMusketWeapon::Fire(FVector Direction, bool bIsAiming, float OwnerSpeed, fl
 	Spread *= FMath::Max(0.05f, AccuracyScale) * FMath::Max(0.05f, ClassSpreadScale);
 	if (Spread > 0.01f)
 	{
-		Dir = FMath::VRandCone(Dir, FMath::DegreesToRadians(Spread));
+		Dir = PA250BattleRng::Get().VRandCone(Dir, FMath::DegreesToRadians(Spread));
 	}
 
 	const FVector Location = MuzzleLocation->GetComponentLocation();
@@ -394,18 +395,23 @@ bool AMusketWeapon::Fire(FVector Direction, bool bIsAiming, float OwnerSpeed, fl
 	return Ball != nullptr;
 }
 
-bool AMusketWeapon::Misfire()
+bool AMusketWeapon::Misfire(bool bFlashInPan)
 {
 	if (!CanFire() || !GetWorld())
 	{
 		return false;
 	}
-	const FVector Muzzle = MuzzleLocation->GetComponentLocation();
 	const FVector Dir = MuzzleLocation->GetForwardVector();
 	FPA250BattleAudio::PlayAt(this, TEXT("flint_click"), GetActorLocation(), EPA250SoundRange::Near, 1.f, 0.08f);
-	if (UPA250SmokeSubsystem* Bank = GetWorld()->GetSubsystem<UPA250SmokeSubsystem>())
+	// A flash in the pan burns the priming (a puff and its hiss); a misfire is the flint failing to
+	// spark (the click alone). Either way the charge is spent: he loads again.
+	if (bFlashInPan)
 	{
-		Bank->AddPanFlash(GetActorLocation(), Dir, true);
+		FPA250BattleAudio::PlayAt(this, TEXT("flash_pan"), GetActorLocation(), EPA250SoundRange::Near, 1.f, 0.05f);
+		if (UPA250SmokeSubsystem* Bank = GetWorld()->GetSubsystem<UPA250SmokeSubsystem>())
+		{
+			Bank->AddPanFlash(GetActorLocation(), Dir, true);
+		}
 	}
 	if (AnimatedMesh && FireAnim)
 	{

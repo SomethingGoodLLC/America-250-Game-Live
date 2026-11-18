@@ -327,6 +327,38 @@ void load_battle_rules(const std::string& json_text) {
             r.cannon_length_cm = f.value("length_cm", r.cannon_length_cm);
             r.cannon_knockdown_push_cm = f.value("knockdown_push_cm", r.cannon_knockdown_push_cm);
             r.cannon_dirt_burst_scale = f.value("dirt_burst_scale", r.cannon_dirt_burst_scale);
+            r.cannon_shell_fuse_variance = f.value("shell_fuse_variance", r.cannon_shell_fuse_variance);
+            r.cannon_shell_dud_chance = f.value("shell_dud_chance", r.cannon_shell_dud_chance);
+            r.cannon_bounce_min_speed_mps = f.value("bounce_min_speed_mps", r.cannon_bounce_min_speed_mps);
+            r.cannon_run_out_seconds = f.value("run_out_seconds", r.cannon_run_out_seconds);
+            r.cannon_missing_roles_scale = f.value("missing_roles_scale", r.cannon_missing_roles_scale);
+            r.cannon_default_gun_type = f.value("default_gun_type", r.cannon_default_gun_type);
+            r.cannon_gun_types.clear();
+            if (f.contains("gun_types")) {
+                for (const auto& [type, entry] : f.at("gun_types").items()) {
+                    if (!entry.is_object() || !entry.contains("allowed_shots")) continue;
+                    std::vector<std::string> shots;
+                    for (const auto& s : entry.at("allowed_shots")) shots.push_back(s.get<std::string>());
+                    r.cannon_gun_types[type] = shots;
+                }
+            }
+        }
+        if (j.contains("drill")) {
+            const json& f = j.at("drill");
+            r.drill_make_ready_s = f.value("make_ready_s", r.drill_make_ready_s);
+            r.drill_present_s = f.value("present_s", r.drill_present_s);
+            r.drill_volley_spread_s = f.value("volley_spread_s", r.drill_volley_spread_s);
+            r.drill_officer_replace_s = f.value("officer_replace_s", r.drill_officer_replace_s);
+            r.drill_ragged_spread_scale = f.value("ragged_spread_scale", r.drill_ragged_spread_scale);
+            r.drill_ragged_response_scale = f.value("ragged_response_scale", r.drill_ragged_response_scale);
+            r.drill_fall_in_radius_m = f.value("fall_in_radius_m", r.drill_fall_in_radius_m);
+            r.drill_fall_in_break_m = f.value("fall_in_break_m", r.drill_fall_in_break_m);
+            if (f.contains("response_delay_s")) {
+                const json& d = f.at("response_delay_s");
+                r.drill_response_advance_s = d.value("advance", r.drill_response_advance_s);
+                r.drill_response_halt_s = d.value("halt", r.drill_response_halt_s);
+                r.drill_response_fire_s = d.value("fire", r.drill_response_fire_s);
+            }
         }
         if (j.contains("blast")) {
             const json& f = j.at("blast");

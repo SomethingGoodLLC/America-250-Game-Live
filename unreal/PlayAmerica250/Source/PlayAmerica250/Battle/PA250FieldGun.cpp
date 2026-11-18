@@ -12,8 +12,10 @@
 #include "MusketProjectile.h"
 #include "MusketWeapon.h"
 #include "PA250BattleAudio.h"
+#include "PA250BattleFX.h"
 #include "PA250BattleGameMode.h"
 #include "PA250AnimClips.h"
+#include "RF/PA250SoldierAnimInstance.h"
 #include "PA250Blast.h"
 #include "PA250BotController.h"
 #include "PA250ControlPoint.h"
@@ -175,6 +177,8 @@ FVector APA250FieldGun::GetCrewPost(int32 Index) const
 		FName(TEXT("TrailL")), FName(TEXT("Trail")), FName(TEXT("Crew_3")), FName(TEXT("Crew_4"))
 	};
 	const int32 I = FMath::Clamp(Index, 0, 3);
+	// Foot posts stay on sockets / share offsets (ventsman beside the barrel, Dist2D > 90).
+	// PoseCrew eases bots onto station_cm for the clip; GetCrewPost must keep the capsule clear.
 	// Tool sockets sit on the barrel or trail. A man's capsule belongs on the ground,
 	// alongside the vent, rather than 90 cm above the tool socket.
 	auto StandAt = [&](FName Socket) {
@@ -256,12 +260,37 @@ void APA250FieldGun::SetPlayerGunner(ARFCharacter* Player)
 	if (!bPlayerChoseShot) SelectedShot = EPA250Shot::RoundShot;
 }
 
+FString APA250FieldGun::GetGunType() const
+{
+	return GunType.IsEmpty() ? PA250Gunnery::DefaultGunType(pa250::battle_rules()) : GunType;
+}
+
+void APA250FieldGun::SetGunType(const FString& Type)
+{
+	GunType = Type;
+	const pa250::BattleRules& R = pa250::battle_rules();
+	if (!PA250Gunnery::ShotAllowedForGun(GetGunType(), SelectedShot, R))
+	{
+		for (EPA250Shot S : {EPA250Shot::RoundShot, EPA250Shot::Grape, EPA250Shot::Shell})
+		{
+			if (PA250Gunnery::ShotAllowedForGun(GetGunType(), S, R)) { SelectedShot = S; break; }
+		}
+		bPlayerChoseShot = false;
+	}
+}
+
 void APA250FieldGun::CycleShot(int32 Delta)
 {
 	if (!PlayerGunner.IsValid() || Delta == 0) return;
+	// Only the loads this kind of piece fires (cannon.gun_types): a six-pounder cycles canister and round shot.
 	const int32 N = 3;
+	const pa250::BattleRules& Rules = pa250::battle_rules();
 	int32 I = static_cast<int32>(SelectedShot);
-	I = (I + Delta % N + N) % N;
+	for (int32 Tries = 0; Tries < N; ++Tries)
+	{
+		I = (I + Delta % N + N) % N;
+		if (PA250Gunnery::ShotAllowedForGun(GetGunType(), static_cast<EPA250Shot>(I), Rules)) break;
+	}
 	SelectedShot = static_cast<EPA250Shot>(I);
 	bPlayerChoseShot = true;
 	FString Line = LoadChip();
@@ -270,7 +299,7 @@ void APA250FieldGun::CycleShot(int32 Delta)
 		const float Range = AimMarkWorld.IsNearlyZero() ? 0.f : FVector::Dist(GetMuzzle(), AimMarkWorld);
 		if (Range > 1.f)
 		{
-			if (const TCHAR* Why = PA250Gunnery::RefuseShot(SelectedShot, Range, pa250::battle_rules()))
+			if (const TCHAR* Why = PA250Gunnery::RefuseShot(SelectedShot, Range, pa250::battle_rules(), GetGunType()))
 			{
 				Line = FString::Printf(TEXT("%s — %s"), *LoadChip(), Why);
 			}
@@ -500,11 +529,13 @@ bool APA250FieldGun::Fire(const FVector& AimPoint, ARFCharacter* Gunner, bool bP
 	const TCHAR* Refuse = nullptr;
 	if (!bPlayerChose || !bPlayerChoseShot)
 	{
+		// The crew's own pick, then only a load this kind of piece fires (a six-pounder never shells).
 		if (!PA250Gunnery::ChooseShot(Range, R, Shot)) Refuse = TEXT("out of range");
+		else if (!PA250Gunnery::ShotAllowedForGun(GetGunType(), Shot, R)) Refuse = PA250Gunnery::RefuseShot(Shot, Range, R, GetGunType());
 	}
 	else
 	{
-		Refuse = PA250Gunnery::RefuseShot(Shot, Range, R);
+		Refuse = PA250Gunnery::RefuseShot(Shot, Range, R, GetGunType());
 	}
 	if (!bLoaded || CrewNow < R.cannon_min_crew)
 	{
@@ -551,17 +582,20 @@ bool APA250FieldGun::Fire(const FVector& AimPoint, ARFCharacter* Gunner, bool bP
 		const int32 Clouds = 10 + FMath::RoundToInt(BarrelHeat * 6.f);
 		for (int32 i = 0; i < Clouds; ++i)
 		{
-			Bank->AddShot(Muzzle + Dir * (40.f * i), FMath::VRandCone(Dir, FMath::DegreesToRadians(12.f)));
+			// Seeded: the bank hides men from the bots, so where it drifts is an outcome.
+			Bank->AddShot(Muzzle + Dir * (40.f * i), AimRng.VRandCone(Dir, FMath::DegreesToRadians(12.f)));
 		}
 	}
-	FPA250BattleAudio::PlayAtOr(this, TEXT("cannon_fire"), TEXT("musket_distant"), Muzzle, EPA250SoundRange::Gunfire, 1.f, 0.04f);
+	// The report, flash and shake go through the one FX router (battle_look.fx): the canister load
+	// has its own entry (tracker "grapeshot"), every other load is CannonFired, shell included.
+	PA250BattleFX::Fire(GetWorld(), Shot == EPA250Shot::Grape ? EPA250BattleFXEvent::CanisterFired : EPA250BattleFXEvent::CannonFired, Muzzle);
 	FActorSpawnParameters Params;
 	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 	if (Shot == EPA250Shot::RoundShot)
 	{
 		const float Speed = R.cannon_round_speed_m * 100.f * MvSigma;
 		FVector Laid = Dir;
-		if (R.cannon_round_spread_degrees > 0.f) Laid = FMath::VRandCone(Laid, FMath::DegreesToRadians(R.cannon_round_spread_degrees));
+		if (R.cannon_round_spread_degrees > 0.f) Laid = AimRng.VRandCone(Laid, FMath::DegreesToRadians(R.cannon_round_spread_degrees));
 		if (APA250CannonBall* Ball = GetWorld()->SpawnActor<APA250CannonBall>(Muzzle, Laid.Rotation(), Params))
 		{
 			Ball->Launch(Laid * Speed, Faction, Gunner, this);
@@ -569,13 +603,18 @@ bool APA250FieldGun::Fire(const FVector& AimPoint, ARFCharacter* Gunner, bool bP
 	}
 	else if (Shot == EPA250Shot::Shell)
 	{
+		// Fuse variance and duds (cannon.shell_*): only a piece whose kind fires shell gets here.
+		// The rolls come from the gun's own seeded stream, after the lay (so round shot is unchanged).
+		const bool bDud = AimRng.FRand() < R.cannon_shell_dud_chance;
+		const float Var = FMath::Clamp(R.cannon_shell_fuse_variance, 0.f, 0.9f);
+		const float FuseScale = AimRng.FRandRange(1.f - Var, 1.f + Var);
 		const float Speed = R.cannon_shell_speed_m * 100.f * MvSigma;
-		const float Fuse = FMath::Clamp(Range, R.cannon_shell_fuse_min_m * 100.f, R.cannon_shell_range_m * 100.f);
+		const float Fuse = FMath::Clamp(Range, R.cannon_shell_fuse_min_m * 100.f, R.cannon_shell_range_m * 100.f) * FuseScale;
 		FVector Laid = Dir;
-		if (R.cannon_shell_spread_degrees > 0.f) Laid = FMath::VRandCone(Laid, FMath::DegreesToRadians(R.cannon_shell_spread_degrees));
+		if (R.cannon_shell_spread_degrees > 0.f) Laid = AimRng.VRandCone(Laid, FMath::DegreesToRadians(R.cannon_shell_spread_degrees));
 		if (APA250CannonShell* Ball = GetWorld()->SpawnActor<APA250CannonShell>(Muzzle, Laid.Rotation(), Params))
 		{
-			Ball->Launch(Laid * Speed, Fuse, Faction, Gunner, this);
+			Ball->Launch(Laid * Speed, Fuse, Faction, Gunner, this, bDud);
 		}
 	}
 	else
@@ -584,7 +623,7 @@ bool APA250FieldGun::Fire(const FVector& AimPoint, ARFCharacter* Gunner, bool bP
 		const float HalfAngle = FMath::Max(0.5f, R.cannon_grape_cone_degrees);
 		for (int32 i = 0; i < FMath::Max(1, R.cannon_grape_balls); ++i)
 		{
-			const FVector D = FMath::VRandCone(Dir, FMath::DegreesToRadians(HalfAngle));
+			const FVector D = AimRng.VRandCone(Dir, FMath::DegreesToRadians(HalfAngle)); // seeded: where each ball goes decides who is hit
 			const FTransform At(D.Rotation(), Muzzle + D * 30.f);
 			AMusketProjectile* Ball = GetWorld()->SpawnActorDeferred<AMusketProjectile>(AMusketProjectile::StaticClass(), At, this, Gunner,
 				ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
@@ -610,6 +649,15 @@ bool APA250FieldGun::Fire(const FVector& AimPoint, ARFCharacter* Gunner, bool bP
 	UE_LOG(LogTemp, Display, TEXT("PA250 gun: %s gun fires %s at %.0f m (crew %d, %d gunners, heat %.2f)"), *Faction.ToString(),
 		PA250Gunnery::ShotWords(Shot), Range / 100.f, CrewNow, TrainedNow, BarrelHeat);
 	if (APA250BattleGameMode* GM = BattleOf(this)) GM->NotifyGunFired(this, Shot);
+	// The crew start at the report (gun_crew_flinch), each his own take.
+	for (int32 i = 0; i < Posts.Num(); ++i)
+	{
+		ARFCharacter* Man = Posts[i].Get();
+		if (!Man || Man->IsDead() || Man->IsPlayerControlled() || Man == Gunner) continue;
+		FPA250ActionParams InPlace;
+		InPlace.bRootMotion = false;
+		PA250AnimClips::PlayCombatClip(Man, TEXT("gun_crew_flinch"), HashCombine(GetTypeHash(GetUniqueID()), GetTypeHash(i + ShotsFired * 7)), &InPlace);
+	}
 	return true;
 }
 
@@ -626,8 +674,82 @@ EActiveReloadHit APA250FieldGun::PlayerCommit()
 {
 	if (bLoaded || !Drill.IsReloading()) return EActiveReloadHit::None;
 	// Load with no round in hand (the chest is empty): there is nothing to commit.
-	if (Drill.GetStepIndex() == 1 && !bRoundInHand) return EActiveReloadHit::None;
+	if (PA250Gunnery::IsGunStep(Drill.GetStepIndex(), PA250Gunnery::EPA250GunStep::Load) && !bRoundInHand) return EActiveReloadHit::None;
 	return Drill.TryCommit();
+}
+
+FName APA250FieldGun::CrewIdleClip(int32 Post)
+{
+	static const FName Idle[4] = {TEXT("gun_crew_idle_sponger"), TEXT("gun_crew_idle_loader"), TEXT("gun_crew_idle_ventsman"), TEXT("gun_crew_idle_captain")};
+	return Idle[FMath::Clamp(Post, 0, 3)];
+}
+
+FName APA250FieldGun::CrewStepClip(int32 Post, int32 Step, bool bDrilling)
+{
+	// Who works at each drill step (PA250Gunnery::EPA250GunStep, the HUD's labels); the rest stand
+	// ready. The ventsman stops the vent while the sponge is in the bore (documented practice). Run up
+	// has no clip on its own yet (gun_crew_run_up is not wired): the captain lays as the piece comes up.
+	using PA250Gunnery::EPA250GunStep;
+	if (bDrilling)
+	{
+		switch (static_cast<EPA250GunStep>(Step))
+		{
+		case EPA250GunStep::Swab: if (Post == 0) return TEXT("gun_crew_sponge"); if (Post == 2) return TEXT("gun_crew_vent"); break;
+		case EPA250GunStep::Load: if (Post == 1) return TEXT("gun_crew_load"); break;
+		case EPA250GunStep::Ram: if (Post == 0) return TEXT("gun_crew_ram"); break;
+		case EPA250GunStep::RunOut: if (Post == 3) return TEXT("gun_crew_lay"); break;
+		case EPA250GunStep::Prime: if (Post == 2) return TEXT("gun_crew_prime"); break;
+		case EPA250GunStep::Fire: if (Post == 2) return TEXT("gun_crew_fire"); break;
+		default: break;
+		}
+	}
+	return CrewIdleClip(Post);
+}
+
+void APA250FieldGun::PoseCrew(float DeltaSeconds)
+{
+	if (!Mesh || !GetWorld()) return;
+	const bool bDrilling = !bLoaded && Drill.IsReloading();
+	const int32 Step = Drill.GetStepIndex();
+	const float Progress = Drill.GetPhaseProgress();
+	const FTransform GunSpace = Mesh->GetComponentTransform();
+	for (int32 i = 0; i < Posts.Num() && i < 4; ++i)
+	{
+		ARFCharacter* Man = Posts[i].Get();
+		if (!Man || Man->IsDead() || Man->IsPlayerControlled() || Man->IsMounted() || Man->FactionId != Faction
+			|| Man->ActorHasTag(TEXT("PA250CrewFallingBack")) || !Man->GetMesh()) continue;
+		UPA250SoldierAnimInstance* Anim = Cast<UPA250SoldierAnimInstance>(Man->GetMesh()->GetAnimInstance());
+		if (!Anim) continue;
+		const FName Name = CrewStepClip(i, Step, bDrilling);
+		const FPA250ClipEntry* Entry = PA250AnimClips::FindClip(Name);
+		if (!Entry || !Entry->bHasStation) continue;
+		// Only a man who has reached his station and stands there: one still walking to it walks.
+		FVector Station = GunSpace.TransformPosition(FVector(Entry->StationCm.X, Entry->StationCm.Y, 0.f));
+		const FVector Here = Man->GetActorLocation();
+		if (FVector::Dist2D(Here, Station) > 150.f || Man->GetVelocity().Size2D() > 60.f) continue;
+		UAnimSequence* Take = PA250AnimClips::ClipVariant(Name, HashCombine(GetTypeHash(GetUniqueID()), GetTypeHash(i * 31 + ShotsFired)));
+		if (!Take) continue;
+		// The clip's hands meet the gun only from the station, facing its face point: he is eased
+		// onto both (a step a second at most), then the clip shows.
+		Station.Z = Here.Z;
+		Man->SetActorLocation(FMath::VInterpConstantTo(Here, Station, DeltaSeconds, 120.f), false, nullptr, ETeleportType::None);
+		const FVector Face = GunSpace.TransformPosition(FVector(Entry->FaceCm.X, Entry->FaceCm.Y, 0.f)) - Station;
+		if (!Face.IsNearlyZero())
+		{
+			const FRotator Want(0.f, Face.Rotation().Yaw, 0.f);
+			Man->SetActorRotation(FMath::RInterpConstantTo(Man->GetActorRotation(), Want, DeltaSeconds, 360.f));
+		}
+		const float Length = Take->GetPlayLength();
+		const bool bLoop = Entry->bLoop;
+		const float Time = bLoop ? FMath::Fmod(GetWorld()->GetTimeSeconds() + i * 0.7f, FMath::Max(0.1f, Length)) : FMath::Clamp(Progress, 0.f, 1.f) * Length;
+		const bool bAtStation = FVector::Dist2D(Here, Station) < 25.f;
+		Anim->SetPosedAction(Take, Time, bAtStation ? 1.f : 0.f, bLoop);
+		if (bAtStation && !bLoop && !CrewClipsLogged.Contains(Name))
+		{
+			CrewClipsLogged.Add(Name);
+			UE_LOG(LogTemp, Display, TEXT("PA250 gun: crew post %d acts %s at his station (step %d)"), i, *Name.ToString(), Step);
+		}
+	}
 }
 
 void APA250FieldGun::DischargePremature(FRandomStream& Hot)
@@ -699,7 +821,7 @@ void APA250FieldGun::Tick(float DeltaSeconds)
 	SettleWobble = FMath::Max(0.f, SettleWobble - DeltaSeconds);
 	// Premature discharge (M6): sponger at the muzzle is the guaranteed casualty (55% WIA / 45% KIA),
 	// then ApplyBlast(Premature) for everyone else.
-	if (!bLoaded && Drill.IsReloading() && BarrelHeat > 0.72f && Drill.GetStepIndex() == 0)
+	if (!bLoaded && Drill.IsReloading() && BarrelHeat > 0.72f && PA250Gunnery::IsGunStep(Drill.GetStepIndex(), PA250Gunnery::EPA250GunStep::Swab))
 	{
 		FRandomStream Hot(HashCombine(GetTypeHash(static_cast<uint64>(FMath::FloorToInt(GetWorld()->GetTimeSeconds() * 10.f))), GetTypeHash(Faction.GetComparisonIndex())));
 		if (Hot.FRand() < 0.002f * BarrelHeat)
@@ -710,8 +832,7 @@ void APA250FieldGun::Tick(float DeltaSeconds)
 	// The drill: as fast as the men at the gun can make it. Missing roles cover +25% step time.
 	// Load (step 1) begins by taking one round from the chest. With none to take the drill
 	// stands at Load ("Chest empty") and a commit does nothing, so no round is loaded for free.
-	float Speed = PA250Gunnery::DrillSpeed(CrewNow, TrainedNow, R);
-	if (CrewNow > 0 && CrewNow < R.cannon_crew_men) Speed /= 1.25f;
+	const float Speed = PA250Gunnery::CrewDrillSpeed(CrewNow, TrainedNow, R);
 	if (!bLoaded && Speed > 0.f)
 	{
 		if (!Drill.IsReloading() && !Drill.IsComplete())
@@ -719,18 +840,19 @@ void APA250FieldGun::Tick(float DeltaSeconds)
 			Drill.BeginReload();
 			bRoundInHand = false;
 		}
-		if (Drill.IsReloading() && Drill.GetStepIndex() == 1 && !bRoundInHand)
+		if (Drill.IsReloading() && PA250Gunnery::IsGunStep(Drill.GetStepIndex(), PA250Gunnery::EPA250GunStep::Load) && !bRoundInHand)
 		{
 			APA250AmmoChest* Box = Chest.Get();
 			bRoundInHand = !Box || Box->TakeOneForLoad();
 		}
-		const bool bStalled = Drill.IsReloading() && Drill.GetStepIndex() == 1 && !bRoundInHand;
+		const bool bStalled = Drill.IsReloading() && PA250Gunnery::IsGunStep(Drill.GetStepIndex(), PA250Gunnery::EPA250GunStep::Load) && !bRoundInHand;
 		if (!bStalled)
 		{
 			// One step at a time: a long frame must not carry the drill through Load unpaid.
 			const int32 StepBefore = Drill.GetStepIndex();
 			Drill.Tick(DeltaSeconds * Speed);
-			if (Drill.IsReloading() && StepBefore == 0 && Drill.GetStepIndex() > 1 && !bRoundInHand)
+			if (Drill.IsReloading() && StepBefore < static_cast<int32>(PA250Gunnery::EPA250GunStep::Load)
+				&& Drill.GetStepIndex() > static_cast<int32>(PA250Gunnery::EPA250GunStep::Load) && !bRoundInHand)
 			{
 				APA250AmmoChest* Box = Chest.Get();
 				bRoundInHand = !Box || Box->TakeOneForLoad();
@@ -758,6 +880,7 @@ void APA250FieldGun::Tick(float DeltaSeconds)
 			}
 		}
 	}
+	PoseCrew(DeltaSeconds);
 	CrewAbandonHold = FMath::Max(0.f, CrewAbandonHold - DeltaSeconds);
 	// Serving crew under two, and the player is not at the piece: those men fall back.
 	// Gunners standing in the radius count as crew even after their posts are cleared, so
@@ -1029,13 +1152,28 @@ void APA250CannonBall::AdvanceFlight(float DeltaSeconds)
 			}
 			else if (Band >= R.cannon_round_wound_mps)
 			{
-				// Leg wound (GAME INVENTION): fall, crawl, then recorded WIA.
-				// Without a crawl clip, WoundOut is immediate (tests and current drop).
+				// Leg wound (GAME INVENTION): he falls (wound_leg_fall), crawls for
+				// leg_wound_crawl_seconds (crawl_wounded), and is then a recorded WIA.
+				// With no fall clip on this machine WoundOut is immediate.
 				const uint32 LegSeed = HashCombine(GetTypeHash(Man), GetTypeHash(static_cast<uint64>(Band * 100.f)));
-				const float Crawl = FMath::Max(0.1f, R.blast_leg_wound_crawl_seconds);
+				const float CrawlSeconds = FMath::Max(0.1f, R.blast_leg_wound_crawl_seconds);
+				TWeakObjectPtr<ARFCharacter> Faller(Man);
+				const float Played = PA250AnimClips::PlayCombatClip(Man, TEXT("wound_leg_fall"), LegSeed, nullptr,
+					[Faller, LegSeed, CrawlSeconds](FName Notify)
+					{
+						ARFCharacter* M = Faller.Get();
+						if (!Notify.IsNone() || !M || M->IsDead()) return;
+						FPA250ActionParams Loop;
+						Loop.bLoop = true;
+						Loop.LoopSeconds = CrawlSeconds + 0.5f; // still crawling when he is taken off
+						Loop.BlendIn = 0.25f;
+						PA250AnimClips::PlayCombatClip(M, TEXT("crawl_wounded"), LegSeed + 1u, &Loop);
+					});
+				const float Crawl = Played + CrawlSeconds;
 				Man->LockMovement(Crawl);
-				const float Played = PA250AnimClips::PlayCombatClip(Man, TEXT("AM_React_LegCrawl"), LegSeed);
-				if (Played <= 0.f || !World)
+				// Commandlet / FScopedTestWorld never BeginPlay: timers do not run, so record the WIA now.
+				// A live battle keeps the fall+crawl, then WoundOut when the timer fires.
+				if (Played <= 0.f || !World || !World->HasBegunPlay())
 				{
 					if (GM) GM->WoundOut(Man, Gunner.Get(), this);
 				}
@@ -1082,7 +1220,7 @@ void APA250CannonBall::AdvanceFlight(float DeltaSeconds)
 				if (!Man->KnockDown(Away * R.cannon_knockdown_push_cm))
 				{
 					Man->LockMovement(R.cannon_knockdown_seconds);
-					PA250AnimClips::PlayCombatClip(Man, TEXT("AM_React_NearMiss"), ReactSeed);
+					PA250AnimClips::PlayCombatClip(Man, TEXT("react_near_miss"), ReactSeed);
 				}
 				Man->ApplySuppression(R.cannon_knockdown_seconds * 2.f, 6.f);
 				if (GM) GM->NotifyRoundShot(Man, false);
@@ -1090,8 +1228,10 @@ void APA250CannonBall::AdvanceFlight(float DeltaSeconds)
 			else
 			{
 				Man->ApplySuppression(R.cannon_knockdown_seconds, 3.f);
+				FPA250ActionParams InPlace;
+				InPlace.bRootMotion = false; // he keeps his place in the rank
 				PA250AnimClips::PlayCombatClip(Man,
-					Row.Off <= R.blast_near_miss_path_cm ? TEXT("AM_React_NearMiss") : TEXT("AM_React_DirtSpray"), ReactSeed);
+					Row.Off <= R.blast_near_miss_path_cm ? FName(TEXT("react_near_miss")) : FName(TEXT("react_dirt_spray")), ReactSeed, &InPlace);
 			}
 			if (Row.Off <= R.blast_dirt_spray_cm)
 			{
@@ -1120,14 +1260,15 @@ void APA250CannonBall::AdvanceFlight(float DeltaSeconds)
 			if (GM) GM->NotifyWorkBattered(Work, bBroken, Faction);
 			if (UPA250SmokeSubsystem* Bank = World->GetSubsystem<UPA250SmokeSubsystem>())
 				Bank->AddDirtBurst(SurfaceHit.ImpactPoint, FVector(SurfaceHit.ImpactNormal), R.cannon_dirt_burst_scale);
-			PA250Intensity::RoundShotStrike(GetWorld(), SurfaceHit.ImpactPoint);
+			PA250BattleFX::Fire(GetWorld(), EPA250BattleFXEvent::RoundShotGroundStrike, SurfaceHit.ImpactPoint);
 			Destroy();
 			return;
 		}
 		// Graze vs bury (dirt/grass defaults: MaxGrazeAngle 18°, Restitution 0.35, GrazeRetention 0.75).
 		const float IncidenceDeg = PA250Gunnery::GrazeAngleDeg(Velocity, SurfaceHit.ImpactNormal);
 		const float MaxGraze = R.cannon_graze_max_deg;
-		if (IncidenceDeg <= MaxGraze && SpeedMps >= R.cannon_round_wound_mps)
+		const float MinBounce = R.cannon_bounce_min_speed_mps > 0.f ? R.cannon_bounce_min_speed_mps : R.cannon_round_wound_mps;
+		if (IncidenceDeg <= MaxGraze && SpeedMps >= MinBounce)
 		{
 			FVector V = Velocity;
 			const FVector N = SurfaceHit.ImpactNormal;
@@ -1140,14 +1281,13 @@ void APA250CannonBall::AdvanceFlight(float DeltaSeconds)
 			SetActorLocation(SurfaceHit.ImpactPoint + N * 5.f);
 			if (UPA250SmokeSubsystem* Bank = World->GetSubsystem<UPA250SmokeSubsystem>())
 				Bank->AddDirtBurst(SurfaceHit.ImpactPoint, N, R.cannon_dirt_burst_scale * 0.6f);
-			FPA250BattleAudio::PlayAt(this, TEXT("impact_ground"), SurfaceHit.ImpactPoint, EPA250SoundRange::Gunfire, 0.7f, 0.1f);
-			PA250Intensity::RoundShotStrike(GetWorld(), SurfaceHit.ImpactPoint); // the player's camera shakes; close by, earth is thrown over his view
+			// Sound, flash, the player's shake and the earth over his view: the FX router (one path).
+			PA250BattleFX::Fire(GetWorld(), EPA250BattleFXEvent::RoundShotGroundStrike, SurfaceHit.ImpactPoint, 0.7f);
 			return;
 		}
 		if (UPA250SmokeSubsystem* Bank = World->GetSubsystem<UPA250SmokeSubsystem>())
 			Bank->AddDirtBurst(SurfaceHit.ImpactPoint, FVector(SurfaceHit.ImpactNormal), R.cannon_dirt_burst_scale);
-		FPA250BattleAudio::PlayAt(this, TEXT("impact_ground"), SurfaceHit.ImpactPoint, EPA250SoundRange::Gunfire, 1.f, 0.1f);
-		PA250Intensity::RoundShotStrike(GetWorld(), SurfaceHit.ImpactPoint); // the player's camera shakes; close by, earth is thrown over his view
+		PA250BattleFX::Fire(GetWorld(), EPA250BattleFXEvent::RoundShotGroundStrike, SurfaceHit.ImpactPoint);
 		Destroy();
 		return;
 	}
@@ -1171,8 +1311,9 @@ APA250CannonShell::APA250CannonShell()
 	InitialLifeSpan = 10.f;
 }
 
-void APA250CannonShell::Launch(const FVector& InVelocity, float InFuseCm, FName InFaction, ARFCharacter* InGunner, const AActor* InGun)
+void APA250CannonShell::Launch(const FVector& InVelocity, float InFuseCm, FName InFaction, ARFCharacter* InGunner, const AActor* InGun, bool bInDud)
 {
+	bDud = bInDud;
 	if (UStaticMesh* Sphere = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Sphere.Sphere"))) Shell->SetStaticMesh(Sphere);
 	Velocity = InVelocity;
 	FuseCm = FMath::Max(500.f, InFuseCm);
@@ -1185,9 +1326,18 @@ void APA250CannonShell::Burst(const FVector& At)
 {
 	UWorld* World = GetWorld();
 	if (!World) { Destroy(); return; }
+	if (bDud) { LandDud(At); return; }
+	// ApplyBlast's FX sends ShellBurst through the router (sound, flash, shake).
 	// Shared blast path (both sides). Outer radius from battle_rules.json blast.shell.
 	PA250Blast::ApplyBlast(World, At, EPA250BlastSize::Shell, Faction, Gunner.Get(), this,
 		HashCombine(GetTypeHash(static_cast<uint64>(Travelled)), GetTypeHash(Faction.GetComparisonIndex())));
+	Destroy();
+}
+
+void APA250CannonShell::LandDud(const FVector& At)
+{
+	if (UWorld* World = GetWorld()) PA250BattleFX::Fire(World, EPA250BattleFXEvent::ShellDud, At);
+	UE_LOG(LogTemp, Display, TEXT("PA250 gun: a %s shell lands without bursting (dud) %.0f m out"), *Faction.ToString(), Travelled / 100.f);
 	Destroy();
 }
 
@@ -1250,7 +1400,7 @@ void APA250CannonShell::AdvanceFlight(float DeltaSeconds)
 		Burst(Hit.ImpactPoint);
 		return;
 	}
-	if (Travelled >= FuseCm)
+	if (Travelled >= FuseCm && !bDud) // a dud's fuse never takes: it flies on to the ground
 	{
 		Burst(To);
 		return;

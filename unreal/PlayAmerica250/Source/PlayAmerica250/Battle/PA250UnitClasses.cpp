@@ -330,6 +330,34 @@ bool PA250UnitClasses::LoadFromFile(const FString& Path, TArray<FString>* OutErr
 		Get(TEXT("squad"), TEXT("aim_snap_m"), Verbs.SquadAimSnapM);
 		Get(TEXT("squad"), TEXT("aim_ray_m"), Verbs.SquadAimRayM);
 		Get(TEXT("squad"), TEXT("ensure_seconds"), Verbs.SquadEnsureSeconds);
+		const TSharedPtr<FJsonObject>* M = nullptr;
+		if ((*V)->TryGetObjectField(TEXT("morale"), M))
+		{
+			// Closed: the four thresholds the squads use, each required, nothing else.
+			static const TCHAR* Keys[] = {TEXT("shaken_enter"), TEXT("shaken_exit"), TEXT("rout_enter"), TEXT("min_state_seconds")};
+			float* Out[] = {&Verbs.Morale.ShakenEnter, &Verbs.Morale.ShakenExit, &Verbs.Morale.RoutEnter, &Verbs.Morale.MinStateSeconds};
+			for (int32 k = 0; k < 4; ++k)
+			{
+				double D = 0.0;
+				if ((*M)->TryGetNumberField(Keys[k], D)) *Out[k] = static_cast<float>(D);
+				else Errors.Add(FString::Printf(TEXT("verbs.morale has no %s"), Keys[k]));
+			}
+			for (const auto& Pair : (*M)->Values)
+			{
+				if (Pair.Key == TEXT("note")) continue;
+				bool bKnown = false;
+				for (const TCHAR* K : Keys) bKnown |= Pair.Key == K;
+				if (!bKnown) Errors.Add(FString::Printf(TEXT("verbs.morale: unknown key %s"), *Pair.Key));
+			}
+			if (!(Verbs.Morale.ShakenExit < Verbs.Morale.ShakenEnter && Verbs.Morale.ShakenEnter < Verbs.Morale.RoutEnter))
+			{
+				Errors.Add(TEXT("verbs.morale: needs shaken_exit < shaken_enter < rout_enter"));
+			}
+		}
+		else
+		{
+			Errors.Add(TEXT("no verbs.morale object"));
+		}
 	}
 	else if (Root.IsValid())
 	{
