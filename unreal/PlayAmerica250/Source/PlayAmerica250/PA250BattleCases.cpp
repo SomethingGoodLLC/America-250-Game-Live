@@ -48,6 +48,12 @@
 #include "PA250BotTuning.h"
 #include "PA250Cover.h"
 #include "PA250Morale.h"
+#include "PA250BattleWeather.h"
+#include "PA250MusketFeel.h"
+#include "PA250BattleRng.h"
+#include "PA250BattleFX.h"
+#include "PA250BattleFeel.h"
+#include "PA250Intensity.h"
 #include "PA250Smoke.h"
 #include "PA250BattleAudio.h"
 #include "Sound/SoundWave.h"
@@ -86,6 +92,8 @@ struct FArtilleryAccess
 	}
 	static void ConfigureCrew(APA250BattleGameMode* GM, ARFCharacter* Man) { GM->ConfigureSoldier(Man, Man->FactionId, TEXT("artilleryman")); }
 	static int32 EnsureCrew(APA250BattleGameMode* GM, APA250FieldGun* Gun, ARFCharacter* Player) { return GM->EnsureGunCrew(Gun, Player); }
+	/** A test world's battle mode has run no BeginPlay: give it the coordinator the cases drive. */
+	static void SetVolleys(APA250BattleGameMode* GM, UPA250VolleyCoordinator* V) { GM->Volleys = V; }
 	static FPA250TicketLedger& Ledger(APA250BattleGameMode* GM) { return GM->Ledger; }
 	static int32 POW(APA250BattleGameMode* GM, FName Side) { int32 N = 0; for (const auto& Row : GM->Prisoners.FindRef(Side)) N += Row.Value; return N; }
 	static int32 Kills(APA250BattleGameMode* GM) { return GM->PersonalKills; }
@@ -981,6 +989,35 @@ void RunSpacing(FLog& Log)
 		&& UPA250VolleyCoordinator::EngagementBucket(10000.f) == 3 && UPA250VolleyCoordinator::EngagementBucket(15000.f) == 4,
 		TEXT("spacing: engagement histogram buckets"));
 
+	// Every man has a lane: nobody stands straight behind a man of the rank in front (at least half a
+	// file to one side of each), for every squad size. Before 2026-11-17 a short rear rank (5, 7, 9 men)
+	// was shifted half a file onto the front men's files and those men could not fire.
+	{
+		FString Masked;
+		for (int32 N = 1; N <= 20; ++N)
+		{
+			TArray<FVector2D> Offs;
+			UPA250VolleyCoordinator::FormationOffsets(N, 200.f, 200.f, 6, Offs);
+			bool bMasked = false;
+			for (const FVector2D& Me : Offs)
+			{
+				for (const FVector2D& Front : Offs)
+				{
+					bMasked |= FMath::IsNearlyEqual(Front.Y, Me.Y - 200.f, 1.f) && FMath::Abs(Front.X - Me.X) < 99.f;
+				}
+			}
+			if (bMasked) Masked += FString::Printf(TEXT(" %d"), N);
+		}
+		Log.Check(Masked.IsEmpty(), FString::Printf(TEXT("spacing: for 1 to 20 men every rear man stands in a gap of the rank in front (masked:%s)"),
+			Masked.IsEmpty() ? TEXT(" none") : *Masked));
+		TArray<FVector2D> Five, Six;
+		UPA250VolleyCoordinator::FormationOffsets(5, 200.f, 200.f, 6, Five);
+		UPA250VolleyCoordinator::FormationOffsets(6, 200.f, 200.f, 6, Six);
+		Log.Check(Five.Num() == 5 && FMath::IsNearlyEqual(Five[3].X, -100.f) && FMath::IsNearlyEqual(Five[4].X, 100.f)
+			&& Six.Num() == 6 && FMath::IsNearlyEqual(Six[3].X, -100.f) && FMath::IsNearlyEqual(Six[5].X, 300.f),
+			TEXT("spacing: five men stand 3 and 2 with the two in the front rank's gaps; six keep the old 3 and 3 staggered places"));
+	}
+
 	// Formation: two staggered ranks, 2 m files - nobody stands on top of anybody.
 	for (const int32 N : {3, 6, 8})
 	{
@@ -1395,7 +1432,8 @@ void RunTraining(FLog& Log)
 			Ctx->Destroy();
 		}
 	}
-	// A misfire on a real soldier: no ball, the musket must be loaded again, and the player never misfires.
+	// A misfire on a real soldier: no ball, the musket must be loaded again. Since 2026-11-16 the player
+	// misfires too, at battle_feel.json musket (RunMusketFeel); a bot at his training profile's chance.
 	{
 		FScopedTestWorld W;
 		ARFCharacter* Soldier = W.World ? W.World->SpawnActor<ARFCharacter>(FVector(0.f, 0.f, 100.f), FRotator::ZeroRotator) : nullptr;
@@ -1403,7 +1441,7 @@ void RunTraining(FLog& Log)
 		if (Soldier)
 		{
 			Soldier->DispatchBeginPlay();
-			Log.Check(Soldier->MisfireChance == 0.f, TEXT("fire: a soldier without a training profile (the player) never misfires"));
+			Log.Check(Soldier->MisfireChance == 0.f, TEXT("fire: a soldier without a training profile (the player) has no profile chance (his is battle_feel's)"));
 			if (Soldier->Musket && Soldier->Musket->CanFire())
 			{
 				int32 Balls = 0;
@@ -3302,9 +3340,10 @@ void RunGunnery(FLog& Log)
 		const float TFull = TimeIt(Full), THalf = TimeIt(Half);
 		Log.Check(Preset.CustomStepSeconds.Num() == 6 && FMath::Abs(TFull - Whole) < 1.5f && FMath::Abs(THalf - 2.f * Whole) < 3.f,
 			FString::Printf(TEXT("guns: 6-step drill takes %.1f s with a full crew (%.0f s steps) and %.1f s with two men"), TFull, Whole, THalf));
-		Log.Check(Preset.CustomStepLabels.Num() == 6 && Preset.CustomStepLabels[0] == TEXT("Sponge")
-			&& Preset.CustomStepLabels[2] == TEXT("Ram") && Preset.CustomStepLabels[5] == TEXT("Fire"),
-			TEXT("guns: six drill step labels (Sponge…Fire)"));
+		Log.Check(Preset.CustomStepLabels.Num() == 6 && Preset.CustomStepLabels[0] == TEXT("Swab")
+			&& Preset.CustomStepLabels[2] == TEXT("Ram") && Preset.CustomStepLabels[3] == TEXT("Run up")
+			&& Preset.CustomStepLabels[5] == TEXT("Fire"),
+			TEXT("guns: six drill step labels (Swab…Run up…Fire)"));
 		// Each step must change phase. Index >= 2 used to stay on ShoulderAim, so ramrod/anim cues fired once.
 		{
 			FActiveReloadSequencer Steps;
@@ -3452,9 +3491,21 @@ void RunGunnery(FLog& Log)
 					FString::Printf(TEXT("guns: one man at the piece (crew %d) cannot fire"), Gun->GetCrew()));
 				Mate->SetActorLocation(Gun->GetActorLocation() + FVector(100.f, 40.f, 0.f));
 				Gun->ClaimPost(Mate);
+				// A six-pounder (the default kind) cycles its two loads only: never shell.
+				bool bSawShell = false;
 				Gun->CycleShot(1);
+				bSawShell |= Gun->GetSelectedShot() == EPA250Shot::Shell;
+				Log.Check(Gun->GetSelectedShot() == EPA250Shot::Grape && Gun->LoadChip() == TEXT("LOAD: CANISTER"),
+					TEXT("guns: [ ] goes to LOAD: CANISTER"));
 				Gun->CycleShot(1);
-				Gun->CycleShot(1);
+				bSawShell |= Gun->GetSelectedShot() == EPA250Shot::Shell;
+				Log.Check(Gun->GetGunType() == TEXT("six_pounder") && !bSawShell && Gun->GetSelectedShot() == EPA250Shot::RoundShot,
+					TEXT("guns: a six-pounder's [ ] cycles canister and round shot, never shell (cannon.gun_types)"));
+				Gun->SetGunType(TEXT("howitzer"));
+				Gun->CycleShot(1); Gun->CycleShot(1);
+				Log.Check(Gun->GetSelectedShot() == EPA250Shot::Shell, TEXT("guns: a howitzer's [ ] reaches shell"));
+				Gun->SetGunType(FString());
+				Log.Check(Gun->GetSelectedShot() != EPA250Shot::Shell, TEXT("guns: made a six-pounder again, a shell load is dropped"));
 				Gun->CycleShot(1);
 				Log.Check(Gun->GetSelectedShot() == EPA250Shot::Grape && Gun->LoadChip() == TEXT("LOAD: CANISTER"),
 					TEXT("guns: [ ] cycles back to LOAD: CANISTER"));
@@ -3969,8 +4020,9 @@ void RunBlast(FLog& Log)
 	Log.Check(R.blast_shell_radius_cm > 0.f && R.blast_premature_radius_cm > 0.f && R.blast_chest_radius_cm > R.blast_shell_radius_cm
 		&& R.blast_ragdoll_cap == 12 && R.blast_chest_ready_rounds > 0,
 		TEXT("blast: data block loads (shell/premature/chest radii, ragdoll cap 12, ready_rounds)"));
-	Log.Check(PA250AnimClips::CombatDropFolder() == TEXT("/Game/PA250/Anim"),
-		TEXT("blast: combat drop folder is /Game/PA250/Anim (anim_clips Loco parent)"));
+	Log.Check(PA250AnimClips::FindClip(TEXT("react_blast_knockdown_f")) && PA250AnimClips::FindClip(TEXT("react_blast_stagger_l"))
+		&& PA250AnimClips::FindClip(TEXT("wound_leg_fall")) && PA250AnimClips::FindClip(TEXT("volley_fire")) && PA250AnimClips::FindClip(TEXT("gun_crew_sponge")),
+		TEXT("blast: the reaction, volley and gun crew clips are names in the clip registry (anim_clips.json)"));
 
 	// Pure ring classification on a distance grid (40 samples).
 	{
@@ -4303,6 +4355,85 @@ void RunBlast(FLog& Log)
 	}
 }
 
+void RunClipActions(FLog& Log)
+{
+	PA250AnimClips::LoadRegistry(PA250AnimClips::DataPath());
+	// Pure: how much of an action shows.
+	Log.Check(UPA250SoldierAnimInstance::ActionWeightAt(0.f, 2.f, 0.2f, 0.4f) == 0.f
+		&& FMath::IsNearlyEqual(UPA250SoldierAnimInstance::ActionWeightAt(0.1f, 2.f, 0.2f, 0.4f), 0.5f, 1.e-4f)
+		&& UPA250SoldierAnimInstance::ActionWeightAt(1.f, 2.f, 0.2f, 0.4f) == 1.f
+		&& FMath::IsNearlyEqual(UPA250SoldierAnimInstance::ActionWeightAt(1.8f, 2.f, 0.2f, 0.4f), 0.5f, 1.e-4f)
+		&& UPA250SoldierAnimInstance::ActionWeightAt(2.f, 2.f, 0.2f, 0.4f) == 0.f
+		&& UPA250SoldierAnimInstance::ActionWeightAt(0.f, 2.f, 0.f, 0.f) == 1.f,
+		TEXT("clips: an action blends in, holds, blends out and is gone at its end"));
+	// Takes: every wired name with a clip has its takes on this machine, and a seed picks the same one twice.
+	int32 Wired = 0, Whole = 0, Steady = 0;
+	FString Missing;
+	for (const FPA250ClipEntry& E : PA250AnimClips::Registry())
+	{
+		if (!E.bWired || E.Variants.Num() == 0) continue;
+		++Wired;
+		bool bAll = true;
+		for (int32 i = 0; i < E.Variants.Num(); ++i)
+		{
+			const UAnimSequence* Take = PA250AnimClips::ClipVariant(E.Name, static_cast<uint32>(i));
+			bAll &= Take && Take->GetPathName().StartsWith(E.Variants[i]);
+		}
+		if (bAll) ++Whole; else Missing += TEXT(" ") + E.Name.ToString();
+		if (PA250AnimClips::ClipVariant(E.Name, 12345u) == PA250AnimClips::ClipVariant(E.Name, 12345u)
+			&& PA250AnimClips::VariantCount(E.Name) == E.Variants.Num()) ++Steady;
+	}
+	Log.Check(Wired >= 30 && Whole == Wired && Steady == Wired,
+		FString::Printf(TEXT("clips: %d wired names, every take of %d loads by its seed, the same seed the same take (missing:%s)"), Wired, Whole, *Missing));
+	// Notifies by name: the clips carry Blueprint notify classes; the game knows them by name alone.
+	const UAnimSequence* Fire = PA250AnimClips::ClipVariant(TEXT("volley_fire"), 0u);
+	const UAnimSequence* Down = PA250AnimClips::ClipVariant(TEXT("react_blast_knockdown_f"), 0u);
+	const float FireAt = UPA250SoldierAnimInstance::NotifyTime(Fire, TEXT("Notify_Volley_Discharge"));
+	const float HandAt = UPA250SoldierAnimInstance::NotifyTime(Down, TEXT("Notify_Ragdoll_Handoff"));
+	Log.Check(Fire && FireAt >= 0.f && FireAt < Fire->GetPlayLength(),
+		FString::Printf(TEXT("clips: volley_fire carries Notify_Volley_Discharge at %.2f s of %.2f"), FireAt, Fire ? Fire->GetPlayLength() : 0.f));
+	Log.Check(Down && HandAt > 0.f && HandAt < Down->GetPlayLength(),
+		FString::Printf(TEXT("clips: react_blast_knockdown_f carries Notify_Ragdoll_Handoff at %.2f s of %.2f"), HandAt, Down ? Down->GetPlayLength() : 0.f));
+	if (Fire && FireAt >= 0.f)
+	{
+		TArray<FName> Before, Across, After, Twice;
+		UPA250SoldierAnimInstance::NotifiesBetween(Fire, -1.f, FireAt - 0.01f, Before);
+		UPA250SoldierAnimInstance::NotifiesBetween(Fire, FireAt - 0.01f, FireAt + 0.01f, Across);
+		UPA250SoldierAnimInstance::NotifiesBetween(Fire, FireAt + 0.01f, Fire->GetPlayLength(), After);
+		UPA250SoldierAnimInstance::NotifiesBetween(Fire, FireAt, FireAt, Twice);
+		Log.Check(!Before.Contains(TEXT("Notify_Volley_Discharge")) && Across.Contains(TEXT("Notify_Volley_Discharge"))
+			&& !After.Contains(TEXT("Notify_Volley_Discharge")) && Twice.Num() == 0,
+			TEXT("clips: a notify is reported in the step that passes it, once, and in no other"));
+	}
+	// Direction and crew.
+	Log.Check(FString(PA250AnimClips::BlastSuffix(static_cast<uint8>(EPA250BlastDir::Front))) == TEXT("f")
+		&& FString(PA250AnimClips::BlastSuffix(static_cast<uint8>(EPA250BlastDir::Back))) == TEXT("b")
+		&& FString(PA250AnimClips::BlastSuffix(static_cast<uint8>(EPA250BlastDir::Left))) == TEXT("l")
+		&& FString(PA250AnimClips::BlastSuffix(static_cast<uint8>(EPA250BlastDir::Right))) == TEXT("r"),
+		TEXT("clips: the blast's side picks the clip's suffix (f, b, l, r)"));
+	bool bStations = true, bSteps = true;
+	for (int32 Post = 0; Post < 4; ++Post)
+	{
+		const FPA250ClipEntry* Idle = PA250AnimClips::FindClip(APA250FieldGun::CrewIdleClip(Post));
+		bStations &= Idle && Idle->bHasStation && Idle->bLoop && !Idle->StationCm.Equals(Idle->FaceCm);
+		bSteps &= APA250FieldGun::CrewStepClip(Post, 0, false) == APA250FieldGun::CrewIdleClip(Post);
+		for (int32 Step = 0; Step < 6; ++Step)
+		{
+			const FPA250ClipEntry* Act = PA250AnimClips::FindClip(APA250FieldGun::CrewStepClip(Post, Step, true));
+			// A man keeps one station through the drill: every clip his post shows stands where his idle does.
+			bSteps &= Act && Act->bHasStation && Idle && Act->StationCm.Equals(Idle->StationCm);
+		}
+	}
+	Log.Check(bStations, TEXT("clips: each of the four crew posts has a station and a point to face (anim_clips.json)"));
+	Log.Check(bSteps, TEXT("clips: every clip a post shows through the six steps stands at that post's own station"));
+	int32 Working = 0;
+	for (int32 Step = 0; Step < 6; ++Step)
+	{
+		for (int32 Post = 0; Post < 4; ++Post) Working += APA250FieldGun::CrewStepClip(Post, Step, true) != APA250FieldGun::CrewIdleClip(Post) ? 1 : 0;
+	}
+	Log.Check(Working == 7, FString::Printf(TEXT("clips: someone works at every step of the drill (%d man-steps: the sponge has two)"), Working));
+}
+
 void RunVolleySync(FLog& Log)
 {
 	pa250::load_battle_rules(pa250::read_text_file(TCHAR_TO_UTF8(*UPA250Subsystem::BattleRulesPath())));
@@ -4330,5 +4461,657 @@ void RunVolleySync(FLog& Log)
 	Log.Check(Ok == 64, FString::Printf(TEXT("volley sync: total offset == rolling + stage jitter, jitter in [0, %.0f] ms, repeatable (%d/64)"), MaxMs, Ok));
 	Log.Check(Distinct.Num() > 16, FString::Printf(TEXT("volley sync: the men's offsets are spread, not one value (%d distinct ms of 64)"), Distinct.Num()));
 	Log.Check(UPA250VolleyCoordinator::StageJitterSeconds(1, 1, 0, 0.f) == 0.f, TEXT("volley sync: zero stage jitter in data means none"));
+}
+
+namespace
+{
+/** A drill field in a test world: lines of continental foot facing a British man 40 m off, the real
+ *  volley coordinator ticking them. Men have no controllers, so each step they are put on the spot
+ *  their squad gave them (as if they had walked there); every word, timer, shot and musket is real. */
+struct FDrillField
+{
+	FScopedTestWorld W{true};
+	APA250BattleGameMode* GM = nullptr;
+	UPA250VolleyCoordinator* V = nullptr;
+	TArray<ARFCharacter*> Line;
+	ARFCharacter* Enemy = nullptr;
+	TMap<ARFCharacter*, float> PulledAt; // when each man's musket stopped being loaded
+	TSet<ARFCharacter*> NoSnap;
+
+	ARFCharacter* Spawn(FName Side, FName Class, const FVector& At)
+	{
+		FActorSpawnParameters P;
+		P.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+		ARFCharacter* Man = W.World->SpawnActor<ARFCharacter>(At, Side == TEXT("british") ? FRotator(0.f, 180.f, 0.f) : FRotator::ZeroRotator, P);
+		if (!Man) return nullptr;
+		Man->FactionId = Side;
+		Man->UnitClass = Class;
+		Man->DispatchBeginPlay();
+		return Man;
+	}
+	/** Squads of six, each its own block 8 m apart along the front; an officer joins the first. */
+	bool Init(int32 Men, bool bOfficer = false, bool bBots = false)
+	{
+		if (!W.World) return false;
+		pa250::load_battle_rules(pa250::read_text_file(TCHAR_TO_UTF8(*UPA250Subsystem::BattleRulesPath())));
+		GM = W.World->GetAuthGameMode<APA250BattleGameMode>();
+		if (!GM) return false;
+		FArtilleryAccess::Init(GM);
+		V = NewObject<UPA250VolleyCoordinator>(GM);
+		V->Init(GM);
+		V->bHoldGround = true;
+		FArtilleryAccess::SetVolleys(GM, V);
+		for (int32 i = 0; i < Men; ++i)
+		{
+			const int32 Block = i / 6, InBlock = i % 6;
+			Line.Add(Spawn(TEXT("continental"), TEXT("line_infantry"), FVector(-(InBlock / 3) * 200.f, Block * 800.f + (InBlock % 3) * 200.f, 100.f)));
+		}
+		if (bOfficer) Line.Add(Spawn(TEXT("continental"), TEXT("officer"), FVector(150.f, 200.f, 100.f)));
+		for (ARFCharacter* C : Line)
+		{
+			if (!C || !bBots) continue;
+			C->AIControllerClass = APA250BotController::StaticClass(); // as the battle spawns them (a sergeant must be a bot)
+			C->SpawnDefaultController();
+		}
+		Enemy = Spawn(TEXT("british"), TEXT("line_infantry"), FVector(4000.f, 1600.f, 100.f));
+		return Enemy && !Line.Contains(nullptr);
+	}
+	float Now() const { return W.World->GetTimeSeconds(); }
+	void Step(float Dt)
+	{
+		W.World->Tick(LEVELTICK_TimeOnly, Dt);
+		// The powder smoke drifts and thins as in a battle (it hides men from the bots; a test world
+		// ticks no subsystems, so without this a few volleys leave a bank that never clears).
+		if (UPA250SmokeSubsystem* Smoke = W.World->GetSubsystem<UPA250SmokeSubsystem>()) Smoke->Tick(Dt);
+		V->Tick(Dt);
+		TSet<int32> Ids;
+		for (ARFCharacter* C : Line) if (C && !C->IsDead()) Ids.Add(C->SquadId);
+		for (const int32 Id : Ids)
+		{
+			for (const TPair<ARFCharacter*, FVector>& Spot : V->GetSquadSpotsForTest(Id))
+			{
+				if (Spot.Key && !NoSnap.Contains(Spot.Key)) Spot.Key->SetActorLocation(FVector(Spot.Value.X, Spot.Value.Y, Spot.Key->GetActorLocation().Z));
+			}
+		}
+		for (ARFCharacter* C : Line)
+		{
+			if (C && C->Musket && !C->Musket->CanFire() && !PulledAt.Contains(C)) PulledAt.Add(C, Now());
+		}
+	}
+	/** Load every musket again (the cases tick no actors, so a reload never finishes by itself). */
+	void ReloadAll()
+	{
+		for (ARFCharacter* C : Line)
+		{
+			if (C && C->Musket) C->Musket->ForceLoadedForTest();
+		}
+		// Balls do not fly in a world that ticks no actors: the last volley's would sit at the muzzles
+		// and stand in the next one's lanes.
+		for (TActorIterator<AMusketProjectile> It(W.World); It; ++It) It->Destroy();
+		PulledAt.Reset();
+	}
+	TArray<float> PullsOf(int32 SquadId) const
+	{
+		TArray<float> Out;
+		for (const TPair<ARFCharacter*, float>& P : PulledAt) if (P.Key->SquadId == SquadId) Out.Add(P.Value);
+		Out.Sort();
+		return Out;
+	}
+};
+
+float Span(const TArray<float>& T) { return T.Num() > 1 ? T.Last() - T[0] : 0.f; }
+}
+
+void RunVolley(FLog& Log)
+{
+	FDrillField F;
+	if (!F.Init(30)) { Log.Check(false, TEXT("volley: drill field (30 men and a target) spawns")); return; }
+	const pa250::BattleRules& R = pa250::battle_rules();
+	Log.Check(FMath::IsNearlyEqual(R.drill_make_ready_s, 1.2f) && FMath::IsNearlyEqual(R.drill_present_s, 0.9f),
+		TEXT("volley: drill.make_ready_s / present_s are the old FVolleyTuning 1.2 / 0.9 (moved 1:1)"));
+	const float T0 = F.Now();
+	F.Step(0.05f);
+	Log.Check(F.Now() > T0, TEXT("volley: the test world's clock runs (world time drives the pending shots)"));
+	TSet<int32> Squads;
+	for (ARFCharacter* C : F.Line) Squads.Add(C->SquadId);
+	Log.Check(!Squads.Contains(-1) && Squads.Num() == 5, FString::Printf(TEXT("volley: 30 men form 5 squads of 6 (%d squads)"), Squads.Num()));
+	// Watch every squad through its words: the order seen, when Fire was called, and the shots.
+	TMap<int32, TArray<EVolleyCall>> Seen;
+	TMap<int32, float> FireWord;
+	TMap<int32, int32> Scheduled;
+	for (int32 i = 0; i < 200; ++i) // 10 s
+	{
+		F.Step(0.05f);
+		for (const int32 Id : Squads)
+		{
+			const EVolleyCall St = F.V->GetSquadStage(Id);
+			TArray<EVolleyCall>& L = Seen.FindOrAdd(Id);
+			if (St != EVolleyCall::None && (L.Num() == 0 || L.Last() != St)) L.Add(St);
+			if (St == EVolleyCall::Fire && !FireWord.Contains(Id))
+			{
+				FireWord.Add(Id, F.Now());
+				Scheduled.Add(Id, F.V->GetPendingFireTimesForTest(Id).Num() + F.PullsOf(Id).Num());
+			}
+		}
+	}
+	int32 InOrder = 0, Loaded = 0, Pulled = 0, InWindow = 0;
+	float WorstSpan = 0.f, FirstAfter = 1.e9f;
+	for (const int32 Id : Squads)
+	{
+		const TArray<EVolleyCall>& L = Seen.FindRef(Id);
+		InOrder += (L.Num() >= 3 && L[0] == EVolleyCall::MakeReady && L[1] == EVolleyCall::Present && L[2] == EVolleyCall::Fire) ? 1 : 0;
+		const TArray<float> Pulls = F.PullsOf(Id);
+		Loaded += 6;
+		Pulled += Pulls.Num();
+		WorstSpan = FMath::Max(WorstSpan, Span(Pulls));
+		if (const float* Word = FireWord.Find(Id); Word && Pulls.Num())
+		{
+			FirstAfter = FMath::Min(FirstAfter, Pulls[0] - *Word);
+			for (const float T : Pulls) InWindow += (T - Pulls[0] <= R.drill_volley_spread_s + 0.051f) ? 1 : 0;
+		}
+	}
+	Log.Check(InOrder == Squads.Num(), FString::Printf(TEXT("volley: every squad goes Make ready -> Present -> Fire (%d of %d)"), InOrder, Squads.Num()));
+	Log.Check(Pulled >= FMath::CeilToInt(0.9f * Loaded),
+		FString::Printf(TEXT("volley: %d of %d loaded men pull the trigger in the volley (>= 90%%)"), Pulled, Loaded));
+	Log.Check(InWindow == Pulled && WorstSpan <= R.drill_volley_spread_s + 0.051f,
+		FString::Printf(TEXT("volley: every shot of a steady line falls inside volley_spread_s %.2f s of its first (worst span %.2f s)"), R.drill_volley_spread_s, WorstSpan));
+	Log.Check(FirstAfter >= R.drill_response_fire_s - 0.051f,
+		FString::Printf(TEXT("volley: the first musket answers the word after drill.response_delay_s.fire %.2f s (%.2f s)"), R.drill_response_fire_s, FirstAfter));
+	// Halt (Hold) and Advance (Form line): the word is obeyed after its response delay, not before.
+	{
+		ARFCharacter* Officer = F.Spawn(TEXT("continental"), TEXT("officer"), FVector(300.f, 1600.f, 100.f));
+		const int32 Id = F.Line[12]->SquadId;
+		F.NoSnap.Add(Officer);
+		const int32 Took = F.V->GiveOrder(Officer, EPA250SquadOrder::Hold, FVector(4000.f, 1600.f, 100.f));
+		const EPA250SquadOrder Before = F.V->GetSquadOrder(Id);
+		float HeldAfter = -1.f;
+		const float Given = F.Now();
+		for (int32 i = 0; i < 40 && HeldAfter < 0.f; ++i)
+		{
+			F.Step(0.025f);
+			if (F.V->GetSquadOrder(Id) == EPA250SquadOrder::Hold) HeldAfter = F.Now() - Given;
+		}
+		Log.Check(Took > 0 && Before != EPA250SquadOrder::Hold && HeldAfter >= R.drill_response_halt_s - 0.001f && HeldAfter <= R.drill_response_halt_s + 0.051f,
+			FString::Printf(TEXT("volley: Halt (Hold) is obeyed %.2f s after the word (drill.response_delay_s.halt %.2f; %d squads heard it)"), HeldAfter, R.drill_response_halt_s, Took));
+		F.V->GiveOrder(Officer, EPA250SquadOrder::FormLine, FVector(4000.f, 1600.f, 100.f));
+		const float Adv = F.Now();
+		float LineAfter = -1.f;
+		for (int32 i = 0; i < 40 && LineAfter < 0.f; ++i)
+		{
+			F.Step(0.025f);
+			if (F.V->GetSquadOrder(Id) == EPA250SquadOrder::FormLine) LineAfter = F.Now() - Adv;
+		}
+		Log.Check(LineAfter >= R.drill_response_advance_s - 0.001f && LineAfter <= R.drill_response_advance_s + 0.051f,
+			FString::Printf(TEXT("volley: Advance (Form line) is obeyed %.2f s after the word (advance %.2f)"), LineAfter, R.drill_response_advance_s));
+		Log.Check(FMath::IsNearlyEqual(UPA250VolleyCoordinator::OrderResponseSeconds(EPA250SquadOrder::Hold, true), R.drill_response_halt_s * R.drill_ragged_response_scale)
+			&& UPA250VolleyCoordinator::OrderResponseSeconds(EPA250SquadOrder::Charge, false) == 0.f,
+			TEXT("volley: an officerless squad answers slower (ragged_response_scale); a charge has no delay"));
+	}
+}
+
+void RunOfficerLoss(FLog& Log)
+{
+	FDrillField F;
+	// Five men and their officer (six, three and three); after he falls the five stand three and two,
+	// the two in the gaps.
+	if (!F.Init(5, /*bOfficer*/ true)) { Log.Check(false, TEXT("officer loss: field spawns")); return; }
+	const pa250::BattleRules& R = pa250::battle_rules();
+	ARFCharacter* Officer = F.Line.Last();
+	F.NoSnap.Add(Officer);
+	F.Step(0.05f);
+	const int32 Id = F.Line[0]->SquadId;
+	Log.Check(Id >= 0 && Officer->SquadId == Id, FString::Printf(TEXT("officer loss: the officer stands with the squad (%d / %d)"), Officer->SquadId, Id));
+	FString Trace;
+	auto VolleyOnce = [&F, Id, &Trace](float MaxSeconds) {
+		F.ReloadAll();
+		Trace.Reset();
+		FString Last;
+		const float Start = F.Now();
+		bool bFired = false;
+		while (F.Now() - Start < MaxSeconds)
+		{
+			F.Step(0.05f);
+			const FString Why = F.V->GetSquadReason(Id);
+			if (Why != Last) { Trace += FString::Printf(TEXT(" %.2f:%s"), F.Now() - Start, *Why); Last = Why; }
+			bFired |= F.V->GetSquadStage(Id) == EVolleyCall::Fire;
+			if (bFired && F.V->GetSquadStage(Id) != EVolleyCall::Fire && F.V->GetPendingFireTimesForTest(Id).Num() == 0) break;
+		}
+		return F.PullsOf(Id);
+	};
+	const TArray<float> Steady = VolleyOnce(8.f);
+	// He falls by the game mode's own death path (WoundOut -> OnCharacterDied -> NotifyOfficerDown).
+	F.GM->WoundOut(Officer, nullptr, nullptr);
+	const float Left = F.V->GetOfficerReplaceLeft(Id);
+	Log.Check(Officer->IsDead() && FMath::IsNearlyEqual(Left, R.drill_officer_replace_s, 0.01f),
+		FString::Printf(TEXT("officer loss: the officer falls and the squad is officerless for officer_replace_s (%.1f of %.1f s)"), Left, R.drill_officer_replace_s));
+	const float Fell = F.Now();
+	const TArray<float> Ragged = VolleyOnce(R.drill_officer_replace_s - 0.5f);
+	Log.Check(Steady.Num() >= 4 && Ragged.Num() >= 4 && Span(Ragged) > R.drill_volley_spread_s && Span(Ragged) <= R.drill_volley_spread_s * R.drill_ragged_spread_scale + 0.051f,
+		FString::Printf(TEXT("officer loss: fire goes ragged, wider than a steady line's volley_spread_s (span %.2f s with him, %.2f s officerless, at most %.2f; %d / %d pulls, morale %s, %s)"), Span(Steady), Span(Ragged),
+			R.drill_volley_spread_s * R.drill_ragged_spread_scale, Steady.Num(), Ragged.Num(), MoraleName(F.V->GetSquadMorale(Id)), *Trace));
+	Log.Check(F.V->GetOfficerReplaceLeft(Id) > 0.f && F.Now() - Fell < R.drill_officer_replace_s,
+		TEXT("officer loss: still ragged before the full officer_replace_s has run"));
+	// The sergeant: only once the full time has run, and never with a volley in hand.
+	bool bResumedMidVolley = false;
+	float ResumedAt = -1.f;
+	while (F.Now() - Fell < R.drill_officer_replace_s + 6.f && ResumedAt < 0.f)
+	{
+		F.Step(0.05f);
+		if (F.V->GetOfficerReplaceLeft(Id) <= 0.f)
+		{
+			ResumedAt = F.Now() - Fell;
+			bResumedMidVolley = F.V->GetPendingFireTimesForTest(Id).Num() > 0 || F.V->GetSquadStage(Id) == EVolleyCall::Fire;
+		}
+	}
+	Log.Check(ResumedAt >= R.drill_officer_replace_s - 0.001f && !bResumedMidVolley,
+		FString::Printf(TEXT("officer loss: a sergeant has the squad after %.2f s (>= %.1f), not mid-volley"), ResumedAt, R.drill_officer_replace_s));
+	// Up to a smoke's life: with no wind the last volley's bank lies on the line until it thins
+	// (battle_rules.json smoke), and a line waits for sight of its enemy as it would in a battle.
+	const TArray<float> After = VolleyOnce(30.f);
+	FString Sight;
+	{
+		const UPA250SmokeSubsystem* Smoke = F.W.World->GetSubsystem<UPA250SmokeSubsystem>();
+		for (const TPair<ARFCharacter*, FVector>& Sp : F.V->GetSquadSpotsForTest(Id))
+		{
+			if (!Sp.Key || !F.Enemy) continue;
+			FCollisionQueryParams Q(SCENE_QUERY_STAT(PA250CaseLOS), false, Sp.Key);
+			Q.AddIgnoredActor(F.Enemy);
+			if (Sp.Key->Musket) Q.AddIgnoredActor(Sp.Key->Musket);
+			FHitResult H;
+			const FVector Eye = PA250Cover::EyePoint(Sp.Key), Mark = F.Enemy->GetActorLocation() + FVector(0.f, 0.f, 40.f);
+			const bool bHit = F.W.World->LineTraceSingleByChannel(H, Eye, Mark, ECC_Visibility, Q);
+			Sight += FString::Printf(TEXT(" [%s smoke=%d]"), bHit && H.GetActor() ? *H.GetActor()->GetName() : TEXT("clear"), Smoke && Smoke->BlocksSight(Eye, Mark));
+		}
+		Sight += FString::Printf(TEXT(" enemy %s puffs %d"), F.Enemy && F.Enemy->IsDead() ? TEXT("dead") : TEXT("up"), Smoke ? Smoke->NumPuffs() : -1);
+	}
+	Log.Check(After.Num() >= 4 && Span(After) <= R.drill_volley_spread_s + 0.051f && Span(After) < Span(Ragged),
+		FString::Printf(TEXT("officer loss: under the sergeant the volley is steady again (span %.2f s against %.2f officerless, %d pulls, morale %s,%s)"),
+			Span(After), Span(Ragged), After.Num(), MoraleName(F.V->GetSquadMorale(Id)), *(Trace + Sight)));
+	Log.Check(F.V->CountOf(TEXT("continental.OfficerlessFire")) == 1 && F.V->CountOf(TEXT("continental.SergeantResumed")) == 1,
+		TEXT("officer loss: counted once each (OfficerlessFire, SergeantResumed)"));
+
+	// A file whose leader (a bot, as in the led-volley probe) falls passes to the man PickSuccessor names;
+	// the player's own file is never handed to a bot.
+	{
+		FDrillField G;
+		if (G.Init(8, false, /*bBots*/ true))
+		{
+			G.Step(0.05f);
+			ARFCharacter* Lead = G.Spawn(TEXT("continental"), TEXT("line_infantry"), FVector(200.f, 100.f, 100.f));
+			G.NoSnap.Add(Lead);
+			const int32 Men = G.V->EnsureLeaderFile(Lead);
+			G.GM->WoundOut(Lead, nullptr, nullptr);
+			const ARFCharacter* Expect = G.V->PickSuccessor(Lead);
+			for (int32 i = 0; i < FMath::CeilToInt((R.drill_officer_replace_s + 1.f) / 0.05f); ++i) G.Step(0.05f);
+			Log.Check(Men > 0 && Expect && G.V->IsLeader(Expect),
+				FString::Printf(TEXT("officer loss: a fallen bot leader's file passes to PickSuccessor's man after officer_replace_s (%d men)"), Men));
+		}
+		FDrillField P;
+		if (P.Init(8))
+		{
+			P.Step(0.05f);
+			ARFCharacter* Me = P.Spawn(TEXT("continental"), TEXT("line_infantry"), FVector(200.f, 100.f, 100.f));
+			APlayerController* PC = P.W.World->SpawnActor<APlayerController>();
+			PC->SetAsLocalPlayerController();
+			PC->Possess(Me);
+			P.NoSnap.Add(Me);
+			const int32 Men = P.V->EnsureLeaderFile(Me);
+			const int32 FileId = Me->SquadId;
+			P.GM->WoundOut(Me, nullptr, nullptr);
+			for (int32 i = 0; i < FMath::CeilToInt((R.drill_officer_replace_s + 1.f) / 0.05f); ++i) P.Step(0.05f);
+			bool bBotLeads = false;
+			for (ARFCharacter* C : P.Line) bBotLeads |= P.V->IsLeader(C);
+			Log.Check(Men > 0 && !bBotLeads && P.V->GetOfficerReplaceLeft(FileId) == 0.f,
+				TEXT("officer loss: the player's file goes to its own drill, never to a bot leader (his next man can lead it)"));
+		}
+	}
+}
+
+void RunFallIn(FLog& Log)
+{
+	FDrillField F;
+	if (!F.Init(12)) { Log.Check(false, TEXT("fall-in: field spawns")); return; }
+	const pa250::BattleRules& R = pa250::battle_rules();
+	F.Step(0.05f);
+	ARFCharacter* Me = F.Spawn(TEXT("continental"), TEXT("line_infantry"), FVector(-150.f, 100.f + (R.drill_fall_in_radius_m - 1.f) * 0.f, 100.f));
+	APlayerController* PC = F.W.World->SpawnActor<APlayerController>();
+	PC->SetAsLocalPlayerController();
+	PC->Possess(Me);
+	Me->GetCharacterMovement()->SetMovementMode(MOVE_Walking); // on his feet: muskets are not fired in mid-air
+	F.NoSnap.Add(Me);
+	F.Line.Add(Me);
+	ARFCharacter* Far = F.Spawn(TEXT("continental"), TEXT("line_infantry"), FVector(-(R.drill_fall_in_radius_m + 10.f) * 100.f, 0.f, 100.f));
+	F.NoSnap.Add(Far);
+	Log.Check(F.V->TryFallIn(Far) == INDEX_NONE, TEXT("fall-in: no line within fall_in_radius_m: nothing to fall in with"));
+	const int32 Id = F.V->TryFallIn(Me);
+	F.Step(0.05f);
+	bool bHasPlace = false;
+	FVector Place = FVector::ZeroVector;
+	for (const TPair<ARFCharacter*, FVector>& S : F.V->GetSquadSpotsForTest(Id)) if (S.Key == Me) { bHasPlace = true; Place = S.Value; }
+	Log.Check(Id != INDEX_NONE && Me->SquadId == Id && Me->ActorHasTag(TEXT("PA250FallenIn")) && bHasPlace,
+		FString::Printf(TEXT("fall-in: he joins squad %d and has a place in its files (%.0f cm from him)"), Id, FVector::Dist2D(Place, Me->GetActorLocation())));
+	Me->SetActorLocation(FVector(Place.X, Place.Y, Me->GetActorLocation().Z));
+	// The line's own words: he presses fire at Make ready; the shot is held and goes with the volley.
+	bool bHeld = false, bAuto = false;
+	float WordAt = -1.f;
+	for (int32 i = 0; i < 200 && !F.PulledAt.Contains(Me); ++i)
+	{
+		F.Step(0.05f);
+		Me->SetActorLocation(FVector(Place.X, Place.Y, Me->GetActorLocation().Z));
+		const EVolleyCall St = F.V->GetSquadStage(Id);
+		if (!bHeld && St == EVolleyCall::MakeReady)
+		{
+			bAuto = F.PulledAt.Contains(Me); // nothing fired his musket for him before his press
+			bHeld = F.V->HoldFallenInShot(Me);
+		}
+		if (St == EVolleyCall::Fire && WordAt < 0.f) WordAt = F.Now();
+	}
+	const TArray<float> Pulls = F.PullsOf(Id);
+	const float* Mine = F.PulledAt.Find(Me);
+	Log.Check(bHeld && !bAuto, TEXT("fall-in: his press at Make ready is held for the volley, not fired at once"));
+	Log.Check(Mine && WordAt >= 0.f && *Mine >= WordAt && Pulls.Num() > 1 && *Mine - Pulls[0] <= R.drill_volley_spread_s + 0.051f,
+		FString::Printf(TEXT("fall-in: his shot goes with the line's volley, inside volley_spread_s (%.2f s after its first; pulled %d, line pulls %d, word %.2f, held %d, in %d, loaded %d)"),
+			Mine && Pulls.Num() ? *Mine - Pulls[0] : -1.f, Mine != nullptr, Pulls.Num(), WordAt, F.V->IsFallInShotHeld(), F.V->GetFallenIn() == Me, Me->Musket && Me->Musket->CanFire()));
+	Log.Check(F.V->HoldFallenInShot(Me) == false, TEXT("fall-in: unloaded, or the line at ease: his trigger is his own"));
+	// He strays from his place: he falls out (and his men no longer count him).
+	Me->SetActorLocation(Place + FVector(-(R.drill_fall_in_break_m + 1.f) * 100.f, 0.f, 0.f));
+	F.Step(0.05f);
+	Log.Check(F.V->GetFallenIn() == nullptr && !Me->ActorHasTag(TEXT("PA250FallenIn")) && Me->SquadId == -1,
+		FString::Printf(TEXT("fall-in: straying %.0f m from his place falls him out"), R.drill_fall_in_break_m + 1.f));
+	// K again falls him out at once.
+	Me->SetActorLocation(Place);
+	const int32 Again = F.V->TryFallIn(Me);
+	F.V->TryFallIn(Me);
+	Log.Check(Again != INDEX_NONE && F.V->GetFallenIn() == nullptr, TEXT("fall-in: pressing K again falls him out"));
+	Log.Check(F.V->CountOf(TEXT("continental.FallIn")) == 2, TEXT("fall-in: each fall-in is counted"));
+}
+
+void RunSuppression(FLog& Log)
+{
+	FScopedTestWorld W;
+	ARFCharacter* Man = W.World ? W.World->SpawnActor<ARFCharacter>(FVector(0.f, 0.f, 100.f), FRotator::ZeroRotator) : nullptr;
+	if (!Man) { Log.Check(false, TEXT("suppression: spawn")); return; }
+	Man->DispatchBeginPlay();
+	const FPA250BattleFeel& Feel = PA250BattleFeel::Get();
+	Log.Check(Feel.SuppressionNearMissAdd > 0.f && Feel.SuppressionDecayPerSecond > 0.f && Feel.SuppressionMax > 0.f,
+		TEXT("suppression: intensity.suppression loaded from battle_feel.json"));
+	// A near miss through the very function the projectile calls.
+	const FVector Ear = Man->GetActorLocation();
+	const bool bNear = PA250Intensity::NearMiss(Man, Ear + FVector(5000.f, 0.f, 0.f), Ear + FVector(0.f, 50.f, 0.f), Ear);
+	Log.Check(bNear && FMath::IsNearlyEqual(Man->GetSuppressionLevel(), Feel.SuppressionNearMissAdd, 0.001f),
+		FString::Printf(TEXT("suppression: a near miss raises it by near_miss_add (%.2f)"), Man->GetSuppressionLevel()));
+	for (int32 i = 0; i < 20; ++i) Man->AddSuppression(Feel.SuppressionNearMissAdd);
+	Log.Check(FMath::IsNearlyEqual(Man->GetSuppressionLevel(), Feel.SuppressionMax, 0.001f)
+		&& FMath::IsNearlyEqual(Man->SuppressionSwayNow(), Feel.SuppressionMax * Feel.SuppressionAimSwayDeg, 0.001f),
+		TEXT("suppression: it stops at max, where the aim sways max x aim_sway_deg"));
+	const float Clear = Feel.SuppressionMax / Feel.SuppressionDecayPerSecond;
+	float T = 0.f;
+	while (Man->GetSuppressionLevel() > 0.f && T < 60.f) { Man->TickSuppression(0.05f); T += 0.05f; }
+	Log.Check(FMath::Abs(T - Clear) <= 0.051f && Man->SuppressionSwayNow() == 0.f,
+		FString::Printf(TEXT("suppression: it falls away in max / decay_per_second (%.2f s, expected %.2f)"), T, Clear));
+	Log.Check(PA250Intensity::SuppressionStep(0.f, 0.f, 1.f, Feel.SuppressionDecayPerSecond, 1.f) == 0.f,
+		TEXT("suppression: never below zero"));
+}
+
+void RunMusketFeel(FLog& Log)
+{
+	const FPA250BattleFeel& Feel = PA250BattleFeel::Get();
+	PA250BattleWeather::ClearOverride();
+	Log.Check(PA250BattleWeather::Get() == EPA250Weather::Dry, TEXT("musket feel: no -PA250Weather and no override: dry"));
+	// 10k pulls through the very roll FireMusketAt makes (PA250MusketFeel::RollFor / Resolve).
+	auto Rates = [](const PA250MusketFeel::FChances& C, uint64 Seed, float& OutMis, float& OutFlash) {
+		const int32 N = 10000;
+		int32 Mis = 0, Flash = 0;
+		for (int32 i = 0; i < N; ++i)
+		{
+			const EPA250TriggerResult Pull = PA250MusketFeel::Resolve(PA250MusketFeel::RollFor(Seed, 0xBEEFu, static_cast<uint32>(i)), C);
+			Mis += Pull == EPA250TriggerResult::Misfire;
+			Flash += Pull == EPA250TriggerResult::FlashInPan;
+		}
+		OutMis = 100.f * Mis / N;
+		OutFlash = 100.f * Flash / N;
+	};
+	const PA250MusketFeel::FChances Dry = PA250MusketFeel::ChancesFor(Feel, 0.f, 0.f, EPA250Weather::Dry);
+	const PA250MusketFeel::FChances Wet = PA250MusketFeel::ChancesFor(Feel, 0.f, 0.f, EPA250Weather::Rain);
+	float DryMis, DryFlash, WetMis, WetFlash;
+	Rates(Dry, 1775, DryMis, DryFlash);
+	Rates(Wet, 1775, WetMis, WetFlash);
+	Log.Check(FMath::Abs(DryMis - Feel.MusketMisfireChance * 100.f) <= 1.5f && FMath::Abs(DryFlash - Feel.MusketFlashInPanChance * 100.f) <= 1.5f,
+		FString::Printf(TEXT("musket feel: the player's dry pulls misfire %.2f%% (data %.1f) and flash %.2f%% (data %.1f), within 1.5 points"),
+			DryMis, Feel.MusketMisfireChance * 100.f, DryFlash, Feel.MusketFlashInPanChance * 100.f));
+	Log.Check(WetMis > DryMis && WetFlash > DryFlash, FString::Printf(TEXT("musket feel: rain misfires (%.2f%%) and flashes (%.2f%%) more than dry"), WetMis, WetFlash));
+	const PA250MusketFeel::FChances Bot = PA250MusketFeel::ChancesFor(Feel, 0.06f, 0.f, EPA250Weather::Dry);
+	Log.Check(FMath::IsNearlyEqual(Bot.Misfire, 0.06f) && FMath::IsNearlyEqual(Bot.Flash, Feel.MusketFlashInPanChance),
+		TEXT("musket feel: a bot misfires at his profile's chance; everyone flashes at the data's"));
+	Log.Check(PA250MusketFeel::RollFor(7, 1, 3) == PA250MusketFeel::RollFor(7, 1, 3) && PA250MusketFeel::RollFor(7, 1, 3) != PA250MusketFeel::RollFor(7, 1, 4),
+		TEXT("musket feel: a pull's roll is the battle seed's, the same every run, and the next pull rolls anew"));
+	// A real soldier with no training profile (the player): FireMusketAt pull after pull, reloaded each time.
+	{
+		FScopedTestWorld W;
+		ARFCharacter* Man = W.World ? W.World->SpawnActor<ARFCharacter>(FVector(0.f, 0.f, 100.f), FRotator::ZeroRotator) : nullptr;
+		if (Man)
+		{
+			Man->DispatchBeginPlay();
+			const int32 N = 600;
+			int32 NoShot = 0;
+			for (int32 i = 0; i < N && Man->Musket; ++i)
+			{
+				if (!Man->Musket->CanFire())
+				{
+					Man->Musket->GetSequencer().Reset();
+					Man->Musket->TickActor(0.01f, LEVELTICK_All, Man->Musket->PrimaryActorTick);
+				}
+				NoShot += Man->FireMusketAt(FVector(3000.f, 0.f, 100.f)) ? 0 : 1;
+				for (TActorIterator<AMusketProjectile> It(W.World); It; ++It) It->Destroy();
+			}
+			const float Want = (Dry.Misfire + Dry.Flash) * N;
+			Log.Check(Man->TriggerPulls == N && Man->Misfires == NoShot && FMath::Abs(NoShot - Want) <= 3.f * FMath::Sqrt(Want) + 1.f,
+				FString::Printf(TEXT("musket feel: a man without a profile (the player) fails %d of %d real pulls (expected ~%.0f): every pull rolls anew"), NoShot, N, Want));
+		}
+	}
+	PA250BattleWeather::SetOverride(EPA250Weather::Rain);
+	Log.Check(PA250BattleWeather::Get() == EPA250Weather::Rain, TEXT("musket feel: the weather accessor takes an override (tests; -PA250Weather=rain in a run)"));
+	PA250BattleWeather::ClearOverride();
+}
+
+void RunFXEvents(FLog& Log)
+{
+	PA250BattleFX::ReloadForTest();
+	PA250BattleFX::ResetCounts();
+	UWorld* World = nullptr; // distances given: the router's own arithmetic, no world effects
+	const EPA250BattleFXEvent Events[] = {
+		EPA250BattleFXEvent::CannonFired, EPA250BattleFXEvent::RoundShotGroundStrike,
+		EPA250BattleFXEvent::CanisterFired, EPA250BattleFXEvent::ShellBurst, EPA250BattleFXEvent::ShellDud
+	};
+	const FPA250BattleFeel& Feel = PA250BattleFeel::Get();
+	for (EPA250BattleFXEvent Ev : Events)
+	{
+		const FPA250BattleFXEntry E = PA250BattleFX::Lookup(Ev);
+		float Shake[3];
+		const float Dists[3] = {5.f, 30.f, 100.f};
+		for (int32 i = 0; i < 3; ++i)
+		{
+			PA250BattleFX::Fire(World, Ev, FVector::ZeroVector, 1.f, Dists[i]);
+			Shake[i] = PA250BattleFX::LastShakeScale(Ev);
+		}
+		const bool bRound = Ev == EPA250BattleFXEvent::RoundShotGroundStrike;
+		const float In = bRound ? Feel.RoundShotShakeInnerM : E.InnerM, Out = bRound ? Feel.RoundShotShakeOuterM : E.OuterM, Sc = bRound ? Feel.RoundShotShakeScale : E.ShakeScale;
+		bool bMatch = true;
+		for (int32 i = 0; i < 3; ++i) bMatch &= FMath::IsNearlyEqual(Shake[i], PA250Intensity::ShakeScaleAt(Dists[i], In, Out, Sc), 0.001f);
+		Log.Check(E.bLoaded && !E.SoundBank.IsEmpty() && PA250BattleFX::FireCount(Ev) == 3 && bMatch && Shake[0] >= Shake[1] && Shake[1] >= Shake[2],
+			FString::Printf(TEXT("fx: %s from battle_look.fx, shake %.2f / %.2f / %.2f at 5 / 30 / 100 m"), PA250BattleFX::EventName(Ev), Shake[0], Shake[1], Shake[2]));
+	}
+	Log.Check(PA250BattleFX::LastShakeScale(EPA250BattleFXEvent::ShellDud) == 0.f && PA250BattleFX::Lookup(EPA250BattleFXEvent::ShellDud).NiagaraPath.IsEmpty(),
+		TEXT("fx: a dud is a sound only: no flash, no shake"));
+	FString Drum, Fife;
+	Log.Check(PA250BattleFX::OrderCue(TEXT("halt"), Drum, Fife) && Drum == TEXT("drum_call_halt") && Fife == TEXT("fife_call_halt"),
+		TEXT("fx: the words of command have their calls in battle_look.audio.orders"));
+	// A real gun's report goes through the router once a shot: round shot -> CannonFired, canister -> CanisterFired.
+	{
+		FScopedTestWorld W(true);
+		APA250BattleGameMode* GM = W.World->GetAuthGameMode<APA250BattleGameMode>();
+		FArtilleryAccess::Init(GM);
+		const pa250::BattleRules& R = pa250::battle_rules();
+		APA250FieldGun* Gun = W.World->SpawnActor<APA250FieldGun>(FVector::ZeroVector, FRotator::ZeroRotator);
+		Gun->Place(TEXT("continental"));
+		TArray<ARFCharacter*> Crew;
+		for (int32 i = 0; i < R.cannon_crew_men; ++i)
+		{
+			FActorSpawnParameters P;
+			P.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+			ARFCharacter* M = W.World->SpawnActor<ARFCharacter>(FVector(-120.f - 40.f * i, -120.f, 100.f), FRotator::ZeroRotator, P);
+			M->FactionId = TEXT("continental"); M->UnitClass = TEXT("artilleryman"); M->DispatchBeginPlay();
+			Gun->ClaimPost(M);
+			Crew.Add(M);
+		}
+		PA250BattleFX::ResetCounts();
+		const FVector Fwd = Gun->GetActorForwardVector().GetSafeNormal2D();
+		Gun->ForceLoaded();
+		Gun->CycleShot(0);
+		const bool bRound = Gun->DischargeAt(Gun->GetMuzzle() + Fwd * (R.cannon_grape_range_m + 0.5f * (R.cannon_round_range_m - R.cannon_grape_range_m)) * 100.f, Crew[0]);
+		const int32 AfterRound = PA250BattleFX::FireCount(EPA250BattleFXEvent::CannonFired);
+		Gun->ForceLoaded();
+		Gun->SetPlayerGunner(Crew[0]);
+		Gun->CycleShot(1); // round shot -> canister
+		const bool bCan = Gun->DischargeAt(Gun->GetMuzzle() + Fwd * R.cannon_grape_range_m * 50.f, Crew[0]);
+		Log.Check(bRound && bCan && AfterRound == 1 && PA250BattleFX::FireCount(EPA250BattleFXEvent::CannonFired) == 1
+			&& PA250BattleFX::FireCount(EPA250BattleFXEvent::CanisterFired) == 1,
+			FString::Printf(TEXT("fx: a real gun's report goes through the router once a shot (round %d, cannon %d, canister %d)"),
+				bRound, PA250BattleFX::FireCount(EPA250BattleFXEvent::CannonFired), PA250BattleFX::FireCount(EPA250BattleFXEvent::CanisterFired)));
+	}
+}
+
+void RunShells(FLog& Log)
+{
+	pa250::load_battle_rules(pa250::read_text_file(TCHAR_TO_UTF8(*UPA250Subsystem::BattleRulesPath())));
+	const pa250::BattleRules& R = pa250::battle_rules();
+	Log.Check(R.cannon_gun_types.count("six_pounder") && R.cannon_gun_types.count("howitzer") && R.cannon_default_gun_type == "six_pounder",
+		TEXT("shells: cannon.gun_types and default_gun_type load from battle_rules.json"));
+	Log.Check(!PA250Gunnery::ShotAllowedForGun(TEXT("six_pounder"), EPA250Shot::Shell, R) && PA250Gunnery::ShotAllowedForGun(TEXT("howitzer"), EPA250Shot::Shell, R)
+		&& !PA250Gunnery::ShotAllowedForGun(TEXT("a_kind_not_in_the_data"), EPA250Shot::Shell, R)
+		&& PA250Gunnery::RefuseShot(EPA250Shot::Shell, R.cannon_shell_fuse_min_m * 100.f + 100.f, R, TEXT("six_pounder")) != nullptr,
+		TEXT("shells: a six-pounder (Lexington) and any unlisted piece refuse shell; a howitzer fires it"));
+	// A real howitzer, the player's load: shell after shell; duds fly and land unburst.
+	FScopedTestWorld W(true);
+	APA250BattleGameMode* GM = W.World->GetAuthGameMode<APA250BattleGameMode>();
+	FArtilleryAccess::Init(GM);
+	W.SpawnBox(FVector(0.f, 0.f, -50.f), FVector(200000.f, 200000.f, 100.f)); // the ground, 2 km a side
+	W.Settle();
+	APA250FieldGun* Gun = W.World->SpawnActor<APA250FieldGun>(FVector(0.f, 0.f, 0.f), FRotator::ZeroRotator);
+	Gun->Place(TEXT("continental"));
+	Gun->SetGunType(TEXT("howitzer"));
+	TArray<ARFCharacter*> Crew;
+	for (int32 i = 0; i < R.cannon_crew_men; ++i)
+	{
+		FActorSpawnParameters P;
+		P.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+		ARFCharacter* M = W.World->SpawnActor<ARFCharacter>(FVector(-120.f - 40.f * i, -120.f, 100.f), FRotator::ZeroRotator, P);
+		M->FactionId = TEXT("continental"); M->UnitClass = TEXT("artilleryman"); M->DispatchBeginPlay();
+		Gun->ClaimPost(M);
+		Crew.Add(M);
+	}
+	Gun->SetPlayerGunner(Crew[0]);
+	while (Gun->GetSelectedShot() != EPA250Shot::Shell) Gun->CycleShot(1);
+	FVector Mark = Gun->GetMuzzle() + Gun->GetActorForwardVector().GetSafeNormal2D() * FMath::Max(R.cannon_shell_fuse_min_m + 20.f, R.cannon_shell_range_m * 0.6f) * 100.f;
+	Mark.Z = 0.f; // on the ground
+	const int32 N = 600;
+	int32 Shells = 0, Duds = 0;
+	TArray<APA250CannonShell*> ADud, ABurst;
+	for (int32 i = 0; i < N; ++i)
+	{
+		Gun->ForceLoaded();
+		if (!Gun->DischargeAt(Mark, Crew[0])) continue;
+		for (TActorIterator<APA250CannonShell> It(W.World); It; ++It)
+		{
+			if (It->IsActorBeingDestroyed() || It->Tags.Contains(TEXT("Counted"))) continue;
+			It->Tags.Add(TEXT("Counted"));
+			++Shells;
+			Duds += It->IsDud();
+			if (It->IsDud() && ADud.Num() == 0) ADud.Add(*It);
+			else if (!It->IsDud() && ABurst.Num() == 0) ABurst.Add(*It);
+			else It->Destroy();
+		}
+	}
+	const float Pct = Shells ? 100.f * Duds / Shells : 0.f;
+	Log.Check(Shells == N && FMath::Abs(Pct - R.cannon_shell_dud_chance * 100.f) <= 3.f,
+		FString::Printf(TEXT("shells: %d real howitzer shells, %.1f%% duds (data %.1f%%, within 3 points)"), Shells, Pct, R.cannon_shell_dud_chance * 100.f));
+	PA250BattleFX::ResetCounts();
+	auto Fly = [](APA250CannonShell* S) { for (int32 i = 0; i < 2000 && IsValid(S) && !S->IsActorBeingDestroyed(); ++i) S->AdvanceForTest(0.01f); };
+	if (ADud.Num()) Fly(ADud[0]);
+	const int32 DudSounds = PA250BattleFX::FireCount(EPA250BattleFXEvent::ShellDud), DudBursts = PA250BattleFX::FireCount(EPA250BattleFXEvent::ShellBurst);
+	if (ABurst.Num()) Fly(ABurst[0]);
+	Log.Check(ADud.Num() == 1 && DudSounds == 1 && DudBursts == 0,
+		FString::Printf(TEXT("shells: a dud flies past its fuse and lands without bursting (ShellDud %d, ShellBurst %d, %d duds kept)"), DudSounds, DudBursts, ADud.Num()));
+	Log.Check(ABurst.Num() == 1 && PA250BattleFX::FireCount(EPA250BattleFXEvent::ShellBurst) == 1,
+		TEXT("shells: a good shell bursts once, through the router (ShellBurst from PA250Blast)"));
+}
+
+void RunGunCrew(FLog& Log)
+{
+	pa250::load_battle_rules(pa250::read_text_file(TCHAR_TO_UTF8(*UPA250Subsystem::BattleRulesPath())));
+	const pa250::BattleRules& R = pa250::battle_rules();
+	using PA250Gunnery::EPA250GunStep;
+	// The labels the HUD shows and the clips the crew act key on the same step: no drift.
+	const FActiveReloadTuningPlain Preset = PA250Gunnery::DrillPreset(R);
+	struct FWho { EPA250GunStep Step; const TCHAR* Label; int32 Post; const TCHAR* Clip; };
+	const FWho Who[] = {
+		{EPA250GunStep::Swab, TEXT("Swab"), 0, TEXT("gun_crew_sponge")}, {EPA250GunStep::Load, TEXT("Load"), 1, TEXT("gun_crew_load")},
+		{EPA250GunStep::Ram, TEXT("Ram"), 0, TEXT("gun_crew_ram")}, {EPA250GunStep::RunOut, TEXT("Run up"), 3, TEXT("gun_crew_lay")},
+		{EPA250GunStep::Prime, TEXT("Prime"), 2, TEXT("gun_crew_prime")}, {EPA250GunStep::Fire, TEXT("Fire"), 2, TEXT("gun_crew_fire")}};
+	bool bAll = Preset.CustomStepLabels.Num() == 6;
+	FString Bad;
+	for (const FWho& X : Who)
+	{
+		const int32 I = static_cast<int32>(X.Step);
+		const bool bOk = Preset.CustomStepLabels.IsValidIndex(I) && Preset.CustomStepLabels[I] == X.Label
+			&& APA250FieldGun::CrewStepClip(X.Post, I, true) == FName(X.Clip) && PA250AnimClips::FindClip(X.Clip) != nullptr;
+		if (!bOk) Bad += FString::Printf(TEXT(" %s"), X.Label);
+		bAll &= bOk;
+	}
+	Log.Check(bAll, FString::Printf(TEXT("gun crew: Swab, Load, Ram, Run up, Prime, Fire: each step's HUD label and its man's clip agree%s"), *Bad));
+	Log.Check(APA250FieldGun::CrewStepClip(2, static_cast<int32>(EPA250GunStep::Swab), true) == TEXT("gun_crew_vent")
+		&& APA250FieldGun::CrewStepClip(0, static_cast<int32>(EPA250GunStep::Prime), true) == APA250FieldGun::CrewIdleClip(0),
+		TEXT("gun crew: the ventsman stops the vent while the sponge is in; the sponger stands ready at Prime"));
+	// Real drills: a full crew, the least crew, and one man.
+	auto DrillSeconds = [&R](int32 Men, TArray<FString>* OutLabels) {
+		FScopedTestWorld W(true);
+		APA250BattleGameMode* GM = W.World->GetAuthGameMode<APA250BattleGameMode>();
+		FArtilleryAccess::Init(GM);
+		APA250FieldGun* Gun = W.World->SpawnActor<APA250FieldGun>(FVector::ZeroVector, FRotator::ZeroRotator);
+		Gun->Place(TEXT("continental"));
+		for (int32 i = 0; i < Men; ++i)
+		{
+			FActorSpawnParameters P;
+			P.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+			ARFCharacter* M = W.World->SpawnActor<ARFCharacter>(FVector(-120.f - 40.f * i, -120.f, 100.f), FRotator::ZeroRotator, P);
+			M->FactionId = TEXT("continental"); M->UnitClass = TEXT("artilleryman"); M->DispatchBeginPlay();
+			Gun->ClaimPost(M);
+		}
+		Gun->ForceEmptyForTest();
+		float T = 0.f;
+		int32 Step = -1;
+		while (!Gun->IsLoaded() && T < 120.f)
+		{
+			Gun->Tick(0.05f);
+			T += 0.05f;
+			if (OutLabels && Gun->GetDrill().IsReloading() && Gun->GetDrill().GetStepIndex() != Step)
+			{
+				Step = Gun->GetDrill().GetStepIndex();
+				OutLabels->Add(Gun->GetDrill().GetStepLabel() == PA250Gunnery::GunStepLabel(static_cast<EPA250GunStep>(Step)) ? TEXT("ok") : Gun->GetDrill().GetStepLabel());
+			}
+		}
+		return Gun->IsLoaded() ? T : -1.f;
+	};
+	TArray<FString> Labels;
+	const float Full = DrillSeconds(R.cannon_crew_men, &Labels);
+	const float Least = DrillSeconds(R.cannon_min_crew, nullptr);
+	const float One = DrillSeconds(R.cannon_min_crew - 1, nullptr);
+	const float Want = PA250Gunnery::CrewDrillSpeed(R.cannon_crew_men, R.cannon_crew_men, R) / FMath::Max(0.001f, PA250Gunnery::CrewDrillSpeed(R.cannon_min_crew, R.cannon_min_crew, R));
+	Log.Check(Full > 0.f && Least > Full && FMath::IsNearlyEqual(Least / Full, Want, 0.1f),
+		FString::Printf(TEXT("gun crew: a real drill takes %.1f s with %d men and %.1f s with %d (x%.2f, missing_roles_scale %.2f -> expected x%.2f)"),
+			Full, R.cannon_crew_men, Least, R.cannon_min_crew, Least / FMath::Max(0.01f, Full), R.cannon_missing_roles_scale, Want));
+	Log.Check(One < 0.f, TEXT("gun crew: below min_crew the piece falls silent (no load in 120 s)"));
+	Log.Check(Labels.Num() >= 5 && !Labels.ContainsByPredicate([](const FString& L) { return L != TEXT("ok"); }),
+		FString::Printf(TEXT("gun crew: the running drill's HUD label is its step's at every step (%d steps seen)"), Labels.Num()));
 }
 } // namespace PA250BattleCases

@@ -86,6 +86,8 @@ struct FPA250MoraleOrders
 	}
 };
 
+/** A squad's morale thresholds. Data: unit_classes.json verbs.morale (PA250UnitClasses::Verbs().Morale);
+ *  these defaults are the same numbers, used only when the file lacks the block. */
 struct FPA250MoraleTuning
 {
 	float ShakenEnter = 0.45f;

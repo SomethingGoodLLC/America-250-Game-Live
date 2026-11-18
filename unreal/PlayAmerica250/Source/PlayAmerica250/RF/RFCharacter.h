@@ -158,6 +158,10 @@ public:
 	 *  gets up again as a thrown rider does. False when he cannot be (dead, mounted, in a boat, down already). */
 	bool KnockDown(const FVector& Push);
 	bool IsKnockedDown() const { return bThrownFromHorse; }
+	/** The registry clip he gets up with when his loose body is next stood up (a blast knockdown
+	 *  knows how it left him lying). NAME_None: the body is only blended up to standing. */
+	void SetGetUpClip(FName Clip) { GetUpClip = Clip; }
+	FName GetGetUpClip() const { return GetUpClip; }
 	/** First person: the camera at his eyes. Z toggles it; third person is the default. */
 	void ToggleFirstPerson();
 	bool IsFirstPerson() const { return bFirstPerson; }
@@ -272,6 +276,8 @@ public:
 	/** 0..1, published by the bot controller; raises the misfire chance. */
 	float MisfireStress = 0.f;
 	int32 Misfires = 0;
+	/** Trigger pulls on his musket this battle: the index of his musket-feel roll (PA250MusketFeel). */
+	int32 TriggerPulls = 0;
 	/** True once after a wound he survived (the bot loses his aim). */
 	bool ConsumeFlinch() { const bool b = bFlinched; bFlinched = false; return b; }
 	/** How long the fallen stay on the field (pa250.CorpseSeconds) and how many at once (pa250.MaxCorpses). */
@@ -286,6 +292,7 @@ public:
 	bool bCorpseFrozen = false;
 	float SuppressionSwayDegrees = 0.f;
 	float SuppressionTimer = 0.f;
+	float SuppressionLevel = 0.f;
 	bool bInLine = false;
 	int32 LineSize = 0;
 
@@ -302,6 +309,14 @@ public:
 	float GetShoulderSign() const { return ShoulderSign; }
 
 	void ApplySuppression(float Seconds, float SwayDegrees);
+	/** The player's suppression (battle_feel.intensity.suppression): rises by Amount (near misses,
+	 *  strikes close by), clamped to its max; it blurs his view and sways his aim, and falls away. */
+	void AddSuppression(float Amount);
+	/** Lets suppression fall for DeltaTime (every tick for the player; tests call it). */
+	void TickSuppression(float DeltaTime);
+	float GetSuppressionLevel() const { return SuppressionLevel; }
+	/** The aim sway his suppression adds now, in degrees (level x aim_sway_deg). */
+	float SuppressionSwayNow() const;
 	void NotifyFired();
 	void ApplyCameraKick(float PitchDeg, float YawDeg);
 	/** Momentary FOV change (deg, - = punch in); the camera blend eases it back. */
@@ -376,6 +391,8 @@ protected:
 	/** Y: the takeover screen for the general, when the player has earned him. U: the played general's own ability. */
 	void OnHeroPressed();
 	void OnHeroAbilityPressed();
+	/** K: fall in with the nearest friendly line (his shot goes with its volleys), or fall out. */
+	void OnFallInPressed();
 	/** Number keys: on foot an order to his file (1 to 6); in the saddle 1 to 3 choose the weapon. */
 	void OnNumberKey(int32 Number);
 	void OnKey1() { OnNumberKey(1); }
@@ -482,6 +499,10 @@ private:
 	bool bRidingMovementSaved = false;
 	double RemountBlockedUntil = 0.0;
 	bool bThrownFromHorse = false;
+	FName GetUpClip;
+	/** EnsureGameMouseCapture: when it last put the mouse back, and how often (the log is capped). */
+	double LastMouseCaptureFix = 0.0;
+	int32 MouseCaptureFixes = 0;
 	float ThrownTime = 0.f;
 	/** <0 while the body is loose; 0..1 while it blends back to his feet. */
 	float ThrowRecoverAlpha = -1.f;

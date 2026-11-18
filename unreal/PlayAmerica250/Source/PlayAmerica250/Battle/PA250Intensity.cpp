@@ -62,6 +62,14 @@ UPA250FeelShake::UPA250FeelShake(const FObjectInitializer& ObjectInitializer)
 	}
 }
 
+void PA250Intensity::ImpactNear(UWorld* World, float Fraction)
+{
+	const FPA250BattleFeel& Feel = PA250BattleFeel::Get();
+	APlayerController* PC = World ? World->GetFirstPlayerController() : nullptr;
+	ARFCharacter* Player = PC ? Cast<ARFCharacter>(PC->GetPawn()) : nullptr;
+	if (Player && !Player->IsDead() && Fraction > 0.f) Player->AddSuppression(Feel.SuppressionImpactAdd * FMath::Clamp(Fraction, 0.f, 1.f));
+}
+
 void PA250Intensity::Shake(UWorld* World, float Scale)
 {
 	APlayerController* PC = World ? World->GetFirstPlayerController() : nullptr;
@@ -89,6 +97,9 @@ bool PA250Intensity::NearMiss(ARFCharacter* Player, const FVector& ShotFrom, con
 			Player->MeleeComponent->Flinch(Away, Feel.NearMissFlinch);
 		}
 		Shake(Player->GetWorld(), Feel.NearMissShakeScale);
+		// Suppression (battle_feel.intensity.suppression): event-driven, no traces per tick. It blurs
+		// his view and sways his aim, and falls away (ARFCharacter::TickSuppression).
+		Player->AddSuppression(Feel.SuppressionNearMissAdd);
 	}
 	// The crack of a close ball, over the whiz the projectile already plays.
 	if (!Feel.NearMissCrackBank.IsEmpty())

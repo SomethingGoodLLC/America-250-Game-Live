@@ -35,18 +35,22 @@ void APA250CampaignPlayerController::BeginPlay()
 
 void APA250CampaignPlayerController::ApplyCampaignInputMode()
 {
+	// What the viewport had is saved before SetInputMode, which itself sets these two. Saved after
+	// it (as it was until 2026-11-17) the "restore" at EndPlay put the map's own
+	// CaptureDuringMouseDown / DoNotLock back, and a battle opened from the map began with them.
+	UGameViewportClient* Viewport = GetWorld() ? GetWorld()->GetGameViewport() : nullptr;
+	if (Viewport && !bSavedViewportInput)
+	{
+		SavedCaptureMode = Viewport->GetMouseCaptureMode();
+		SavedLockMode = Viewport->GetMouseLockMode();
+		bSavedViewportInput = true;
+	}
 	FInputModeGameAndUI Mode;
 	Mode.SetHideCursorDuringCapture(false);
 	Mode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
 	SetInputMode(Mode);
-	if (UGameViewportClient* GVC = GetWorld() ? GetWorld()->GetGameViewport() : nullptr)
+	if (UGameViewportClient* GVC = Viewport)
 	{
-		if (!bSavedViewportInput)
-		{
-			SavedCaptureMode = GVC->GetMouseCaptureMode();
-			SavedLockMode = GVC->GetMouseLockMode();
-			bSavedViewportInput = true;
-		}
 		GVC->SetMouseCaptureMode(EMouseCaptureMode::CaptureDuringMouseDown);
 		GVC->SetMouseLockMode(EMouseLockMode::DoNotLock);
 		UE_LOG(LogTemp, Display, TEXT("PA250 input: campaign capture=CaptureDuringMouseDown lock=DoNotLock hide_during_capture=0 (saved capture=%d lock=%d)"),

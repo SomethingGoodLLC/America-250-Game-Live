@@ -1,6 +1,8 @@
 // ARFCharacter riding: gaits, the sabre from the saddle, and the horse going down under him.
 // Kept apart from RFCharacter.cpp; the infantry code only calls in through a few hooks.
 
+#include "Battle/PA250AnimClips.h"
+#include "RF/PA250SoldierAnimInstance.h"
 #include "RF/RFCharacter.h"
 
 #include "Battle/PA250BattleAudio.h"
@@ -389,6 +391,17 @@ void ARFCharacter::TickThrown(float DeltaTime)
             MeshComp->SetRelativeTransform(SavedMeshRelative, false, nullptr, ETeleportType::None);
             ThrowRecoverAlpha = 0.f;
             UE_LOG(LogTemp, Display, TEXT("PA250 riding: getting up after %.1f s at %s"), ThrownTime, *Stand.ToCompactString());
+            if (!GetUpClip.IsNone())
+            {
+                // He gets up by the clip for how he lies: the loose body blends onto its first pose
+                // (lying) while it begins, and the clip brings him to his feet where he is.
+                FPA250ActionParams InPlace;
+                InPlace.bRootMotion = false;
+                InPlace.BlendIn = 0.f;
+                const float Up = PA250AnimClips::PlayCombatClip(this, GetUpClip, GetUniqueID(), &InPlace);
+                if (Up > 0.f) LockMovement(Up);
+                GetUpClip = NAME_None;
+            }
         }
         return;
     }

@@ -25,7 +25,7 @@ MAPPED = {
     "reload_stand_prime_pan": "AM_Reload_PrimePan_v0",
     "reload_stand_ram_charge": "AM_Reload_RamCharge_v0",
     "reload_stand_shoulder_aim": "AM_Reload_Shoulder_v0",
-    "gun_crew_ram_home": "AM_Gun_Ram_v0",
+    "gun_crew_ram": "AM_Gun_Ram_v0",
     "crawl_wounded": "AM_Wound_Crawl_v0",
 }
 

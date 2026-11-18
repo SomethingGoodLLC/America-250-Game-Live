@@ -10,6 +10,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "PA250Morale.h"
 
 enum class EPA250Bayonet : uint8
 {
@@ -96,6 +97,9 @@ struct FPA250UnitClassKit
 /** Values of the class verbs (unit_classes.json "verbs"). */
 struct FPA250ClassVerbs
 {
+	/** verbs.morale: a squad's thresholds (FPA250MoraleState). Moved 1:1 from FPA250MoraleTuning's
+	 *  defaults, which remain only as the fallback for a file without the block (logged as an error). */
+	FPA250MoraleTuning Morale;
 	int32 VolleyMinShooters = 3;
 	float VolleyWindowSeconds = 1.f;
 	float VolleyShockPressure = 0.5f;  // added to the target squad's morale pressure...

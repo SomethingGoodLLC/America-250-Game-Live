@@ -7,6 +7,7 @@
 class UAnimSequence;
 class UPoseSearchDatabase;
 class ARFCharacter;
+struct FPA250ActionParams;
 
 /** One name of the clip registry (anim_clips.json clips): a clip the battle can show, with or without an asset. */
 struct FPA250ClipEntry
@@ -18,6 +19,12 @@ struct FPA250ClipEntry
 	FString Shows;      // what the player sees in place of the clip
 	bool bLoop = false;
 	bool bWired = false;
+	/** Takes of the clip (package paths); empty: Asset alone. */
+	TArray<FString> Variants;
+	/** Gun crew: where he stands for it and the point he faces, in the cannon's mesh space (cm). */
+	bool bHasStation = false;
+	FVector2D StationCm = FVector2D::ZeroVector;
+	FVector2D FaceCm = FVector2D::ZeroVector;
 	FName Stage;
 	FName Stance;
 };
@@ -64,20 +71,19 @@ PLAYAMERICA250_API UAnimSequence* Clip(FName Name);
 PLAYAMERICA250_API int32 PlaceholdersLogged();
 PLAYAMERICA250_API int32 UnknownLogged();
 
+/** How many takes a name has (its variants; 1 for an asset alone, 0 with no clip). */
+PLAYAMERICA250_API int32 VariantCount(FName Name);
+/** The take of a name a seed picks (the same seed, the same take). Null as Clip() is, with the same lines. */
+PLAYAMERICA250_API UAnimSequence* ClipVariant(FName Name, uint32 Seed);
+/** Pure: the registry suffix for where a blast was, seen from the man: f (in front of him), b, l, r. */
+PLAYAMERICA250_API const TCHAR* BlastSuffix(uint8 BlastDir);
 /**
- * Combat montage drop folder (Artillery M9). Found path: /Game/PA250/Anim
- * (anim_clips.json locomotion.clip_folder = /Game/PA250/Anim/Loco; rebuild deletes Content/PA250/Anim).
- * Reads manifest.json there. Server clips are AnimSequences AM_*_vN; played as dynamic montages.
- * Missing name → closest fallback; one Warning per name, never Error. Never downloads.
+ * Plays a registered clip over a soldier's whole body (UPA250SoldierAnimInstance::PlayAction; the
+ * soldier has no montage slot). The take is picked by Seed. OnNotify gets the name of each notify
+ * the clip passes, and NAME_None when it is over. Returns the seconds it will show; 0 when the name
+ * has no clip on this machine (its placeholder shows, as the registry says) or the man is no
+ * period soldier.
  */
-PLAYAMERICA250_API FString CombatDropFolder();
-PLAYAMERICA250_API bool LoadCombatManifest(TArray<FString>* OutWarnings = nullptr);
-/** Pick a variant AnimSequence for a logical name (e.g. AM_GetUp_Back) using Seed. Null if missing. */
-PLAYAMERICA250_API class UAnimSequence* PickCombatClip(const FString& LogicalName, uint32 Seed);
-/**
- * Play a combat AnimSequence as a dynamic montage on DefaultSlot.
- * Returns length, or 0 if the clip is missing / the mesh has no AnimInstance.
- */
-PLAYAMERICA250_API float PlayCombatClip(ARFCharacter* Man, const FString& LogicalName, uint32 Seed,
-	float BlendIn = 0.1f, float BlendOut = 0.2f, float PlayRate = 1.f);
+PLAYAMERICA250_API float PlayCombatClip(ARFCharacter* Man, FName Name, uint32 Seed,
+	const FPA250ActionParams* Params = nullptr, TFunction<void(FName)> OnNotify = nullptr);
 }

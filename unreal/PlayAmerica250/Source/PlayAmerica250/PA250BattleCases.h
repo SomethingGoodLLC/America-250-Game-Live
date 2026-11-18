@@ -49,5 +49,15 @@ void RunRoundShot(FLog& Log);    // Artillery M5: bounce/graze thresholds, speed
 void RunCannonAim(FLog& Log);    // Artillery M6: quoin/heat/recoil helpers; no wind-drift/wet-powder asserts
 void RunCanister(FLog& Log);     // Artillery M7: grape enum → CANISTER label; pellet/range/cone
 void RunBlast(FLog& Log);        // Artillery M9: blast rings, cover demote, ragdoll cap, chest seed, invariant
+void RunClipActions(FLog& Log);  // registered clips on the soldier: takes, notifies by name, action weight, crew stations
 void RunVolleySync(FLog& Log);   // Artillery M9: seeded 0–150 ms stage jitter (replaces VolleyShotDelay jitter)
+// Battle Feel Pass M1–M6
+void RunVolley(FLog& Log);       // MakeReady→Present→Fire spread; Halt/Hold response
+void RunOfficerLoss(FLog& Log);  // ragged fire after officer death; sergeant after officer_replace_s
+void RunFallIn(FLog& Log);       // player fall-in syncs shot to volley window
+void RunSuppression(FLog& Log);  // blur/sway rise and decay
+void RunMusketFeel(FLog& Log);   // 10k seeded misfire/FITP; rain via weather accessor
+void RunFXEvents(FLog& Log);     // FX router at 5/30/100 m; ShellDud no shake
+void RunShells(FLog& Log);       // howitzer dud rate; six_pounder refuses shell
+void RunGunCrew(FLog& Log);      // drill slows with fewer crew; silent when crew gone
 }

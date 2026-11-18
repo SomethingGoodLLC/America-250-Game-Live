@@ -285,6 +285,16 @@ bool PA250BattleFeel::LoadFromFile(const FString& Path, FName Platform, TArray<F
 				R.Number(*J, TEXT("seconds"), W, Feel.CorpseSeconds);
 				R.Number(*J, TEXT("freeze_after_seconds"), W, Feel.CorpseFreezeAfterSeconds);
 			}
+			if (const TSharedPtr<FJsonObject>* J = R.Object(*In, TEXT("suppression"), TEXT("intensity.")))
+			{
+				const FString W = TEXT("intensity.suppression.");
+				R.Number(*J, TEXT("near_miss_add"), W, Feel.SuppressionNearMissAdd);
+				R.Number(*J, TEXT("impact_add"), W, Feel.SuppressionImpactAdd);
+				R.Number(*J, TEXT("max"), W, Feel.SuppressionMax);
+				R.Number(*J, TEXT("decay_per_second"), W, Feel.SuppressionDecayPerSecond);
+				R.Number(*J, TEXT("blur_amount"), W, Feel.SuppressionBlurAmount);
+				R.Number(*J, TEXT("aim_sway_deg"), W, Feel.SuppressionAimSwayDeg);
+			}
 			if (const TSharedPtr<FJsonObject>* J = R.Object(*In, TEXT("music"), TEXT("intensity.")))
 			{
 				const FString W = TEXT("intensity.music.");
@@ -310,6 +320,14 @@ bool PA250BattleFeel::LoadFromFile(const FString& Path, FName Platform, TArray<F
 					}
 				}
 			}
+		}
+		if (const TSharedPtr<FJsonObject>* Musket = R.Object(Root, TEXT("musket"), TEXT("")))
+		{
+			const FString W = TEXT("musket.");
+			R.Number(*Musket, TEXT("misfire_chance"), W, Feel.MusketMisfireChance);
+			R.Number(*Musket, TEXT("flash_in_pan_chance"), W, Feel.MusketFlashInPanChance);
+			R.Number(*Musket, TEXT("rain_misfire_scale"), W, Feel.MusketRainMisfireScale);
+			R.Number(*Musket, TEXT("rain_flash_scale"), W, Feel.MusketRainFlashScale);
 		}
 		if (const TSharedPtr<FJsonObject>* Verify = R.Object(Root, TEXT("verify"), TEXT("")))
 		{

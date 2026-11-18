@@ -1,4 +1,5 @@
 #include "PA250AimComponent.h"
+#include "PA250BattleRng.h"
 #include "Camera/CameraComponent.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
@@ -73,7 +74,7 @@ FPA250AimResult UPA250AimComponent::ResolveAim(
 	FVector Fired = ToAim;
 	if (SpreadDegrees > 0.01f)
 	{
-		Fired = FMath::VRandCone(ToAim, FMath::DegreesToRadians(SpreadDegrees));
+		Fired = PA250BattleRng::Get().VRandCone(ToAim, FMath::DegreesToRadians(SpreadDegrees));
 	}
 	R.FireDirection = Fired;
 	return R;

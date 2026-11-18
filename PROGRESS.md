@@ -2,6 +2,120 @@
 
 **Vertical slice M0–M8 complete. Battle Feel B1–B4 complete.** Nothing committed or stashed; all changes are uncommitted in the working tree.
 
+## "Can't aim higher" again: the mouse out of relative mode (2026-11-17)
+Reported in PIE (campaign map, then Lexington, playing a musket man): the view would not look any higher. Third report of it (line "Shoulder-camera rotation lag is off"; the movement pass's unexplained playtester report). Nothing in the committed or uncommitted code clamps the view pitch, and the look call itself reaches ±89.
+- **Likely cause, not confirmed:** look needs the mouse in relative ("high precision") mode. Without it the deltas come from the pointer's place on screen, and the hidden pointer stops at the top edge: the view turns and looks down but not higher. That fits every report (one direction only, yaw fine, not reproducible through the look call, cleared by a restart). `ARFCharacter::EnsureGameMouseCapture` only checked `HasMouseCapture()`, which can be true with the mode lost.
+- **Changed:** `EnsureGameMouseCapture` also checks `FSlateApplication::IsUsingHighPrecisionMouseMovment()`, is called from `Look` as well as `Move`, and when either is missing sets game-only input again (at most once a second) and logs `PA250 input: look needed the mouse back (capture=… relative=…, capture mode …, lock mode …)`.
+- **Also fixed:** `APA250CampaignPlayerController::ApplyCampaignInputMode` saved the viewport's capture and lock modes *after* `SetInputMode`, which had just set them, so EndPlay "restored" the map's own `CaptureDuringMouseDown` / `DoNotLock` (the session's log: `saved capture=3 lock=0`). They are saved first now.
+- **Verified:** build Succeeded; `-run=PA250Battle` checks=1047 fails=0; a windowed run starts and plays with no input spam. **Not verified:** that this is the cause. It needs a real mouse: if the look sticks again, the log line above says what state the mouse was in; if it sticks and the line is absent, the cause is elsewhere.
+
+## Clips on the soldier: reactions, volley, gun crew (2026-11-17)
+Done in the main checkout on `master`, on top of another session's uncommitted work in the same tree (gun types, battle FX, weather). Nothing committed.
+
+**Why the artillery pass's clip player was replaced.** The soldier has no Animation Blueprint and no montage slot (`UPA250SoldierAnimInstance` is native; its proxy samples clips itself). `PlayCombatClip` played a dynamic montage on `DefaultSlot`, which nothing evaluates: no clip could ever have shown. It also read a `Content/PA250/Anim/manifest.json` that does not exist and is git-ignored. Both are gone. Clips now go the way the movement pass already goes: a name in `anim_clips.json` `clips`, shown by a pose layer in the proxy.
+
+- **Registry** (`anim_clips.json`, `protocol/schemas/anim_clips.yaml`): 56 names, 44 with a clip. New groups `volley` and `reaction`. A name may carry `variants` (its takes; `asset` is the first): one is picked for each man from a seed. Gun-crew names carry `station_cm` and `face_cm`, the place and facing the clip was generated from (`tools/anim/gun_geometry.json`). The three old gun names (`gun_crew_sponge_load`, `gun_crew_ram_home`, `gun_crew_prime_lay`) are replaced by one name per drill step and role; `tools/anim/ue_export_drop.py` `MAPPED` follows. The clips are read from `/Game/PA250/Anim/Generated` as committed; no FBX drop is needed for them.
+- **Action layer** (`UPA250SoldierAnimInstance::PlayAction`, `SetPosedAction`): a clip over the whole body, by the world's clock, blended in and out, root locked in the pose while the game thread moves the capsule by the clip's root motion. Notifies are reported **by name** (`Notify_Volley_Discharge`, `Notify_Ragdoll_Handoff`), so the clips' Blueprint notify classes need no change. While an action has the body the poses made in code stand down.
+- **Blast** (`APA250BattleGameMode::ApplyBlastKnockdown/Stagger/Flinch`): the clip for the side the blast was on (`_f/_b/_l/_r`). Knockdown: at `Notify_Ragdoll_Handoff` (the clip's last frame, 1.97 s) the body goes limp if the ragdoll cap allows, and is stood up by `get_up_back/front/side` for how it lay; over the cap the clip plays out and the get-up follows. The player keeps his feet (the stagger, in place).
+- **Round shot**: `react_near_miss`, `react_dirt_spray`; a leg wound is `wound_leg_fall`, then `crawl_wounded` for `leg_wound_crawl_seconds`, then the recorded WIA.
+- **Volley** (`UPA250VolleyCoordinator`): `volley_make_ready` and `volley_present` (kneeling takes when ducked) at the word of command; each pending shot starts `volley_fire` so its discharge frame (0.23 s in) falls on the shot's time. The notify and the shot's timer cannot both fire.
+- **Gun crew** (`APA250FieldGun::PoseCrew`, `GetCrewPost`): a bot's post is his role's station (sponger muzzle right, loader muzzle left, ventsman at the vent, captain at the trail); he is eased onto it facing its point and shows the step's clip scrubbed by the drill's progress, an idle loop otherwise, and `gun_crew_flinch` at the report. The player keeps the old place by the wheel.
+- **Loading drill**: the three standing stages point at `AM_Reload_*`; the hook (`UPA250MeleeComponent`, upper body) was already there.
+- **Not wired**: `death_shot_f/b` (the dead go limp at once, and a clip cannot show on a body physics has), `react_deafened`, `gun_crew_run_up`, `gun_crew_traverse`, the kneeling reload stages (no clip), the 24 transition clips.
+
+**Verified (this Mac):** UE **Succeeded**; `-run=PA250Battle` **checks=1047 fails=0** (new `PA250.Battle.ClipActions`: 39 wired names load every take by seed; `volley_fire carries Notify_Volley_Discharge at 0.23 s of 1.47`; `react_blast_knockdown_f carries Notify_Ragdoll_Handoff at 1.97 s of 1.97`; a notify is reported once; crew stations); `-run=PA250Combat` **fails=0**; CONTRACT **338 passed**; SIM **27090 checks, 0 failed**. Bot battles with guns (`scripts/run_debug_battle.sh … -PA250Guns=british:1,continental:2`): `selftest_battle PASSED`, ledger OK both sides, log `PA250 gun: crew post 0 acts gun_crew_sponge at his station` (and ram, load, vent, prime, lay, fire).
+**Seen in a real window** (`-PA250ClipProbe=<names>`, 1280x720, stills `docs/preview/clip_<name>_1.png`, `_2.png`): stagger, knockdown to the ground, get-up, near miss, leg fall, crawl, the three volley clips and the ram all move the body. A real shell on a man (`-PA250ClipProbe=blast`): thrown down, limp, `getting up after 0.4 s`, `back on his feet after 0.7 s`, no error.
+**Not verified:** how the musket sits in the hands during the volley clips (seen only from behind, small); the gun crew in a window (their hands on the piece); the reload clips in a window; the get-up after a ragdoll as motion (the stills missed it); frame rate with many actions at once.
+
+## Battle Feel Pass (2026-11-16) — M0–M7
+
+Work on **main/master**. No commits. Extends existing battle systems; does not fork them. Tracker “grapeshot” → **canister** everywhere in code/FX/tests.
+
+### M0 — Inventory (existing systems)
+
+| System | Where | What it already does |
+|---|---|---|
+| Squad / volley | `Battle/PA250VolleyCoordinator` (`EVolleyCall` MakeReady/Present/Fire; `EPA250SquadOrder` … Hold/FormLine/…) | Player led-file volleys; AI MakeReady→Present→Fire. Hold stops in place. |
+| Cannon | `Battle/PA250FieldGun` (`EPA250Shot` RoundShot/Grape/Shell); `PA250Blast` | 6-pdr + howitzer types; canister (grape); shell dud on howitzer. |
+| Morale / endings | `Battle/PA250Morale`; end rules | Steady/Shaken/Routing/Rallying; `army_broke` / `routed`. |
+| Cover / support / data / audio | as before | Unchanged consumers; extended loaders only. |
+| Tests / perf harness | `scripts/battle_tests.sh`, `scripts/perf_capture.sh` | Commandlet `PA250.Battle.*`; CSV uncapped FPS. |
+
+**Halt → Hold** (no new enum). **Advance → FormLine**.
+
+### M0 — Harness
+- `scripts/battle_tests.sh` — **PASS** `checks=1011 fails=0` (2026-11-16).
+- `scripts/perf_capture.sh` — CSV under Engine `Saved/Profiling/CSV`; discard 300 warmup frames; **never** `-PA250Preview=*` (exits early).
+
+#### Mac M3 — baseline (pre-effects)
+- **avg_frame_ms=54.122** · **p95_frame_ms=64.048** · frames_used=300 (of 600)
+- `unreal/PlayAmerica250/Saved/PA250/perf/lexington_baseline_summary.json`
+- Exact command:
+```
+/Users/Shared/Epic Games/UE_5.8/Engine/Binaries/Mac/UnrealEditor.app/Contents/MacOS/UnrealEditor \
+  /Users/leone/PycharmProjects/Samson/unreal/PlayAmerica250/PlayAmerica250.uproject \
+  /Game/PA250/Maps/L_Lexington -game -windowed -ResX=1710 -ResY=1112 -nosound -nosplash -unattended \
+  -PA250Scenario=lexington_common -PA250Bots=20 -csvCaptureFrames=600 -ExitAfterCsvProfiling \
+  -csvCompression=0 -ExecCmds="r.VSync 0,t.MaxFPS 0"
+```
+- Note: **editor `-game` numbers, not a packaged build.**
+
+### Review and fixes (2026-11-17)
+A review of the first M1–M7 pass found most "data moves" unwired, several real bugs and tests that asserted their own arithmetic. What changed, and what was run:
+
+**Bugs fixed**
+- Musket feel: the misfire roll was seeded with the man's *misfire* count, so a man who did not misfire on his first pull rolled the same number forever (never misfired). Now `PA250MusketFeel::RollFor(battle seed, man, pull index)`, one roll a pull (`ARFCharacter::TriggerPulls`). Flash in the pan (priming burns, pan flash + `flash_pan`) and misfire (flint click only) are now distinct (`AMusketWeapon::Misfire(bFlashInPan)`).
+- **Rule change (from the plan, now stated):** the player misfires too, at `battle_feel.musket.misfire_chance`; bots at their `DA_CombatProfiles` MisfireChance. Before 2026-11-16 the player never misfired (PROGRESS line on fire discipline, `PA250CombatProfiles.h` and the "fire:" case text updated).
+- Gun drill: the pass reordered the steps to Swab, Load, Ram, Run up, Prime, Fire but `CrewStepClip` still used the old numbers (step 3 played Prime, step 4 Lay). One enum `PA250Gunnery::EPA250GunStep` now drives labels, crew clips, the Load chest stall and the Swab premature check.
+- Shell dud: a dud spawned no shell at all and "burst" FX played at the muzzle. A dud now flies past its fuse and lands unburst (`ShellDud` at the landing point); a good shell's `ShellBurst` comes from `PA250Blast` where it bursts.
+- FX doubles: the report played twice (`cannon_fire` + router) and round-shot strikes shook twice. `PA250BattleFX` is now the one path (fallback banks in data; the round shot's shake stays `battle_feel.intensity.round_shot`).
+- Officer loss: only player-led files were covered, and after 8 s the player's file was handed to a bot, which locked its men from the player's next man. Now any officer's or leader's death (game mode death path) makes the squad ragged for the full `officer_replace_s`, never resuming mid-volley; a bot leader's file passes to `PickSuccessor`, the player's goes to its own drill.
+- The pass added up to 1 s random delay to every one of the player's file volleys (was ≤150 ms): undone. `volley_spread_s` is a window a steady volley stays inside; the wide spread is only while officerless.
+- **The aiming regression the user saw (2026-11-17):** removing `musket.active_reload_shorten` from `battle_feel.json` while the editor ran the old binary (which required it) put battle feel in FALLBACK (neutral poses, so the musket stopped following pitch). Fixed by the rebuild; restart the editor.
+
+**Data moves finished (old sources removed, not stubbed)**
+- `FVolleyTuning::MakeReadySeconds/PresentSeconds` deleted (`DA_MusketTuning` held no override: checked in the asset); `battle_rules.drill` is the only source.
+- `FPA250MoraleTuning` now filled from `unit_classes.json verbs.morale` (closed: four required keys, unknown keys refused); its defaults remain only as the logged fallback.
+- `cannon.gun_types` / `default_gun_type` now loaded by the sim and used by `ShotAllowedForGun` and `CycleShot` (a six-pounder cycles canister and round shot only). The flat 1.25 short-crew factor moved 1:1 to `cannon.missing_roles_scale`.
+- Removed dead keys nothing read: `bounce_by_physical_material`, `crew_slowdown.per_missing_crew`, `musket.active_reload_shorten`, `drill.response_delay_s.make_ready/present`, militia `rout_enter_open/cover`, morale `rally_time_s/rallied_rout_enter_scale`, every class's `reload_seconds_min/max`.
+- **Not done (needs a decision):** absolute reload ranges (regulars 15–20 s, militia 20–25 s) would slow every musket substantially; per-class morale thresholds are a separate tuning step.
+
+**New wiring**
+- Fall in (K): `TryFallIn` joins the nearest friendly line within `fall_in_radius_m` and its files re-sort with him in them; his press at Make ready / Present is held and fired with the volley; straying `fall_in_break_m`, K again, or dying falls him out; his own led file is released; `TickPlayerFile` leaves him alone while fallen in; HUD line + key help.
+- Order response delays (Hold = halt 0.35 s, Form line = advance 0.4 s, fire 0.25 s; ×1.75 officerless).
+- Suppression: a real level (near miss +0.25, close strikes +impact) that decays; drives aim sway and a depth-of-field blur (`ARFCharacter::AddSuppression/TickSuppression`), replacing "ShowDirt as blur".
+- `battle_look.audio.orders` read by `PA250BattleFX::OrderCue`: drum and fife calls with a musician present (Form line / Hold orders, Make ready / Present / Fire words).
+- Weather accessor reads `-PA250Weather` once (it parsed the command line every trigger pull). There is no debug-battle JSON; the flag is the override.
+
+**Assets**
+- 48 new WAVs imported (`Scripts/import_audio.py` with `PA250_AUDIO_ONLY`; none replaced an existing asset). Officer voices renamed from `VO_officer<n>_<key>.wav` (would have imported as `VO_VO_...`, never played) to `<key>_<n>.wav`, so they are variants of the shout banks the game plays (Hold's shout is `steady`).
+- `asset_manifest.json` had rows for the 10 images only: the audio run's rows were lost. `tools/generate_assets.py --record-existing` added 60 rows (sha256 of the files on disk, catalog prompt/model, file date, marked as recorded after the fact); the generator now saves after every asset. ruff + mypy clean.
+- `NS_PH_*` Niagara and `MS_PH_*` MetaSounds are still not authored; they stay on the manifest's missing list and the router logs each missing system once.
+
+**Tests (all run on this Mac, 2026-11-17)**
+- `scripts/battle_tests.sh`: **PASS `checks=1036 fails=0`** (1038 after the formation fix below). Rewritten world-driven cases: `Volley` (30 bots in 5 squads through the real coordinator: 5/5 squads Make ready → Present → Fire, 29/30 pull, worst span 0.10 s, Hold obeyed at 0.35 s, Form line at 0.40 s), `OfficerLoss` (officer killed through `WoundOut`: ragged 1.30 s span, sergeant after 8.00 s not mid-volley, steady 0.10 s after; bot-leader hand-off; player's file released), `FallIn` (a possessed pawn: held shot fires with the volley, stray/K fall-out), `Suppression`, `MusketFeel` (10k pulls through the game's roll: 4.95 %/2.53 % vs data 5/3; 600 real `FireMusketAt` pulls fail 49, expected ~48), `FXEvents` (router + a real gun: one report a shot), `Shells` (600 real howitzer shells, 8.3 % duds; a dud lands unburst), `GunCrew` (real drill 22.2 s with 4 men, 55.2 s with 2; silent with 1; label and clip agree at every step).
+- `PA250Combat` commandlet `fails=0`; `PA250.Campaign.Clock` passed (goldens untouched); sim ctest passed (clang, no warnings).
+- pytest contracts + diplomacy: 467 passed, 2 failed, both outside this pass: `test_anim_clips_contracts` (clip assets under `/Game/PA250/Anim/Generated/`, from the anim work) and `tests/diplomacy/test_defect.py`.
+- **Formation fix (2026-11-17, behaviour change, deliberate):** `FormationOffsets` shifted every second rank half a file, which put a *short* rear rank straight behind the front men: in a 5-man squad (3 and 2) both rear men had no lane, likewise 7, 9 and 13+ men (found by the officer-loss case: 2 of 5 fired). Each rank is now placed in the gaps of the rank in front: shifted only when centring alone would put it on the front rank's files. Full ranks are unchanged (6 and 8 men keep their old places, checked). New case: for 1–20 men no rear man stands within half a file of a man straight ahead. `checks=1038 fails=0`; officer-loss squad back to 5 + officer, 5 of 5 fire each volley. Not yet seen in a window.
+
+**Perf (honest)**: the earlier "after 35.3 ms vs baseline 54.1 ms" does not reproduce. Two identical back-to-back runs today (`CAPTURE_FRAMES=600 scripts/perf_capture.sh pair_first|pair_second`, same command as the M0 line above): **55.8 / 66.1 ms** and **59.4 / 69.9 ms** (avg / p95). Run-to-run spread (~6 %) is as large as any difference from the baseline; no evidence of a >10 % regression. The pre-pass binary is gone, so a true before/after needs a build of the old code. `PREWARM=1` now runs one untimed launch first; compare only runs with the same PREWARM. Editor `-game`, not packaged.
+
+### Clip checklist (M1–M6, tracker "grapeshot" = canister) — not yet recorded
+- L_Lexington, a 30-man line: Make ready → Present → Fire, then Halt (Hold) stops it 0.35 s after the word.
+- Officer falls → ragged fire for 8 s → sergeant's steady volley; player falls in (K) and his shot goes with the volley.
+- Suppression blur under near misses; flash in the pan (pan puff) vs misfire (click).
+- Round shot strike and canister at near / mid distance; a test howitzer's shell burst and a dud landing with no shake.
+- A short crew's slower drill (Swab, Load, Ram, Run up, Prime, Fire).
+
+### Proposed contract changes
+- `BattleSetup.weather` — **not** added; `PA250BattleWeather::Get` is the only reader.
+
+### RNG
+Outcome rolls now draw from `PA250BattleRng` (seeded from `BattleSetup.seed` in the game mode) or per-actor seeded streams: musket spread (`MusketWeapon.cpp`, `PA250AimComponent.cpp`), suppression/saddle sway (`RFCharacter.cpp`), bot aim, reaction, think timers, loose slots, melee recovery and guard reads (`PA250BotController.cpp`), melee butt-stroke and guard chances (`PA250MeleeComponent.cpp`), volley discharge aim (`PA250VolleyCoordinator.cpp`), reinforcement spawn points (`PA250BattleGameMode.cpp`), respawn pick (`RFGameMode.cpp`), reload jams (`ActiveReloadSequencer.cpp`), gun round/shell/canister spread and the gun's smoke (smoke hides men from bots, so it is an outcome) and blast smoke (`PA250FieldGun.cpp`, `PA250Blast.cpp`). The premature-discharge stream is seeded from game time and faction (deterministic per tick, not the wall clock).
+**RNG left cosmetic** (FMath global, no outcome): `Battle/PA250VolleyCoordinator.cpp:1891` (where a shout is heard from), `Battle/PA250MeleeComponent.cpp:1002` (which charge cry), `Battle/PA250BattleAudio.cpp:87, 95, 113, 174, 184` (variant and pitch), `RF/RFCharacter.cpp:1143` (the player's camera kick yaw), `RF/RFCharacter.cpp:2117` (how a dropped musket lies).
+
+---
+
 ## Artillery pass (2026-11)
 
 Worktree `/Users/leone/PycharmProjects/Samson-artillery`, branch `feature/artillery-pass`, from `e1a17f1`. Nothing committed. This agent runs on the Mac; **Windows timings stay unmeasured** here. Verify commands use `scripts/_ue_env.sh` (Mac host today). Stop if the branch changes under the agent.

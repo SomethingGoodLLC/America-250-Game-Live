@@ -1,4 +1,5 @@
 #include "PA250MeleeComponent.h"
+#include "PA250BattleRng.h"
 #include "Battle/PA250BattleFeel.h"
 #include "Battle/PA250AnimClips.h"
 #include "Animation/AnimSequence.h"
@@ -807,7 +808,7 @@ bool UPA250MeleeComponent::DoThrust()
 	ARFCharacter* Target = ThrustTarget.Get();
 	// Bots know the answer to a raised guard: close enough, most of them go in with the butt instead.
 	if (Target && !Me->IsPlayerControlled() && Target->MeleeComponent && Target->MeleeComponent->IsGuarding()
-		&& FVector::Dist2D(Target->GetActorLocation(), Me->GetActorLocation()) <= V.ButtStrokeReachCm + 35.f && FMath::FRand() < 0.6f)
+		&& FVector::Dist2D(Target->GetActorLocation(), Me->GetActorLocation()) <= V.ButtStrokeReachCm + 35.f && PA250BattleRng::Get().FRand() < 0.6f)
 	{
 		FaceTarget(Target, false);
 		return DoButtStroke();
@@ -847,7 +848,7 @@ void UPA250MeleeComponent::NotifyIncoming(float Seconds)
 	ThreatTimer = FMath::Max(ThreatTimer, Seconds + 0.15f);
 	// Bots: some get the musket up in time (a block, never a parry). A man still reeling cannot.
 	if (!Me->IsPlayerControlled() && Visual == EPA250MeleeVisual::None && !bGuarding && FlinchTime < 0.f
-		&& FMath::FRand() < GetValues().BotGuardChance)
+		&& PA250BattleRng::Get().FRand() < GetValues().BotGuardChance)
 	{
 		AutoGuardTimer = Seconds + 0.35f;
 	}

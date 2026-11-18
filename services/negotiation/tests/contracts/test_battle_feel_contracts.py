@@ -254,3 +254,41 @@ def test_intensity_values_are_sane() -> None:
     assert field["morale_weight"] == music["morale_weight"]
     assert set(feel["shouts"]) == {"charge", "rout", "officer_down", "colours_taken"}
     assert len(_vectors("music_layers_")) >= 2
+
+
+# ---- Battle Feel Pass (2026-11-16): musket feel and suppression ----
+
+
+def test_musket_feel_is_bounded_and_rain_never_helps() -> None:
+    musket = FEEL["musket"]
+    assert 0 <= musket["misfire_chance"] <= 0.5
+    assert 0 <= musket["flash_in_pan_chance"] <= 0.5
+    assert musket["rain_misfire_scale"] >= 1 and musket["rain_flash_scale"] >= 1
+    # A dry pull fires most of the time, the player's included.
+    assert musket["misfire_chance"] + musket["flash_in_pan_chance"] < 0.2
+
+
+def test_suppression_rises_and_always_falls_away() -> None:
+    sup = FEEL["intensity"]["suppression"]
+    assert 0 < sup["near_miss_add"] <= sup["max"] <= 1
+    assert 0 <= sup["impact_add"] <= sup["max"]
+    assert sup["decay_per_second"] > 0
+    # From full, a man is clear inside ten seconds of quiet.
+    assert sup["max"] / sup["decay_per_second"] <= 10
+
+
+def test_the_schema_requires_the_musket_and_suppression_blocks() -> None:
+    checker = Draft7Validator(FEEL_SCHEMA)
+    for path in (("musket",), ("intensity", "suppression")):
+        doc = json.loads(json.dumps(FEEL))
+        parent = doc
+        for key in path[:-1]:
+            parent = parent[key]
+        del parent[path[-1]]
+        assert list(checker.iter_errors(doc)), path
+    extra = json.loads(json.dumps(FEEL))
+    extra["musket"]["active_reload_shorten"] = 0.12  # no field without a reader
+    assert list(checker.iter_errors(extra))
+    never = json.loads(json.dumps(FEEL))
+    never["intensity"]["suppression"]["decay_per_second"] = 0
+    assert list(checker.iter_errors(never))

@@ -3349,33 +3349,48 @@
   "clips": {
     "reload_stand_prime_pan": {
       "group": "loading_drill",
-      "asset": null,
+      "asset": "/Game/PA250/Anim/Generated/Volley/AM_Reload_PrimePan_v0",
       "placeholder": "procedural",
       "shows": "the hands work the cartridge and the pan, made in code (UPA250MeleeComponent::TickReloadPose)",
       "loop": false,
       "stage": "prime_pan",
       "stance": "stand",
-      "wired": true
+      "wired": true,
+      "variants": [
+        "/Game/PA250/Anim/Generated/Volley/AM_Reload_PrimePan_v0",
+        "/Game/PA250/Anim/Generated/Volley/AM_Reload_PrimePan_v1",
+        "/Game/PA250/Anim/Generated/Volley/AM_Reload_PrimePan_v2"
+      ]
     },
     "reload_stand_ram_charge": {
       "group": "loading_drill",
-      "asset": null,
+      "asset": "/Game/PA250/Anim/Generated/Volley/AM_Reload_RamCharge_v0",
       "placeholder": "procedural",
       "shows": "the butt goes to the ground and the right hand works the rammer, made in code",
       "loop": false,
       "stage": "ram_charge",
       "stance": "stand",
-      "wired": true
+      "wired": true,
+      "variants": [
+        "/Game/PA250/Anim/Generated/Volley/AM_Reload_RamCharge_v0",
+        "/Game/PA250/Anim/Generated/Volley/AM_Reload_RamCharge_v1",
+        "/Game/PA250/Anim/Generated/Volley/AM_Reload_RamCharge_v2"
+      ]
     },
     "reload_stand_shoulder_aim": {
       "group": "loading_drill",
-      "asset": null,
+      "asset": "/Game/PA250/Anim/Generated/Volley/AM_Reload_Shoulder_v0",
       "placeholder": "procedural",
       "shows": "the musket is brought back from the load to the carry, made in code",
       "loop": false,
       "stage": "shoulder_aim",
       "stance": "stand",
-      "wired": true
+      "wired": true,
+      "variants": [
+        "/Game/PA250/Anim/Generated/Volley/AM_Reload_Shoulder_v0",
+        "/Game/PA250/Anim/Generated/Volley/AM_Reload_Shoulder_v1",
+        "/Game/PA250/Anim/Generated/Volley/AM_Reload_Shoulder_v2"
+      ]
     },
     "reload_stand_miss_delay": {
       "group": "loading_drill",
@@ -3447,30 +3462,6 @@
       "stance": "kneel",
       "wired": true
     },
-    "gun_crew_sponge_load": {
-      "group": "gun_crew",
-      "asset": null,
-      "placeholder": "none",
-      "shows": "no crew drill is acted: the gun shows its load as a bar",
-      "loop": false,
-      "wired": false
-    },
-    "gun_crew_ram_home": {
-      "group": "gun_crew",
-      "asset": null,
-      "placeholder": "none",
-      "shows": "no crew drill is acted: the gun shows its load as a bar",
-      "loop": false,
-      "wired": false
-    },
-    "gun_crew_prime_lay": {
-      "group": "gun_crew",
-      "asset": null,
-      "placeholder": "none",
-      "shows": "no crew drill is acted: the gun shows its load as a bar",
-      "loop": false,
-      "wired": false
-    },
     "row_stroke": {
       "group": "rowing",
       "asset": null,
@@ -3497,11 +3488,15 @@
     },
     "crawl_wounded": {
       "group": "crawl",
-      "asset": null,
+      "asset": "/Game/PA250/Anim/Generated/React/AM_Wound_Crawl_v0",
       "placeholder": "none",
-      "shows": "there is no crawling: a man who is hit stands, staggers or falls",
+      "shows": "a man hit in the leg crawls before he is taken off the field; with no clip he is taken off at once",
       "loop": true,
-      "wired": false
+      "wired": true,
+      "variants": [
+        "/Game/PA250/Anim/Generated/React/AM_Wound_Crawl_v0",
+        "/Game/PA250/Anim/Generated/React/AM_Wound_Crawl_v1"
+      ]
     },
     "drummer_beat": {
       "group": "drummer",
@@ -3517,6 +3512,542 @@
       "placeholder": "none",
       "shows": "an ensign carries himself like any soldier; the colours are an actor of their own",
       "loop": true,
+      "wired": false
+    },
+    "gun_crew_sponge": {
+      "group": "gun_crew",
+      "asset": "/Game/PA250/Anim/Generated/Gun/AM_Gun_Sponge_v0",
+      "variants": [
+        "/Game/PA250/Anim/Generated/Gun/AM_Gun_Sponge_v0",
+        "/Game/PA250/Anim/Generated/Gun/AM_Gun_Sponge_v1",
+        "/Game/PA250/Anim/Generated/Gun/AM_Gun_Sponge_v2"
+      ],
+      "placeholder": "none",
+      "shows": "with no clip the crew stand at their posts and the gun shows its load as a bar",
+      "loop": false,
+      "wired": true,
+      "station_cm": [176.0, 70.0],
+      "face_cm": [156.0, 0.0]
+    },
+    "gun_crew_load": {
+      "group": "gun_crew",
+      "asset": "/Game/PA250/Anim/Generated/Gun/AM_Gun_Load_v0",
+      "variants": [
+        "/Game/PA250/Anim/Generated/Gun/AM_Gun_Load_v0",
+        "/Game/PA250/Anim/Generated/Gun/AM_Gun_Load_v1",
+        "/Game/PA250/Anim/Generated/Gun/AM_Gun_Load_v2"
+      ],
+      "placeholder": "none",
+      "shows": "with no clip the crew stand at their posts and the gun shows its load as a bar",
+      "loop": false,
+      "wired": true,
+      "station_cm": [176.0, -70.0],
+      "face_cm": [156.0, 0.0]
+    },
+    "gun_crew_ram": {
+      "group": "gun_crew",
+      "asset": "/Game/PA250/Anim/Generated/Gun/AM_Gun_Ram_v0",
+      "variants": [
+        "/Game/PA250/Anim/Generated/Gun/AM_Gun_Ram_v0",
+        "/Game/PA250/Anim/Generated/Gun/AM_Gun_Ram_v1",
+        "/Game/PA250/Anim/Generated/Gun/AM_Gun_Ram_v2"
+      ],
+      "placeholder": "none",
+      "shows": "with no clip the crew stand at their posts and the gun shows its load as a bar",
+      "loop": false,
+      "wired": true,
+      "station_cm": [176.0, 70.0],
+      "face_cm": [156.0, 0.0]
+    },
+    "gun_crew_vent": {
+      "group": "gun_crew",
+      "asset": "/Game/PA250/Anim/Generated/Gun/AM_Gun_Vent_v0",
+      "variants": [
+        "/Game/PA250/Anim/Generated/Gun/AM_Gun_Vent_v0",
+        "/Game/PA250/Anim/Generated/Gun/AM_Gun_Vent_v1"
+      ],
+      "placeholder": "none",
+      "shows": "with no clip the crew stand at their posts and the gun shows its load as a bar",
+      "loop": false,
+      "wired": true,
+      "station_cm": [10.0, 50.0],
+      "face_cm": [10.0, 0.0]
+    },
+    "gun_crew_prime": {
+      "group": "gun_crew",
+      "asset": "/Game/PA250/Anim/Generated/Gun/AM_Gun_Prime_v0",
+      "variants": [
+        "/Game/PA250/Anim/Generated/Gun/AM_Gun_Prime_v0",
+        "/Game/PA250/Anim/Generated/Gun/AM_Gun_Prime_v1"
+      ],
+      "placeholder": "none",
+      "shows": "with no clip the crew stand at their posts and the gun shows its load as a bar",
+      "loop": false,
+      "wired": true,
+      "station_cm": [10.0, 50.0],
+      "face_cm": [10.0, 0.0]
+    },
+    "gun_crew_lay": {
+      "group": "gun_crew",
+      "asset": "/Game/PA250/Anim/Generated/Gun/AM_Gun_Lay_v0",
+      "variants": [
+        "/Game/PA250/Anim/Generated/Gun/AM_Gun_Lay_v0",
+        "/Game/PA250/Anim/Generated/Gun/AM_Gun_Lay_v1",
+        "/Game/PA250/Anim/Generated/Gun/AM_Gun_Lay_v2"
+      ],
+      "placeholder": "none",
+      "shows": "with no clip the crew stand at their posts and the gun shows its load as a bar",
+      "loop": false,
+      "wired": true,
+      "station_cm": [-216.6, 0.0],
+      "face_cm": [10.0, 0.0]
+    },
+    "gun_crew_run_up": {
+      "group": "gun_crew",
+      "asset": "/Game/PA250/Anim/Generated/Gun/AM_Gun_RunUp_v0",
+      "variants": [
+        "/Game/PA250/Anim/Generated/Gun/AM_Gun_RunUp_v0",
+        "/Game/PA250/Anim/Generated/Gun/AM_Gun_RunUp_v1"
+      ],
+      "placeholder": "none",
+      "shows": "with no clip the crew stand at their posts and the gun shows its load as a bar",
+      "loop": false,
+      "wired": false
+    },
+    "gun_crew_traverse": {
+      "group": "gun_crew",
+      "asset": "/Game/PA250/Anim/Generated/Gun/AM_Gun_Traverse_v0",
+      "variants": [
+        "/Game/PA250/Anim/Generated/Gun/AM_Gun_Traverse_v0",
+        "/Game/PA250/Anim/Generated/Gun/AM_Gun_Traverse_v1"
+      ],
+      "placeholder": "none",
+      "shows": "with no clip the crew stand at their posts and the gun shows its load as a bar",
+      "loop": false,
+      "wired": false
+    },
+    "gun_crew_fire": {
+      "group": "gun_crew",
+      "asset": "/Game/PA250/Anim/Generated/Gun/AM_Gun_Fire_v0",
+      "variants": [
+        "/Game/PA250/Anim/Generated/Gun/AM_Gun_Fire_v0",
+        "/Game/PA250/Anim/Generated/Gun/AM_Gun_Fire_v1",
+        "/Game/PA250/Anim/Generated/Gun/AM_Gun_Fire_v2"
+      ],
+      "placeholder": "none",
+      "shows": "with no clip the crew stand at their posts and the gun shows its load as a bar",
+      "loop": false,
+      "wired": true,
+      "station_cm": [10.0, 50.0],
+      "face_cm": [10.0, 0.0]
+    },
+    "gun_crew_flinch": {
+      "group": "gun_crew",
+      "asset": "/Game/PA250/Anim/Generated/Gun/AM_Gun_Flinch_v0",
+      "variants": [
+        "/Game/PA250/Anim/Generated/Gun/AM_Gun_Flinch_v0",
+        "/Game/PA250/Anim/Generated/Gun/AM_Gun_Flinch_v1",
+        "/Game/PA250/Anim/Generated/Gun/AM_Gun_Flinch_v2",
+        "/Game/PA250/Anim/Generated/Gun/AM_Gun_Flinch_v3"
+      ],
+      "placeholder": "none",
+      "shows": "with no clip the crew stand at their posts and the gun shows its load as a bar",
+      "loop": false,
+      "wired": true
+    },
+    "gun_crew_idle_sponger": {
+      "group": "gun_crew",
+      "asset": "/Game/PA250/Anim/Generated/Gun/AM_Gun_Idle_Sponger_v0",
+      "variants": [
+        "/Game/PA250/Anim/Generated/Gun/AM_Gun_Idle_Sponger_v0",
+        "/Game/PA250/Anim/Generated/Gun/AM_Gun_Idle_Sponger_v1",
+        "/Game/PA250/Anim/Generated/Gun/AM_Gun_Idle_Sponger_v2"
+      ],
+      "placeholder": "none",
+      "shows": "with no clip the crew stand at their posts and the gun shows its load as a bar",
+      "loop": true,
+      "wired": true,
+      "station_cm": [176.0, 70.0],
+      "face_cm": [156.0, 0.0]
+    },
+    "gun_crew_idle_loader": {
+      "group": "gun_crew",
+      "asset": "/Game/PA250/Anim/Generated/Gun/AM_Gun_Idle_Loader_v0",
+      "variants": [
+        "/Game/PA250/Anim/Generated/Gun/AM_Gun_Idle_Loader_v0",
+        "/Game/PA250/Anim/Generated/Gun/AM_Gun_Idle_Loader_v1",
+        "/Game/PA250/Anim/Generated/Gun/AM_Gun_Idle_Loader_v2"
+      ],
+      "placeholder": "none",
+      "shows": "with no clip the crew stand at their posts and the gun shows its load as a bar",
+      "loop": true,
+      "wired": true,
+      "station_cm": [176.0, -70.0],
+      "face_cm": [156.0, 0.0]
+    },
+    "gun_crew_idle_ventsman": {
+      "group": "gun_crew",
+      "asset": "/Game/PA250/Anim/Generated/Gun/AM_Gun_Idle_Ventsman_v0",
+      "variants": [
+        "/Game/PA250/Anim/Generated/Gun/AM_Gun_Idle_Ventsman_v0",
+        "/Game/PA250/Anim/Generated/Gun/AM_Gun_Idle_Ventsman_v1",
+        "/Game/PA250/Anim/Generated/Gun/AM_Gun_Idle_Ventsman_v2"
+      ],
+      "placeholder": "none",
+      "shows": "with no clip the crew stand at their posts and the gun shows its load as a bar",
+      "loop": true,
+      "wired": true,
+      "station_cm": [10.0, 50.0],
+      "face_cm": [10.0, 0.0]
+    },
+    "gun_crew_idle_firer": {
+      "group": "gun_crew",
+      "asset": "/Game/PA250/Anim/Generated/Gun/AM_Gun_Idle_Firer_v0",
+      "variants": [
+        "/Game/PA250/Anim/Generated/Gun/AM_Gun_Idle_Firer_v0",
+        "/Game/PA250/Anim/Generated/Gun/AM_Gun_Idle_Firer_v1",
+        "/Game/PA250/Anim/Generated/Gun/AM_Gun_Idle_Firer_v2"
+      ],
+      "placeholder": "none",
+      "shows": "with no clip the crew stand at their posts and the gun shows its load as a bar",
+      "loop": true,
+      "wired": true,
+      "station_cm": [10.0, 50.0],
+      "face_cm": [10.0, 0.0]
+    },
+    "gun_crew_idle_handspike": {
+      "group": "gun_crew",
+      "asset": "/Game/PA250/Anim/Generated/Gun/AM_Gun_Idle_Handspike_v0",
+      "variants": [
+        "/Game/PA250/Anim/Generated/Gun/AM_Gun_Idle_Handspike_v0",
+        "/Game/PA250/Anim/Generated/Gun/AM_Gun_Idle_Handspike_v1",
+        "/Game/PA250/Anim/Generated/Gun/AM_Gun_Idle_Handspike_v2"
+      ],
+      "placeholder": "none",
+      "shows": "with no clip the crew stand at their posts and the gun shows its load as a bar",
+      "loop": true,
+      "wired": true,
+      "station_cm": [-216.6, 0.0],
+      "face_cm": [10.0, 0.0]
+    },
+    "gun_crew_idle_captain": {
+      "group": "gun_crew",
+      "asset": "/Game/PA250/Anim/Generated/Gun/AM_Gun_Idle_Captain_v0",
+      "variants": [
+        "/Game/PA250/Anim/Generated/Gun/AM_Gun_Idle_Captain_v0",
+        "/Game/PA250/Anim/Generated/Gun/AM_Gun_Idle_Captain_v1",
+        "/Game/PA250/Anim/Generated/Gun/AM_Gun_Idle_Captain_v2"
+      ],
+      "placeholder": "none",
+      "shows": "with no clip the crew stand at their posts and the gun shows its load as a bar",
+      "loop": true,
+      "wired": true,
+      "station_cm": [-216.6, 0.0],
+      "face_cm": [10.0, 0.0]
+    },
+    "volley_make_ready": {
+      "group": "volley",
+      "asset": "/Game/PA250/Anim/Generated/Volley/AM_Volley_MakeReady_v0",
+      "variants": [
+        "/Game/PA250/Anim/Generated/Volley/AM_Volley_MakeReady_v0",
+        "/Game/PA250/Anim/Generated/Volley/AM_Volley_MakeReady_v1",
+        "/Game/PA250/Anim/Generated/Volley/AM_Volley_MakeReady_v2",
+        "/Game/PA250/Anim/Generated/Volley/AM_Volley_MakeReady_v3"
+      ],
+      "placeholder": "procedural",
+      "shows": "with no clip the musket comes to the shoulder by the pose made in code",
+      "loop": false,
+      "wired": true
+    },
+    "volley_present": {
+      "group": "volley",
+      "asset": "/Game/PA250/Anim/Generated/Volley/AM_Volley_Present_v0",
+      "variants": [
+        "/Game/PA250/Anim/Generated/Volley/AM_Volley_Present_v0",
+        "/Game/PA250/Anim/Generated/Volley/AM_Volley_Present_v1",
+        "/Game/PA250/Anim/Generated/Volley/AM_Volley_Present_v2",
+        "/Game/PA250/Anim/Generated/Volley/AM_Volley_Present_v3"
+      ],
+      "placeholder": "procedural",
+      "shows": "with no clip the musket comes to the shoulder by the pose made in code",
+      "loop": false,
+      "wired": true
+    },
+    "volley_fire": {
+      "group": "volley",
+      "asset": "/Game/PA250/Anim/Generated/Volley/AM_Volley_Fire_v0",
+      "variants": [
+        "/Game/PA250/Anim/Generated/Volley/AM_Volley_Fire_v0",
+        "/Game/PA250/Anim/Generated/Volley/AM_Volley_Fire_v1",
+        "/Game/PA250/Anim/Generated/Volley/AM_Volley_Fire_v2",
+        "/Game/PA250/Anim/Generated/Volley/AM_Volley_Fire_v3"
+      ],
+      "placeholder": "procedural",
+      "shows": "with no clip the musket comes to the shoulder by the pose made in code",
+      "loop": false,
+      "wired": true
+    },
+    "volley_kneel_make_ready": {
+      "group": "volley",
+      "asset": "/Game/PA250/Anim/Generated/Volley/AM_Volley_Kneel_MakeReady_v0",
+      "variants": [
+        "/Game/PA250/Anim/Generated/Volley/AM_Volley_Kneel_MakeReady_v0",
+        "/Game/PA250/Anim/Generated/Volley/AM_Volley_Kneel_MakeReady_v1",
+        "/Game/PA250/Anim/Generated/Volley/AM_Volley_Kneel_MakeReady_v2"
+      ],
+      "placeholder": "procedural",
+      "shows": "with no clip the musket comes to the shoulder by the pose made in code",
+      "loop": false,
+      "wired": true
+    },
+    "volley_kneel_present": {
+      "group": "volley",
+      "asset": "/Game/PA250/Anim/Generated/Volley/AM_Volley_Kneel_Present_v0",
+      "variants": [
+        "/Game/PA250/Anim/Generated/Volley/AM_Volley_Kneel_Present_v0",
+        "/Game/PA250/Anim/Generated/Volley/AM_Volley_Kneel_Present_v1",
+        "/Game/PA250/Anim/Generated/Volley/AM_Volley_Kneel_Present_v2"
+      ],
+      "placeholder": "procedural",
+      "shows": "with no clip the musket comes to the shoulder by the pose made in code",
+      "loop": false,
+      "wired": true
+    },
+    "volley_kneel_fire": {
+      "group": "volley",
+      "asset": "/Game/PA250/Anim/Generated/Volley/AM_Volley_Kneel_Fire_v0",
+      "variants": [
+        "/Game/PA250/Anim/Generated/Volley/AM_Volley_Kneel_Fire_v0",
+        "/Game/PA250/Anim/Generated/Volley/AM_Volley_Kneel_Fire_v1",
+        "/Game/PA250/Anim/Generated/Volley/AM_Volley_Kneel_Fire_v2"
+      ],
+      "placeholder": "procedural",
+      "shows": "with no clip the musket comes to the shoulder by the pose made in code",
+      "loop": false,
+      "wired": true
+    },
+    "react_blast_knockdown_f": {
+      "group": "reaction",
+      "asset": "/Game/PA250/Anim/Generated/React/AM_React_BlastKnockdown_F_v0",
+      "variants": [
+        "/Game/PA250/Anim/Generated/React/AM_React_BlastKnockdown_F_v0",
+        "/Game/PA250/Anim/Generated/React/AM_React_BlastKnockdown_F_v1"
+      ],
+      "placeholder": "none",
+      "shows": "a blast in front of him: he is thrown backward; with no clip he goes limp where he stands",
+      "loop": false,
+      "wired": true
+    },
+    "react_blast_stagger_f": {
+      "group": "reaction",
+      "asset": "/Game/PA250/Anim/Generated/React/AM_React_BlastStagger_F_v0",
+      "variants": [
+        "/Game/PA250/Anim/Generated/React/AM_React_BlastStagger_F_v0",
+        "/Game/PA250/Anim/Generated/React/AM_React_BlastStagger_F_v1"
+      ],
+      "placeholder": "none",
+      "shows": "a blast in front of him: he staggers; with no clip he only stands held",
+      "loop": false,
+      "wired": true
+    },
+    "react_blast_knockdown_b": {
+      "group": "reaction",
+      "asset": "/Game/PA250/Anim/Generated/React/AM_React_BlastKnockdown_B_v0",
+      "variants": [
+        "/Game/PA250/Anim/Generated/React/AM_React_BlastKnockdown_B_v0",
+        "/Game/PA250/Anim/Generated/React/AM_React_BlastKnockdown_B_v1"
+      ],
+      "placeholder": "none",
+      "shows": "a blast behind him: he is thrown forward; with no clip he goes limp where he stands",
+      "loop": false,
+      "wired": true
+    },
+    "react_blast_stagger_b": {
+      "group": "reaction",
+      "asset": "/Game/PA250/Anim/Generated/React/AM_React_BlastStagger_B_v0",
+      "variants": [
+        "/Game/PA250/Anim/Generated/React/AM_React_BlastStagger_B_v0",
+        "/Game/PA250/Anim/Generated/React/AM_React_BlastStagger_B_v1"
+      ],
+      "placeholder": "none",
+      "shows": "a blast behind him: he staggers; with no clip he only stands held",
+      "loop": false,
+      "wired": true
+    },
+    "react_blast_knockdown_l": {
+      "group": "reaction",
+      "asset": "/Game/PA250/Anim/Generated/React/AM_React_BlastKnockdown_L_v0",
+      "variants": [
+        "/Game/PA250/Anim/Generated/React/AM_React_BlastKnockdown_L_v0",
+        "/Game/PA250/Anim/Generated/React/AM_React_BlastKnockdown_L_v1"
+      ],
+      "placeholder": "none",
+      "shows": "a blast on his left: he is thrown to his right; with no clip he goes limp where he stands",
+      "loop": false,
+      "wired": true
+    },
+    "react_blast_stagger_l": {
+      "group": "reaction",
+      "asset": "/Game/PA250/Anim/Generated/React/AM_React_BlastStagger_L_v0",
+      "variants": [
+        "/Game/PA250/Anim/Generated/React/AM_React_BlastStagger_L_v0",
+        "/Game/PA250/Anim/Generated/React/AM_React_BlastStagger_L_v1"
+      ],
+      "placeholder": "none",
+      "shows": "a blast on his left: he staggers; with no clip he only stands held",
+      "loop": false,
+      "wired": true
+    },
+    "react_blast_knockdown_r": {
+      "group": "reaction",
+      "asset": "/Game/PA250/Anim/Generated/React/AM_React_BlastKnockdown_R_v0",
+      "variants": [
+        "/Game/PA250/Anim/Generated/React/AM_React_BlastKnockdown_R_v0",
+        "/Game/PA250/Anim/Generated/React/AM_React_BlastKnockdown_R_v1"
+      ],
+      "placeholder": "none",
+      "shows": "a blast on his right: he is thrown to his left; with no clip he goes limp where he stands",
+      "loop": false,
+      "wired": true
+    },
+    "react_blast_stagger_r": {
+      "group": "reaction",
+      "asset": "/Game/PA250/Anim/Generated/React/AM_React_BlastStagger_R_v0",
+      "variants": [
+        "/Game/PA250/Anim/Generated/React/AM_React_BlastStagger_R_v0",
+        "/Game/PA250/Anim/Generated/React/AM_React_BlastStagger_R_v1"
+      ],
+      "placeholder": "none",
+      "shows": "a blast on his right: he staggers; with no clip he only stands held",
+      "loop": false,
+      "wired": true
+    },
+    "react_blast_flinch": {
+      "group": "reaction",
+      "asset": "/Game/PA250/Anim/Generated/Gun/AM_Gun_Flinch_v0",
+      "variants": [
+        "/Game/PA250/Anim/Generated/Gun/AM_Gun_Flinch_v0",
+        "/Game/PA250/Anim/Generated/Gun/AM_Gun_Flinch_v1",
+        "/Game/PA250/Anim/Generated/Gun/AM_Gun_Flinch_v2",
+        "/Game/PA250/Anim/Generated/Gun/AM_Gun_Flinch_v3"
+      ],
+      "placeholder": "none",
+      "shows": "the edge of a blast: he flinches; with no clip nothing is acted",
+      "loop": false,
+      "wired": true
+    },
+    "react_near_miss": {
+      "group": "reaction",
+      "asset": "/Game/PA250/Anim/Generated/React/AM_React_NearMiss_v0",
+      "variants": [
+        "/Game/PA250/Anim/Generated/React/AM_React_NearMiss_v0",
+        "/Game/PA250/Anim/Generated/React/AM_React_NearMiss_v1",
+        "/Game/PA250/Anim/Generated/React/AM_React_NearMiss_v2",
+        "/Game/PA250/Anim/Generated/React/AM_React_NearMiss_v3"
+      ],
+      "placeholder": "none",
+      "shows": "a round shot passes close: he ducks from it; with no clip nothing is acted",
+      "loop": false,
+      "wired": true
+    },
+    "react_dirt_spray": {
+      "group": "reaction",
+      "asset": "/Game/PA250/Anim/Generated/React/AM_React_DirtSpray_v0",
+      "variants": [
+        "/Game/PA250/Anim/Generated/React/AM_React_DirtSpray_v0",
+        "/Game/PA250/Anim/Generated/React/AM_React_DirtSpray_v1",
+        "/Game/PA250/Anim/Generated/React/AM_React_DirtSpray_v2"
+      ],
+      "placeholder": "none",
+      "shows": "earth thrown over him by a shot: he shields himself; with no clip nothing is acted",
+      "loop": false,
+      "wired": true
+    },
+    "react_deafened": {
+      "group": "reaction",
+      "asset": "/Game/PA250/Anim/Generated/React/AM_React_Deafened_v0",
+      "variants": [
+        "/Game/PA250/Anim/Generated/React/AM_React_Deafened_v0",
+        "/Game/PA250/Anim/Generated/React/AM_React_Deafened_v1"
+      ],
+      "placeholder": "none",
+      "shows": "deafened by a blast; nothing plays it yet",
+      "loop": false,
+      "wired": false
+    },
+    "wound_leg_fall": {
+      "group": "reaction",
+      "asset": "/Game/PA250/Anim/Generated/React/AM_Wound_Leg_Fall_v0",
+      "variants": [
+        "/Game/PA250/Anim/Generated/React/AM_Wound_Leg_Fall_v0",
+        "/Game/PA250/Anim/Generated/React/AM_Wound_Leg_Fall_v1",
+        "/Game/PA250/Anim/Generated/React/AM_Wound_Leg_Fall_v2"
+      ],
+      "placeholder": "none",
+      "shows": "a round shot takes his leg: he falls; with no clip he is taken off the field at once",
+      "loop": false,
+      "wired": true
+    },
+    "get_up_back": {
+      "group": "reaction",
+      "asset": "/Game/PA250/Anim/Generated/React/AM_GetUp_Back_v0",
+      "variants": [
+        "/Game/PA250/Anim/Generated/React/AM_GetUp_Back_v0",
+        "/Game/PA250/Anim/Generated/React/AM_GetUp_Back_v1"
+      ],
+      "placeholder": "none",
+      "shows": "a man thrown down gets up from his back; with no clip his body is blended up to standing",
+      "loop": false,
+      "wired": true
+    },
+    "get_up_front": {
+      "group": "reaction",
+      "asset": "/Game/PA250/Anim/Generated/React/AM_GetUp_Front_v0",
+      "variants": [
+        "/Game/PA250/Anim/Generated/React/AM_GetUp_Front_v0",
+        "/Game/PA250/Anim/Generated/React/AM_GetUp_Front_v1"
+      ],
+      "placeholder": "none",
+      "shows": "a man thrown down gets up from his front; with no clip his body is blended up to standing",
+      "loop": false,
+      "wired": true
+    },
+    "get_up_side": {
+      "group": "reaction",
+      "asset": "/Game/PA250/Anim/Generated/React/AM_GetUp_Side_v0",
+      "variants": [
+        "/Game/PA250/Anim/Generated/React/AM_GetUp_Side_v0",
+        "/Game/PA250/Anim/Generated/React/AM_GetUp_Side_v1"
+      ],
+      "placeholder": "none",
+      "shows": "a man thrown down gets up from his side; with no clip his body is blended up to standing",
+      "loop": false,
+      "wired": true
+    },
+    "death_shot_f": {
+      "group": "reaction",
+      "asset": "/Game/PA250/Anim/Generated/React/AM_Death_Shot_F_v0",
+      "variants": [
+        "/Game/PA250/Anim/Generated/React/AM_Death_Shot_F_v0",
+        "/Game/PA250/Anim/Generated/React/AM_Death_Shot_F_v1",
+        "/Game/PA250/Anim/Generated/React/AM_Death_Shot_F_v2"
+      ],
+      "placeholder": "none",
+      "shows": "shot from the front and killed; nothing plays it: the dead go limp at once",
+      "loop": false,
+      "wired": false
+    },
+    "death_shot_b": {
+      "group": "reaction",
+      "asset": "/Game/PA250/Anim/Generated/React/AM_Death_Shot_B_v0",
+      "variants": [
+        "/Game/PA250/Anim/Generated/React/AM_Death_Shot_B_v0",
+        "/Game/PA250/Anim/Generated/React/AM_Death_Shot_B_v1",
+        "/Game/PA250/Anim/Generated/React/AM_Death_Shot_B_v2"
+      ],
+      "placeholder": "none",
+      "shows": "shot from behind and killed; nothing plays it: the dead go limp at once",
+      "loop": false,
       "wired": false
     }
   }

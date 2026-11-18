@@ -1,4 +1,5 @@
 #include "PA250BattleGameMode.h"
+#include "Battle/PA250BattleRng.h"
 #include "Battle/PA250AnimClips.h"
 #include "Battle/PA250BattleFeel.h"
 #include "RF/PA250SoldierAnimInstance.h"
@@ -1172,9 +1173,87 @@ void APA250BattleGameMode::TickIntensityProbe()
 	}
 }
 
+void APA250BattleGameMode::TickClipProbe()
+{
+	static const bool bProbe = FString(FCommandLine::Get()).Contains(TEXT("-PA250ClipProbe="));
+	if (!bProbe) return;
+	APlayerController* PC = GetWorld()->GetFirstPlayerController();
+	ARFCharacter* Me = PC ? Cast<ARFCharacter>(PC->GetPawn()) : nullptr;
+	if (!Me || Me->IsDead()) return;
+	const float T = GetWorld()->GetTimeSeconds() - StartTime;
+	if (ClipProbeIndex < 0)
+	{
+		if (T < 12.f) return;
+		FString List;
+		FParse::Value(FCommandLine::Get(), TEXT("PA250ClipProbe="), List, false);
+		List.ParseIntoArray(ClipProbeNames, TEXT(","));
+		ClipProbeIndex = 0;
+		ClipProbeNextAt = T;
+	}
+	const FString Dir = FPaths::ConvertRelativePathToFull(FPaths::Combine(FPaths::ProjectDir(), TEXT("../../docs/preview")));
+	for (int32 i = 0; i < 2; ++i)
+	{
+		if (ClipProbeShots == i && T >= ClipProbeShotAt[i] && ClipProbeNames.IsValidIndex(ClipProbeIndex - 1))
+		{
+			++ClipProbeShots;
+			FScreenshotRequest::RequestScreenshot(FPaths::Combine(Dir, FString::Printf(TEXT("clip_%s_%d.png"), *ClipProbeNames[ClipProbeIndex - 1], i + 1)), false, false);
+		}
+	}
+	if (T < ClipProbeNextAt) return;
+	if (!ClipProbeNames.IsValidIndex(ClipProbeIndex))
+	{
+		ClipProbeNextAt = T + 1000.f;
+		UE_LOG(LogTemp, Display, TEXT("PA250 clip probe: done (%d clips)"), ClipProbeNames.Num());
+		FTimerHandle Quit;
+		GetWorldTimerManager().SetTimer(Quit, FTimerDelegate::CreateLambda([]() { FPlatformMisc::RequestExit(false); }), 1.5f, false);
+		return;
+	}
+	// The nearest man of his own side is stood four paces in front of him, side on.
+	ARFCharacter* Subject = nullptr;
+	float Best = TNumericLimits<float>::Max();
+	for (TActorIterator<ARFCharacter> It(GetWorld()); It; ++It)
+	{
+		if (*It == Me || It->IsDead() || It->IsPlayerControlled() || It->IsMounted() || It->FactionId != Me->FactionId || IsGeneral(*It)) continue;
+		const float D = FVector::DistSquared(It->GetActorLocation(), Me->GetActorLocation());
+		if (D < Best) { Best = D; Subject = *It; }
+	}
+	const FString Name = ClipProbeNames[ClipProbeIndex++];
+	float Played = 0.f;
+	if (Subject)
+	{
+		const FVector Fwd = FRotator(0.f, PC->GetControlRotation().Yaw, 0.f).Vector();
+		Subject->SetActorLocation(Me->GetActorLocation() + Fwd * 330.f, false, nullptr, ETeleportType::TeleportPhysics);
+		Subject->SetActorRotation(FRotator(0.f, PC->GetControlRotation().Yaw + 120.f, 0.f));
+		PC->SetControlRotation(FRotator(-8.f, PC->GetControlRotation().Yaw, 0.f));
+		FPA250ActionParams Params;
+		Params.bKeepSupportHand = Name.StartsWith(TEXT("volley_"));
+		if (Name == TEXT("blast"))
+		{
+			// A shell bursts beyond him, in the knockdown ring: thrown down, limp, and up again.
+			const pa250::BattleRules& BR = pa250::battle_rules();
+			const float Ring = BR.blast_shell_radius_cm * (BR.blast_ring_wounded_frac + BR.blast_ring_knockdown_frac) * 0.5f;
+			PA250Blast::ApplyBlast(GetWorld(), Subject->GetActorLocation() + Fwd * Ring, EPA250BlastSize::Shell,
+				Me->FactionId == TEXT("british") ? FName(TEXT("continental")) : FName(TEXT("british")), nullptr, nullptr);
+			Played = 8.f;
+		}
+		else
+		{
+			Played = PA250AnimClips::PlayCombatClip(Subject, FName(*Name), 0u, &Params);
+			Subject->LockMovement(FMath::Max(1.f, Played));
+		}
+	}
+	UE_LOG(LogTemp, Display, TEXT("PA250 clip probe: %s on %s shows for %.2f s (takes %d)"), *Name, Subject ? *Subject->GetName() : TEXT("nobody"), Played,
+		PA250AnimClips::VariantCount(FName(*Name)));
+	ClipProbeShots = 0;
+	ClipProbeShotAt[0] = T + FMath::Max(0.3f, Played * 0.35f);
+	ClipProbeShotAt[1] = T + FMath::Max(0.6f, Played * 0.75f);
+	ClipProbeNextAt = T + FMath::Max(1.5f, Played) + 0.6f;
+}
+
 void APA250BattleGameMode::TickMusic(float DeltaSeconds)
 {
 	TickIntensityProbe();
+	TickClipProbe();
 	if (!Music.IsValid() || Music->NumPlaying() == 0 || !Volleys) return;
 	MusicUpdateTimer -= DeltaSeconds;
 	if (MusicUpdateTimer > 0.f) return;
@@ -1406,6 +1485,8 @@ void APA250BattleGameMode::EnsureInitialized()
 	{
 		Setup = Sub->GetBattleSetup();
 	}
+	// Every outcome roll of the battle draws from streams seeded here (PA250BattleRng).
+	PA250BattleRng::Reseed(Setup.seed);
 	if (bDebugBattle && Setup.valid)
 	{
 		// A level opened directly fights the scenario it was built for (the debug campaign's first
@@ -2851,6 +2932,19 @@ void APA250BattleGameMode::ShockArmyResolve(FName Faction, float Amount)
 	ArmyResolve.Shock(Faction, Amount);
 }
 
+namespace
+{
+FName BlastClip(const TCHAR* Stem, EPA250BlastDir Dir)
+{
+	return FName(*FString::Printf(TEXT("%s_%s"), Stem, PA250AnimClips::BlastSuffix(static_cast<uint8>(Dir))));
+}
+/** How he lies after a knockdown clip: thrown backward he is on his back, forward on his front. */
+FName GetUpClip(EPA250BlastDir Dir)
+{
+	return Dir == EPA250BlastDir::Front ? FName(TEXT("get_up_back")) : Dir == EPA250BlastDir::Back ? FName(TEXT("get_up_front")) : FName(TEXT("get_up_side"));
+}
+}
+
 void APA250BattleGameMode::ApplyBlastKnockdown(ARFCharacter* Man, const FVector& Impulse, EPA250BlastDir Dir)
 {
 	if (!Man || Man->IsDead()) return;
@@ -2858,10 +2952,44 @@ void APA250BattleGameMode::ApplyBlastKnockdown(ARFCharacter* Man, const FVector&
 	const uint32 Seed = HashCombine(GetTypeHash(Man), static_cast<uint32>(Dir) + 17u);
 	if (Man->IsPlayerControlled())
 	{
+		// The player keeps his feet (and his camera): the stagger, in place.
 		Man->LockMovement(R.blast_player_control_loss_seconds);
 		Man->ApplySuppression(R.blast_player_control_loss_seconds, 6.f);
 		Man->PunchFOV(8.f);
-		PA250AnimClips::PlayCombatClip(Man, TEXT("AM_React_BlastKnockdown"), Seed);
+		FPA250ActionParams InPlace;
+		InPlace.bRootMotion = false;
+		PA250AnimClips::PlayCombatClip(Man, BlastClip(TEXT("react_blast_stagger"), Dir), Seed, &InPlace);
+		return;
+	}
+	// The knockdown clip throws him the way the blast drives him. At its Notify_Ragdoll_Handoff the
+	// body goes limp from the pose it has reached (if the ragdoll cap allows); with no ragdoll the
+	// clip plays out and he gets up from where it left him.
+	TWeakObjectPtr<ARFCharacter> WeakMan(Man);
+	TWeakObjectPtr<APA250BattleGameMode> WeakThis(this);
+	const float Played = PA250AnimClips::PlayCombatClip(Man, BlastClip(TEXT("react_blast_knockdown"), Dir), Seed, nullptr,
+		[WeakMan, WeakThis, Impulse, Dir, Seed](FName Notify)
+		{
+			ARFCharacter* M = WeakMan.Get();
+			APA250BattleGameMode* GM = WeakThis.Get();
+			if (!M || !GM || M->IsDead()) return;
+			if (Notify == TEXT("Notify_Ragdoll_Handoff"))
+			{
+				if (!GM->CanBlastRagdoll(M)) return; // over the cap or too far: the clip carries on
+				if (UPA250SoldierAnimInstance* Anim = Cast<UPA250SoldierAnimInstance>(M->GetMesh()->GetAnimInstance())) Anim->StopAction(0.f);
+				// Limp from the pose the clip reached; he gets up later by the clip for how it left him.
+				if (GM->StartBlastRagdoll(M, Impulse)) M->SetGetUpClip(GetUpClip(Dir));
+			}
+			else if (Notify.IsNone() && !M->IsKnockedDown())
+			{
+				// No ragdoll took him: he gets up from where the clip left him.
+				const float Up = PA250AnimClips::PlayCombatClip(M, GetUpClip(Dir), Seed + 1u);
+				if (Up > 0.f) M->LockMovement(Up);
+			}
+		});
+	if (Played > 0.f)
+	{
+		Man->LockMovement(Played + 0.2f);
+		Man->ApplySuppression(Played, 6.f);
 		return;
 	}
 	TryBlastRagdoll(Man, Impulse, /*bDead*/ false);
@@ -2871,10 +2999,13 @@ void APA250BattleGameMode::ApplyBlastStagger(ARFCharacter* Man, EPA250BlastDir D
 {
 	if (!Man || Man->IsDead()) return;
 	const pa250::BattleRules& R = pa250::battle_rules();
-	Man->LockMovement(R.blast_settle_max_seconds * 0.6f);
+	FPA250ActionParams Params;
+	Params.bRootMotion = !Man->IsPlayerControlled();
+	const float Played = PA250AnimClips::PlayCombatClip(Man, BlastClip(TEXT("react_blast_stagger"), Dir),
+		HashCombine(GetTypeHash(Man), static_cast<uint32>(Dir) + 31u), &Params);
+	// He is held for as long as he staggers (the player for the data's time, clip or none).
+	Man->LockMovement(Man->IsPlayerControlled() ? R.blast_settle_max_seconds * 0.6f : FMath::Max(R.blast_settle_max_seconds * 0.6f, Played));
 	Man->ApplySuppression(R.cannon_knockdown_seconds, 4.f);
-	PA250AnimClips::PlayCombatClip(Man, TEXT("AM_React_BlastStagger"),
-		HashCombine(GetTypeHash(Man), static_cast<uint32>(Dir) + 31u));
 }
 
 void APA250BattleGameMode::ApplyBlastFlinch(ARFCharacter* Man, EPA250BlastDir Dir)
@@ -2882,32 +3013,42 @@ void APA250BattleGameMode::ApplyBlastFlinch(ARFCharacter* Man, EPA250BlastDir Di
 	if (!Man || Man->IsDead()) return;
 	Man->ApplySuppression(pa250::battle_rules().blast_player_control_loss_seconds, 2.f);
 	if (Man->IsPlayerControlled()) Man->PunchFOV(4.f);
-	PA250AnimClips::PlayCombatClip(Man, TEXT("AM_React_BlastFlinch"),
-		HashCombine(GetTypeHash(Man), static_cast<uint32>(Dir) + 53u));
+	FPA250ActionParams InPlace;
+	InPlace.bRootMotion = false;
+	PA250AnimClips::PlayCombatClip(Man, TEXT("react_blast_flinch"), HashCombine(GetTypeHash(Man), static_cast<uint32>(Dir) + 53u), &InPlace);
+}
+
+bool APA250BattleGameMode::CanBlastRagdoll(const ARFCharacter* Man) const
+{
+	if (!Man || Man->IsPlayerControlled()) return false;
+	const pa250::BattleRules& R = pa250::battle_rules();
+	APlayerController* PC = GetWorld() ? GetWorld()->GetFirstPlayerController() : nullptr;
+	const FVector Viewer = PC && PC->GetPawn() ? PC->GetPawn()->GetActorLocation() : FVector::ZeroVector;
+	const float Dist = Viewer.IsNearlyZero() ? 0.f : FVector::Dist(Viewer, Man->GetActorLocation());
+	return BlastRagdollActive < R.blast_ragdoll_cap && Dist <= R.blast_ragdoll_max_distance_cm;
+}
+
+bool APA250BattleGameMode::StartBlastRagdoll(ARFCharacter* Man, const FVector& Impulse)
+{
+	if (!Man || Man->IsDead() || !Man->KnockDown(Impulse)) return false;
+	++BlastRagdollActive;
+	Man->Tags.AddUnique(TEXT("PA250BlastRagdoll"));
+	return true;
 }
 
 void APA250BattleGameMode::TryBlastRagdoll(ARFCharacter* Man, const FVector& Impulse, bool bDead)
 {
 	if (!Man) return;
 	const pa250::BattleRules& R = pa250::battle_rules();
-	APlayerController* PC = GetWorld() ? GetWorld()->GetFirstPlayerController() : nullptr;
-	const FVector Viewer = PC && PC->GetPawn() ? PC->GetPawn()->GetActorLocation() : FVector::ZeroVector;
-	const float Dist = Viewer.IsNearlyZero() ? 0.f : FVector::Dist(Viewer, Man->GetActorLocation());
-	const bool bOverCap = BlastRagdollActive >= R.blast_ragdoll_cap;
-	const bool bTooFar = Dist > R.blast_ragdoll_max_distance_cm;
-	const uint32 Seed = HashCombine(GetTypeHash(Man), GetTypeHash(static_cast<uint64>(Impulse.Size())));
-	if (bOverCap || bTooFar || Man->IsPlayerControlled())
+	if (bDead && !Man->IsDead()) return; // the blow did not kill him: a living man is not left limp
+	if (!CanBlastRagdoll(Man))
 	{
-		// Over the cap: death clip or React_BlastKnockdown in place (no ragdoll).
-		if (bDead) PA250AnimClips::PlayCombatClip(Man, TEXT("AM_Death_Blast"), Seed);
-		else
-		{
-			Man->LockMovement(R.blast_settle_max_seconds);
-			PA250AnimClips::PlayCombatClip(Man, TEXT("AM_React_BlastKnockdown"), Seed);
-		}
+		// Over the cap, too far, or the player: no ragdoll. The dead go limp by OnDeath as any
+		// dead man does (a clip cannot show on a body that physics already has); the living are
+		// held where they stand.
+		if (!Man->IsDead()) Man->LockMovement(R.blast_settle_max_seconds);
 		return;
 	}
-	if (bDead && !Man->IsDead()) return; // the blow did not kill him: a living man is not left limp
 	if (Man->IsDead())
 	{
 		// Killed by the blast: impulse on the corpse still counts against the ragdoll cap.
@@ -2933,16 +3074,7 @@ void APA250BattleGameMode::TryBlastRagdoll(ARFCharacter* Man, const FVector& Imp
 		}
 		return;
 	}
-	if (Man->KnockDown(Impulse))
-	{
-		++BlastRagdollActive;
-		Man->Tags.AddUnique(TEXT("PA250BlastRagdoll"));
-	}
-	else
-	{
-		Man->LockMovement(R.blast_settle_max_seconds);
-		PA250AnimClips::PlayCombatClip(Man, TEXT("AM_React_BlastKnockdown"), Seed);
-	}
+	if (!StartBlastRagdoll(Man, Impulse)) Man->LockMovement(R.blast_settle_max_seconds);
 }
 
 void APA250BattleGameMode::NotifyBlastRagdollEnded()
@@ -3307,13 +3439,14 @@ void APA250BattleGameMode::TickMuster(float DeltaSeconds)
 		// A company arrives together from one of the side's muster points (else its normal start).
 		const TArray<TWeakObjectPtr<AActor>>* Points = MusterPoints.Find(F);
 		AActor* From = nullptr;
-		if (Points && Points->Num() > 0) From = (*Points)[FMath::RandHelper(Points->Num())].Get();
+		if (Points && Points->Num() > 0) From = (*Points)[PA250BattleRng::Get().RandHelper(Points->Num())].Get();
 		if (!From) From = PickStart(F);
 		if (!From) continue;
 		int32 Arrived = 0;
 		for (int32 i = 0; i < N; ++i)
 		{
-			FVector Loc = From->GetActorLocation() + FVector(FMath::FRandRange(-500.f, 500.f), FMath::FRandRange(-500.f, 500.f), 0.f);
+			FRandomStream& Rng = PA250BattleRng::Get();
+			FVector Loc = From->GetActorLocation() + FVector(Rng.FRandRange(-500.f, 500.f), Rng.FRandRange(-500.f, 500.f), 0.f);
 			Loc = ClearSpawnLocation(GetWorld(), Loc);
 			Arrived += SpawnBotAt(F, TEXT("militia"), FTransform(From->GetActorRotation(), Loc)) ? 1 : 0;
 		}
@@ -3561,9 +3694,32 @@ FString APA250BattleGameMode::GetFileLine(const ARFCharacter* Soldier) const
 	int32 Men = 0, Loaded = 0, Presented = 0;
 	EPA250SquadOrder Order = EPA250SquadOrder::None;
 	int32 WithYou = 0;
+	if (Volleys && Soldier && Volleys->GetFallenIn() == Soldier)
+	{
+		// In a line's ranks: what the line is doing, so he knows when his held shot will go.
+		const EVolleyCall Stage = Volleys->GetSquadStage(Volleys->GetFallInSquad());
+		const TCHAR* Word = Stage == EVolleyCall::MakeReady ? TEXT("Make ready") : Stage == EVolleyCall::Present ? TEXT("Present")
+			: Stage == EVolleyCall::Fire ? TEXT("Fire") : TEXT("at ease");
+		return FString::Printf(TEXT("In the line: %s%s   K fall out"), Word, Volleys->IsFallInShotHeld() ? TEXT("  ·  your shot waits for the volley") : TEXT(""));
+	}
 	if (!Volleys || !Soldier || !Volleys->GetFileStatus(Soldier, Men, Loaded, Presented, Order, &WithYou)) return FString();
 	const bool bVolleyRole = CombatProfilesAsset ? !CombatProfilesAsset->RoleFor(Soldier->FactionId, Soldier->UnitClass).bIndividualFire : true;
 	return FileLineText(Men, Loaded, Presented, PA250Squad::OrderWords(Order), bVolleyRole, WithYou);
+}
+
+void APA250BattleGameMode::TryPlayerFallIn(ARFCharacter* Soldier)
+{
+	if (!Soldier || !Volleys || Soldier->IsDead() || Soldier->IsMounted()) return;
+	const bool bWasIn = Volleys->GetFallenIn() == Soldier;
+	const int32 Squad = Volleys->TryFallIn(Soldier);
+	if (bWasIn) ShowNotice(TEXT("Fallen out: your own man again"), 2.5f);
+	else if (Squad != INDEX_NONE) ShowNotice(TEXT("Fallen in with the line: fire with its volley  (K to fall out)"), 3.f);
+	else ShowNotice(FString::Printf(TEXT("No friendly line within %.0f m to fall in with"), GetRules().drill_fall_in_radius_m), 2.5f);
+}
+
+bool APA250BattleGameMode::HoldFallenInShot(ARFCharacter* Soldier)
+{
+	return Volleys && Volleys->HoldFallenInShot(Soldier);
 }
 
 void APA250BattleGameMode::GivePlayerOrder(ARFCharacter* Soldier, int32 OrderIndex)
@@ -3596,6 +3752,7 @@ void APA250BattleGameMode::TickPlayerFile(float DeltaSeconds)
 	APlayerController* PC = GetWorld()->GetFirstPlayerController();
 	ARFCharacter* Me = PC ? Cast<ARFCharacter>(PC->GetPawn()) : nullptr;
 	if (!Me || Me->IsDead() || Me->FactionId != PlayerFaction || Me->IsMounted()) return;
+	if (Volleys->GetFallenIn() == Me) return; // he stands in a line's ranks, not before a file of his own
 	const FPA250ClassVerbs& Verbs = PA250UnitClasses::Verbs();
 	FileTimer -= DeltaSeconds;
 	if (FileTimer <= 0.f)
@@ -4848,6 +5005,12 @@ void APA250BattleGameMode::OnCharacterDied(ARFCharacter* Victim, AController* Vi
 		{
 			Volleys->ShoutEvent(TEXT("officer_down"), Victim->FactionId, Victim->GetActorLocation());
 		}
+		// Any side's officer, or the leader of a file (the player's own included): his squad fires
+		// raggedly until a sergeant has it (battle_rules.json drill.officer_replace_s).
+		if (Volleys && (PA250UnitClasses::KitFor(Victim->FactionId, Victim->UnitClass).bOfficer || Volleys->IsLeader(Victim)))
+		{
+			Volleys->NotifyOfficerDown(Victim);
+		}
 		if (bWoundOut)
 		{
 			SpendWoundTicket(Victim->FactionId, Victim->UnitClass);
@@ -4965,7 +5128,7 @@ void APA250BattleGameMode::OnCharacterDied(ARFCharacter* Victim, AController* Vi
 		if (bSafe)
 		{
 			const FVector At = ClearSpawnLocation(GetWorld(), Bearer->GetActorLocation() - Bearer->GetActorForwardVector() * 350.f
-				+ FVector(FMath::FRandRange(-200.f, 200.f), FMath::FRandRange(-200.f, 200.f), 0.f));
+				+ FVector(PA250BattleRng::Get().FRandRange(-200.f, 200.f), PA250BattleRng::Get().FRandRange(-200.f, 200.f), 0.f));
 			if (SpawnBotAt(F, ChooseClassFor(F, Cls), FTransform(Bearer->GetActorRotation(), At), Clothes))
 			{
 				++SpawnedOnColours;

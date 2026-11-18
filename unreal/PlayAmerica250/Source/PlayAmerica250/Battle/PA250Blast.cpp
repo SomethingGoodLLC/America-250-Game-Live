@@ -1,4 +1,6 @@
 #include "PA250Blast.h"
+#include "PA250BattleFX.h"
+#include "PA250BattleRng.h"
 #include "PA250BattleAudio.h"
 #include "PA250BattleGameMode.h"
 #include "PA250FieldGun.h"
@@ -37,8 +39,16 @@ void SpawnBlastFX(UWorld* World, const FVector& Origin, EPA250BlastSize Size)
 		const int32 Puffs = Size == EPA250BlastSize::Chest ? 10 : 6;
 		for (int32 i = 0; i < Puffs; ++i)
 		{
-			Bank->AddShot(Origin, FMath::VRandCone(FVector::UpVector, FMath::DegreesToRadians(50.f)));
+			// Seeded: the smoke hides men from the bots, so where it rolls is an outcome.
+			Bank->AddShot(Origin, PA250BattleRng::Get().VRandCone(FVector::UpVector, FMath::DegreesToRadians(50.f)));
 		}
+	}
+	// A shell's burst goes through the FX router (battle_look.fx.ShellBurst: sound, flash, shake);
+	// a premature discharge and a chest keep the report they always had.
+	if (Size == EPA250BlastSize::Shell)
+	{
+		PA250BattleFX::Fire(World, EPA250BattleFXEvent::ShellBurst, Origin);
+		return;
 	}
 	FPA250BattleAudio::PlayAtOr(World, TEXT("cannon_fire"), TEXT("musket_distant"), Origin, EPA250SoundRange::Gunfire,
 		Size == EPA250BlastSize::Chest ? 1.1f : 0.85f, 0.05f);

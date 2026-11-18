@@ -328,5 +328,100 @@
     "note": "Applied twice a second by distance from the viewer (APA250BattleGameMode::TickAnimTiers).",
     "shadow_cast_m": 60,
     "update_rate_optimisation": true
+  },
+  "officer_voices": {
+    "note": "ElevenLabs voice ids the officer lines were generated with (tools/generate_assets.py, generated_assets.json). Production data, not read by the game: each line is a variant of the shout bank it belongs to (VO_<key>_<n>).",
+    "british": [
+      "JBFqnCBsd6RMkjVDRZzb",
+      "nPczCjzI2devNBz1zQrb"
+    ],
+    "continental": [
+      "EXAVITQu4vr4xnSDxMaL",
+      "VR6AewLTigWG4xSOukaG"
+    ]
+  },
+  "audio": {
+    "note": "Words of command (GAME INVENTION for which call goes with which word). drum and fife: banks a musician beats with the word, when a musician is with the squad (orders: within his relay distance); voice: the shout bank the officer gives (officer lines are its _1, _2 variants). metasound: null until the MS_PH_* graphs are authored (asset_manifest.json missing). Read by PA250BattleFX::OrderCue.",
+    "orders": {
+      "advance": {
+        "drum": "drum_call_advance",
+        "fife": "fife_call_advance",
+        "voice": "forward",
+        "metasound": null
+      },
+      "halt": {
+        "drum": "drum_call_halt",
+        "fife": "fife_call_halt",
+        "voice": "steady",
+        "metasound": null
+      },
+      "make_ready": {
+        "drum": "drum_call_make_ready",
+        "fife": "fife_call_make_ready",
+        "voice": "make_ready",
+        "metasound": null
+      },
+      "present": {
+        "drum": "drum_call_present",
+        "fife": "fife_call_present",
+        "voice": "present",
+        "metasound": null
+      },
+      "fire": {
+        "drum": "drum_call_fire",
+        "fife": "fife_call_fire",
+        "voice": "fire",
+        "metasound": null
+      },
+      "rally": {
+        "drum": "drum_call_rally",
+        "fife": "fife_call_rally",
+        "voice": "rally",
+        "metasound": null
+      }
+    }
+  },
+  "fx": {
+    "note": "Battle FX router (PA250BattleFX), the one path for these events. niagara: a system path, or null; the NS_PH_* placeholders are not authored yet (asset_manifest.json missing) and the router says so once and carries on with sound and shake. sound: a bank, fallback_sound when it has no assets. shake_scale with its inner_m / outer_m falloff; the round shot's shake and earth over the view stay battle_feel.intensity.round_shot (one owner), so its entry has none. Tracker 'grapeshot' is CanisterFired. EmberGen flipbooks swap in by changing niagara.",
+    "CannonFired": {
+      "niagara": "/Game/PA250/FX/NS_PH_MuzzleFlash.NS_PH_MuzzleFlash",
+      "sound": "cannon_fire",
+      "fallback_sound": "musket_distant",
+      "shake_scale": 1.0,
+      "inner_m": 8.0,
+      "outer_m": 40.0
+    },
+    "RoundShotGroundStrike": {
+      "niagara": "/Game/PA250/FX/NS_PH_DirtSpray.NS_PH_DirtSpray",
+      "sound": "round_shot_ground",
+      "fallback_sound": "impact_ground",
+      "shake_scale": 0.0,
+      "inner_m": 0.0,
+      "outer_m": 0.0
+    },
+    "CanisterFired": {
+      "niagara": "/Game/PA250/FX/NS_PH_PowderPuff.NS_PH_PowderPuff",
+      "sound": "canister",
+      "fallback_sound": "cannon_fire",
+      "shake_scale": 0.7,
+      "inner_m": 6.0,
+      "outer_m": 25.0
+    },
+    "ShellBurst": {
+      "niagara": "/Game/PA250/FX/NS_PH_MuzzleFlash.NS_PH_MuzzleFlash",
+      "sound": "shell_burst",
+      "fallback_sound": "cannon_fire",
+      "shake_scale": 1.2,
+      "inner_m": 10.0,
+      "outer_m": 50.0
+    },
+    "ShellDud": {
+      "niagara": null,
+      "sound": "shell_dud",
+      "fallback_sound": "impact_ground",
+      "shake_scale": 0.0,
+      "inner_m": 0.0,
+      "outer_m": 0.0
+    }
   }
 }

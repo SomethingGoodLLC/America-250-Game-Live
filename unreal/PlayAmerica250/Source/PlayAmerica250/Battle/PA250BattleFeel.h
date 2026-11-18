@@ -150,6 +150,20 @@ struct FPA250BattleFeel
 	float BufferOrderSeconds = 0.f;
 	float BufferThrustSeconds = 0.f;
 
+	// intensity.suppression (Battle Feel M3)
+	float SuppressionNearMissAdd = 0.f;
+	float SuppressionImpactAdd = 0.f;
+	float SuppressionMax = 1.f;
+	float SuppressionDecayPerSecond = 0.f;
+	float SuppressionBlurAmount = 0.f;
+	float SuppressionAimSwayDeg = 0.f;
+
+	// musket (Battle Feel M4)
+	float MusketMisfireChance = 0.05f;
+	float MusketFlashInPanChance = 0.03f;
+	float MusketRainMisfireScale = 1.8f;
+	float MusketRainFlashScale = 2.f;
+
 	// verify
 	float FrameTimeMarginPct = 0.f;
 };

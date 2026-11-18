@@ -224,6 +224,10 @@ public:
 	void ApplyBlastFlinch(ARFCharacter* Man, EPA250BlastDir Dir);
 	/** Physics ragdoll if under the cap and in range; else in-place react/death clip. */
 	void TryBlastRagdoll(ARFCharacter* Man, const FVector& Impulse, bool bDead);
+	/** A living bot may go limp now: under the ragdoll cap and near enough to the viewer to be worth it. */
+	bool CanBlastRagdoll(const ARFCharacter* Man) const;
+	/** Throws a living man down as a loose body and takes a cap slot (freed when he gets up or dies). */
+	bool StartBlastRagdoll(ARFCharacter* Man, const FVector& Impulse);
 	void NoteFriendlyBlastCasualties(FName SourceFaction, int32 Killed, int32 Wounded);
 	int32 GetFriendlyBlastKilled(FName Faction) const { return FriendlyBlastKilled.FindRef(Faction); }
 	int32 GetFriendlyBlastWounded(FName Faction) const { return FriendlyBlastWounded.FindRef(Faction); }
@@ -362,6 +366,12 @@ public:
 	UPA250BotTuning* GetBotTuning() const { return BotTuningAsset; }
 	UPA250FactionVisuals* GetFactionVisuals() const { return FactionVisualsAsset; }
 	UPA250VolleyCoordinator* GetVolleys() const { return Volleys; }
+	/** BattleSetup.seed — outcome rolls in the battle derive streams from this, never the wall clock. */
+	uint64 GetBattleSeed() const { return Setup.seed; }
+	/** K: fall in with the nearest friendly line, or fall out again (UPA250VolleyCoordinator::TryFallIn). */
+	void TryPlayerFallIn(ARFCharacter* Soldier);
+	/** His trigger while fallen in: held for the line's volley (true) or fired at once (false). */
+	bool HoldFallenInShot(ARFCharacter* Soldier);
 	void NotifyShot(ARFCharacter* Shooter, const FVector& Dir, bool bHit);
 	void NotifyProjectileHit(ARFCharacter* Shooter, ARFCharacter* Victim, float Damage);
 	void PushKillFeed(const FString& Line);
@@ -747,6 +757,14 @@ private:
 	/** -PA250IntensityProbe: a near miss and a round shot beside the player, logged, with one still. */
 	void TickIntensityProbe();
 	int32 IntensityProbeStep = 0;
+	/** -PA250ClipProbe=<name>,<name>,...: each registry clip in turn on a man stood before the player,
+	 *  with two stills of it (docs/preview/clip_<name>_1.png, _2.png) and a log line. Then the game quits. */
+	void TickClipProbe();
+	TArray<FString> ClipProbeNames;
+	int32 ClipProbeIndex = -1;
+	float ClipProbeNextAt = 0.f;
+	float ClipProbeShotAt[2] = {0.f, 0.f};
+	int32 ClipProbeShots = 2;
 	// The playable general (M5).
 	FPA250HeroState Hero;
 	TWeakObjectPtr<ARFCharacter> HeroOwnBody;  // the player's own man while he fights as the general

@@ -191,6 +191,36 @@ public:
 	 *  if they are too few), taken out of the squads they stood in. Idempotent: a leader who already
 	 *  has a file of his class with a man standing keeps it. Returns the men in the file. */
 	int32 EnsureLeaderFile(ARFCharacter* Leader);
+	// ---- Drill (battle_rules.json "drill"; Battle Feel Pass) ----
+	/** Fall in (K): Man joins the nearest friendly line with a man within drill.fall_in_radius_m. The
+	 *  line sorts its files again with him in them, so he takes the place nearest where he stands. A
+	 *  file he led is left to its own drill. Pressed again, it falls him out (as straying
+	 *  drill.fall_in_break_m from his place, or falling, does). Returns the squad id, or INDEX_NONE. */
+	int32 TryFallIn(ARFCharacter* Man);
+	void FallOut(const TCHAR* Why);
+	ARFCharacter* GetFallenIn() const { return FallenIn.Get(); }
+	int32 GetFallInSquad() const { return FallenIn.IsValid() ? FallInSquadId : INDEX_NONE; }
+	/** His trigger while fallen in. With the line at Make ready or Present the shot is held and fired
+	 *  with the volley, inside its window (true). Otherwise false: he fires at once. */
+	bool HoldFallenInShot(ARFCharacter* Man);
+	bool IsFallInShotHeld() const { return bFallInShotHeld; }
+	/** An officer, or a file's leader, is down: his squad fires raggedly (spread and stage times x the
+	 *  drill's ragged scales) for drill.officer_replace_s, then a sergeant has it again. A led file
+	 *  whose fallen leader was a bot passes to PickSuccessor's man; the player's file goes to its own
+	 *  drill (so the man he plays next can lead it). Never in the middle of a volley. */
+	void NotifyOfficerDown(const ARFCharacter* Officer);
+	/** Seconds until a sergeant has the squad again (0: it is steady). */
+	float GetOfficerReplaceLeft(int32 SquadId) const;
+	EVolleyCall GetSquadStage(int32 SquadId) const;
+	EPA250SquadOrder GetSquadOrder(int32 SquadId) const;
+	/** Why the squad is (not) volleying now, as its debug overlay says it. */
+	FString GetSquadReason(int32 SquadId) const;
+	/** Tests: where each man of the squad was last told to stand. */
+	TArray<TPair<ARFCharacter*, FVector>> GetSquadSpotsForTest(int32 SquadId) const;
+	/** Tests: the world times its pending shots are due. */
+	TArray<float> GetPendingFireTimesForTest(int32 SquadId) const;
+	/** The seconds after the word before men obey (drill.response_delay_s; Hold = halt, Form line = advance). */
+	static float OrderResponseSeconds(EPA250SquadOrder Order, bool bRagged);
 	/** The leader's order to his file; an officer's order also reaches every friendly squad whose line
 	 *  is within his order radius (they obey for the order seconds, then judge for themselves again).
 	 *  AimPoint is where he is looking. Returns the squads that took the order. */
@@ -261,6 +291,10 @@ private:
 		int32 Epoch = 0;
 		/** A led volley at a point with no man on it: fires at AimPoint without a target. */
 		bool bAtPoint = false;
+		/** His fire clip has been started (or he has none to play). */
+		bool bClipStarted = false;
+		/** The fallen-in man's own trigger, held for the volley: he fires where he aims. */
+		bool bHeldTrigger = false;
 	};
 
 	struct FSquad
@@ -276,6 +310,8 @@ private:
 		float ShockPressure = 0.f;
 		float ShockSpan = 6.f;      // the seconds that shock fades over
 		bool bRoutCheckDone = false; // this charge has already forced its check
+		/** The stage whose clip the men were last given (PlayVolleyStageClips). */
+		EVolleyCall ClipStage = EVolleyCall::None;
 		TArray<TWeakObjectPtr<ARFCharacter>> Members;
 		EVolleyCall Stage = EVolleyCall::None;
 		float StageTimer = 0.f;
@@ -312,6 +348,12 @@ private:
 		bool bCharging = false;
 		float ChargeStartTime = -1000.f;
 		float LastChargeEndTime = -1000.f;
+		/** Seconds left until a sergeant resumes the file after the officer falls (0 = steady). */
+		float OfficerReplaceLeft = 0.f;
+		/** Whether the officer who fell was the player (his file is not handed to a bot). */
+		bool bFallenOfficerWasPlayer = false;
+		/** Where each man (by FileOrder) was last told to stand. */
+		TArray<FVector> LastSpots;
 		/** Bumped to invalidate delayed volley shots after cancel. */
 		int32 VolleyEpoch = 0;
 		/** Volleys fired since this contact began: the first is fired together, later ones may roll. */
@@ -384,7 +426,34 @@ private:
 	void TickPendingVolley(FSquad& Sq);
 	/** Fire one pending shot if it is still good (epoch, alive, lane). The caller has removed it. */
 	void FirePendingShot(FSquad& Sq, const FPendingVolleyShot& P);
+	/** "Make ready" / "Present": the stage's clip on every man of the squad who has his musket loaded. */
+	void PlayVolleyStageClips(FSquad& Sq, const TArray<ARFCharacter*>& Live);
+	/** Starts a pending shot's fire clip so its Notify_Volley_Discharge falls on the shot's time. */
+	void StartFireClip(FSquad& Sq, FPendingVolleyShot& P, float Now);
 	void DischargeOne(ARFCharacter* Shooter, ARFCharacter* Enemy, const FVector& AimAt);
+	/** Seconds from the word "Fire!" to a man's shot: the fire response, then the steady line's own
+	 *  offsets (within drill.volley_spread_s) or, while officerless, a ragged spread. */
+	float VolleyShotSeconds(const FSquad& Sq, int32 Index, float RollingFileSeconds, float StageJitterMs) const;
+	/** A musician standing with the squad beats the word's call (battle_look.json audio.orders). */
+	void SoundDrillCall(const FSquad& Sq, const TCHAR* Word);
+	/** The fallen-in man's held trigger joins the volley being scheduled. */
+	void AddHeldTrigger(FSquad& Sq, float Now);
+	/** The full officer_replace_s has run: a sergeant has the squad. */
+	void ResumeAfterOfficer(FSquad& Sq);
+	void SetOrderAfterResponse(FSquad& Sq, EPA250SquadOrder Order, ARFCharacter* Giver, const FVector& AimPoint, float Until);
+	struct FPendingOrder
+	{
+		int32 SquadId = INDEX_NONE;
+		EPA250SquadOrder Order = EPA250SquadOrder::None;
+		TWeakObjectPtr<ARFCharacter> Giver;
+		FVector AimPoint = FVector::ZeroVector;
+		float Until = -1.f;
+		float ApplyAt = 0.f;
+	};
+	TArray<FPendingOrder> PendingOrders;
+	TWeakObjectPtr<ARFCharacter> FallenIn;
+	int32 FallInSquadId = INDEX_NONE;
+	bool bFallInShotHeld = false;
 	TArray<FSquad> Squads;
 	float SquadRebuildTimer = 0.f;
 	int32 NextSquadId = 0;

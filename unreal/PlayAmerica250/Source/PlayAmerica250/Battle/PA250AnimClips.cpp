@@ -1,8 +1,7 @@
 #include "PA250AnimClips.h"
 
-#include "Animation/AnimInstance.h"
-#include "Animation/AnimMontage.h"
 #include "Animation/AnimSequence.h"
+#include "Components/SkeletalMeshComponent.h"
 
 #include "Dom/JsonObject.h"
 #include "Misc/CommandLine.h"
@@ -10,6 +9,8 @@
 #include "Misc/Parse.h"
 #include "Misc/Paths.h"
 #include "PoseSearch/PoseSearchDatabase.h"
+#include "PA250Blast.h"
+#include "RF/PA250SoldierAnimInstance.h"
 #include "RFCharacter.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
@@ -142,6 +143,8 @@ struct FClipRegistry
 	TMap<FName, TStrongObjectPtr<UAnimSequence>> Loaded;
 	TSet<FName> Placeholders;
 	TSet<FName> Unknown;
+	/** Takes asked for so far, by package (a null entry: asked, and it does not load). */
+	TMap<FString, TStrongObjectPtr<UAnimSequence>> LoadedTakes;
 };
 
 FClipRegistry& ClipRegistry()
@@ -203,6 +206,19 @@ bool PA250AnimClips::LoadRegistry(const FString& Path, TArray<FString>* OutError
 			}
 			(*J)->TryGetStringField(TEXT("asset"), E.Asset); // null: no asset yet
 			(*J)->TryGetBoolField(TEXT("wired"), E.bWired);
+			const TArray<TSharedPtr<FJsonValue>>* Station = nullptr;
+			const TArray<TSharedPtr<FJsonValue>>* Face = nullptr;
+			if ((*J)->TryGetArrayField(TEXT("station_cm"), Station) && (*J)->TryGetArrayField(TEXT("face_cm"), Face) && Station->Num() == 2 && Face->Num() == 2)
+			{
+				E.bHasStation = true;
+				E.StationCm = FVector2D((*Station)[0]->AsNumber(), (*Station)[1]->AsNumber());
+				E.FaceCm = FVector2D((*Face)[0]->AsNumber(), (*Face)[1]->AsNumber());
+			}
+			const TArray<TSharedPtr<FJsonValue>>* Takes = nullptr;
+			if ((*J)->TryGetArrayField(TEXT("variants"), Takes))
+			{
+				for (const TSharedPtr<FJsonValue>& Take : *Takes) E.Variants.Add(Take->AsString());
+			}
 			(*J)->TryGetStringField(TEXT("stage"), Stage);
 			(*J)->TryGetStringField(TEXT("stance"), Stance);
 			E.Group = FName(*Group);
@@ -301,107 +317,47 @@ int32 PA250AnimClips::LocomotionDatabaseCount()
 	return Set().Owned.Num();
 }
 
-namespace
+int32 PA250AnimClips::VariantCount(FName Name)
 {
-struct FCombatClips
-{
-	bool bTried = false;
-	/** Logical name → package paths of variants (AM_X_v1..). */
-	TMap<FString, TArray<FString>> Variants;
-	TSet<FString> Warned;
-};
-
-FCombatClips& Combat()
-{
-	static FCombatClips C;
-	return C;
-}
+	const FPA250ClipEntry* Entry = FindClip(Name);
+	if (!Entry) return 0;
+	return Entry->Variants.Num() > 0 ? Entry->Variants.Num() : (Entry->Asset.IsEmpty() ? 0 : 1);
 }
 
-FString PA250AnimClips::CombatDropFolder()
+UAnimSequence* PA250AnimClips::ClipVariant(FName Name, uint32 Seed)
 {
-	// Found: anim_clips.json locomotion.clip_folder = /Game/PA250/Anim/Loco → drop root /Game/PA250/Anim.
-	return TEXT("/Game/PA250/Anim");
-}
-
-bool PA250AnimClips::LoadCombatManifest(TArray<FString>* OutWarnings)
-{
-	FCombatClips& C = Combat();
-	C.bTried = true;
-	C.Variants.Reset();
-	const FString Folder = CombatDropFolder();
-	const FString Disk = FPaths::ConvertRelativePathToFull(FPaths::ProjectContentDir() / TEXT("PA250/Anim/manifest.json"));
-	FString Text;
-	TArray<FString> Warnings;
-	if (!FFileHelper::LoadFileToString(Text, *Disk))
+	const FPA250ClipEntry* Entry = FindClip(Name);
+	if (!Entry || Entry->Variants.Num() <= 1) return Clip(Name); // unknown names and placeholders are logged there
+	FClipRegistry& R = ClipRegistry();
+	const FString& Package = Entry->Variants[Seed % static_cast<uint32>(Entry->Variants.Num())];
+	if (const TStrongObjectPtr<UAnimSequence>* Found = R.LoadedTakes.Find(Package))
 	{
-		// Missing manifest is fine until Andrew drops clips; one soft note.
-		Warnings.Add(FString::Printf(TEXT("no combat manifest at %s (drop folder %s)"), *Disk, *Folder));
-		if (OutWarnings) *OutWarnings = Warnings;
-		return false;
+		return Found->Get() ? Found->Get() : Clip(Name);
 	}
-	TSharedPtr<FJsonObject> Root;
-	if (!FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(Text), Root) || !Root.IsValid())
-	{
-		Warnings.Add(TEXT("combat manifest is not valid JSON"));
-		if (OutWarnings) *OutWarnings = Warnings;
-		return false;
-	}
-	for (const auto& Pair : Root->Values)
-	{
-		const TArray<TSharedPtr<FJsonValue>>* Arr = nullptr;
-		if (Pair.Value->TryGetArray(Arr) && Arr)
-		{
-			TArray<FString> Paths;
-			for (const TSharedPtr<FJsonValue>& V : *Arr) Paths.Add(V->AsString());
-			if (Paths.Num() > 0) C.Variants.Emplace(Pair.Key, MoveTemp(Paths));
-		}
-		else
-		{
-			const FString One = Pair.Value->AsString();
-			if (!One.IsEmpty())
-			{
-				TArray<FString> Paths;
-				Paths.Add(One);
-				C.Variants.Emplace(Pair.Key, MoveTemp(Paths));
-			}
-		}
-	}
-	UE_LOG(LogTemp, Display, TEXT("PA250 anim clips: combat manifest %d names from %s"), C.Variants.Num(), *Disk);
-	if (OutWarnings) *OutWarnings = Warnings;
-	return C.Variants.Num() > 0;
+	const FString ObjectPath = Package + TEXT(".") + FPaths::GetBaseFilename(Package);
+	UAnimSequence* Take = Cast<UAnimSequence>(StaticLoadObject(UAnimSequence::StaticClass(), nullptr, *ObjectPath, nullptr, LOAD_NoWarn));
+	R.LoadedTakes.Add(Package, TStrongObjectPtr<UAnimSequence>(Take));
+	// A take that is not on this machine falls back to the name's first clip (or its placeholder).
+	return Take ? Take : Clip(Name);
 }
 
-UAnimSequence* PA250AnimClips::PickCombatClip(const FString& LogicalName, uint32 Seed)
+const TCHAR* PA250AnimClips::BlastSuffix(uint8 BlastDir)
 {
-	FCombatClips& C = Combat();
-	if (!C.bTried) LoadCombatManifest();
-	const TArray<FString>* Paths = C.Variants.Find(LogicalName);
-	if (!Paths || Paths->Num() == 0)
+	switch (static_cast<EPA250BlastDir>(BlastDir))
 	{
-		if (!C.Warned.Contains(LogicalName))
-		{
-			C.Warned.Add(LogicalName);
-			UE_LOG(LogTemp, Warning, TEXT("PA250 anim clips: missing combat clip %s (fallback)"), *LogicalName);
-		}
-		return nullptr;
+	case EPA250BlastDir::Back: return TEXT("b");
+	case EPA250BlastDir::Left: return TEXT("l");
+	case EPA250BlastDir::Right: return TEXT("r");
+	default: return TEXT("f");
 	}
-	FRandomStream Rng(Seed);
-	const FString& Package = (*Paths)[Rng.RandRange(0, Paths->Num() - 1)];
-	const FString ObjectPath = Package.Contains(TEXT(".")) ? Package : (Package + TEXT(".") + FPaths::GetBaseFilename(Package));
-	return LoadObject<UAnimSequence>(nullptr, *ObjectPath);
 }
 
-float PA250AnimClips::PlayCombatClip(ARFCharacter* Man, const FString& LogicalName, uint32 Seed,
-	float BlendIn, float BlendOut, float PlayRate)
+float PA250AnimClips::PlayCombatClip(ARFCharacter* Man, FName Name, uint32 Seed, const FPA250ActionParams* Params, TFunction<void(FName)> OnNotify)
 {
 	if (!Man || !Man->GetMesh()) return 0.f;
-	UAnimInstance* Anim = Man->GetMesh()->GetAnimInstance();
+	UPA250SoldierAnimInstance* Anim = Cast<UPA250SoldierAnimInstance>(Man->GetMesh()->GetAnimInstance());
 	if (!Anim) return 0.f;
-	UAnimSequence* Seq = PickCombatClip(LogicalName, Seed);
-	if (!Seq) return 0.f;
-	UAnimMontage* Montage = UAnimMontage::CreateSlotAnimationAsDynamicMontage(
-		Seq, TEXT("DefaultSlot"), BlendIn, BlendOut, PlayRate);
-	if (!Montage) return 0.f;
-	return Anim->Montage_Play(Montage, PlayRate);
+	UAnimSequence* Take = ClipVariant(Name, Seed);
+	if (!Take) return 0.f;
+	return Anim->PlayAction(Take, Params ? *Params : FPA250ActionParams(), MoveTemp(OnNotify));
 }

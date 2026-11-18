@@ -3,8 +3,16 @@
   "animation": {
     "motion_matching": true,
     "platforms": {
-      "win64": {"full_quality_max": 12, "switch_distance_m": 35, "measured": "2026-11-15"},
-      "mac": {"full_quality_max": 1, "switch_distance_m": 0, "measured": null}
+      "win64": {
+        "full_quality_max": 12,
+        "switch_distance_m": 35,
+        "measured": "2026-11-15"
+      },
+      "mac": {
+        "full_quality_max": 1,
+        "switch_distance_m": 0,
+        "measured": null
+      }
     },
     "switch_hysteresis_m": 5,
     "tier_blend_seconds": 0.25,
@@ -14,7 +22,11 @@
     "play_rate_min": 0.8,
     "play_rate_max": 1.2,
     "upper_body_sway": 0.35,
-    "gait_speed_cm_s": {"idle_max": 5, "walk_max": 300, "run_max": 560}
+    "gait_speed_cm_s": {
+      "idle_max": 5,
+      "walk_max": 300,
+      "run_max": 560
+    }
   },
   "carry": {
     "blend_seconds": 0.3,
@@ -27,9 +39,27 @@
       "yaw_deg": -6,
       "check_seconds": 0.2
     },
-    "trail": {"pitch_deg": 22, "yaw_deg": -20, "hand_forward_cm": 9, "hand_right_cm": 15, "hand_up_cm": -27},
-    "shoulder": {"pitch_deg": 55, "yaw_deg": -12, "hand_forward_cm": 6, "hand_right_cm": 16, "hand_up_cm": -24},
-    "charge": {"pitch_deg": 4, "yaw_deg": -8, "hand_forward_cm": 10, "hand_right_cm": 24, "hand_up_cm": -26}
+    "trail": {
+      "pitch_deg": 22,
+      "yaw_deg": -20,
+      "hand_forward_cm": 9,
+      "hand_right_cm": 15,
+      "hand_up_cm": -27
+    },
+    "shoulder": {
+      "pitch_deg": 55,
+      "yaw_deg": -12,
+      "hand_forward_cm": 6,
+      "hand_right_cm": 16,
+      "hand_up_cm": -24
+    },
+    "charge": {
+      "pitch_deg": 4,
+      "yaw_deg": -8,
+      "hand_forward_cm": 10,
+      "hand_right_cm": 24,
+      "hand_up_cm": -26
+    }
   },
   "kneel": {
     "note": "A man down behind cover (ducked) kneels: hips lowered, the right foot drawn back so the right knee goes toward the ground, the body leant a little forward. A procedural pose until a kneeling clip is dropped in.",
@@ -77,7 +107,13 @@
   },
   "input": {
     "note": "Buffered input (GAME INVENTION). A press that cannot be acted on at once (he is held still after a shot, mid-thrust, over a wall) is remembered for its window and acted on the moment it can be; older than the window it is dropped. vault: the jump key asks for a traversal at any speed for this long.",
-    "buffer_seconds": {"fire": 0.25, "reload": 0.4, "vault": 0.3, "order": 0.5, "thrust": 0.3}
+    "buffer_seconds": {
+      "fire": 0.25,
+      "reload": 0.4,
+      "vault": 0.3,
+      "order": 0.5,
+      "thrust": 0.3
+    }
   },
   "intensity": {
     "note": "How hard the battle presses on the player (GAME INVENTION). Before 2026-11-15 the near miss's 5 m and 8 m and its 2 degree start were constants in MusketProjectile, and the fallen's 24 and 45 s were console variables only (pa250.MaxCorpses, pa250.CorpseSeconds still override). The rest is new.",
@@ -103,20 +139,74 @@
       "frequency_hz": 18
     },
     "shouts": {
-      "charge": {"key": "charge_b", "text": "At them, boys! Charge!", "cooldown_seconds": 8},
-      "rout": {"key": "breaking", "text": "The line is breaking - run!", "cooldown_seconds": 8},
-      "officer_down": {"key": "officer_down", "text": "The officer is down!", "cooldown_seconds": 8},
-      "colours_taken": {"key": "colours_taken", "text": "They have our colours!", "cooldown_seconds": 8}
+      "charge": {
+        "key": "charge_b",
+        "text": "At them, boys! Charge!",
+        "cooldown_seconds": 8
+      },
+      "rout": {
+        "key": "breaking",
+        "text": "The line is breaking - run!",
+        "cooldown_seconds": 8
+      },
+      "officer_down": {
+        "key": "officer_down",
+        "text": "The officer is down!",
+        "cooldown_seconds": 8
+      },
+      "colours_taken": {
+        "key": "colours_taken",
+        "text": "They have our colours!",
+        "cooldown_seconds": 8
+      }
     },
-    "corpses": {"max": 24, "seconds": 45, "freeze_after_seconds": 4},
+    "corpses": {
+      "max": 24,
+      "seconds": 45,
+      "freeze_after_seconds": 4
+    },
     "music": {
       "note": "Layers of one piece, started together and kept in step; each layer's loudness follows how the day is going for the player's side. Intensity = morale_weight x (share of his squads not steady) + ticket_weight x (share of his reserve spent), 0 to 1. A layer is silent below `from`, full at `full`, and rises evenly between; a layer whose from and full are both 0 always plays.",
-      "layers": [{"bank": "music_battle_low", "from": 0.0, "full": 0.0}, {"bank": "music_battle_mid", "from": 0.25, "full": 0.5}, {"bank": "music_battle_high", "from": 0.6, "full": 0.85}],
+      "layers": [
+        {
+          "bank": "music_battle_low",
+          "from": 0.0,
+          "full": 0.0
+        },
+        {
+          "bank": "music_battle_mid",
+          "from": 0.25,
+          "full": 0.5
+        },
+        {
+          "bank": "music_battle_high",
+          "from": 0.6,
+          "full": 0.85
+        }
+      ],
       "fade_seconds": 2,
       "morale_weight": 0.6,
       "ticket_weight": 0.4,
       "volume": 0.5
+    },
+    "suppression": {
+      "note": "GAME TUNING. The player's suppression, 0 to max: a near miss adds near_miss_add, a round shot or shell striking close adds impact_add (times how hard it shook him); it falls decay_per_second. At level L his view blurs by L x blur_amount (shallow focus) and his aim sways up to L x aim_sway_deg. Event driven, no traces per tick (ARFCharacter::AddSuppression / TickSuppression).",
+      "near_miss_add": 0.25,
+      "impact_add": 0.35,
+      "max": 1.0,
+      "decay_per_second": 0.2,
+      "blur_amount": 0.45,
+      "aim_sway_deg": 2.5
     }
   },
-  "verify": {"frame_time_margin_pct": 10}
+  "verify": {
+    "frame_time_margin_pct": 10
+  },
+  "musket": {
+    "note": "GAME TUNING (Battle Feel M4, PA250MusketFeel). Every trigger pull, bots' and the player's: flash_in_pan_chance (the priming burns, no shot) for everyone; misfire_chance (the flint gives no spark) for a man without a training profile, the player (a bot misfires at its DA_CombatProfiles MisfireChance, stress-scaled). Either way the charge is spent and he loads again. Rain (PA250BattleWeather, -PA250Weather=rain until BattleSetup carries weather) multiplies them. Before 2026-11-16 the player never misfired.",
+    "misfire_chance": 0.05,
+    "flash_in_pan_chance": 0.03,
+    "rain_misfire_scale": 1.8,
+    "rain_flash_scale": 2.0
+  }
 }
