@@ -1,5 +1,325 @@
 {
   "clips": {
+    "AM_Gun_Fire_v0": {
+      "attempts": [
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.0,
+          "seed": 640529
+        }
+      ],
+      "cfg": "model default",
+      "chain_to": null,
+      "constraints": [],
+      "diffusion_steps": 100,
+      "duration_s": 2.5,
+      "expect": null,
+      "expect_ok": true,
+      "family": "Gun",
+      "files": {
+        "bvh": "AM_Gun_Fire_v0.bvh",
+        "bvh_sha256": "6e1c6f3cd9267629797ca13774fb924852992eae12bc5972de5e15c178341bd8",
+        "npz": "AM_Gun_Fire_v0.npz",
+        "npz_sha256": "fa246315b7098a847915b6a85159cfe82c8cab47fa40b4bffd52b4a5d859657b"
+      },
+      "foot_lock": {
+        "after_cm": 0.009053063695318997,
+        "before_cm": 0.499421963468194,
+        "max_leg_change_deg": 0.7421771583259106,
+        "phases": 6
+      },
+      "fps": 30.0,
+      "frames": 75,
+      "hand_error_limit_m": 0.05,
+      "hand_error_ok": true,
+      "loop": false,
+      "model": "Kimodo-SOMA-RP-v1",
+      "model_repo": "nvidia/Kimodo-SOMA-RP-v1",
+      "model_revision": "defbe1f34f5fd031eb0ccfe19f3f92a9880c287b",
+      "name": "AM_Gun_Fire",
+      "prompt": "A man reaches out to his left at arm's length with a long staff in his right hand and touches it down on a waist-high object, leaning his body away and turning his head away.",
+      "root_motion": false,
+      "scale_soma_over_soldier": 0.987,
+      "seed": 640529,
+      "station": "Linstock",
+      "variant": 0
+    },
+    "AM_Gun_Fire_v1": {
+      "attempts": [
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.0,
+          "seed": 640530
+        }
+      ],
+      "cfg": "model default",
+      "chain_to": null,
+      "constraints": [],
+      "diffusion_steps": 100,
+      "duration_s": 2.5,
+      "expect": null,
+      "expect_ok": true,
+      "family": "Gun",
+      "files": {
+        "bvh": "AM_Gun_Fire_v1.bvh",
+        "bvh_sha256": "eb99ee3faf05399536b45fc25d106c6edd300c787ad372026cb49df81e4d3e5c",
+        "npz": "AM_Gun_Fire_v1.npz",
+        "npz_sha256": "924551b2f8773a7dbaf08114e6c42da1c7ab7aed65818ef5a2827052b1e7962c"
+      },
+      "foot_lock": {
+        "after_cm": 0.021337818179745227,
+        "before_cm": 1.8883956596255302,
+        "max_leg_change_deg": 2.257650895180553,
+        "phases": 6
+      },
+      "fps": 30.0,
+      "frames": 75,
+      "hand_error_limit_m": 0.05,
+      "hand_error_ok": true,
+      "loop": false,
+      "model": "Kimodo-SOMA-RP-v1",
+      "model_repo": "nvidia/Kimodo-SOMA-RP-v1",
+      "model_revision": "defbe1f34f5fd031eb0ccfe19f3f92a9880c287b",
+      "name": "AM_Gun_Fire",
+      "prompt": "A man reaches out to his left at arm's length with a long staff in his right hand and touches it down on a waist-high object, leaning his body away and turning his head away.",
+      "root_motion": false,
+      "scale_soma_over_soldier": 0.987,
+      "seed": 640530,
+      "station": "Linstock",
+      "variant": 1
+    },
+    "AM_Gun_Fire_v2": {
+      "attempts": [
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.0,
+          "seed": 640531
+        }
+      ],
+      "cfg": "model default",
+      "chain_to": null,
+      "constraints": [],
+      "diffusion_steps": 100,
+      "duration_s": 2.5,
+      "expect": null,
+      "expect_ok": true,
+      "family": "Gun",
+      "files": {
+        "bvh": "AM_Gun_Fire_v2.bvh",
+        "bvh_sha256": "cd314e3836ab84a513624b9093cd0dfef36731b09741bc483d80cbc37b770667",
+        "npz": "AM_Gun_Fire_v2.npz",
+        "npz_sha256": "ae303a09a2c96b53b41e4f0b030798d194d7e99938d8f3afd9238072a12fc207"
+      },
+      "foot_lock": {
+        "after_cm": 0.012903109018225223,
+        "before_cm": 0.6597401574254036,
+        "max_leg_change_deg": 1.4688067728292198,
+        "phases": 6
+      },
+      "fps": 30.0,
+      "frames": 75,
+      "hand_error_limit_m": 0.05,
+      "hand_error_ok": true,
+      "loop": false,
+      "model": "Kimodo-SOMA-RP-v1",
+      "model_repo": "nvidia/Kimodo-SOMA-RP-v1",
+      "model_revision": "defbe1f34f5fd031eb0ccfe19f3f92a9880c287b",
+      "name": "AM_Gun_Fire",
+      "prompt": "A man reaches out to his left at arm's length with a long staff in his right hand and touches it down on a waist-high object, leaning his body away and turning his head away.",
+      "root_motion": false,
+      "scale_soma_over_soldier": 0.987,
+      "seed": 640531,
+      "station": "Linstock",
+      "variant": 2
+    },
+    "AM_Gun_Flinch_v0": {
+      "attempts": [
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.0,
+          "seed": 740692
+        }
+      ],
+      "cfg": "model default",
+      "chain_to": null,
+      "constraints": [],
+      "diffusion_steps": 100,
+      "duration_s": 1.5,
+      "expect": {
+        "end_hip_min_m": 0.8,
+        "travel_max_m": 0.5
+      },
+      "expect_ok": true,
+      "family": "Gun",
+      "files": {
+        "bvh": "AM_Gun_Flinch_v0.bvh",
+        "bvh_sha256": "b0ab3b40b8a7c341766906592fd5124c2a043f60b71c9a2d01bbff52150e78db",
+        "npz": "AM_Gun_Flinch_v0.npz",
+        "npz_sha256": "b67db84f9375e2b80a1401f43918e6a0d81ec312c29cfec057d45ffafa999cf5"
+      },
+      "foot_lock": {
+        "after_cm": 0.015953174442984164,
+        "before_cm": 0.6044748704880476,
+        "max_leg_change_deg": 1.4926721026528627,
+        "phases": 6
+      },
+      "fps": 30.0,
+      "frames": 45,
+      "hand_error_limit_m": 0.05,
+      "hand_error_ok": true,
+      "loop": false,
+      "model": "Kimodo-SOMA-RP-v1",
+      "model_repo": "nvidia/Kimodo-SOMA-RP-v1",
+      "model_revision": "defbe1f34f5fd031eb0ccfe19f3f92a9880c287b",
+      "name": "AM_Gun_Flinch",
+      "prompt": "A standing man braces himself, hunches his shoulders and turns his face sharply away from a loud bang beside him, then recovers.",
+      "root_motion": false,
+      "scale_soma_over_soldier": 0.987,
+      "seed": 740692,
+      "station": null,
+      "variant": 0
+    },
+    "AM_Gun_Flinch_v1": {
+      "attempts": [
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.0,
+          "seed": 740693
+        }
+      ],
+      "cfg": "model default",
+      "chain_to": null,
+      "constraints": [],
+      "diffusion_steps": 100,
+      "duration_s": 1.5,
+      "expect": {
+        "end_hip_min_m": 0.8,
+        "travel_max_m": 0.5
+      },
+      "expect_ok": true,
+      "family": "Gun",
+      "files": {
+        "bvh": "AM_Gun_Flinch_v1.bvh",
+        "bvh_sha256": "f44e69ed41b06bca76305f236de9c514a8659ea5b439fbb33bffa32dadb6d237",
+        "npz": "AM_Gun_Flinch_v1.npz",
+        "npz_sha256": "94dc897213893cc3f635c16a5ab62e53f40290f17a1535fa602ddf7d176ea18e"
+      },
+      "foot_lock": {
+        "after_cm": 0.09531472460366786,
+        "before_cm": 2.230295352637768,
+        "max_leg_change_deg": 6.0615589873686435,
+        "phases": 12
+      },
+      "fps": 30.0,
+      "frames": 45,
+      "hand_error_limit_m": 0.05,
+      "hand_error_ok": true,
+      "loop": false,
+      "model": "Kimodo-SOMA-RP-v1",
+      "model_repo": "nvidia/Kimodo-SOMA-RP-v1",
+      "model_revision": "defbe1f34f5fd031eb0ccfe19f3f92a9880c287b",
+      "name": "AM_Gun_Flinch",
+      "prompt": "A standing man braces himself, hunches his shoulders and turns his face sharply away from a loud bang beside him, then recovers.",
+      "root_motion": false,
+      "scale_soma_over_soldier": 0.987,
+      "seed": 740693,
+      "station": null,
+      "variant": 1
+    },
+    "AM_Gun_Flinch_v2": {
+      "attempts": [
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.0,
+          "seed": 740694
+        }
+      ],
+      "cfg": "model default",
+      "chain_to": null,
+      "constraints": [],
+      "diffusion_steps": 100,
+      "duration_s": 1.5,
+      "expect": {
+        "end_hip_min_m": 0.8,
+        "travel_max_m": 0.5
+      },
+      "expect_ok": true,
+      "family": "Gun",
+      "files": {
+        "bvh": "AM_Gun_Flinch_v2.bvh",
+        "bvh_sha256": "5411080ef9f76dd55b96cdf021efb367fd01987bb2a29aee2f3ca94a02f78771",
+        "npz": "AM_Gun_Flinch_v2.npz",
+        "npz_sha256": "fb6ba7e51d9fd1818685fbd93342c0db9ea2d8b51562010b72fce99dd96fd89d"
+      },
+      "foot_lock": {
+        "after_cm": 0.017681202734820545,
+        "before_cm": 1.1410572566092014,
+        "max_leg_change_deg": 1.1940063930328935,
+        "phases": 9
+      },
+      "fps": 30.0,
+      "frames": 45,
+      "hand_error_limit_m": 0.05,
+      "hand_error_ok": true,
+      "loop": false,
+      "model": "Kimodo-SOMA-RP-v1",
+      "model_repo": "nvidia/Kimodo-SOMA-RP-v1",
+      "model_revision": "defbe1f34f5fd031eb0ccfe19f3f92a9880c287b",
+      "name": "AM_Gun_Flinch",
+      "prompt": "A standing man braces himself, hunches his shoulders and turns his face sharply away from a loud bang beside him, then recovers.",
+      "root_motion": false,
+      "scale_soma_over_soldier": 0.987,
+      "seed": 740694,
+      "station": null,
+      "variant": 2
+    },
+    "AM_Gun_Flinch_v3": {
+      "attempts": [
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.0,
+          "seed": 740695
+        }
+      ],
+      "cfg": "model default",
+      "chain_to": null,
+      "constraints": [],
+      "diffusion_steps": 100,
+      "duration_s": 1.5,
+      "expect": {
+        "end_hip_min_m": 0.8,
+        "travel_max_m": 0.5
+      },
+      "expect_ok": true,
+      "family": "Gun",
+      "files": {
+        "bvh": "AM_Gun_Flinch_v3.bvh",
+        "bvh_sha256": "79b751be6ea0bb38162d4086608406984f552daeba40560b16ab4cf659a7701e",
+        "npz": "AM_Gun_Flinch_v3.npz",
+        "npz_sha256": "f553069bf83992ce5df1796c0369aeaced8fc5d09022f55d8ab17719ce40c4de"
+      },
+      "foot_lock": {
+        "after_cm": 0.058898323914036155,
+        "before_cm": 1.6220944002270699,
+        "max_leg_change_deg": 2.4012381714619697,
+        "phases": 9
+      },
+      "fps": 30.0,
+      "frames": 45,
+      "hand_error_limit_m": 0.05,
+      "hand_error_ok": true,
+      "loop": false,
+      "model": "Kimodo-SOMA-RP-v1",
+      "model_repo": "nvidia/Kimodo-SOMA-RP-v1",
+      "model_revision": "defbe1f34f5fd031eb0ccfe19f3f92a9880c287b",
+      "name": "AM_Gun_Flinch",
+      "prompt": "A standing man braces himself, hunches his shoulders and turns his face sharply away from a loud bang beside him, then recovers.",
+      "root_motion": false,
+      "scale_soma_over_soldier": 0.987,
+      "seed": 740695,
+      "station": null,
+      "variant": 3
+    },
     "AM_Gun_Idle_Captain_v0": {
       "attempts": [
         {
@@ -364,6 +684,189 @@
       "scale_soma_over_soldier": 0.987,
       "seed": 18864,
       "station": "Linstock",
+      "variant": 2
+    },
+    "AM_Gun_Idle_Handspike_v0": {
+      "attempts": [
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.0,
+          "seed": 410781
+        }
+      ],
+      "cfg": {
+        "cfg_type": "separated",
+        "cfg_weight": [
+          2.0,
+          4.0
+        ]
+      },
+      "chain_to": null,
+      "constraints": [
+        {
+          "frames": [
+            0,
+            119
+          ],
+          "type": "loop"
+        }
+      ],
+      "diffusion_steps": 100,
+      "duration_s": 4.0,
+      "expect": {
+        "end_hip_min_m": 0.8,
+        "travel_max_m": 0.25
+      },
+      "expect_ok": true,
+      "family": "Gun",
+      "files": {
+        "bvh": "AM_Gun_Idle_Handspike_v0.bvh",
+        "bvh_sha256": "69b6e8c022c8b64108dcb4280bdbd9fedc1311e1c74854b7b30b7b0825f7937a",
+        "npz": "AM_Gun_Idle_Handspike_v0.npz",
+        "npz_sha256": "a7967247314c4d39cd95f3ff9fbbdf5b0e648da2229a86d6498745bb4511b3c8"
+      },
+      "foot_lock": {
+        "after_cm": 0.026264629559591413,
+        "before_cm": 3.276130184531212,
+        "max_leg_change_deg": 3.683787006407976,
+        "phases": 6
+      },
+      "fps": 30.0,
+      "frames": 120,
+      "hand_error_limit_m": 0.05,
+      "hand_error_ok": true,
+      "loop": true,
+      "model": "Kimodo-SOMA-RP-v1",
+      "model_repo": "nvidia/Kimodo-SOMA-RP-v1",
+      "model_revision": "defbe1f34f5fd031eb0ccfe19f3f92a9880c287b",
+      "name": "AM_Gun_Idle_Handspike",
+      "prompt": "A man stands ready in place holding a heavy bar upright with both hands in front of him, shifts his weight slightly and waits.",
+      "root_motion": false,
+      "scale_soma_over_soldier": 0.987,
+      "seed": 410781,
+      "station": "TrailL",
+      "variant": 0
+    },
+    "AM_Gun_Idle_Handspike_v1": {
+      "attempts": [
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.0,
+          "seed": 410782
+        }
+      ],
+      "cfg": {
+        "cfg_type": "separated",
+        "cfg_weight": [
+          2.0,
+          4.0
+        ]
+      },
+      "chain_to": null,
+      "constraints": [
+        {
+          "frames": [
+            0,
+            119
+          ],
+          "type": "loop"
+        }
+      ],
+      "diffusion_steps": 100,
+      "duration_s": 4.0,
+      "expect": {
+        "end_hip_min_m": 0.8,
+        "travel_max_m": 0.25
+      },
+      "expect_ok": true,
+      "family": "Gun",
+      "files": {
+        "bvh": "AM_Gun_Idle_Handspike_v1.bvh",
+        "bvh_sha256": "98bcf47d03cb4c7a26a41d866166a82586d33e922608d5960bab17023e9f4470",
+        "npz": "AM_Gun_Idle_Handspike_v1.npz",
+        "npz_sha256": "f452ba5e58469ea026f578066ad33e968f845b1862b1940d73b597391568202e"
+      },
+      "foot_lock": {
+        "after_cm": 0.024118550936691463,
+        "before_cm": 1.362475287169218,
+        "max_leg_change_deg": 2.2367539239428935,
+        "phases": 6
+      },
+      "fps": 30.0,
+      "frames": 120,
+      "hand_error_limit_m": 0.05,
+      "hand_error_ok": true,
+      "loop": true,
+      "model": "Kimodo-SOMA-RP-v1",
+      "model_repo": "nvidia/Kimodo-SOMA-RP-v1",
+      "model_revision": "defbe1f34f5fd031eb0ccfe19f3f92a9880c287b",
+      "name": "AM_Gun_Idle_Handspike",
+      "prompt": "A man stands ready in place holding a heavy bar upright with both hands in front of him, shifts his weight slightly and waits.",
+      "root_motion": false,
+      "scale_soma_over_soldier": 0.987,
+      "seed": 410782,
+      "station": "TrailL",
+      "variant": 1
+    },
+    "AM_Gun_Idle_Handspike_v2": {
+      "attempts": [
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.0,
+          "seed": 410783
+        }
+      ],
+      "cfg": {
+        "cfg_type": "separated",
+        "cfg_weight": [
+          2.0,
+          4.0
+        ]
+      },
+      "chain_to": null,
+      "constraints": [
+        {
+          "frames": [
+            0,
+            119
+          ],
+          "type": "loop"
+        }
+      ],
+      "diffusion_steps": 100,
+      "duration_s": 4.0,
+      "expect": {
+        "end_hip_min_m": 0.8,
+        "travel_max_m": 0.25
+      },
+      "expect_ok": true,
+      "family": "Gun",
+      "files": {
+        "bvh": "AM_Gun_Idle_Handspike_v2.bvh",
+        "bvh_sha256": "23d52bfbb9be54172faab45bd80e242ce455de05ffabea24fdd08e0bd73fbd1e",
+        "npz": "AM_Gun_Idle_Handspike_v2.npz",
+        "npz_sha256": "393407e5d792727ecb58439d35bd160ab900c44ff7f5c03c9716426021126a7e"
+      },
+      "foot_lock": {
+        "after_cm": 0.02543455921113491,
+        "before_cm": 2.4396536871790886,
+        "max_leg_change_deg": 4.305168384088576,
+        "phases": 6
+      },
+      "fps": 30.0,
+      "frames": 120,
+      "hand_error_limit_m": 0.05,
+      "hand_error_ok": true,
+      "loop": true,
+      "model": "Kimodo-SOMA-RP-v1",
+      "model_repo": "nvidia/Kimodo-SOMA-RP-v1",
+      "model_revision": "defbe1f34f5fd031eb0ccfe19f3f92a9880c287b",
+      "name": "AM_Gun_Idle_Handspike",
+      "prompt": "A man stands ready in place holding a heavy bar upright with both hands in front of him, shifts his weight slightly and waits.",
+      "root_motion": false,
+      "scale_soma_over_soldier": 0.987,
+      "seed": 410783,
+      "station": "TrailL",
       "variant": 2
     },
     "AM_Gun_Idle_Loader_v0": {
@@ -914,6 +1417,3778 @@
       "seed": 352659,
       "station": "station_Vent",
       "variant": 2
+    },
+    "AM_Gun_Lay_v0": {
+      "attempts": [
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.0,
+          "seed": 786005
+        }
+      ],
+      "cfg": "model default",
+      "chain_to": null,
+      "constraints": [],
+      "diffusion_steps": 100,
+      "duration_s": 3.0,
+      "expect": null,
+      "expect_ok": true,
+      "family": "Gun",
+      "files": {
+        "bvh": "AM_Gun_Lay_v0.bvh",
+        "bvh_sha256": "989e58e231798d91498888f9349ac047418601dc7d2b3a367ca9adcda7631611",
+        "npz": "AM_Gun_Lay_v0.npz",
+        "npz_sha256": "58b8bfa1b1d8b7088c94b64f6955d8ce2b39f98431ffa9284ec0691f377f8bf3"
+      },
+      "foot_lock": {
+        "after_cm": 0.10326402261853218,
+        "before_cm": 6.230638548731804,
+        "max_leg_change_deg": 5.190068799456954,
+        "phases": 11
+      },
+      "fps": 30.0,
+      "frames": 90,
+      "hand_error_limit_m": 0.05,
+      "hand_error_ok": true,
+      "loop": false,
+      "model": "Kimodo-SOMA-RP-v1",
+      "model_repo": "nvidia/Kimodo-SOMA-RP-v1",
+      "model_revision": "defbe1f34f5fd031eb0ccfe19f3f92a9880c287b",
+      "name": "AM_Gun_Lay",
+      "prompt": "A man crouches down low, looks carefully forward along a line at eye level, raises his left hand and waves it to the left, then to the right, and holds his palm up to signal stop.",
+      "root_motion": false,
+      "scale_soma_over_soldier": 0.987,
+      "seed": 786005,
+      "station": "Trail",
+      "variant": 0
+    },
+    "AM_Gun_Lay_v1": {
+      "attempts": [
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.0,
+          "seed": 786006
+        }
+      ],
+      "cfg": "model default",
+      "chain_to": null,
+      "constraints": [],
+      "diffusion_steps": 100,
+      "duration_s": 3.0,
+      "expect": null,
+      "expect_ok": true,
+      "family": "Gun",
+      "files": {
+        "bvh": "AM_Gun_Lay_v1.bvh",
+        "bvh_sha256": "6d74ef3c1b746db34c068ea76f8ee70532ca7618a8a84554d4653adc9bbfc54e",
+        "npz": "AM_Gun_Lay_v1.npz",
+        "npz_sha256": "9c08e318efc5308b10310b1b8e0ce040469dbfe6c5e9ff98465361ab699aeb58"
+      },
+      "foot_lock": {
+        "after_cm": 0.1306275255046785,
+        "before_cm": 9.356904774904251,
+        "max_leg_change_deg": 11.592447091197968,
+        "phases": 11
+      },
+      "fps": 30.0,
+      "frames": 90,
+      "hand_error_limit_m": 0.05,
+      "hand_error_ok": true,
+      "loop": false,
+      "model": "Kimodo-SOMA-RP-v1",
+      "model_repo": "nvidia/Kimodo-SOMA-RP-v1",
+      "model_revision": "defbe1f34f5fd031eb0ccfe19f3f92a9880c287b",
+      "name": "AM_Gun_Lay",
+      "prompt": "A man crouches down low, looks carefully forward along a line at eye level, raises his left hand and waves it to the left, then to the right, and holds his palm up to signal stop.",
+      "root_motion": false,
+      "scale_soma_over_soldier": 0.987,
+      "seed": 786006,
+      "station": "Trail",
+      "variant": 1
+    },
+    "AM_Gun_Lay_v2": {
+      "attempts": [
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.0,
+          "seed": 786007
+        }
+      ],
+      "cfg": "model default",
+      "chain_to": null,
+      "constraints": [],
+      "diffusion_steps": 100,
+      "duration_s": 3.0,
+      "expect": null,
+      "expect_ok": true,
+      "family": "Gun",
+      "files": {
+        "bvh": "AM_Gun_Lay_v2.bvh",
+        "bvh_sha256": "edb2f1bd2d9de7640b0d94f3c6a964a3af546a4a454178269b6b8ab7a390194f",
+        "npz": "AM_Gun_Lay_v2.npz",
+        "npz_sha256": "539e06c2b3b0ba2947c5b36fcb9e6c1767ee1e37247f9548c49d24c68535e231"
+      },
+      "foot_lock": {
+        "after_cm": 0.2142456592991948,
+        "before_cm": 5.315233021974564,
+        "max_leg_change_deg": 7.443510375612974,
+        "phases": 8
+      },
+      "fps": 30.0,
+      "frames": 90,
+      "hand_error_limit_m": 0.05,
+      "hand_error_ok": true,
+      "loop": false,
+      "model": "Kimodo-SOMA-RP-v1",
+      "model_repo": "nvidia/Kimodo-SOMA-RP-v1",
+      "model_revision": "defbe1f34f5fd031eb0ccfe19f3f92a9880c287b",
+      "name": "AM_Gun_Lay",
+      "prompt": "A man crouches down low, looks carefully forward along a line at eye level, raises his left hand and waves it to the left, then to the right, and holds his palm up to signal stop.",
+      "root_motion": false,
+      "scale_soma_over_soldier": 0.987,
+      "seed": 786007,
+      "station": "Trail",
+      "variant": 2
+    },
+    "AM_Gun_Load_v0": {
+      "attempts": [
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.018086875019859196,
+          "seed": 425539
+        }
+      ],
+      "cfg": {
+        "cfg_type": "separated",
+        "cfg_weight": [
+          2.0,
+          4.0
+        ]
+      },
+      "chain_to": null,
+      "constraints": [
+        {
+          "achieved_error_m": {
+            "right_hand": 0.018086875019859196
+          },
+          "frame": 45,
+          "full_body_from_v0": false,
+          "ik_residual_m": {
+            "right_hand": 7.15962378308177e-05
+          },
+          "ik_root_shift_m": 0.1928739845752716,
+          "targets_gun_cm": {
+            "right_hand": [
+              162.0,
+              0.0,
+              113.58
+            ]
+          },
+          "targets_kimodo_m": {
+            "right_hand": [
+              0.05694144817928954,
+              1.1210346,
+              0.7022778608779046
+            ]
+          },
+          "type": "hands"
+        }
+      ],
+      "diffusion_steps": 100,
+      "duration_s": 3.0,
+      "expect": null,
+      "expect_ok": true,
+      "family": "Gun",
+      "files": {
+        "bvh": "AM_Gun_Load_v0.bvh",
+        "bvh_sha256": "05f302b01d87a4065537c3a0510741cc90152c86988df05c8684f954b824c195",
+        "npz": "AM_Gun_Load_v0.npz",
+        "npz_sha256": "4d1f52ea6b90cd85266043b24fed90e95a407916843f7a74862f75771bcb9de7"
+      },
+      "foot_lock": {
+        "after_cm": 0.06311748293228447,
+        "before_cm": 3.119879588484764,
+        "max_leg_change_deg": 6.03088331617713,
+        "phases": 9
+      },
+      "fps": 30.0,
+      "frames": 90,
+      "hand_error_limit_m": 0.05,
+      "hand_error_ok": true,
+      "loop": false,
+      "model": "Kimodo-SOMA-RP-v1",
+      "model_repo": "nvidia/Kimodo-SOMA-RP-v1",
+      "model_revision": "defbe1f34f5fd031eb0ccfe19f3f92a9880c287b",
+      "name": "AM_Gun_Load",
+      "prompt": "A man takes a small heavy bundle out of a bag at his hip with his right hand, steps forward, pushes it into the open end of a waist-high horizontal tube in front of him, then steps back.",
+      "root_motion": false,
+      "scale_soma_over_soldier": 0.987,
+      "seed": 425539,
+      "station": "station_MuzzleL",
+      "variant": 0
+    },
+    "AM_Gun_Load_v1": {
+      "attempts": [
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.019907272150485746,
+          "seed": 425540
+        }
+      ],
+      "cfg": {
+        "cfg_type": "separated",
+        "cfg_weight": [
+          2.0,
+          4.0
+        ]
+      },
+      "chain_to": null,
+      "constraints": [
+        {
+          "achieved_error_m": {
+            "right_hand": 0.019907272150485746
+          },
+          "frame": 45,
+          "full_body_from_v0": false,
+          "ik_residual_m": {
+            "right_hand": 4.6383123844861984e-05
+          },
+          "ik_root_shift_m": 0.14900419116020203,
+          "targets_gun_cm": {
+            "right_hand": [
+              162.0,
+              0.0,
+              113.58
+            ]
+          },
+          "targets_kimodo_m": {
+            "right_hand": [
+              0.05694144817928954,
+              1.1210346,
+              0.7022778608779046
+            ]
+          },
+          "type": "hands"
+        }
+      ],
+      "diffusion_steps": 100,
+      "duration_s": 3.0,
+      "expect": null,
+      "expect_ok": true,
+      "family": "Gun",
+      "files": {
+        "bvh": "AM_Gun_Load_v1.bvh",
+        "bvh_sha256": "ed02b2042f9faadfc7a1078c48d00fe6d24592fd5129e1dd03f0707485a5300a",
+        "npz": "AM_Gun_Load_v1.npz",
+        "npz_sha256": "e8b996eba66a40a48adc3d8aa1045a3efd847e399eda8080e89096111dae1143"
+      },
+      "foot_lock": {
+        "after_cm": 0.02670976973604411,
+        "before_cm": 2.7522988617420197,
+        "max_leg_change_deg": 2.4734358581252396,
+        "phases": 12
+      },
+      "fps": 30.0,
+      "frames": 90,
+      "hand_error_limit_m": 0.05,
+      "hand_error_ok": true,
+      "loop": false,
+      "model": "Kimodo-SOMA-RP-v1",
+      "model_repo": "nvidia/Kimodo-SOMA-RP-v1",
+      "model_revision": "defbe1f34f5fd031eb0ccfe19f3f92a9880c287b",
+      "name": "AM_Gun_Load",
+      "prompt": "A man takes a small heavy bundle out of a bag at his hip with his right hand, steps forward, pushes it into the open end of a waist-high horizontal tube in front of him, then steps back.",
+      "root_motion": false,
+      "scale_soma_over_soldier": 0.987,
+      "seed": 425540,
+      "station": "station_MuzzleL",
+      "variant": 1
+    },
+    "AM_Gun_Load_v2": {
+      "attempts": [
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.028814019011965158,
+          "seed": 425541
+        }
+      ],
+      "cfg": {
+        "cfg_type": "separated",
+        "cfg_weight": [
+          2.0,
+          4.0
+        ]
+      },
+      "chain_to": null,
+      "constraints": [
+        {
+          "achieved_error_m": {
+            "right_hand": 0.028814019011965158
+          },
+          "frame": 45,
+          "full_body_from_v0": false,
+          "ik_residual_m": {
+            "right_hand": 7.121238013496622e-05
+          },
+          "ik_root_shift_m": 0.12467141449451447,
+          "targets_gun_cm": {
+            "right_hand": [
+              162.0,
+              0.0,
+              113.58
+            ]
+          },
+          "targets_kimodo_m": {
+            "right_hand": [
+              0.05694144817928954,
+              1.1210346,
+              0.7022778608779046
+            ]
+          },
+          "type": "hands"
+        }
+      ],
+      "diffusion_steps": 100,
+      "duration_s": 3.0,
+      "expect": null,
+      "expect_ok": true,
+      "family": "Gun",
+      "files": {
+        "bvh": "AM_Gun_Load_v2.bvh",
+        "bvh_sha256": "b559d880b3414c1c7252e26a2b4553a6437821058dcfa4f7cb72cf63ee2d436d",
+        "npz": "AM_Gun_Load_v2.npz",
+        "npz_sha256": "66dfc7b536e16c8201ef5a08fd318042d99d2fdeaff9ff2f8f2b0d917e07c855"
+      },
+      "foot_lock": {
+        "after_cm": 0.035078314249403775,
+        "before_cm": 1.3570483773946762,
+        "max_leg_change_deg": 1.7891843809235841,
+        "phases": 6
+      },
+      "fps": 30.0,
+      "frames": 90,
+      "hand_error_limit_m": 0.05,
+      "hand_error_ok": true,
+      "loop": false,
+      "model": "Kimodo-SOMA-RP-v1",
+      "model_repo": "nvidia/Kimodo-SOMA-RP-v1",
+      "model_revision": "defbe1f34f5fd031eb0ccfe19f3f92a9880c287b",
+      "name": "AM_Gun_Load",
+      "prompt": "A man takes a small heavy bundle out of a bag at his hip with his right hand, steps forward, pushes it into the open end of a waist-high horizontal tube in front of him, then steps back.",
+      "root_motion": false,
+      "scale_soma_over_soldier": 0.987,
+      "seed": 425541,
+      "station": "station_MuzzleL",
+      "variant": 2
+    },
+    "AM_Gun_Observe_v0": {
+      "attempts": [
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.02290761607695636,
+          "seed": 916914
+        }
+      ],
+      "cfg": {
+        "cfg_type": "separated",
+        "cfg_weight": [
+          2.0,
+          4.0
+        ]
+      },
+      "chain_to": null,
+      "constraints": [
+        {
+          "achieved_error_m": {
+            "left_hand": 0.0018397112420457744,
+            "right_hand": 0.02290761607695636
+          },
+          "frame": 40,
+          "full_body_from_v0": false,
+          "ik_residual_m": {
+            "left_hand": 0.00012269571016076952,
+            "right_hand": 7.904350059106946e-05
+          },
+          "ik_root_shift_m": 0.0007811038522049785,
+          "targets_gun_cm": {},
+          "targets_kimodo_m": {
+            "left_hand": [
+              -0.02961,
+              1.58907,
+              0.39480000000000004
+            ],
+            "right_hand": [
+              -0.049350000000000005,
+              1.59894,
+              0.13818
+            ]
+          },
+          "type": "hands"
+        },
+        {
+          "achieved_error_m": {
+            "left_hand": 0.010667006768991499,
+            "right_hand": 0.02241857014710014
+          },
+          "frame": 95,
+          "full_body_from_v0": false,
+          "ik_residual_m": {
+            "left_hand": 0.0002743355871643871,
+            "right_hand": 0.0001029809718602337
+          },
+          "ik_root_shift_m": 0.005213497672230005,
+          "targets_gun_cm": {},
+          "targets_kimodo_m": {
+            "left_hand": [
+              -0.02961,
+              1.58907,
+              0.39480000000000004
+            ],
+            "right_hand": [
+              -0.049350000000000005,
+              1.59894,
+              0.13818
+            ]
+          },
+          "type": "hands"
+        }
+      ],
+      "diffusion_steps": 100,
+      "duration_s": 4.0,
+      "expect": {
+        "end_hip_min_m": 0.8,
+        "travel_max_m": 0.25
+      },
+      "expect_ok": true,
+      "family": "Gun",
+      "files": {
+        "bvh": "AM_Gun_Observe_v0.bvh",
+        "bvh_sha256": "c92028240c5d6b8294fa3deba1d1e8c216e4dc19d6c6989adc3f85dc2efeb0c1",
+        "npz": "AM_Gun_Observe_v0.npz",
+        "npz_sha256": "cc7477828e123f2121472b8c6731694490576f2156b513cf8eb2436e22e47cdb"
+      },
+      "foot_lock": {
+        "after_cm": 0.02145586331607774,
+        "before_cm": 1.1828904040157795,
+        "max_leg_change_deg": 1.5800335617475212,
+        "phases": 6
+      },
+      "fps": 30.0,
+      "frames": 120,
+      "hand_error_limit_m": 0.05,
+      "hand_error_ok": true,
+      "loop": false,
+      "model": "Kimodo-SOMA-RP-v1",
+      "model_repo": "nvidia/Kimodo-SOMA-RP-v1",
+      "model_revision": "defbe1f34f5fd031eb0ccfe19f3f92a9880c287b",
+      "name": "AM_Gun_Observe",
+      "prompt": "A man standing upright raises a long thin tube to his right eye with both hands, one hand near his eye and the other further forward, and looks through it steadily at something far ahead.",
+      "root_motion": false,
+      "scale_soma_over_soldier": 0.987,
+      "seed": 916914,
+      "station": "Trail",
+      "variant": 0
+    },
+    "AM_Gun_Observe_v1": {
+      "attempts": [
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.026227993554325875,
+          "seed": 916915
+        }
+      ],
+      "cfg": {
+        "cfg_type": "separated",
+        "cfg_weight": [
+          2.0,
+          4.0
+        ]
+      },
+      "chain_to": null,
+      "constraints": [
+        {
+          "achieved_error_m": {
+            "left_hand": 0.017140516761089537,
+            "right_hand": 0.026227993554325875
+          },
+          "frame": 40,
+          "full_body_from_v0": false,
+          "ik_residual_m": {
+            "left_hand": 0.0002497889508958906,
+            "right_hand": 9.659750503487885e-05
+          },
+          "ik_root_shift_m": 0.000778155867010355,
+          "targets_gun_cm": {},
+          "targets_kimodo_m": {
+            "left_hand": [
+              -0.02961,
+              1.58907,
+              0.39480000000000004
+            ],
+            "right_hand": [
+              -0.049350000000000005,
+              1.59894,
+              0.13818
+            ]
+          },
+          "type": "hands"
+        },
+        {
+          "achieved_error_m": {
+            "left_hand": 0.01257223242360415,
+            "right_hand": 0.026070931957910028
+          },
+          "frame": 95,
+          "full_body_from_v0": false,
+          "ik_residual_m": {
+            "left_hand": 0.00011333430302329361,
+            "right_hand": 6.16346369497478e-05
+          },
+          "ik_root_shift_m": 0.06286799907684326,
+          "targets_gun_cm": {},
+          "targets_kimodo_m": {
+            "left_hand": [
+              -0.02961,
+              1.58907,
+              0.39480000000000004
+            ],
+            "right_hand": [
+              -0.049350000000000005,
+              1.59894,
+              0.13818
+            ]
+          },
+          "type": "hands"
+        }
+      ],
+      "diffusion_steps": 100,
+      "duration_s": 4.0,
+      "expect": {
+        "end_hip_min_m": 0.8,
+        "travel_max_m": 0.25
+      },
+      "expect_ok": true,
+      "family": "Gun",
+      "files": {
+        "bvh": "AM_Gun_Observe_v1.bvh",
+        "bvh_sha256": "5fb019e4aec80fea6bcab3abd3c420f51daffbcdc58dda0ece28073eca96ae30",
+        "npz": "AM_Gun_Observe_v1.npz",
+        "npz_sha256": "de3adaf64ad3b512aac9e57812da65611b99640cf5774e5e7a3e4f9d321f19f8"
+      },
+      "foot_lock": {
+        "after_cm": 0.019425230857450515,
+        "before_cm": 0.44271284714341164,
+        "max_leg_change_deg": 0.7685815585205331,
+        "phases": 8
+      },
+      "fps": 30.0,
+      "frames": 120,
+      "hand_error_limit_m": 0.05,
+      "hand_error_ok": true,
+      "loop": false,
+      "model": "Kimodo-SOMA-RP-v1",
+      "model_repo": "nvidia/Kimodo-SOMA-RP-v1",
+      "model_revision": "defbe1f34f5fd031eb0ccfe19f3f92a9880c287b",
+      "name": "AM_Gun_Observe",
+      "prompt": "A man standing upright raises a long thin tube to his right eye with both hands, one hand near his eye and the other further forward, and looks through it steadily at something far ahead.",
+      "root_motion": false,
+      "scale_soma_over_soldier": 0.987,
+      "seed": 916915,
+      "station": "Trail",
+      "variant": 1
+    },
+    "AM_Gun_Prime_v0": {
+      "attempts": [
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.01490002546203286,
+          "seed": 190387
+        }
+      ],
+      "cfg": {
+        "cfg_type": "separated",
+        "cfg_weight": [
+          2.0,
+          4.0
+        ]
+      },
+      "chain_to": null,
+      "constraints": [
+        {
+          "achieved_error_m": {
+            "right_hand": 0.01490002546203286
+          },
+          "frame": 25,
+          "full_body_from_v0": false,
+          "ik_residual_m": {
+            "right_hand": 4.0936789446277544e-05
+          },
+          "ik_root_shift_m": 0.16894058883190155,
+          "targets_gun_cm": {
+            "right_hand": [
+              10.0,
+              0.0,
+              106.3
+            ]
+          },
+          "targets_kimodo_m": {
+            "right_hand": [
+              -0.0,
+              1.049181,
+              0.4935
+            ]
+          },
+          "type": "hands"
+        },
+        {
+          "achieved_error_m": {
+            "right_hand": 0.011426300647228934
+          },
+          "frame": 50,
+          "full_body_from_v0": false,
+          "ik_residual_m": {
+            "right_hand": 2.265401963086333e-05
+          },
+          "ik_root_shift_m": 0.17534251511096954,
+          "targets_gun_cm": {
+            "right_hand": [
+              10.0,
+              0.0,
+              103.3
+            ]
+          },
+          "targets_kimodo_m": {
+            "right_hand": [
+              -0.0,
+              1.019571,
+              0.4935
+            ]
+          },
+          "type": "hands"
+        }
+      ],
+      "diffusion_steps": 100,
+      "duration_s": 3.0,
+      "expect": null,
+      "expect_ok": true,
+      "family": "Gun",
+      "files": {
+        "bvh": "AM_Gun_Prime_v0.bvh",
+        "bvh_sha256": "c8ba9e2df9dcda965bb88d116d7881a624511b1597654da0599656f2da4d1bc6",
+        "npz": "AM_Gun_Prime_v0.npz",
+        "npz_sha256": "004e2d2101c9a7bb011e724b195cc7548c0848b149fc3cd84ffde69780d81c20"
+      },
+      "foot_lock": {
+        "after_cm": 0.0340314902132377,
+        "before_cm": 2.2162850946187973,
+        "max_leg_change_deg": 2.4801332878880205,
+        "phases": 12
+      },
+      "fps": 30.0,
+      "frames": 90,
+      "hand_error_limit_m": 0.05,
+      "hand_error_ok": true,
+      "loop": false,
+      "model": "Kimodo-SOMA-RP-v1",
+      "model_repo": "nvidia/Kimodo-SOMA-RP-v1",
+      "model_revision": "defbe1f34f5fd031eb0ccfe19f3f92a9880c287b",
+      "name": "AM_Gun_Prime",
+      "prompt": "A man leans over a waist-high object, pokes a thin wire straight down into the top of it with his right hand, then pushes a small tube into the same spot, and steps aside to his right.",
+      "root_motion": false,
+      "scale_soma_over_soldier": 0.987,
+      "seed": 190387,
+      "station": "station_Vent",
+      "variant": 0
+    },
+    "AM_Gun_Prime_v1": {
+      "attempts": [
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.043796824112938504,
+          "seed": 190388
+        }
+      ],
+      "cfg": {
+        "cfg_type": "separated",
+        "cfg_weight": [
+          2.0,
+          4.0
+        ]
+      },
+      "chain_to": null,
+      "constraints": [
+        {
+          "achieved_error_m": {
+            "right_hand": 0.043796824112938504
+          },
+          "frame": 25,
+          "full_body_from_v0": false,
+          "ik_residual_m": {
+            "right_hand": 0.00014719399041496217
+          },
+          "ik_root_shift_m": 0.039460666477680206,
+          "targets_gun_cm": {
+            "right_hand": [
+              10.0,
+              0.0,
+              106.3
+            ]
+          },
+          "targets_kimodo_m": {
+            "right_hand": [
+              -0.0,
+              1.049181,
+              0.4935
+            ]
+          },
+          "type": "hands"
+        },
+        {
+          "achieved_error_m": {
+            "right_hand": 0.02210067969438223
+          },
+          "frame": 50,
+          "full_body_from_v0": false,
+          "ik_residual_m": {
+            "right_hand": 0.00030026244348846376
+          },
+          "ik_root_shift_m": 0.041861142963171005,
+          "targets_gun_cm": {
+            "right_hand": [
+              10.0,
+              0.0,
+              103.3
+            ]
+          },
+          "targets_kimodo_m": {
+            "right_hand": [
+              -0.0,
+              1.019571,
+              0.4935
+            ]
+          },
+          "type": "hands"
+        },
+        {
+          "frame": 0,
+          "from": "AM_Gun_Prime_v0 frame 0",
+          "type": "start_pose"
+        }
+      ],
+      "diffusion_steps": 100,
+      "duration_s": 3.0,
+      "expect": null,
+      "expect_ok": true,
+      "family": "Gun",
+      "files": {
+        "bvh": "AM_Gun_Prime_v1.bvh",
+        "bvh_sha256": "153b35a4a5e758c1cf7208ae11e221b7252a64cbf46cc7af9fd5134b431cda59",
+        "npz": "AM_Gun_Prime_v1.npz",
+        "npz_sha256": "6e204345fc32b4f9e95b0c03143225f2a14a6016e88f6f1c3d371140ff5a83d5"
+      },
+      "foot_lock": {
+        "after_cm": 0.023760439944453537,
+        "before_cm": 2.5212040171027184,
+        "max_leg_change_deg": 1.4959306376606225,
+        "phases": 27
+      },
+      "fps": 30.0,
+      "frames": 90,
+      "hand_error_limit_m": 0.05,
+      "hand_error_ok": true,
+      "loop": false,
+      "model": "Kimodo-SOMA-RP-v1",
+      "model_repo": "nvidia/Kimodo-SOMA-RP-v1",
+      "model_revision": "defbe1f34f5fd031eb0ccfe19f3f92a9880c287b",
+      "name": "AM_Gun_Prime",
+      "prompt": "A man leans over a waist-high object, pokes a thin wire straight down into the top of it with his right hand, then pushes a small tube into the same spot, and steps aside to his right.",
+      "root_motion": false,
+      "scale_soma_over_soldier": 0.987,
+      "seed": 190388,
+      "station": "station_Vent",
+      "variant": 1
+    },
+    "AM_Gun_Ram_v0": {
+      "attempts": [
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.04968181950113155,
+          "seed": 330066
+        }
+      ],
+      "cfg": {
+        "cfg_type": "separated",
+        "cfg_weight": [
+          2.0,
+          4.0
+        ]
+      },
+      "chain_to": null,
+      "constraints": [
+        {
+          "achieved_error_m": {
+            "left_hand": 0.04785807136328432,
+            "right_hand": 0.04968181950113155
+          },
+          "frame": 30,
+          "full_body_from_v0": false,
+          "ik_residual_m": {
+            "left_hand": 0.0005235968856140971,
+            "right_hand": 0.00023195472022052854
+          },
+          "ik_root_shift_m": 0.7956848740577698,
+          "targets_gun_cm": {
+            "left_hand": [
+              254.662,
+              0.0,
+              129.883
+            ],
+            "right_hand": [
+              294.1268,
+              0.0,
+              136.4042
+            ]
+          },
+          "targets_kimodo_m": {
+            "left_hand": [
+              -0.9363261933775109,
+              1.2819452100000002,
+              0.4510250765355555
+            ],
+            "right_hand": [
+              -1.3108566707285154,
+              1.346309454,
+              0.34401636872098285
+            ]
+          },
+          "type": "hands"
+        },
+        {
+          "achieved_error_m": {
+            "left_hand": 0.029948336856700244,
+            "right_hand": 0.03185439132969786
+          },
+          "frame": 44,
+          "full_body_from_v0": false,
+          "ik_residual_m": {
+            "left_hand": 0.00022800253645982593,
+            "right_hand": 0.0005840693484060466
+          },
+          "ik_root_shift_m": 0.745952308177948,
+          "targets_gun_cm": {
+            "left_hand": [
+              185.5986,
+              0.0,
+              118.4709
+            ],
+            "right_hand": [
+              225.0634,
+              0.0,
+              124.9921
+            ]
+          },
+          "targets_kimodo_m": {
+            "left_hand": [
+              -0.2808978580132533,
+              1.169307783,
+              0.6382903152110577
+            ],
+            "right_hand": [
+              -0.6554283353642576,
+              1.233672027,
+              0.531281607396485
+            ]
+          },
+          "type": "hands"
+        },
+        {
+          "achieved_error_m": {
+            "left_hand": 0.036881970806455604,
+            "right_hand": 0.033950566042810756
+          },
+          "frame": 58,
+          "full_body_from_v0": false,
+          "ik_residual_m": {
+            "left_hand": 0.0010770473163574934,
+            "right_hand": 0.0014918720116838813
+          },
+          "ik_root_shift_m": 0.8240282535552979,
+          "targets_gun_cm": {
+            "left_hand": [
+              254.662,
+              0.0,
+              129.883
+            ],
+            "right_hand": [
+              294.1268,
+              0.0,
+              136.4042
+            ]
+          },
+          "targets_kimodo_m": {
+            "left_hand": [
+              -0.9363261933775109,
+              1.2819452100000002,
+              0.4510250765355555
+            ],
+            "right_hand": [
+              -1.3108566707285154,
+              1.346309454,
+              0.34401636872098285
+            ]
+          },
+          "type": "hands"
+        }
+      ],
+      "diffusion_steps": 100,
+      "duration_s": 3.0,
+      "expect": null,
+      "expect_ok": true,
+      "family": "Gun",
+      "files": {
+        "bvh": "AM_Gun_Ram_v0.bvh",
+        "bvh_sha256": "7463c3ae82fb0c62868fb4d9a99d05ae5357984edd7cba498a0019d257c2c48a",
+        "npz": "AM_Gun_Ram_v0.npz",
+        "npz_sha256": "3649696289c30362c877fa23e8001b04142f6c9506ea09e37835bdf5cbab87a9"
+      },
+      "foot_lock": {
+        "after_cm": 0.056973344180732965,
+        "before_cm": 3.502919152379036,
+        "max_leg_change_deg": 4.580732891571522,
+        "phases": 20
+      },
+      "fps": 30.0,
+      "frames": 90,
+      "hand_error_limit_m": 0.05,
+      "hand_error_ok": true,
+      "loop": false,
+      "model": "Kimodo-SOMA-RP-v1",
+      "model_repo": "nvidia/Kimodo-SOMA-RP-v1",
+      "model_revision": "defbe1f34f5fd031eb0ccfe19f3f92a9880c287b",
+      "name": "AM_Gun_Ram",
+      "prompt": "A man holding a long wooden pole level across his body with both hands flips it end for end, rams it to his left into a waist-high horizontal tube with two firm strokes, pulls it out and steps clear.",
+      "root_motion": false,
+      "scale_soma_over_soldier": 0.987,
+      "seed": 330066,
+      "station": "station_MuzzleR",
+      "variant": 0
+    },
+    "AM_Gun_Ram_v1": {
+      "attempts": [
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.08112123381733426,
+          "seed": 330067
+        },
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.05405117533897496,
+          "seed": 331067
+        },
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.07360829374178926,
+          "seed": 332067
+        },
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.040524721288437954,
+          "seed": 333067
+        }
+      ],
+      "cfg": {
+        "cfg_type": "separated",
+        "cfg_weight": [
+          2.0,
+          4.0
+        ]
+      },
+      "chain_to": null,
+      "constraints": [
+        {
+          "achieved_error_m": {
+            "left_hand": 0.040524721288437954,
+            "right_hand": 0.018033511838812903
+          },
+          "frame": 30,
+          "full_body_from_v0": false,
+          "ik_residual_m": {
+            "left_hand": 0.0006620282074436545,
+            "right_hand": 0.000625293527264148
+          },
+          "ik_root_shift_m": 0.4089924693107605,
+          "targets_gun_cm": {
+            "left_hand": [
+              254.662,
+              0.0,
+              129.883
+            ],
+            "right_hand": [
+              294.1268,
+              0.0,
+              136.4042
+            ]
+          },
+          "targets_kimodo_m": {
+            "left_hand": [
+              -0.9363261933775109,
+              1.2819452100000002,
+              0.4510250765355555
+            ],
+            "right_hand": [
+              -1.3108566707285154,
+              1.346309454,
+              0.34401636872098285
+            ]
+          },
+          "type": "hands"
+        },
+        {
+          "achieved_error_m": {
+            "left_hand": 0.031776078870938515,
+            "right_hand": 0.02430037338371256
+          },
+          "frame": 44,
+          "full_body_from_v0": false,
+          "ik_residual_m": {
+            "left_hand": 0.000191670042113401,
+            "right_hand": 0.001002387492917478
+          },
+          "ik_root_shift_m": 0.4095223546028137,
+          "targets_gun_cm": {
+            "left_hand": [
+              185.5986,
+              0.0,
+              118.4709
+            ],
+            "right_hand": [
+              225.0634,
+              0.0,
+              124.9921
+            ]
+          },
+          "targets_kimodo_m": {
+            "left_hand": [
+              -0.2808978580132533,
+              1.169307783,
+              0.6382903152110577
+            ],
+            "right_hand": [
+              -0.6554283353642576,
+              1.233672027,
+              0.531281607396485
+            ]
+          },
+          "type": "hands"
+        },
+        {
+          "achieved_error_m": {
+            "left_hand": 0.019203563871688353,
+            "right_hand": 0.036986020959304707
+          },
+          "frame": 58,
+          "full_body_from_v0": false,
+          "ik_residual_m": {
+            "left_hand": 0.0003933300613425672,
+            "right_hand": 0.00028774901875294745
+          },
+          "ik_root_shift_m": 0.4410688281059265,
+          "targets_gun_cm": {
+            "left_hand": [
+              254.662,
+              0.0,
+              129.883
+            ],
+            "right_hand": [
+              294.1268,
+              0.0,
+              136.4042
+            ]
+          },
+          "targets_kimodo_m": {
+            "left_hand": [
+              -0.9363261933775109,
+              1.2819452100000002,
+              0.4510250765355555
+            ],
+            "right_hand": [
+              -1.3108566707285154,
+              1.346309454,
+              0.34401636872098285
+            ]
+          },
+          "type": "hands"
+        },
+        {
+          "frame": 0,
+          "from": "AM_Gun_Ram_v0 frame 0",
+          "type": "start_pose"
+        }
+      ],
+      "diffusion_steps": 100,
+      "duration_s": 3.0,
+      "expect": null,
+      "expect_ok": true,
+      "family": "Gun",
+      "files": {
+        "bvh": "AM_Gun_Ram_v1.bvh",
+        "bvh_sha256": "a6891ee597a1e5b2542b30ef448b4382f0d650c9d2bc363603364398484f69b6",
+        "npz": "AM_Gun_Ram_v1.npz",
+        "npz_sha256": "6f5c4ca943ff7bca778c81360dc53d60da7ad14f67521d34a7bf5cc6346d81b6"
+      },
+      "foot_lock": {
+        "after_cm": 0.08524474687874317,
+        "before_cm": 4.109036177396774,
+        "max_leg_change_deg": 7.499240470299124,
+        "phases": 20
+      },
+      "fps": 30.0,
+      "frames": 90,
+      "hand_error_limit_m": 0.05,
+      "hand_error_ok": true,
+      "loop": false,
+      "model": "Kimodo-SOMA-RP-v1",
+      "model_repo": "nvidia/Kimodo-SOMA-RP-v1",
+      "model_revision": "defbe1f34f5fd031eb0ccfe19f3f92a9880c287b",
+      "name": "AM_Gun_Ram",
+      "prompt": "A man holding a long wooden pole level across his body with both hands flips it end for end, rams it to his left into a waist-high horizontal tube with two firm strokes, pulls it out and steps clear.",
+      "root_motion": false,
+      "scale_soma_over_soldier": 0.987,
+      "seed": 333067,
+      "station": "station_MuzzleR",
+      "variant": 1
+    },
+    "AM_Gun_Ram_v2": {
+      "attempts": [
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.0551339056533907,
+          "seed": 330068
+        },
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.06660958322817614,
+          "seed": 331068
+        },
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.06394983526944287,
+          "seed": 332068
+        },
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.06761614948189136,
+          "seed": 333068
+        },
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.03844688223594197,
+          "seed": 334068
+        }
+      ],
+      "cfg": {
+        "cfg_type": "separated",
+        "cfg_weight": [
+          2.0,
+          4.0
+        ]
+      },
+      "chain_to": null,
+      "constraints": [
+        {
+          "achieved_error_m": {
+            "left_hand": 0.028182429001916608,
+            "right_hand": 0.03844688223594197
+          },
+          "frame": 30,
+          "full_body_from_v0": false,
+          "ik_residual_m": {
+            "left_hand": 0.0007813911070115864,
+            "right_hand": 0.0006089585949666798
+          },
+          "ik_root_shift_m": 0.6005581617355347,
+          "targets_gun_cm": {
+            "left_hand": [
+              254.662,
+              0.0,
+              129.883
+            ],
+            "right_hand": [
+              294.1268,
+              0.0,
+              136.4042
+            ]
+          },
+          "targets_kimodo_m": {
+            "left_hand": [
+              -0.9363261933775109,
+              1.2819452100000002,
+              0.4510250765355555
+            ],
+            "right_hand": [
+              -1.3108566707285154,
+              1.346309454,
+              0.34401636872098285
+            ]
+          },
+          "type": "hands"
+        },
+        {
+          "achieved_error_m": {
+            "left_hand": 0.020085660583913915,
+            "right_hand": 0.02535103237977531
+          },
+          "frame": 44,
+          "full_body_from_v0": false,
+          "ik_residual_m": {
+            "left_hand": 0.0005645156488753855,
+            "right_hand": 0.0012125883949920535
+          },
+          "ik_root_shift_m": 0.5899996757507324,
+          "targets_gun_cm": {
+            "left_hand": [
+              185.5986,
+              0.0,
+              118.4709
+            ],
+            "right_hand": [
+              225.0634,
+              0.0,
+              124.9921
+            ]
+          },
+          "targets_kimodo_m": {
+            "left_hand": [
+              -0.2808978580132533,
+              1.169307783,
+              0.6382903152110577
+            ],
+            "right_hand": [
+              -0.6554283353642576,
+              1.233672027,
+              0.531281607396485
+            ]
+          },
+          "type": "hands"
+        },
+        {
+          "achieved_error_m": {
+            "left_hand": 0.015840387755725372,
+            "right_hand": 0.03336569424500434
+          },
+          "frame": 58,
+          "full_body_from_v0": false,
+          "ik_residual_m": {
+            "left_hand": 0.0003713176411110908,
+            "right_hand": 0.0010056038154289126
+          },
+          "ik_root_shift_m": 0.775008499622345,
+          "targets_gun_cm": {
+            "left_hand": [
+              254.662,
+              0.0,
+              129.883
+            ],
+            "right_hand": [
+              294.1268,
+              0.0,
+              136.4042
+            ]
+          },
+          "targets_kimodo_m": {
+            "left_hand": [
+              -0.9363261933775109,
+              1.2819452100000002,
+              0.4510250765355555
+            ],
+            "right_hand": [
+              -1.3108566707285154,
+              1.346309454,
+              0.34401636872098285
+            ]
+          },
+          "type": "hands"
+        },
+        {
+          "frame": 0,
+          "from": "AM_Gun_Ram_v0 frame 0",
+          "type": "start_pose"
+        }
+      ],
+      "diffusion_steps": 100,
+      "duration_s": 3.0,
+      "expect": null,
+      "expect_ok": true,
+      "family": "Gun",
+      "files": {
+        "bvh": "AM_Gun_Ram_v2.bvh",
+        "bvh_sha256": "405ff69b55495112ab77fb6fc05da1a7fff6245b5496905ba7dac8dd9e58cb95",
+        "npz": "AM_Gun_Ram_v2.npz",
+        "npz_sha256": "f0a2d9a78cf501a48066c0b3b7a1baf27888738e11d80ee3363006ada0b57050"
+      },
+      "foot_lock": {
+        "after_cm": 0.06510699167847633,
+        "before_cm": 2.868177741765976,
+        "max_leg_change_deg": 5.7441518722951415,
+        "phases": 17
+      },
+      "fps": 30.0,
+      "frames": 90,
+      "hand_error_limit_m": 0.05,
+      "hand_error_ok": true,
+      "loop": false,
+      "model": "Kimodo-SOMA-RP-v1",
+      "model_repo": "nvidia/Kimodo-SOMA-RP-v1",
+      "model_revision": "defbe1f34f5fd031eb0ccfe19f3f92a9880c287b",
+      "name": "AM_Gun_Ram",
+      "prompt": "A man holding a long wooden pole level across his body with both hands flips it end for end, rams it to his left into a waist-high horizontal tube with two firm strokes, pulls it out and steps clear.",
+      "root_motion": false,
+      "scale_soma_over_soldier": 0.987,
+      "seed": 334068,
+      "station": "station_MuzzleR",
+      "variant": 2
+    },
+    "AM_Gun_RunUp_v0": {
+      "attempts": [
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.0,
+          "seed": 324671
+        }
+      ],
+      "cfg": "model default",
+      "chain_to": null,
+      "constraints": [],
+      "diffusion_steps": 100,
+      "duration_s": 3.0,
+      "expect": {
+        "direction": "fwd",
+        "travel_min_m": 0.6
+      },
+      "expect_ok": true,
+      "family": "Gun",
+      "files": {
+        "bvh": "AM_Gun_RunUp_v0.bvh",
+        "bvh_sha256": "f9fc39bcf7abdfb8537c385aa154449aee9b5a126876513a68e04deb892fae5b",
+        "npz": "AM_Gun_RunUp_v0.npz",
+        "npz_sha256": "f193dafa1339d10a7e764e46ac1447ef51b7e8728af9f59d92a16595df1661c6"
+      },
+      "foot_lock": {
+        "after_cm": 0.048635355778969824,
+        "before_cm": 1.7633408308029175,
+        "max_leg_change_deg": 3.3303672791719436,
+        "phases": 16
+      },
+      "fps": 30.0,
+      "frames": 90,
+      "hand_error_limit_m": 0.05,
+      "hand_error_ok": true,
+      "loop": false,
+      "model": "Kimodo-SOMA-RP-v1",
+      "model_repo": "nvidia/Kimodo-SOMA-RP-v1",
+      "model_revision": "defbe1f34f5fd031eb0ccfe19f3f92a9880c287b",
+      "name": "AM_Gun_RunUp",
+      "prompt": "A man leans forward with both hands on a large waist-high wheel and pushes it hard, walking three slow heavy steps forward, then stops and stands.",
+      "root_motion": true,
+      "scale_soma_over_soldier": 0.987,
+      "seed": 324671,
+      "station": "Crew_3",
+      "variant": 0
+    },
+    "AM_Gun_RunUp_v1": {
+      "attempts": [
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.0,
+          "seed": 324672
+        }
+      ],
+      "cfg": "model default",
+      "chain_to": null,
+      "constraints": [],
+      "diffusion_steps": 100,
+      "duration_s": 3.0,
+      "expect": {
+        "direction": "fwd",
+        "travel_min_m": 0.6
+      },
+      "expect_ok": true,
+      "family": "Gun",
+      "files": {
+        "bvh": "AM_Gun_RunUp_v1.bvh",
+        "bvh_sha256": "0b9a6f63c8b70f7ff9f4f52962371190362b1de3810f3931fbaccc8b31bf1f03",
+        "npz": "AM_Gun_RunUp_v1.npz",
+        "npz_sha256": "45909da28e5dc0ebf13aa0fe67c7b3b035842f7a25f712c32a748e78efd46e1b"
+      },
+      "foot_lock": {
+        "after_cm": 0.04773375403601676,
+        "before_cm": 2.581063099205494,
+        "max_leg_change_deg": 5.696117696008086,
+        "phases": 12
+      },
+      "fps": 30.0,
+      "frames": 90,
+      "hand_error_limit_m": 0.05,
+      "hand_error_ok": true,
+      "loop": false,
+      "model": "Kimodo-SOMA-RP-v1",
+      "model_repo": "nvidia/Kimodo-SOMA-RP-v1",
+      "model_revision": "defbe1f34f5fd031eb0ccfe19f3f92a9880c287b",
+      "name": "AM_Gun_RunUp",
+      "prompt": "A man leans forward with both hands on a large waist-high wheel and pushes it hard, walking three slow heavy steps forward, then stops and stands.",
+      "root_motion": true,
+      "scale_soma_over_soldier": 0.987,
+      "seed": 324672,
+      "station": "Crew_3",
+      "variant": 1
+    },
+    "AM_Gun_Sponge_v0": {
+      "attempts": [
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.036379702190781196,
+          "seed": 240090
+        }
+      ],
+      "cfg": {
+        "cfg_type": "separated",
+        "cfg_weight": [
+          2.0,
+          4.0
+        ]
+      },
+      "chain_to": "AM_Gun_Ram",
+      "constraints": [
+        {
+          "achieved_error_m": {
+            "left_hand": 0.025292488793188402,
+            "right_hand": 0.036379702190781196
+          },
+          "frame": 45,
+          "full_body_from_v0": false,
+          "ik_residual_m": {
+            "left_hand": 0.0006542106857523322,
+            "right_hand": 0.0008824114338494837
+          },
+          "ik_root_shift_m": 0.5650464296340942,
+          "targets_gun_cm": {
+            "left_hand": [
+              254.662,
+              0.0,
+              129.883
+            ],
+            "right_hand": [
+              294.1268,
+              0.0,
+              136.4042
+            ]
+          },
+          "targets_kimodo_m": {
+            "left_hand": [
+              -0.9363261933775109,
+              1.2819452100000002,
+              0.4510250765355555
+            ],
+            "right_hand": [
+              -1.3108566707285154,
+              1.346309454,
+              0.34401636872098285
+            ]
+          },
+          "type": "hands"
+        },
+        {
+          "frame": 119,
+          "from": "AM_Gun_Ram_v0 frame 0",
+          "type": "end_pose"
+        }
+      ],
+      "diffusion_steps": 100,
+      "duration_s": 4.0,
+      "expect": null,
+      "expect_ok": true,
+      "family": "Gun",
+      "files": {
+        "bvh": "AM_Gun_Sponge_v0.bvh",
+        "bvh_sha256": "edd6c6346874916a7938859159aca8c7c16f07887b6c2233e897d89d9d630f71",
+        "npz": "AM_Gun_Sponge_v0.npz",
+        "npz_sha256": "19263904b2f82d3a7675890a1ca6067cb8308dcdfffb8c26f561d46c97225389"
+      },
+      "foot_lock": {
+        "after_cm": 0.16255242517217994,
+        "before_cm": 2.361220493912697,
+        "max_leg_change_deg": 9.216524811503291,
+        "phases": 24
+      },
+      "fps": 30.0,
+      "frames": 120,
+      "hand_error_limit_m": 0.05,
+      "hand_error_ok": true,
+      "loop": false,
+      "model": "Kimodo-SOMA-RP-v1",
+      "model_repo": "nvidia/Kimodo-SOMA-RP-v1",
+      "model_revision": "defbe1f34f5fd031eb0ccfe19f3f92a9880c287b",
+      "name": "AM_Gun_Sponge",
+      "prompt": "A man standing beside a waist-high horizontal tube holds a long wooden pole level across his body with both hands, thrusts it firmly to his left into the tube, twists it twice, then draws it back out to his right.",
+      "root_motion": false,
+      "scale_soma_over_soldier": 0.987,
+      "seed": 240090,
+      "station": "station_MuzzleR",
+      "variant": 0
+    },
+    "AM_Gun_Sponge_v1": {
+      "attempts": [
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.008118946245915805,
+          "seed": 240091
+        }
+      ],
+      "cfg": {
+        "cfg_type": "separated",
+        "cfg_weight": [
+          2.0,
+          4.0
+        ]
+      },
+      "chain_to": "AM_Gun_Ram",
+      "constraints": [
+        {
+          "achieved_error_m": {
+            "left_hand": 0.008118946245915805,
+            "right_hand": 0.007323153743797056
+          },
+          "frame": 45,
+          "full_body_from_v0": false,
+          "ik_residual_m": {
+            "left_hand": 0.0003071035607717931,
+            "right_hand": 0.000690983550157398
+          },
+          "ik_root_shift_m": 0.719002366065979,
+          "targets_gun_cm": {
+            "left_hand": [
+              254.662,
+              0.0,
+              129.883
+            ],
+            "right_hand": [
+              294.1268,
+              0.0,
+              136.4042
+            ]
+          },
+          "targets_kimodo_m": {
+            "left_hand": [
+              -0.9363261933775109,
+              1.2819452100000002,
+              0.4510250765355555
+            ],
+            "right_hand": [
+              -1.3108566707285154,
+              1.346309454,
+              0.34401636872098285
+            ]
+          },
+          "type": "hands"
+        },
+        {
+          "frame": 119,
+          "from": "AM_Gun_Ram_v0 frame 0",
+          "type": "end_pose"
+        }
+      ],
+      "diffusion_steps": 100,
+      "duration_s": 4.0,
+      "expect": null,
+      "expect_ok": true,
+      "family": "Gun",
+      "files": {
+        "bvh": "AM_Gun_Sponge_v1.bvh",
+        "bvh_sha256": "428a18d471c45285663fc8b9d9919a0847a5716e746b05306b0555ae3e50aadd",
+        "npz": "AM_Gun_Sponge_v1.npz",
+        "npz_sha256": "f0f8280bf6c906c843c20b4599099163c922c82e66cbc6642b44b12a0170635c"
+      },
+      "foot_lock": {
+        "after_cm": 0.07451511919498444,
+        "before_cm": 1.4698105864226818,
+        "max_leg_change_deg": 4.709045298086107,
+        "phases": 16
+      },
+      "fps": 30.0,
+      "frames": 120,
+      "hand_error_limit_m": 0.05,
+      "hand_error_ok": true,
+      "loop": false,
+      "model": "Kimodo-SOMA-RP-v1",
+      "model_repo": "nvidia/Kimodo-SOMA-RP-v1",
+      "model_revision": "defbe1f34f5fd031eb0ccfe19f3f92a9880c287b",
+      "name": "AM_Gun_Sponge",
+      "prompt": "A man standing beside a waist-high horizontal tube holds a long wooden pole level across his body with both hands, thrusts it firmly to his left into the tube, twists it twice, then draws it back out to his right.",
+      "root_motion": false,
+      "scale_soma_over_soldier": 0.987,
+      "seed": 240091,
+      "station": "station_MuzzleR",
+      "variant": 1
+    },
+    "AM_Gun_Sponge_v2": {
+      "attempts": [
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.013835984432518208,
+          "seed": 240092
+        }
+      ],
+      "cfg": {
+        "cfg_type": "separated",
+        "cfg_weight": [
+          2.0,
+          4.0
+        ]
+      },
+      "chain_to": "AM_Gun_Ram",
+      "constraints": [
+        {
+          "achieved_error_m": {
+            "left_hand": 0.013835984432518208,
+            "right_hand": 0.0030325379650294475
+          },
+          "frame": 45,
+          "full_body_from_v0": false,
+          "ik_residual_m": {
+            "left_hand": 3.295236820122227e-05,
+            "right_hand": 0.00024214708537328988
+          },
+          "ik_root_shift_m": 0.5262062549591064,
+          "targets_gun_cm": {
+            "left_hand": [
+              254.662,
+              0.0,
+              129.883
+            ],
+            "right_hand": [
+              294.1268,
+              0.0,
+              136.4042
+            ]
+          },
+          "targets_kimodo_m": {
+            "left_hand": [
+              -0.9363261933775109,
+              1.2819452100000002,
+              0.4510250765355555
+            ],
+            "right_hand": [
+              -1.3108566707285154,
+              1.346309454,
+              0.34401636872098285
+            ]
+          },
+          "type": "hands"
+        },
+        {
+          "frame": 119,
+          "from": "AM_Gun_Ram_v0 frame 0",
+          "type": "end_pose"
+        }
+      ],
+      "diffusion_steps": 100,
+      "duration_s": 4.0,
+      "expect": null,
+      "expect_ok": true,
+      "family": "Gun",
+      "files": {
+        "bvh": "AM_Gun_Sponge_v2.bvh",
+        "bvh_sha256": "935f483c3c2f790fff811d6ab61cffa2f54b9e362126f4638e34fc6c8f815033",
+        "npz": "AM_Gun_Sponge_v2.npz",
+        "npz_sha256": "5db918654c61b1f1c67e4a390ee4039568bdc08f9d0951b60ff2f0f540ed43cf"
+      },
+      "foot_lock": {
+        "after_cm": 0.04786205245181918,
+        "before_cm": 3.2425329089164734,
+        "max_leg_change_deg": 4.939903213258088,
+        "phases": 21
+      },
+      "fps": 30.0,
+      "frames": 120,
+      "hand_error_limit_m": 0.05,
+      "hand_error_ok": true,
+      "loop": false,
+      "model": "Kimodo-SOMA-RP-v1",
+      "model_repo": "nvidia/Kimodo-SOMA-RP-v1",
+      "model_revision": "defbe1f34f5fd031eb0ccfe19f3f92a9880c287b",
+      "name": "AM_Gun_Sponge",
+      "prompt": "A man standing beside a waist-high horizontal tube holds a long wooden pole level across his body with both hands, thrusts it firmly to his left into the tube, twists it twice, then draws it back out to his right.",
+      "root_motion": false,
+      "scale_soma_over_soldier": 0.987,
+      "seed": 240092,
+      "station": "station_MuzzleR",
+      "variant": 2
+    },
+    "AM_Gun_Traverse_v0": {
+      "attempts": [
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.0,
+          "seed": 625589
+        }
+      ],
+      "cfg": "model default",
+      "chain_to": null,
+      "constraints": [],
+      "diffusion_steps": 100,
+      "duration_s": 3.0,
+      "expect": null,
+      "expect_ok": true,
+      "family": "Gun",
+      "files": {
+        "bvh": "AM_Gun_Traverse_v0.bvh",
+        "bvh_sha256": "b90a3cf629955517d06b512dd929e79cdccb4fcd600c748fe8e0f4fb0d0b634e",
+        "npz": "AM_Gun_Traverse_v0.npz",
+        "npz_sha256": "0ca83fa49d312c0a7cf139c3e482900ecc329ded356982b2b1072f0dcbb62fae"
+      },
+      "foot_lock": {
+        "after_cm": 0.015007088950369507,
+        "before_cm": 2.52995528280735,
+        "max_leg_change_deg": 3.1416563420042394,
+        "phases": 6
+      },
+      "fps": 30.0,
+      "frames": 90,
+      "hand_error_limit_m": 0.05,
+      "hand_error_ok": true,
+      "loop": false,
+      "model": "Kimodo-SOMA-RP-v1",
+      "model_repo": "nvidia/Kimodo-SOMA-RP-v1",
+      "model_revision": "defbe1f34f5fd031eb0ccfe19f3f92a9880c287b",
+      "name": "AM_Gun_Traverse",
+      "prompt": "A man bends down, grips a heavy iron bar with both hands low near the ground and heaves it sideways to his right twice with great effort, then straightens up.",
+      "root_motion": false,
+      "scale_soma_over_soldier": 0.987,
+      "seed": 625589,
+      "station": "TrailL",
+      "variant": 0
+    },
+    "AM_Gun_Traverse_v1": {
+      "attempts": [
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.0,
+          "seed": 625590
+        }
+      ],
+      "cfg": "model default",
+      "chain_to": null,
+      "constraints": [],
+      "diffusion_steps": 100,
+      "duration_s": 3.0,
+      "expect": null,
+      "expect_ok": true,
+      "family": "Gun",
+      "files": {
+        "bvh": "AM_Gun_Traverse_v1.bvh",
+        "bvh_sha256": "23a319e6032d09d7bf75dcf5281c4b3ba7ca1570a3ac797222ec161b4bd98f97",
+        "npz": "AM_Gun_Traverse_v1.npz",
+        "npz_sha256": "410b658481df738a0a2e85266557a1cc2b433c00b375ce06f9de578cca97ae55"
+      },
+      "foot_lock": {
+        "after_cm": 0.022174355399329215,
+        "before_cm": 1.4179017394781113,
+        "max_leg_change_deg": 1.7772384825155139,
+        "phases": 6
+      },
+      "fps": 30.0,
+      "frames": 90,
+      "hand_error_limit_m": 0.05,
+      "hand_error_ok": true,
+      "loop": false,
+      "model": "Kimodo-SOMA-RP-v1",
+      "model_repo": "nvidia/Kimodo-SOMA-RP-v1",
+      "model_revision": "defbe1f34f5fd031eb0ccfe19f3f92a9880c287b",
+      "name": "AM_Gun_Traverse",
+      "prompt": "A man bends down, grips a heavy iron bar with both hands low near the ground and heaves it sideways to his right twice with great effort, then straightens up.",
+      "root_motion": false,
+      "scale_soma_over_soldier": 0.987,
+      "seed": 625590,
+      "station": "TrailL",
+      "variant": 1
+    },
+    "AM_Gun_Vent_v0": {
+      "attempts": [
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.03729238409909137,
+          "seed": 347397
+        }
+      ],
+      "cfg": {
+        "cfg_type": "separated",
+        "cfg_weight": [
+          2.0,
+          4.0
+        ]
+      },
+      "chain_to": "AM_Gun_Prime",
+      "constraints": [
+        {
+          "achieved_error_m": {
+            "right_hand": 0.012740937100681846
+          },
+          "frame": 40,
+          "full_body_from_v0": false,
+          "ik_residual_m": {
+            "right_hand": 0.0001864321093307808
+          },
+          "ik_root_shift_m": 0.0945560485124588,
+          "targets_gun_cm": {
+            "right_hand": [
+              10.0,
+              0.0,
+              100.3
+            ]
+          },
+          "targets_kimodo_m": {
+            "right_hand": [
+              -0.0,
+              0.989961,
+              0.4935
+            ]
+          },
+          "type": "hands"
+        },
+        {
+          "achieved_error_m": {
+            "right_hand": 0.03729238409909137
+          },
+          "frame": 95,
+          "full_body_from_v0": false,
+          "ik_residual_m": {
+            "right_hand": 0.00014446569548454136
+          },
+          "ik_root_shift_m": 0.08873017132282257,
+          "targets_gun_cm": {
+            "right_hand": [
+              10.0,
+              0.0,
+              100.3
+            ]
+          },
+          "targets_kimodo_m": {
+            "right_hand": [
+              -0.0,
+              0.989961,
+              0.4935
+            ]
+          },
+          "type": "hands"
+        },
+        {
+          "frame": 119,
+          "from": "AM_Gun_Prime_v0 frame 0",
+          "type": "end_pose"
+        }
+      ],
+      "diffusion_steps": 100,
+      "duration_s": 4.0,
+      "expect": null,
+      "expect_ok": true,
+      "family": "Gun",
+      "files": {
+        "bvh": "AM_Gun_Vent_v0.bvh",
+        "bvh_sha256": "3b4f356d95dd2e4ed1f8380c44bfd744bd3dbcf55f5f3f0f4a3175a23473323e",
+        "npz": "AM_Gun_Vent_v0.npz",
+        "npz_sha256": "c92791f51ba1166ed7ea27bb3e0685acf54ec9b14a57e0bbb50db043f390593d"
+      },
+      "foot_lock": {
+        "after_cm": 0.10497123003005981,
+        "before_cm": 3.016720525920391,
+        "max_leg_change_deg": 5.988747864121199,
+        "phases": 18
+      },
+      "fps": 30.0,
+      "frames": 120,
+      "hand_error_limit_m": 0.05,
+      "hand_error_ok": true,
+      "loop": false,
+      "model": "Kimodo-SOMA-RP-v1",
+      "model_repo": "nvidia/Kimodo-SOMA-RP-v1",
+      "model_revision": "defbe1f34f5fd031eb0ccfe19f3f92a9880c287b",
+      "name": "AM_Gun_Vent",
+      "prompt": "A man leans forward over a waist-high object, presses his right thumb down firmly on top of it and holds it there, standing still.",
+      "root_motion": false,
+      "scale_soma_over_soldier": 0.987,
+      "seed": 347397,
+      "station": "station_Vent",
+      "variant": 0
+    },
+    "AM_Gun_Vent_v1": {
+      "attempts": [
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.059365295332318685,
+          "seed": 347398
+        },
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.04329246735610324,
+          "seed": 348398
+        }
+      ],
+      "cfg": {
+        "cfg_type": "separated",
+        "cfg_weight": [
+          2.0,
+          4.0
+        ]
+      },
+      "chain_to": "AM_Gun_Prime",
+      "constraints": [
+        {
+          "achieved_error_m": {
+            "right_hand": 0.0025203164097348844
+          },
+          "frame": 40,
+          "full_body_from_v0": false,
+          "ik_residual_m": {
+            "right_hand": 0.00012079857697244734
+          },
+          "ik_root_shift_m": 0.11328721791505814,
+          "targets_gun_cm": {
+            "right_hand": [
+              10.0,
+              0.0,
+              100.3
+            ]
+          },
+          "targets_kimodo_m": {
+            "right_hand": [
+              -0.0,
+              0.989961,
+              0.4935
+            ]
+          },
+          "type": "hands"
+        },
+        {
+          "achieved_error_m": {
+            "right_hand": 0.04329246735610324
+          },
+          "frame": 95,
+          "full_body_from_v0": false,
+          "ik_residual_m": {
+            "right_hand": 0.0002587699855212122
+          },
+          "ik_root_shift_m": 0.1416587084531784,
+          "targets_gun_cm": {
+            "right_hand": [
+              10.0,
+              0.0,
+              100.3
+            ]
+          },
+          "targets_kimodo_m": {
+            "right_hand": [
+              -0.0,
+              0.989961,
+              0.4935
+            ]
+          },
+          "type": "hands"
+        },
+        {
+          "frame": 119,
+          "from": "AM_Gun_Prime_v0 frame 0",
+          "type": "end_pose"
+        }
+      ],
+      "diffusion_steps": 100,
+      "duration_s": 4.0,
+      "expect": null,
+      "expect_ok": true,
+      "family": "Gun",
+      "files": {
+        "bvh": "AM_Gun_Vent_v1.bvh",
+        "bvh_sha256": "71165bdc493643b9a8dc1ef89b0465f7fd1ceb4195c33f678e62379a6cc364a4",
+        "npz": "AM_Gun_Vent_v1.npz",
+        "npz_sha256": "a21642c788dc7cded5b8b11d3e73a7ba6457d7d15478d349633fd7f6d4bd91ad"
+      },
+      "foot_lock": {
+        "after_cm": 0.054668833035975695,
+        "before_cm": 1.6293752938508987,
+        "max_leg_change_deg": 4.14292401253134,
+        "phases": 21
+      },
+      "fps": 30.0,
+      "frames": 120,
+      "hand_error_limit_m": 0.05,
+      "hand_error_ok": true,
+      "loop": false,
+      "model": "Kimodo-SOMA-RP-v1",
+      "model_repo": "nvidia/Kimodo-SOMA-RP-v1",
+      "model_revision": "defbe1f34f5fd031eb0ccfe19f3f92a9880c287b",
+      "name": "AM_Gun_Vent",
+      "prompt": "A man leans forward over a waist-high object, presses his right thumb down firmly on top of it and holds it there, standing still.",
+      "root_motion": false,
+      "scale_soma_over_soldier": 0.987,
+      "seed": 348398,
+      "station": "station_Vent",
+      "variant": 1
+    },
+    "AM_Volley_Fire_v0": {
+      "attempts": [
+        {
+          "expect_failures": [
+            "travel 1.20 m > 0.40"
+          ],
+          "hand_error_m": 0.050976226938712975,
+          "seed": 672522
+        },
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.031637535364772755,
+          "seed": 673522
+        }
+      ],
+      "cfg": {
+        "cfg_type": "separated",
+        "cfg_weight": [
+          2.0,
+          4.0
+        ]
+      },
+      "chain_to": null,
+      "constraints": [
+        {
+          "achieved_error_m": {
+            "left_hand": 0.031637535364772755,
+            "right_hand": 0.028993102230525526
+          },
+          "frame": 0,
+          "full_body_from_v0": false,
+          "ik_residual_m": {
+            "left_hand": 0.002037190832197666,
+            "right_hand": 0.0025336635299026966
+          },
+          "ik_root_shift_m": 0.0022687739692628384,
+          "targets_gun_cm": {},
+          "targets_kimodo_m": {
+            "left_hand": [
+              -0.11844,
+              1.39167,
+              0.5922000000000001
+            ],
+            "right_hand": [
+              -0.15792,
+              1.3818000000000001,
+              0.23688
+            ]
+          },
+          "type": "hands"
+        },
+        {
+          "achieved_error_m": {
+            "left_hand": 0.017746263304190574,
+            "right_hand": 0.011468408214648259
+          },
+          "frame": 9,
+          "full_body_from_v0": false,
+          "ik_residual_m": {
+            "left_hand": 0.0006932994583621621,
+            "right_hand": 0.001270214794203639
+          },
+          "ik_root_shift_m": 0.0034124867524951696,
+          "targets_gun_cm": {},
+          "targets_kimodo_m": {
+            "left_hand": [
+              -0.11844,
+              1.39167,
+              0.5922000000000001
+            ],
+            "right_hand": [
+              -0.15792,
+              1.3818000000000001,
+              0.23688
+            ]
+          },
+          "type": "hands"
+        }
+      ],
+      "diffusion_steps": 100,
+      "duration_s": 1.5,
+      "expect": {
+        "end_hip_min_m": 0.8,
+        "travel_max_m": 0.4
+      },
+      "expect_ok": true,
+      "family": "Volley",
+      "files": {
+        "bvh": "AM_Volley_Fire_v0.bvh",
+        "bvh_sha256": "a5f10e1e17465158cb52d6a84ff6f619b47248956a7eb99acf8cac5f40916db8",
+        "npz": "AM_Volley_Fire_v0.npz",
+        "npz_sha256": "874eb0bdfec9dc85a87df6e3080a4fedb90a3e4769223786c8a5ff3fac70cc45"
+      },
+      "foot_lock": {
+        "after_cm": 0.05299184122122824,
+        "before_cm": 1.3783971779048443,
+        "max_leg_change_deg": 4.558215884260833,
+        "phases": 6
+      },
+      "fps": 30.0,
+      "frames": 45,
+      "hand_error_limit_m": 0.05,
+      "hand_error_ok": true,
+      "loop": false,
+      "model": "Kimodo-SOMA-RP-v1",
+      "model_repo": "nvidia/Kimodo-SOMA-RP-v1",
+      "model_revision": "defbe1f34f5fd031eb0ccfe19f3f92a9880c287b",
+      "name": "AM_Volley_Fire",
+      "prompt": "A soldier aiming a long gun from his right shoulder fires it, his shoulder jerks back sharply from the recoil, he holds the aim for a moment and then lowers the gun in front of him.",
+      "root_motion": false,
+      "scale_soma_over_soldier": 0.987,
+      "seed": 673522,
+      "station": null,
+      "variant": 0
+    },
+    "AM_Volley_Fire_v1": {
+      "attempts": [
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.030110013492215763,
+          "seed": 672523
+        }
+      ],
+      "cfg": {
+        "cfg_type": "separated",
+        "cfg_weight": [
+          2.0,
+          4.0
+        ]
+      },
+      "chain_to": null,
+      "constraints": [
+        {
+          "achieved_error_m": {
+            "left_hand": 0.030110013492215763,
+            "right_hand": 0.024234899056779245
+          },
+          "frame": 0,
+          "full_body_from_v0": true,
+          "ik_residual_m": {
+            "left_hand": 5.4028430895414203e-05,
+            "right_hand": 2.1819787434651516e-05
+          },
+          "ik_root_shift_m": 0.00018659609486348927,
+          "targets_gun_cm": {},
+          "targets_kimodo_m": {
+            "left_hand": [
+              -0.11844,
+              1.39167,
+              0.5922000000000001
+            ],
+            "right_hand": [
+              -0.15792,
+              1.3818000000000001,
+              0.23688
+            ]
+          },
+          "type": "hands"
+        },
+        {
+          "achieved_error_m": {
+            "left_hand": 0.02396429040609664,
+            "right_hand": 0.02495616913812179
+          },
+          "frame": 9,
+          "full_body_from_v0": false,
+          "ik_residual_m": {
+            "left_hand": 0.0002593330864328891,
+            "right_hand": 0.0009068542858585715
+          },
+          "ik_root_shift_m": 0.05379378795623779,
+          "targets_gun_cm": {},
+          "targets_kimodo_m": {
+            "left_hand": [
+              -0.11844,
+              1.39167,
+              0.5922000000000001
+            ],
+            "right_hand": [
+              -0.15792,
+              1.3818000000000001,
+              0.23688
+            ]
+          },
+          "type": "hands"
+        }
+      ],
+      "diffusion_steps": 100,
+      "duration_s": 1.5,
+      "expect": {
+        "end_hip_min_m": 0.8,
+        "travel_max_m": 0.4
+      },
+      "expect_ok": true,
+      "family": "Volley",
+      "files": {
+        "bvh": "AM_Volley_Fire_v1.bvh",
+        "bvh_sha256": "9a5cfcf383fc8440a52a7778d7af4f599c578a9f250e113800138600d6872aab",
+        "npz": "AM_Volley_Fire_v1.npz",
+        "npz_sha256": "fba225bf85747e6611610dd5de85d3e0c81c4f112ab54f55cc24865846a69633"
+      },
+      "foot_lock": {
+        "after_cm": 0.03832175279967487,
+        "before_cm": 1.0054799728095531,
+        "max_leg_change_deg": 1.4216454736858606,
+        "phases": 9
+      },
+      "fps": 30.0,
+      "frames": 45,
+      "hand_error_limit_m": 0.05,
+      "hand_error_ok": true,
+      "loop": false,
+      "model": "Kimodo-SOMA-RP-v1",
+      "model_repo": "nvidia/Kimodo-SOMA-RP-v1",
+      "model_revision": "defbe1f34f5fd031eb0ccfe19f3f92a9880c287b",
+      "name": "AM_Volley_Fire",
+      "prompt": "A soldier aiming a long gun from his right shoulder fires it, his shoulder jerks back sharply from the recoil, he holds the aim for a moment and then lowers the gun in front of him.",
+      "root_motion": false,
+      "scale_soma_over_soldier": 0.987,
+      "seed": 672523,
+      "station": null,
+      "variant": 1
+    },
+    "AM_Volley_Fire_v2": {
+      "attempts": [
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.030110013492215763,
+          "seed": 672524
+        }
+      ],
+      "cfg": {
+        "cfg_type": "separated",
+        "cfg_weight": [
+          2.0,
+          4.0
+        ]
+      },
+      "chain_to": null,
+      "constraints": [
+        {
+          "achieved_error_m": {
+            "left_hand": 0.030110013492215763,
+            "right_hand": 0.024234899056779245
+          },
+          "frame": 0,
+          "full_body_from_v0": true,
+          "ik_residual_m": {
+            "left_hand": 5.4028430895414203e-05,
+            "right_hand": 2.1819787434651516e-05
+          },
+          "ik_root_shift_m": 0.00018659609486348927,
+          "targets_gun_cm": {},
+          "targets_kimodo_m": {
+            "left_hand": [
+              -0.11844,
+              1.39167,
+              0.5922000000000001
+            ],
+            "right_hand": [
+              -0.15792,
+              1.3818000000000001,
+              0.23688
+            ]
+          },
+          "type": "hands"
+        },
+        {
+          "achieved_error_m": {
+            "left_hand": 0.028840421417438155,
+            "right_hand": 0.017844994351842166
+          },
+          "frame": 9,
+          "full_body_from_v0": false,
+          "ik_residual_m": {
+            "left_hand": 0.0006436832481995225,
+            "right_hand": 0.0003846166073344648
+          },
+          "ik_root_shift_m": 0.0263337604701519,
+          "targets_gun_cm": {},
+          "targets_kimodo_m": {
+            "left_hand": [
+              -0.11844,
+              1.39167,
+              0.5922000000000001
+            ],
+            "right_hand": [
+              -0.15792,
+              1.3818000000000001,
+              0.23688
+            ]
+          },
+          "type": "hands"
+        }
+      ],
+      "diffusion_steps": 100,
+      "duration_s": 1.5,
+      "expect": {
+        "end_hip_min_m": 0.8,
+        "travel_max_m": 0.4
+      },
+      "expect_ok": true,
+      "family": "Volley",
+      "files": {
+        "bvh": "AM_Volley_Fire_v2.bvh",
+        "bvh_sha256": "43ce59f70bc6bf5f7a36fcf30ebcadda2a3f8f29449008096f2a4faeb86d918b",
+        "npz": "AM_Volley_Fire_v2.npz",
+        "npz_sha256": "33e00f438333b24db034da059e5c7f5d7edbbe708aa5557b55ab30cfcc9f41ad"
+      },
+      "foot_lock": {
+        "after_cm": 0.04008294199593365,
+        "before_cm": 2.573327161371708,
+        "max_leg_change_deg": 3.2435203256048264,
+        "phases": 8
+      },
+      "fps": 30.0,
+      "frames": 45,
+      "hand_error_limit_m": 0.05,
+      "hand_error_ok": true,
+      "loop": false,
+      "model": "Kimodo-SOMA-RP-v1",
+      "model_repo": "nvidia/Kimodo-SOMA-RP-v1",
+      "model_revision": "defbe1f34f5fd031eb0ccfe19f3f92a9880c287b",
+      "name": "AM_Volley_Fire",
+      "prompt": "A soldier aiming a long gun from his right shoulder fires it, his shoulder jerks back sharply from the recoil, he holds the aim for a moment and then lowers the gun in front of him.",
+      "root_motion": false,
+      "scale_soma_over_soldier": 0.987,
+      "seed": 672524,
+      "station": null,
+      "variant": 2
+    },
+    "AM_Volley_Fire_v3": {
+      "attempts": [
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.030466574886882463,
+          "seed": 672525
+        }
+      ],
+      "cfg": {
+        "cfg_type": "separated",
+        "cfg_weight": [
+          2.0,
+          4.0
+        ]
+      },
+      "chain_to": null,
+      "constraints": [
+        {
+          "achieved_error_m": {
+            "left_hand": 0.030110013492215763,
+            "right_hand": 0.024234899056779245
+          },
+          "frame": 0,
+          "full_body_from_v0": true,
+          "ik_residual_m": {
+            "left_hand": 5.4028430895414203e-05,
+            "right_hand": 2.1819787434651516e-05
+          },
+          "ik_root_shift_m": 0.00018659609486348927,
+          "targets_gun_cm": {},
+          "targets_kimodo_m": {
+            "left_hand": [
+              -0.11844,
+              1.39167,
+              0.5922000000000001
+            ],
+            "right_hand": [
+              -0.15792,
+              1.3818000000000001,
+              0.23688
+            ]
+          },
+          "type": "hands"
+        },
+        {
+          "achieved_error_m": {
+            "left_hand": 0.030466574886882463,
+            "right_hand": 0.02331539827966178
+          },
+          "frame": 9,
+          "full_body_from_v0": false,
+          "ik_residual_m": {
+            "left_hand": 0.0003010708896908909,
+            "right_hand": 0.0003753814089577645
+          },
+          "ik_root_shift_m": 0.06445156037807465,
+          "targets_gun_cm": {},
+          "targets_kimodo_m": {
+            "left_hand": [
+              -0.11844,
+              1.39167,
+              0.5922000000000001
+            ],
+            "right_hand": [
+              -0.15792,
+              1.3818000000000001,
+              0.23688
+            ]
+          },
+          "type": "hands"
+        }
+      ],
+      "diffusion_steps": 100,
+      "duration_s": 1.5,
+      "expect": {
+        "end_hip_min_m": 0.8,
+        "travel_max_m": 0.4
+      },
+      "expect_ok": true,
+      "family": "Volley",
+      "files": {
+        "bvh": "AM_Volley_Fire_v3.bvh",
+        "bvh_sha256": "22f5db557ec68b139a326ba4543376040c56d13d1c27d0b5abbdb2faa54e7f22",
+        "npz": "AM_Volley_Fire_v3.npz",
+        "npz_sha256": "3505b96ffcca5a5b03a1ca4e05c3d7792746c88249124091d5eb0bde4d7a12d9"
+      },
+      "foot_lock": {
+        "after_cm": 0.030702268122695386,
+        "before_cm": 3.9044681936502457,
+        "max_leg_change_deg": 4.040087366956472,
+        "phases": 14
+      },
+      "fps": 30.0,
+      "frames": 45,
+      "hand_error_limit_m": 0.05,
+      "hand_error_ok": true,
+      "loop": false,
+      "model": "Kimodo-SOMA-RP-v1",
+      "model_repo": "nvidia/Kimodo-SOMA-RP-v1",
+      "model_revision": "defbe1f34f5fd031eb0ccfe19f3f92a9880c287b",
+      "name": "AM_Volley_Fire",
+      "prompt": "A soldier aiming a long gun from his right shoulder fires it, his shoulder jerks back sharply from the recoil, he holds the aim for a moment and then lowers the gun in front of him.",
+      "root_motion": false,
+      "scale_soma_over_soldier": 0.987,
+      "seed": 672525,
+      "station": null,
+      "variant": 3
+    },
+    "AM_Volley_Kneel_Fire_v0": {
+      "attempts": [
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.07141781385460676,
+          "seed": 765701
+        },
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.06431214177814257,
+          "seed": 766701
+        },
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.07833867626525677,
+          "seed": 767701
+        },
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.05737795194048983,
+          "seed": 768701
+        },
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.06217236712194824,
+          "seed": 769701
+        },
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.0651898564926181,
+          "seed": 770701
+        },
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.06613463487147167,
+          "seed": 771701
+        },
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.08108793582756367,
+          "seed": 772701
+        },
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.05494341543295869,
+          "seed": 773701
+        },
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.04332347767479713,
+          "seed": 774701
+        }
+      ],
+      "cfg": {
+        "cfg_type": "separated",
+        "cfg_weight": [
+          2.0,
+          4.0
+        ]
+      },
+      "chain_to": null,
+      "constraints": [
+        {
+          "achieved_error_m": {
+            "left_hand": 0.04332347767479713,
+            "right_hand": 0.03488901559489035
+          },
+          "frame": 0,
+          "full_body_from_v0": false,
+          "ik_residual_m": {
+            "left_hand": 0.0005237195291556418,
+            "right_hand": 0.00016043445793911815
+          },
+          "ik_root_shift_m": 0.001888076774775982,
+          "targets_gun_cm": {},
+          "targets_kimodo_m": {
+            "left_hand": [
+              -0.11844,
+              1.02648,
+              0.5922000000000001
+            ],
+            "right_hand": [
+              -0.15792,
+              1.01661,
+              0.23688
+            ]
+          },
+          "type": "hands"
+        },
+        {
+          "achieved_error_m": {
+            "left_hand": 0.03133941416756615,
+            "right_hand": 0.037169955650266845
+          },
+          "frame": 9,
+          "full_body_from_v0": false,
+          "ik_residual_m": {
+            "left_hand": 0.000523981056176126,
+            "right_hand": 0.00016623089322820306
+          },
+          "ik_root_shift_m": 0.009585178457200527,
+          "targets_gun_cm": {},
+          "targets_kimodo_m": {
+            "left_hand": [
+              -0.11844,
+              1.02648,
+              0.5922000000000001
+            ],
+            "right_hand": [
+              -0.15792,
+              1.01661,
+              0.23688
+            ]
+          },
+          "type": "hands"
+        }
+      ],
+      "diffusion_steps": 100,
+      "duration_s": 1.5,
+      "expect": {
+        "end_hip_max_m": 0.75,
+        "start_hip_max_m": 0.75,
+        "travel_max_m": 0.4
+      },
+      "expect_ok": true,
+      "family": "Volley",
+      "files": {
+        "bvh": "AM_Volley_Kneel_Fire_v0.bvh",
+        "bvh_sha256": "f4465e0e2cd1938d25cef24cfa929cc8cd404d65fac6c5c7d0e507384bc25380",
+        "npz": "AM_Volley_Kneel_Fire_v0.npz",
+        "npz_sha256": "813e0de59003f6581315fc38cecff6dd257c7150407b9e1753ba086807370b72"
+      },
+      "foot_lock": {
+        "after_cm": 0.07549350848421454,
+        "before_cm": 2.1785205230116844,
+        "max_leg_change_deg": 6.502616903181374,
+        "phases": 5
+      },
+      "fps": 30.0,
+      "frames": 45,
+      "hand_error_limit_m": 0.05,
+      "hand_error_ok": true,
+      "loop": false,
+      "model": "Kimodo-SOMA-RP-v1",
+      "model_repo": "nvidia/Kimodo-SOMA-RP-v1",
+      "model_revision": "defbe1f34f5fd031eb0ccfe19f3f92a9880c287b",
+      "name": "AM_Volley_Kneel_Fire",
+      "prompt": "A soldier kneeling on his right knee and aiming a long gun from his right shoulder fires it, his shoulder jerks back from the recoil, he holds the aim, then lowers the gun, staying on one knee.",
+      "root_motion": false,
+      "scale_soma_over_soldier": 0.987,
+      "seed": 774701,
+      "station": null,
+      "variant": 0
+    },
+    "AM_Volley_Kneel_Fire_v1": {
+      "attempts": [
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.040540508627769506,
+          "seed": 765702
+        }
+      ],
+      "cfg": {
+        "cfg_type": "separated",
+        "cfg_weight": [
+          2.0,
+          4.0
+        ]
+      },
+      "chain_to": null,
+      "constraints": [
+        {
+          "achieved_error_m": {
+            "left_hand": 0.01873201214106264,
+            "right_hand": 0.030684371516140507
+          },
+          "frame": 0,
+          "full_body_from_v0": true,
+          "ik_residual_m": {
+            "left_hand": 0.01654406636953354,
+            "right_hand": 0.012489006854593754
+          },
+          "ik_root_shift_m": 0.0016248824540525675,
+          "targets_gun_cm": {},
+          "targets_kimodo_m": {
+            "left_hand": [
+              -0.11844,
+              1.02648,
+              0.5922000000000001
+            ],
+            "right_hand": [
+              -0.15792,
+              1.01661,
+              0.23688
+            ]
+          },
+          "type": "hands"
+        },
+        {
+          "achieved_error_m": {
+            "left_hand": 0.030141003101137813,
+            "right_hand": 0.040540508627769506
+          },
+          "frame": 9,
+          "full_body_from_v0": false,
+          "ik_residual_m": {
+            "left_hand": 0.0004337183781899512,
+            "right_hand": 0.0005575753166340292
+          },
+          "ik_root_shift_m": 0.046027179807424545,
+          "targets_gun_cm": {},
+          "targets_kimodo_m": {
+            "left_hand": [
+              -0.11844,
+              1.02648,
+              0.5922000000000001
+            ],
+            "right_hand": [
+              -0.15792,
+              1.01661,
+              0.23688
+            ]
+          },
+          "type": "hands"
+        }
+      ],
+      "diffusion_steps": 100,
+      "duration_s": 1.5,
+      "expect": {
+        "end_hip_max_m": 0.75,
+        "start_hip_max_m": 0.75,
+        "travel_max_m": 0.4
+      },
+      "expect_ok": true,
+      "family": "Volley",
+      "files": {
+        "bvh": "AM_Volley_Kneel_Fire_v1.bvh",
+        "bvh_sha256": "d06cbb6982954d0e19dd81d515e88f0d1946cbf4d3ac53ab87a552b9d67a2456",
+        "npz": "AM_Volley_Kneel_Fire_v1.npz",
+        "npz_sha256": "3e9e3c17bc02b894f3d4098ff19e0607609354d8114b5cf58d87633b358b8e70"
+      },
+      "foot_lock": {
+        "after_cm": 0.06108770030550659,
+        "before_cm": 7.94021338224411,
+        "max_leg_change_deg": 28.517593604421617,
+        "phases": 5
+      },
+      "fps": 30.0,
+      "frames": 45,
+      "hand_error_limit_m": 0.05,
+      "hand_error_ok": true,
+      "loop": false,
+      "model": "Kimodo-SOMA-RP-v1",
+      "model_repo": "nvidia/Kimodo-SOMA-RP-v1",
+      "model_revision": "defbe1f34f5fd031eb0ccfe19f3f92a9880c287b",
+      "name": "AM_Volley_Kneel_Fire",
+      "prompt": "A soldier kneeling on his right knee and aiming a long gun from his right shoulder fires it, his shoulder jerks back from the recoil, he holds the aim, then lowers the gun, staying on one knee.",
+      "root_motion": false,
+      "scale_soma_over_soldier": 0.987,
+      "seed": 765702,
+      "station": null,
+      "variant": 1
+    },
+    "AM_Volley_Kneel_Fire_v2": {
+      "attempts": [
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.05222275416529778,
+          "seed": 765703
+        },
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.08053538081606276,
+          "seed": 766703
+        },
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.08173272822854222,
+          "seed": 767703
+        },
+        {
+          "expect_failures": [
+            "travel 0.51 m > 0.40"
+          ],
+          "hand_error_m": 0.07292248851955627,
+          "seed": 768703
+        },
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.04571088028704689,
+          "seed": 769703
+        }
+      ],
+      "cfg": {
+        "cfg_type": "separated",
+        "cfg_weight": [
+          2.0,
+          4.0
+        ]
+      },
+      "chain_to": null,
+      "constraints": [
+        {
+          "achieved_error_m": {
+            "left_hand": 0.01873201214106264,
+            "right_hand": 0.030684371516140507
+          },
+          "frame": 0,
+          "full_body_from_v0": true,
+          "ik_residual_m": {
+            "left_hand": 0.01654406636953354,
+            "right_hand": 0.012489006854593754
+          },
+          "ik_root_shift_m": 0.0016248824540525675,
+          "targets_gun_cm": {},
+          "targets_kimodo_m": {
+            "left_hand": [
+              -0.11844,
+              1.02648,
+              0.5922000000000001
+            ],
+            "right_hand": [
+              -0.15792,
+              1.01661,
+              0.23688
+            ]
+          },
+          "type": "hands"
+        },
+        {
+          "achieved_error_m": {
+            "left_hand": 0.014429119085004168,
+            "right_hand": 0.04571088028704689
+          },
+          "frame": 9,
+          "full_body_from_v0": false,
+          "ik_residual_m": {
+            "left_hand": 0.0007513494347222149,
+            "right_hand": 0.00015552340482827276
+          },
+          "ik_root_shift_m": 0.06945914775133133,
+          "targets_gun_cm": {},
+          "targets_kimodo_m": {
+            "left_hand": [
+              -0.11844,
+              1.02648,
+              0.5922000000000001
+            ],
+            "right_hand": [
+              -0.15792,
+              1.01661,
+              0.23688
+            ]
+          },
+          "type": "hands"
+        }
+      ],
+      "diffusion_steps": 100,
+      "duration_s": 1.5,
+      "expect": {
+        "end_hip_max_m": 0.75,
+        "start_hip_max_m": 0.75,
+        "travel_max_m": 0.4
+      },
+      "expect_ok": true,
+      "family": "Volley",
+      "files": {
+        "bvh": "AM_Volley_Kneel_Fire_v2.bvh",
+        "bvh_sha256": "9e8015bd660881d67daeea7a6104bcfcd444a6f129de1a29148f04aead08979a",
+        "npz": "AM_Volley_Kneel_Fire_v2.npz",
+        "npz_sha256": "d2bd1eaec019fe8493e952acd2b7bea485b92f879becd55278a11a44a1f92120"
+      },
+      "foot_lock": {
+        "after_cm": 0.05822815583087504,
+        "before_cm": 3.849874809384346,
+        "max_leg_change_deg": 9.270984490549564,
+        "phases": 7
+      },
+      "fps": 30.0,
+      "frames": 45,
+      "hand_error_limit_m": 0.05,
+      "hand_error_ok": true,
+      "loop": false,
+      "model": "Kimodo-SOMA-RP-v1",
+      "model_repo": "nvidia/Kimodo-SOMA-RP-v1",
+      "model_revision": "defbe1f34f5fd031eb0ccfe19f3f92a9880c287b",
+      "name": "AM_Volley_Kneel_Fire",
+      "prompt": "A soldier kneeling on his right knee and aiming a long gun from his right shoulder fires it, his shoulder jerks back from the recoil, he holds the aim, then lowers the gun, staying on one knee.",
+      "root_motion": false,
+      "scale_soma_over_soldier": 0.987,
+      "seed": 769703,
+      "station": null,
+      "variant": 2
+    },
+    "AM_Volley_MakeReady_v0": {
+      "attempts": [
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.06299433687876725,
+          "seed": 641161
+        },
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.02224238757829023,
+          "seed": 642161
+        }
+      ],
+      "cfg": {
+        "cfg_type": "separated",
+        "cfg_weight": [
+          2.0,
+          4.0
+        ]
+      },
+      "chain_to": "AM_Volley_Present",
+      "constraints": [
+        {
+          "achieved_error_m": {
+            "left_hand": 0.013163778637736864,
+            "right_hand": 0.016013087020314426
+          },
+          "frame": 6,
+          "full_body_from_v0": false,
+          "ik_residual_m": {
+            "left_hand": 8.43197267386131e-05,
+            "right_hand": 0.00021922950691077858
+          },
+          "ik_root_shift_m": 0.0005164716858416796,
+          "targets_gun_cm": {},
+          "targets_kimodo_m": {
+            "left_hand": [
+              0.07896,
+              1.32258,
+              0.27636
+            ],
+            "right_hand": [
+              0.03948,
+              1.06596,
+              0.26649
+            ]
+          },
+          "type": "hands"
+        },
+        {
+          "achieved_error_m": {
+            "left_hand": 0.02224238757829023,
+            "right_hand": 0.021825149878228024
+          },
+          "frame": 42,
+          "full_body_from_v0": false,
+          "ik_residual_m": {
+            "left_hand": 0.00012335815699771047,
+            "right_hand": 9.45301799220033e-05
+          },
+          "ik_root_shift_m": 3.094715066254139e-05,
+          "targets_gun_cm": {},
+          "targets_kimodo_m": {
+            "left_hand": [
+              0.05922,
+              1.46076,
+              0.29610000000000003
+            ],
+            "right_hand": [
+              0.049350000000000005,
+              1.1844000000000001,
+              0.27636
+            ]
+          },
+          "type": "hands"
+        },
+        {
+          "frame": 59,
+          "from": "AM_Volley_Present_v0 frame 0",
+          "type": "end_pose"
+        }
+      ],
+      "diffusion_steps": 100,
+      "duration_s": 2.0,
+      "expect": {
+        "end_hip_min_m": 0.8,
+        "travel_max_m": 0.4
+      },
+      "expect_ok": true,
+      "family": "Volley",
+      "files": {
+        "bvh": "AM_Volley_MakeReady_v0.bvh",
+        "bvh_sha256": "ad7b40f2bb726fd1c81d20413d44d93480505b56bc62c604e4df5a0d4784e1a2",
+        "npz": "AM_Volley_MakeReady_v0.npz",
+        "npz_sha256": "463adafb63f53364c7e6d71fdd16ceff8019e1bd1359dbc31df176e5b935dc95"
+      },
+      "foot_lock": {
+        "after_cm": 0.07756673148833215,
+        "before_cm": 5.3207483142614365,
+        "max_leg_change_deg": 9.256554003220797,
+        "phases": 6
+      },
+      "fps": 30.0,
+      "frames": 60,
+      "hand_error_limit_m": 0.05,
+      "hand_error_ok": true,
+      "loop": false,
+      "model": "Kimodo-SOMA-RP-v1",
+      "model_repo": "nvidia/Kimodo-SOMA-RP-v1",
+      "model_revision": "defbe1f34f5fd031eb0ccfe19f3f92a9880c287b",
+      "name": "AM_Volley_MakeReady",
+      "prompt": "A soldier standing at attention with a long gun resting upright against his left shoulder brings it up vertically in front of his chest with both hands and pulls back its hammer with his right thumb.",
+      "root_motion": false,
+      "scale_soma_over_soldier": 0.987,
+      "seed": 642161,
+      "station": null,
+      "variant": 0
+    },
+    "AM_Volley_MakeReady_v1": {
+      "attempts": [
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.021933057369924635,
+          "seed": 641162
+        }
+      ],
+      "cfg": {
+        "cfg_type": "separated",
+        "cfg_weight": [
+          2.0,
+          4.0
+        ]
+      },
+      "chain_to": "AM_Volley_Present",
+      "constraints": [
+        {
+          "achieved_error_m": {
+            "left_hand": 0.014684087891257587,
+            "right_hand": 0.01988793565104774
+          },
+          "frame": 6,
+          "full_body_from_v0": false,
+          "ik_residual_m": {
+            "left_hand": 0.000470719242002815,
+            "right_hand": 0.0003879171272274107
+          },
+          "ik_root_shift_m": 0.004002447705715895,
+          "targets_gun_cm": {},
+          "targets_kimodo_m": {
+            "left_hand": [
+              0.07896,
+              1.32258,
+              0.27636
+            ],
+            "right_hand": [
+              0.03948,
+              1.06596,
+              0.26649
+            ]
+          },
+          "type": "hands"
+        },
+        {
+          "achieved_error_m": {
+            "left_hand": 0.02175448838590738,
+            "right_hand": 0.021933057369924635
+          },
+          "frame": 42,
+          "full_body_from_v0": false,
+          "ik_residual_m": {
+            "left_hand": 0.00012335815699771047,
+            "right_hand": 9.45301799220033e-05
+          },
+          "ik_root_shift_m": 3.094715066254139e-05,
+          "targets_gun_cm": {},
+          "targets_kimodo_m": {
+            "left_hand": [
+              0.05922,
+              1.46076,
+              0.29610000000000003
+            ],
+            "right_hand": [
+              0.049350000000000005,
+              1.1844000000000001,
+              0.27636
+            ]
+          },
+          "type": "hands"
+        },
+        {
+          "frame": 59,
+          "from": "AM_Volley_Present_v0 frame 0",
+          "type": "end_pose"
+        }
+      ],
+      "diffusion_steps": 100,
+      "duration_s": 2.0,
+      "expect": {
+        "end_hip_min_m": 0.8,
+        "travel_max_m": 0.4
+      },
+      "expect_ok": true,
+      "family": "Volley",
+      "files": {
+        "bvh": "AM_Volley_MakeReady_v1.bvh",
+        "bvh_sha256": "043e249a3a8fa0d9cefe3903bc70db13a8af2d53ed4fec4ad32890d7fadab0fe",
+        "npz": "AM_Volley_MakeReady_v1.npz",
+        "npz_sha256": "36b0a57764c5ee4c3d57df2b91bea653abe4cee5325a7d2deb1bb6405684ef59"
+      },
+      "foot_lock": {
+        "after_cm": 0.10644500143826008,
+        "before_cm": 6.387514621019363,
+        "max_leg_change_deg": 10.359008401161432,
+        "phases": 6
+      },
+      "fps": 30.0,
+      "frames": 60,
+      "hand_error_limit_m": 0.05,
+      "hand_error_ok": true,
+      "loop": false,
+      "model": "Kimodo-SOMA-RP-v1",
+      "model_repo": "nvidia/Kimodo-SOMA-RP-v1",
+      "model_revision": "defbe1f34f5fd031eb0ccfe19f3f92a9880c287b",
+      "name": "AM_Volley_MakeReady",
+      "prompt": "A soldier standing at attention with a long gun resting upright against his left shoulder brings it up vertically in front of his chest with both hands and pulls back its hammer with his right thumb.",
+      "root_motion": false,
+      "scale_soma_over_soldier": 0.987,
+      "seed": 641162,
+      "station": null,
+      "variant": 1
+    },
+    "AM_Volley_MakeReady_v2": {
+      "attempts": [
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.043513375418685656,
+          "seed": 641163
+        }
+      ],
+      "cfg": {
+        "cfg_type": "separated",
+        "cfg_weight": [
+          2.0,
+          4.0
+        ]
+      },
+      "chain_to": "AM_Volley_Present",
+      "constraints": [
+        {
+          "achieved_error_m": {
+            "left_hand": 0.03784464371387142,
+            "right_hand": 0.043513375418685656
+          },
+          "frame": 6,
+          "full_body_from_v0": false,
+          "ik_residual_m": {
+            "left_hand": 0.0008721522171981633,
+            "right_hand": 0.000555501552298665
+          },
+          "ik_root_shift_m": 0.0067594218999147415,
+          "targets_gun_cm": {},
+          "targets_kimodo_m": {
+            "left_hand": [
+              0.07896,
+              1.32258,
+              0.27636
+            ],
+            "right_hand": [
+              0.03948,
+              1.06596,
+              0.26649
+            ]
+          },
+          "type": "hands"
+        },
+        {
+          "achieved_error_m": {
+            "left_hand": 0.015032380805501244,
+            "right_hand": 0.02279768181886684
+          },
+          "frame": 42,
+          "full_body_from_v0": false,
+          "ik_residual_m": {
+            "left_hand": 0.00012335815699771047,
+            "right_hand": 9.45301799220033e-05
+          },
+          "ik_root_shift_m": 3.094715066254139e-05,
+          "targets_gun_cm": {},
+          "targets_kimodo_m": {
+            "left_hand": [
+              0.05922,
+              1.46076,
+              0.29610000000000003
+            ],
+            "right_hand": [
+              0.049350000000000005,
+              1.1844000000000001,
+              0.27636
+            ]
+          },
+          "type": "hands"
+        },
+        {
+          "frame": 59,
+          "from": "AM_Volley_Present_v0 frame 0",
+          "type": "end_pose"
+        }
+      ],
+      "diffusion_steps": 100,
+      "duration_s": 2.0,
+      "expect": {
+        "end_hip_min_m": 0.8,
+        "travel_max_m": 0.4
+      },
+      "expect_ok": true,
+      "family": "Volley",
+      "files": {
+        "bvh": "AM_Volley_MakeReady_v2.bvh",
+        "bvh_sha256": "d981656b5b48c87309899702107d25c37f8ca0a435c9853e3e15ffff660bb847",
+        "npz": "AM_Volley_MakeReady_v2.npz",
+        "npz_sha256": "a03d8dcd3057e6bf3b50ed275e2284be62e828e00c81d9afb82d232e6467bee7"
+      },
+      "foot_lock": {
+        "after_cm": 0.06598124164156616,
+        "before_cm": 4.533302411437035,
+        "max_leg_change_deg": 8.324285782134533,
+        "phases": 6
+      },
+      "fps": 30.0,
+      "frames": 60,
+      "hand_error_limit_m": 0.05,
+      "hand_error_ok": true,
+      "loop": false,
+      "model": "Kimodo-SOMA-RP-v1",
+      "model_repo": "nvidia/Kimodo-SOMA-RP-v1",
+      "model_revision": "defbe1f34f5fd031eb0ccfe19f3f92a9880c287b",
+      "name": "AM_Volley_MakeReady",
+      "prompt": "A soldier standing at attention with a long gun resting upright against his left shoulder brings it up vertically in front of his chest with both hands and pulls back its hammer with his right thumb.",
+      "root_motion": false,
+      "scale_soma_over_soldier": 0.987,
+      "seed": 641163,
+      "station": null,
+      "variant": 2
+    },
+    "AM_Volley_MakeReady_v3": {
+      "attempts": [
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.02548535976752078,
+          "seed": 641164
+        }
+      ],
+      "cfg": {
+        "cfg_type": "separated",
+        "cfg_weight": [
+          2.0,
+          4.0
+        ]
+      },
+      "chain_to": "AM_Volley_Present",
+      "constraints": [
+        {
+          "achieved_error_m": {
+            "left_hand": 0.014330836811108113,
+            "right_hand": 0.013732449341365818
+          },
+          "frame": 6,
+          "full_body_from_v0": false,
+          "ik_residual_m": {
+            "left_hand": 6.117282464401796e-05,
+            "right_hand": 0.0002235451538581401
+          },
+          "ik_root_shift_m": 0.00042155972914770246,
+          "targets_gun_cm": {},
+          "targets_kimodo_m": {
+            "left_hand": [
+              0.07896,
+              1.32258,
+              0.27636
+            ],
+            "right_hand": [
+              0.03948,
+              1.06596,
+              0.26649
+            ]
+          },
+          "type": "hands"
+        },
+        {
+          "achieved_error_m": {
+            "left_hand": 0.018871656693702856,
+            "right_hand": 0.02548535976752078
+          },
+          "frame": 42,
+          "full_body_from_v0": false,
+          "ik_residual_m": {
+            "left_hand": 0.00012335815699771047,
+            "right_hand": 9.45301799220033e-05
+          },
+          "ik_root_shift_m": 3.094715066254139e-05,
+          "targets_gun_cm": {},
+          "targets_kimodo_m": {
+            "left_hand": [
+              0.05922,
+              1.46076,
+              0.29610000000000003
+            ],
+            "right_hand": [
+              0.049350000000000005,
+              1.1844000000000001,
+              0.27636
+            ]
+          },
+          "type": "hands"
+        },
+        {
+          "frame": 59,
+          "from": "AM_Volley_Present_v0 frame 0",
+          "type": "end_pose"
+        }
+      ],
+      "diffusion_steps": 100,
+      "duration_s": 2.0,
+      "expect": {
+        "end_hip_min_m": 0.8,
+        "travel_max_m": 0.4
+      },
+      "expect_ok": true,
+      "family": "Volley",
+      "files": {
+        "bvh": "AM_Volley_MakeReady_v3.bvh",
+        "bvh_sha256": "e9d16663b40642b7252351bdca543a1a017b405a7cfd1b3f65bb005c8b85d436",
+        "npz": "AM_Volley_MakeReady_v3.npz",
+        "npz_sha256": "575d54bb767fa8c8240322994bac9ae3bd3ff2545f0cb819a44d75c2e1d53a88"
+      },
+      "foot_lock": {
+        "after_cm": 0.049666891572996974,
+        "before_cm": 2.8185801580548286,
+        "max_leg_change_deg": 7.618669785735011,
+        "phases": 6
+      },
+      "fps": 30.0,
+      "frames": 60,
+      "hand_error_limit_m": 0.05,
+      "hand_error_ok": true,
+      "loop": false,
+      "model": "Kimodo-SOMA-RP-v1",
+      "model_repo": "nvidia/Kimodo-SOMA-RP-v1",
+      "model_revision": "defbe1f34f5fd031eb0ccfe19f3f92a9880c287b",
+      "name": "AM_Volley_MakeReady",
+      "prompt": "A soldier standing at attention with a long gun resting upright against his left shoulder brings it up vertically in front of his chest with both hands and pulls back its hammer with his right thumb.",
+      "root_motion": false,
+      "scale_soma_over_soldier": 0.987,
+      "seed": 641164,
+      "station": null,
+      "variant": 3
+    },
+    "AM_Volley_Present_v0": {
+      "attempts": [
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.05135368790548089,
+          "seed": 780885
+        },
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.0652428802438946,
+          "seed": 781885
+        },
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.04100169781531646,
+          "seed": 782885
+        }
+      ],
+      "cfg": {
+        "cfg_type": "separated",
+        "cfg_weight": [
+          2.0,
+          4.0
+        ]
+      },
+      "chain_to": "AM_Volley_Fire",
+      "constraints": [
+        {
+          "achieved_error_m": {
+            "left_hand": 0.030212749481023603,
+            "right_hand": 0.024102997932439557
+          },
+          "frame": 0,
+          "full_body_from_v0": false,
+          "ik_residual_m": {
+            "left_hand": 0.0001315077388426289,
+            "right_hand": 0.00032628196640871465
+          },
+          "ik_root_shift_m": 0.0015303988475352526,
+          "targets_gun_cm": {},
+          "targets_kimodo_m": {
+            "left_hand": [
+              0.05922,
+              1.46076,
+              0.29610000000000003
+            ],
+            "right_hand": [
+              0.049350000000000005,
+              1.1844000000000001,
+              0.27636
+            ]
+          },
+          "type": "hands"
+        },
+        {
+          "achieved_error_m": {
+            "left_hand": 0.038366338790786304,
+            "right_hand": 0.04100169781531646
+          },
+          "frame": 34,
+          "full_body_from_v0": false,
+          "ik_residual_m": {
+            "left_hand": 5.4028430895414203e-05,
+            "right_hand": 2.1819787434651516e-05
+          },
+          "ik_root_shift_m": 0.00018659609486348927,
+          "targets_gun_cm": {},
+          "targets_kimodo_m": {
+            "left_hand": [
+              -0.11844,
+              1.39167,
+              0.5922000000000001
+            ],
+            "right_hand": [
+              -0.15792,
+              1.3818000000000001,
+              0.23688
+            ]
+          },
+          "type": "hands"
+        },
+        {
+          "frame": 44,
+          "from": "AM_Volley_Fire_v0 frame 0",
+          "type": "end_pose"
+        }
+      ],
+      "diffusion_steps": 100,
+      "duration_s": 1.5,
+      "expect": {
+        "end_hip_min_m": 0.8,
+        "travel_max_m": 0.4
+      },
+      "expect_ok": true,
+      "family": "Volley",
+      "files": {
+        "bvh": "AM_Volley_Present_v0.bvh",
+        "bvh_sha256": "69e736eca70dd0e01107b0e400a90b7acc7b23b3482a89b5721cddf4d197091d",
+        "npz": "AM_Volley_Present_v0.npz",
+        "npz_sha256": "93f9bf62dfbc32519edf0a3209b2253271884bfd988f4e8a1d21d8d131994deb"
+      },
+      "foot_lock": {
+        "after_cm": 0.1354774460196495,
+        "before_cm": 4.0391843765974045,
+        "max_leg_change_deg": 4.62990386787504,
+        "phases": 12
+      },
+      "fps": 30.0,
+      "frames": 45,
+      "hand_error_limit_m": 0.05,
+      "hand_error_ok": true,
+      "loop": false,
+      "model": "Kimodo-SOMA-RP-v1",
+      "model_repo": "nvidia/Kimodo-SOMA-RP-v1",
+      "model_revision": "defbe1f34f5fd031eb0ccfe19f3f92a9880c287b",
+      "name": "AM_Volley_Present",
+      "prompt": "A soldier holding a long gun upright in front of his chest steps back with his right foot, levels the gun to his right shoulder, lowers his cheek to it and aims straight ahead, holding still.",
+      "root_motion": false,
+      "scale_soma_over_soldier": 0.987,
+      "seed": 782885,
+      "station": null,
+      "variant": 0
+    },
+    "AM_Volley_Present_v1": {
+      "attempts": [
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.041604958434745085,
+          "seed": 780886
+        }
+      ],
+      "cfg": {
+        "cfg_type": "separated",
+        "cfg_weight": [
+          2.0,
+          4.0
+        ]
+      },
+      "chain_to": "AM_Volley_Fire",
+      "constraints": [
+        {
+          "achieved_error_m": {
+            "left_hand": 0.03017190830799235,
+            "right_hand": 0.024224583824681904
+          },
+          "frame": 0,
+          "full_body_from_v0": true,
+          "ik_residual_m": {
+            "left_hand": 0.00012335815699771047,
+            "right_hand": 9.45301799220033e-05
+          },
+          "ik_root_shift_m": 3.094715066254139e-05,
+          "targets_gun_cm": {},
+          "targets_kimodo_m": {
+            "left_hand": [
+              0.05922,
+              1.46076,
+              0.29610000000000003
+            ],
+            "right_hand": [
+              0.049350000000000005,
+              1.1844000000000001,
+              0.27636
+            ]
+          },
+          "type": "hands"
+        },
+        {
+          "achieved_error_m": {
+            "left_hand": 0.04020919863005933,
+            "right_hand": 0.041604958434745085
+          },
+          "frame": 34,
+          "full_body_from_v0": false,
+          "ik_residual_m": {
+            "left_hand": 5.4028430895414203e-05,
+            "right_hand": 2.1819787434651516e-05
+          },
+          "ik_root_shift_m": 0.00018659609486348927,
+          "targets_gun_cm": {},
+          "targets_kimodo_m": {
+            "left_hand": [
+              -0.11844,
+              1.39167,
+              0.5922000000000001
+            ],
+            "right_hand": [
+              -0.15792,
+              1.3818000000000001,
+              0.23688
+            ]
+          },
+          "type": "hands"
+        },
+        {
+          "frame": 44,
+          "from": "AM_Volley_Fire_v0 frame 0",
+          "type": "end_pose"
+        }
+      ],
+      "diffusion_steps": 100,
+      "duration_s": 1.5,
+      "expect": {
+        "end_hip_min_m": 0.8,
+        "travel_max_m": 0.4
+      },
+      "expect_ok": true,
+      "family": "Volley",
+      "files": {
+        "bvh": "AM_Volley_Present_v1.bvh",
+        "bvh_sha256": "8cf2cf4bdb0e167d5a48272bfe4291a8da673a2e9d0c0f25b5c3e93eba37b493",
+        "npz": "AM_Volley_Present_v1.npz",
+        "npz_sha256": "b1b6ec39ca87f1284e6a02c7190d67c604e815a1ec33b3dc7cd5c471b49c4885"
+      },
+      "foot_lock": {
+        "after_cm": 0.047443207586184144,
+        "before_cm": 4.36798669397831,
+        "max_leg_change_deg": 5.111272293922305,
+        "phases": 7
+      },
+      "fps": 30.0,
+      "frames": 45,
+      "hand_error_limit_m": 0.05,
+      "hand_error_ok": true,
+      "loop": false,
+      "model": "Kimodo-SOMA-RP-v1",
+      "model_repo": "nvidia/Kimodo-SOMA-RP-v1",
+      "model_revision": "defbe1f34f5fd031eb0ccfe19f3f92a9880c287b",
+      "name": "AM_Volley_Present",
+      "prompt": "A soldier holding a long gun upright in front of his chest steps back with his right foot, levels the gun to his right shoulder, lowers his cheek to it and aims straight ahead, holding still.",
+      "root_motion": false,
+      "scale_soma_over_soldier": 0.987,
+      "seed": 780886,
+      "station": null,
+      "variant": 1
+    },
+    "AM_Volley_Present_v2": {
+      "attempts": [
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.0364132252283807,
+          "seed": 780887
+        }
+      ],
+      "cfg": {
+        "cfg_type": "separated",
+        "cfg_weight": [
+          2.0,
+          4.0
+        ]
+      },
+      "chain_to": "AM_Volley_Fire",
+      "constraints": [
+        {
+          "achieved_error_m": {
+            "left_hand": 0.03017190830799235,
+            "right_hand": 0.024224583824681904
+          },
+          "frame": 0,
+          "full_body_from_v0": true,
+          "ik_residual_m": {
+            "left_hand": 0.00012335815699771047,
+            "right_hand": 9.45301799220033e-05
+          },
+          "ik_root_shift_m": 3.094715066254139e-05,
+          "targets_gun_cm": {},
+          "targets_kimodo_m": {
+            "left_hand": [
+              0.05922,
+              1.46076,
+              0.29610000000000003
+            ],
+            "right_hand": [
+              0.049350000000000005,
+              1.1844000000000001,
+              0.27636
+            ]
+          },
+          "type": "hands"
+        },
+        {
+          "achieved_error_m": {
+            "left_hand": 0.03129714682300141,
+            "right_hand": 0.0364132252283807
+          },
+          "frame": 34,
+          "full_body_from_v0": false,
+          "ik_residual_m": {
+            "left_hand": 5.4028430895414203e-05,
+            "right_hand": 2.1819787434651516e-05
+          },
+          "ik_root_shift_m": 0.00018659609486348927,
+          "targets_gun_cm": {},
+          "targets_kimodo_m": {
+            "left_hand": [
+              -0.11844,
+              1.39167,
+              0.5922000000000001
+            ],
+            "right_hand": [
+              -0.15792,
+              1.3818000000000001,
+              0.23688
+            ]
+          },
+          "type": "hands"
+        },
+        {
+          "frame": 44,
+          "from": "AM_Volley_Fire_v0 frame 0",
+          "type": "end_pose"
+        }
+      ],
+      "diffusion_steps": 100,
+      "duration_s": 1.5,
+      "expect": {
+        "end_hip_min_m": 0.8,
+        "travel_max_m": 0.4
+      },
+      "expect_ok": true,
+      "family": "Volley",
+      "files": {
+        "bvh": "AM_Volley_Present_v2.bvh",
+        "bvh_sha256": "33524530aba2e9e0e811ca13528013ac1f6f8b7995b529ed86a09e9a702e18c6",
+        "npz": "AM_Volley_Present_v2.npz",
+        "npz_sha256": "77c2d63c759e588b0c23cdbb0c5ad84402c513100f7fa7cce69ca69d7fc4b319"
+      },
+      "foot_lock": {
+        "after_cm": 0.17188136698678136,
+        "before_cm": 6.3683196902275085,
+        "max_leg_change_deg": 8.469836311617494,
+        "phases": 13
+      },
+      "fps": 30.0,
+      "frames": 45,
+      "hand_error_limit_m": 0.05,
+      "hand_error_ok": true,
+      "loop": false,
+      "model": "Kimodo-SOMA-RP-v1",
+      "model_repo": "nvidia/Kimodo-SOMA-RP-v1",
+      "model_revision": "defbe1f34f5fd031eb0ccfe19f3f92a9880c287b",
+      "name": "AM_Volley_Present",
+      "prompt": "A soldier holding a long gun upright in front of his chest steps back with his right foot, levels the gun to his right shoulder, lowers his cheek to it and aims straight ahead, holding still.",
+      "root_motion": false,
+      "scale_soma_over_soldier": 0.987,
+      "seed": 780887,
+      "station": null,
+      "variant": 2
+    },
+    "AM_Volley_Present_v3": {
+      "attempts": [
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.05552460050802241,
+          "seed": 780888
+        },
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.035584806146637,
+          "seed": 781888
+        }
+      ],
+      "cfg": {
+        "cfg_type": "separated",
+        "cfg_weight": [
+          2.0,
+          4.0
+        ]
+      },
+      "chain_to": "AM_Volley_Fire",
+      "constraints": [
+        {
+          "achieved_error_m": {
+            "left_hand": 0.03017190830799235,
+            "right_hand": 0.024224583824681904
+          },
+          "frame": 0,
+          "full_body_from_v0": true,
+          "ik_residual_m": {
+            "left_hand": 0.00012335815699771047,
+            "right_hand": 9.45301799220033e-05
+          },
+          "ik_root_shift_m": 3.094715066254139e-05,
+          "targets_gun_cm": {},
+          "targets_kimodo_m": {
+            "left_hand": [
+              0.05922,
+              1.46076,
+              0.29610000000000003
+            ],
+            "right_hand": [
+              0.049350000000000005,
+              1.1844000000000001,
+              0.27636
+            ]
+          },
+          "type": "hands"
+        },
+        {
+          "achieved_error_m": {
+            "left_hand": 0.029300931184709295,
+            "right_hand": 0.035584806146637
+          },
+          "frame": 34,
+          "full_body_from_v0": false,
+          "ik_residual_m": {
+            "left_hand": 5.4028430895414203e-05,
+            "right_hand": 2.1819787434651516e-05
+          },
+          "ik_root_shift_m": 0.00018659609486348927,
+          "targets_gun_cm": {},
+          "targets_kimodo_m": {
+            "left_hand": [
+              -0.11844,
+              1.39167,
+              0.5922000000000001
+            ],
+            "right_hand": [
+              -0.15792,
+              1.3818000000000001,
+              0.23688
+            ]
+          },
+          "type": "hands"
+        },
+        {
+          "frame": 44,
+          "from": "AM_Volley_Fire_v0 frame 0",
+          "type": "end_pose"
+        }
+      ],
+      "diffusion_steps": 100,
+      "duration_s": 1.5,
+      "expect": {
+        "end_hip_min_m": 0.8,
+        "travel_max_m": 0.4
+      },
+      "expect_ok": true,
+      "family": "Volley",
+      "files": {
+        "bvh": "AM_Volley_Present_v3.bvh",
+        "bvh_sha256": "4a313116f9ee998e93a15624951d961c1fedd3140483cf53e6f729bff8aba743",
+        "npz": "AM_Volley_Present_v3.npz",
+        "npz_sha256": "7b8510c1d8c35f822a9dbd931e06882406ec261bab5a23dcac7bcbecaa031b73"
+      },
+      "foot_lock": {
+        "after_cm": 0.09808369213715196,
+        "before_cm": 4.825466126203537,
+        "max_leg_change_deg": 10.557664524203538,
+        "phases": 6
+      },
+      "fps": 30.0,
+      "frames": 45,
+      "hand_error_limit_m": 0.05,
+      "hand_error_ok": true,
+      "loop": false,
+      "model": "Kimodo-SOMA-RP-v1",
+      "model_repo": "nvidia/Kimodo-SOMA-RP-v1",
+      "model_revision": "defbe1f34f5fd031eb0ccfe19f3f92a9880c287b",
+      "name": "AM_Volley_Present",
+      "prompt": "A soldier holding a long gun upright in front of his chest steps back with his right foot, levels the gun to his right shoulder, lowers his cheek to it and aims straight ahead, holding still.",
+      "root_motion": false,
+      "scale_soma_over_soldier": 0.987,
+      "seed": 781888,
+      "station": null,
+      "variant": 3
     }
   }
 }

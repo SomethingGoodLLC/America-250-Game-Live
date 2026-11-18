@@ -1,6 +1,8 @@
 # Clip specs for tools/anim/gen_clips.py. Prompts describe body motion only: Kimodo cannot see props.
 # station / face / targets are in the cannon's mesh space (see gun_geometry.json); frames are 30 fps.
 # Hand targets: {point: bore, forward_of_muzzle_cm: N} | {point: muzzle_mouth} | {point: vent} | {point_cm: [x, y, z]}
+# intent: what the clip is meant to show that check_quality.py would otherwise flag as a fault
+#   (hands_at_face, wide_stance, stoop, hold).
 # chain_to: when both clips share a station, this clip's last pose is constrained to the next clip's first.
 # "fact" = documented period practice (6-pounder drill, platoon volley, manual exercise); the timing is the game's.
 # Blast directions: _F is a blast in FRONT of the man (he is thrown backward), _B behind him (thrown forward),
@@ -21,12 +23,13 @@
    prompt: "A man stands ready in place holding a heavy bar upright with both hands in front of him, shifts his weight slightly and waits."}
 
 # The gun captain watches the fall of shot through a spyglass (a brass draw telescope: period; binoculars are not).
-- {name: AM_Gun_Observe, expect: {travel_max_m: 0.25, end_hip_min_m: 0.8}, family: Gun, station: Trail, duration: 4.0, variants: 2,
+- {name: AM_Gun_Observe, intent: [hands_at_face], expect: {travel_max_m: 0.25, end_hip_min_m: 0.8}, family: Gun, station: Trail, duration: 4.0, variants: 2,
    constraints: [{frame: 40, left_hand: {body_cm: [-3, 40, 161]}, right_hand: {body_cm: [-5, 14, 162]}},
                  {frame: 95, left_hand: {body_cm: [-3, 40, 161]}, right_hand: {body_cm: [-5, 14, 162]}}],
    prompt: "A man standing upright raises a long thin tube to his right eye with both hands, one hand near his eye and the other further forward, and looks through it steadily at something far ahead."}
 
 - name: AM_Gun_Sponge
+  intent: [wide_stance, stoop]
   family: Gun
   prompt: "A man standing beside a waist-high horizontal tube holds a long wooden pole level across his body with both hands, thrusts it firmly to his left into the tube, twists it twice, then draws it back out to his right."
   duration: 4.0
@@ -40,6 +43,7 @@
   chain_to: AM_Gun_Ram
 
 - name: AM_Gun_Vent
+  intent: [stoop, hold]
   family: Gun
   prompt: "A man leans forward over a waist-high object, presses his right thumb down firmly on top of it and holds it there, standing still."
   duration: 4.0
@@ -52,6 +56,7 @@
   chain_to: AM_Gun_Prime
 
 - name: AM_Gun_Load
+  intent: [stoop]
   family: Gun
   prompt: "A man takes a small heavy bundle out of a bag at his hip with his right hand, steps forward, pushes it into the open end of a waist-high horizontal tube in front of him, then steps back."
   duration: 3.0
@@ -62,6 +67,7 @@
     - {frame: 45, right_hand: {point: muzzle_mouth, offset_cm: [6, 0, 0]}}
 
 - name: AM_Gun_Ram
+  intent: [wide_stance, stoop]
   family: Gun
   prompt: "A man holding a long wooden pole level across his body with both hands flips it end for end, rams it to his left into a waist-high horizontal tube with two firm strokes, pulls it out and steps clear."
   duration: 3.0
@@ -80,6 +86,7 @@
       right_hand: {point: bore, forward_of_muzzle_cm: 140}
 
 - name: AM_Gun_Prime
+  intent: [stoop]
   family: Gun
   prompt: "A man leans over a waist-high object, pokes a thin wire straight down into the top of it with his right hand, then pushes a small tube into the same spot, and steps aside to his right."
   duration: 3.0
@@ -90,15 +97,15 @@
     - {frame: 25, right_hand: {point: vent, offset_cm: [0, 0, 6]}}
     - {frame: 50, right_hand: {point: vent, offset_cm: [0, 0, 3]}}
 
-- {name: AM_Gun_Traverse, family: Gun, station: TrailL, duration: 3.0, variants: 2,
+- {name: AM_Gun_Traverse, intent: [stoop, wide_stance], family: Gun, station: TrailL, duration: 3.0, variants: 2,
    prompt: "A man bends down, grips a heavy iron bar with both hands low near the ground and heaves it sideways to his right twice with great effort, then straightens up."}
-- {name: AM_Gun_RunUp, expect: {travel_min_m: 0.6, direction: fwd}, family: Gun, station: Crew_3, duration: 3.0, variants: 2, root_motion: true,
+- {name: AM_Gun_RunUp, intent: [stoop], expect: {travel_min_m: 0.6, direction: fwd}, family: Gun, station: Crew_3, duration: 3.0, variants: 2, root_motion: true,
    prompt: "A man leans forward with both hands on a large waist-high wheel and pushes it hard, walking three slow heavy steps forward, then stops and stands."}
-- {name: AM_Gun_Lay, family: Gun, station: Trail, duration: 3.0, variants: 3,
+- {name: AM_Gun_Lay, intent: [stoop], family: Gun, station: Trail, duration: 3.0, variants: 3,
    prompt: "A man crouches down low, looks carefully forward along a line at eye level, raises his left hand and waves it to the left, then to the right, and holds his palm up to signal stop."}
-- {name: AM_Gun_Fire, family: Gun, station: Linstock, duration: 2.5, variants: 3,
+- {name: AM_Gun_Fire, intent: [stoop], family: Gun, station: Linstock, duration: 2.5, variants: 3,
    prompt: "A man reaches out to his left at arm's length with a long staff in his right hand and touches it down on a waist-high object, leaning his body away and turning his head away."}
-- {name: AM_Gun_Flinch, expect: {travel_max_m: 0.5, end_hip_min_m: 0.8}, family: Gun, duration: 1.5, variants: 4,
+- {name: AM_Gun_Flinch, intent: [hands_at_face, stoop], expect: {travel_max_m: 0.5, end_hip_min_m: 0.8}, family: Gun, duration: 1.5, variants: 4,
    prompt: "A standing man braces himself, hunches his shoulders and turns his face sharply away from a loud bang beside him, then recovers."}
 
 # ---------------- B. Coordinated musket fire ----------------
@@ -119,19 +126,19 @@
 - {name: AM_Volley_Present, expect: {travel_max_m: 0.4, end_hip_min_m: 0.8}, family: Volley, duration: 1.5, variants: 4, chain_to: AM_Volley_Fire,
    constraints: [{frame: 0, full_body: true, left_hand: {body_cm: [6, 30, 148]}, right_hand: {body_cm: [5, 28, 120]}}, {frame: 34, seed: chain_end, left_hand: {body_cm: [-12, 60, 141]}, right_hand: {body_cm: [-16, 24, 140]}}],
    prompt: "A soldier holding a long gun upright in front of his chest steps back with his right foot, levels the gun to his right shoulder, lowers his cheek to it and aims straight ahead, holding still."}
-- {name: AM_Volley_Fire, expect: {travel_max_m: 0.4, end_hip_min_m: 0.8}, family: Volley, duration: 1.5, variants: 4,
+- {name: AM_Volley_Fire, intent: [hold], expect: {travel_max_m: 0.4, end_hip_min_m: 0.8}, family: Volley, duration: 1.5, variants: 4,
    constraints: [{frame: 0, left_hand: {body_cm: [-12, 60, 141]}, right_hand: {body_cm: [-16, 24, 140]}}, {frame: 9, left_hand: {body_cm: [-12, 60, 141]}, right_hand: {body_cm: [-16, 24, 140]}}],
    prompt: "A soldier aiming a long gun from his right shoulder fires it, his shoulder jerks back sharply from the recoil, he holds the aim for a moment and then lowers the gun in front of him."}
-- {name: AM_Volley_Kneel_MakeReady, expect: {travel_max_m: 0.4, start_hip_max_m: 0.75, end_hip_max_m: 0.75}, family: Volley, duration: 2.0, variants: 3, chain_to: AM_Volley_Kneel_Present,
+- {name: AM_Volley_Kneel_MakeReady, intent: [hold], expect: {travel_max_m: 0.4, start_hip_max_m: 0.75, end_hip_max_m: 0.75}, family: Volley, duration: 2.0, variants: 3, chain_to: AM_Volley_Kneel_Present,
    constraints: [{frame: 42, seed: chain_end, left_hand: {body_cm: [6, 30, 111]}, right_hand: {body_cm: [5, 28, 83]}}],
    prompt: "A soldier kneeling on his right knee holds a long gun upright in front of his chest with both hands and pulls back its hammer with his right thumb, staying on one knee."}
-- {name: AM_Volley_Kneel_Present, expect: {travel_max_m: 0.4, start_hip_max_m: 0.75, end_hip_max_m: 0.75}, family: Volley, duration: 1.5, variants: 3, chain_to: AM_Volley_Kneel_Fire,
+- {name: AM_Volley_Kneel_Present, intent: [hold], expect: {travel_max_m: 0.4, start_hip_max_m: 0.75, end_hip_max_m: 0.75}, family: Volley, duration: 1.5, variants: 3, chain_to: AM_Volley_Kneel_Fire,
    constraints: [{frame: 0, full_body: true, left_hand: {body_cm: [6, 30, 111]}, right_hand: {body_cm: [5, 28, 83]}}, {frame: 34, seed: chain_end, left_hand: {body_cm: [-12, 60, 104]}, right_hand: {body_cm: [-16, 24, 103]}}],
    prompt: "A soldier kneeling on his right knee levels a long gun to his right shoulder, lowers his cheek to it and aims straight ahead, holding still on one knee."}
-- {name: AM_Volley_Kneel_Fire, expect: {travel_max_m: 0.4, start_hip_max_m: 0.75, end_hip_max_m: 0.75}, family: Volley, duration: 1.5, variants: 3,
+- {name: AM_Volley_Kneel_Fire, intent: [hold], expect: {travel_max_m: 0.4, start_hip_max_m: 0.75, end_hip_max_m: 0.75}, family: Volley, duration: 1.5, variants: 3,
    constraints: [{frame: 0, left_hand: {body_cm: [-12, 60, 104]}, right_hand: {body_cm: [-16, 24, 103]}}, {frame: 9, left_hand: {body_cm: [-12, 60, 104]}, right_hand: {body_cm: [-16, 24, 103]}}],
    prompt: "A soldier kneeling on his right knee and aiming a long gun from his right shoulder fires it, his shoulder jerks back from the recoil, he holds the aim, then lowers the gun, staying on one knee."}
-- {name: AM_Reload_PrimePan, expect: {travel_max_m: 0.4, end_hip_min_m: 0.8}, family: Volley, duration: 3.0, variants: 3, chain_to: AM_Reload_RamCharge,
+- {name: AM_Reload_PrimePan, intent: [hands_at_face], expect: {travel_max_m: 0.4, end_hip_min_m: 0.8}, family: Volley, duration: 3.0, variants: 3, chain_to: AM_Reload_RamCharge,
    prompt: "A standing soldier holds a long gun level at his right hip with his left hand, takes a small paper packet from a pouch at his right hip, bites the end off it, tips a little powder onto the gun near his right hand and snaps a small lid shut."}
 - {name: AM_Reload_RamCharge, expect: {travel_max_m: 0.4, end_hip_min_m: 0.8}, family: Volley, duration: 4.0, variants: 3, chain_to: AM_Reload_Shoulder,
    prompt: "A standing soldier swings a long gun upright with its butt on the ground by his left foot, pours something into its top end with his right hand, draws a long thin rod out from under the barrel, pushes the rod down the barrel twice, pulls it out and slides it back into place."}
@@ -139,9 +146,9 @@
    prompt: "A standing soldier lifts a long gun from the ground with both hands and brings it up to rest upright against his left shoulder, then stands at attention."}
 
 # ---------------- C. Explosion and impact reactions ----------------
-- {name: AM_React_NearMiss, expect: {travel_max_m: 0.5, end_hip_min_m: 0.8}, family: React, duration: 1.5, variants: 4,
+- {name: AM_React_NearMiss, intent: [hands_at_face, stoop, wide_stance], expect: {travel_max_m: 0.5, end_hip_min_m: 0.8}, family: React, duration: 1.5, variants: 4,
    prompt: "A standing man ducks sharply, covers his head with both arms in a half crouch, then straightens up again."}
-- {name: AM_React_DirtSpray, seed: 600000, expect: {travel_min_m: 0.15, direction: back, end_hip_min_m: 0.8}, family: React, duration: 1.5, variants: 3, root_motion: true,
+- {name: AM_React_DirtSpray, intent: [hands_at_face, stoop], seed: 600000, expect: {travel_min_m: 0.15, direction: back, end_hip_min_m: 0.8}, family: React, duration: 1.5, variants: 3, root_motion: true,
    prompt: "A standing man recoils sharply backward, throwing his right arm up to shield his face while taking one quick step backward, then stands."}
 - {name: AM_React_BlastStagger_F, expect: {travel_min_m: 0.6, direction: back, end_hip_min_m: 0.8}, family: React, duration: 2.0, variants: 2, root_motion: true,
    prompt: "A man is pushed violently in the chest and staggers backward, taking three quick stumbling steps backward across the floor before he regains his balance and stands."}
@@ -159,7 +166,7 @@
    prompt: "A standing man is knocked sideways to his right, falls over to the right, lands on his right side on the ground and lies still."}
 - {name: AM_React_BlastKnockdown_R, expect: {travel_min_m: 0.3, direction: left, end_hip_max_m: 0.35}, family: React, duration: 2.0, variants: 2, root_motion: true,
    prompt: "A standing man is thrown violently to his left off his feet, lands on his left side on the ground and lies still."}
-- {name: AM_React_Deafened, expect: {travel_max_m: 0.6, end_hip_min_m: 0.8}, family: React, duration: 3.0, variants: 2,
+- {name: AM_React_Deafened, intent: [hands_at_face], expect: {travel_max_m: 0.6, end_hip_min_m: 0.8}, family: React, duration: 3.0, variants: 2,
    prompt: "A dazed standing man presses both hands over his ears, sways unsteadily and shakes his head, then slowly lowers his hands and recovers."}
 - {name: AM_GetUp_Back, expect: {start_hip_max_m: 0.45, end_hip_min_m: 0.8}, family: React, duration: 3.0, variants: 2, root_motion: true,
    prompt: "A man lying flat on his back on the ground rolls over, pushes himself up to a crouch and then stands up."}
