@@ -145,7 +145,71 @@ struct FClipRegistry
 	TSet<FName> Unknown;
 	/** Takes asked for so far, by package (a null entry: asked, and it does not load). */
 	TMap<FString, TStrongObjectPtr<UAnimSequence>> LoadedTakes;
+	FPA250GunTools Tools;
 };
+
+bool ReadTriple(const TSharedPtr<FJsonObject>& J, const TCHAR* Key, FVector& Out)
+{
+	const TArray<TSharedPtr<FJsonValue>>* A = nullptr;
+	if (!J->TryGetArrayField(Key, A) || A->Num() != 3) return false;
+	Out = FVector((*A)[0]->AsNumber(), (*A)[1]->AsNumber(), (*A)[2]->AsNumber());
+	return true;
+}
+
+/** gun_tools: errors go to Errors; the clip registry stands without it. */
+void ReadGunTools(const TSharedPtr<FJsonObject>& Root, FPA250GunTools& T, TArray<FString>& Errors)
+{
+	const TSharedPtr<FJsonObject>* G = nullptr;
+	if (!Root->TryGetObjectField(TEXT("gun_tools"), G))
+	{
+		Errors.Add(TEXT("no \"gun_tools\" object: the gun crew hold no tools"));
+		return;
+	}
+	const TSharedPtr<FJsonObject>* Meshes = nullptr;
+	const TSharedPtr<FJsonObject>* ByClip = nullptr;
+	if (!ReadTriple(*G, TEXT("bore_origin_cm"), T.BoreOriginCm) || !ReadTriple(*G, TEXT("bore_direction"), T.BoreDirection)
+		|| !ReadTriple(*G, TEXT("vent_cm"), T.VentCm) || !(*G)->TryGetObjectField(TEXT("meshes"), Meshes) || !(*G)->TryGetObjectField(TEXT("by_clip"), ByClip))
+	{
+		Errors.Add(TEXT("gun_tools lacks bore_origin_cm, bore_direction, vent_cm, meshes or by_clip"));
+		return;
+	}
+	T.BoreDirection = T.BoreDirection.GetSafeNormal();
+	for (const auto& M : (*Meshes)->Values) T.Meshes.Add(FName(*M.Key), M.Value->AsString());
+	for (const auto& Pair : (*ByClip)->Values)
+	{
+		const TSharedPtr<FJsonObject>* J = nullptr;
+		FString Tool, Hold, Head;
+		if (!Pair.Value->TryGetObject(J) || !(*J)->TryGetStringField(TEXT("tool"), Tool) || !(*J)->TryGetStringField(TEXT("hold"), Hold) || !T.Meshes.Contains(FName(*Tool)))
+		{
+			Errors.Add(FString::Printf(TEXT("gun_tools.by_clip.%s lacks a tool of meshes or a hold"), *Pair.Key));
+			continue;
+		}
+		FPA250CrewToolRule R;
+		R.Tool = FName(*Tool);
+		double Num = 0.0;
+		if ((*J)->TryGetNumberField(TEXT("mid_cm"), Num)) R.MidCm = float(Num);
+		if ((*J)->TryGetNumberField(TEXT("offset_cm"), Num)) R.OffsetCm = float(Num);
+		if ((*J)->TryGetNumberField(TEXT("until_s"), Num)) R.UntilSeconds = float(Num);
+		const TArray<TSharedPtr<FJsonValue>>* P = nullptr;
+		if ((*J)->TryGetArrayField(TEXT("planted_cm"), P) && P->Num() == 2) R.PlantedCm = FVector2D((*P)[0]->AsNumber(), (*P)[1]->AsNumber());
+		(*J)->TryGetStringField(TEXT("head"), Head);
+		R.bSpongeHead = Head != TEXT("rammer");
+		bool bOk = true;
+		if (Hold == TEXT("bore")) { R.Hold = EPA250ToolHold::Bore; bOk = !Head.IsEmpty(); }
+		else if (Hold == TEXT("upright")) { R.Hold = EPA250ToolHold::Upright; bOk = R.MidCm > 0.f; }
+		else if (Hold == TEXT("to_vent")) { R.Hold = EPA250ToolHold::ToVent; }
+		else if (Hold == TEXT("in_hand")) { R.Hold = EPA250ToolHold::InHand; bOk = R.UntilSeconds > 0.f; }
+		else if (Hold == TEXT("planted")) { R.Hold = EPA250ToolHold::Planted; bOk = R.MidCm > 0.f && P; }
+		else bOk = false;
+		if (!bOk)
+		{
+			Errors.Add(FString::Printf(TEXT("gun_tools.by_clip.%s: hold \"%s\" is unknown or lacks its number"), *Pair.Key, *Hold));
+			continue;
+		}
+		T.ByClip.Add(FName(*Pair.Key), R);
+	}
+	T.bLoaded = true;
+}
 
 FClipRegistry& ClipRegistry()
 {
@@ -228,6 +292,13 @@ bool PA250AnimClips::LoadRegistry(const FString& Path, TArray<FString>* OutError
 			R.Index.Add(E.Name, R.Entries.Add(MoveTemp(E)));
 		}
 	}
+	if (Root.IsValid() && Clips)
+	{
+		TArray<FString> ToolErrors;
+		ReadGunTools(Root, R.Tools, ToolErrors);
+		for (const FString& E : ToolErrors) UE_LOG(LogTemp, Error, TEXT("PA250 anim clips: %s"), *E);
+		if (R.Tools.bLoaded) UE_LOG(LogTemp, Display, TEXT("PA250 anim clips: gun crew tools for %d clips (%d meshes)"), R.Tools.ByClip.Num(), R.Tools.Meshes.Num());
+	}
 	for (const FString& E : Errors) UE_LOG(LogTemp, Error, TEXT("PA250 anim clips: %s"), *E);
 	if (OutErrors) *OutErrors = Errors;
 	if (Errors.IsEmpty())
@@ -241,6 +312,18 @@ bool PA250AnimClips::LoadRegistry(const FString& Path, TArray<FString>* OutError
 		UE_LOG(LogTemp, Error, TEXT("PA250 anim clips: FALLBACK, every named clip shows its placeholder. Fix %s."), *Path);
 	}
 	return Errors.IsEmpty();
+}
+
+const FPA250GunTools& PA250AnimClips::GunTools()
+{
+	FClipRegistry& R = ClipRegistry();
+	if (!R.bTried) LoadRegistry(DataPath());
+	return R.Tools;
+}
+
+const FPA250CrewToolRule* PA250AnimClips::CrewToolRule(FName Clip)
+{
+	return GunTools().ByClip.Find(Clip);
 }
 
 const TArray<FPA250ClipEntry>& PA250AnimClips::Registry()

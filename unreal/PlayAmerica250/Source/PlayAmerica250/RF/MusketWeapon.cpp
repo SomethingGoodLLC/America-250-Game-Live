@@ -619,8 +619,9 @@ void AMusketWeapon::PoseSupportHand()
 	UPA250SoldierAnimInstance* BodyAnim = Body ? Cast<UPA250SoldierAnimInstance>(Body->GetAnimInstance()) : nullptr;
 	if (!BodyAnim) return;
 	const USkinnedAsset* Skinned = Body->GetSkinnedAsset();
-	// (A man with the general's sword and pistol has no musket for his left hand to hold.)
-	if (Soldier->IsDead() || !Soldier->IsUsingPeriodSoldier() || !AnimatedMesh || !Skinned || Soldier->HasHeroArms()
+	// (A man with the general's sword and pistol has no musket for his left hand to hold, nor a gunner
+	// whose musket is put away while his hands hold the glass.)
+	if (Soldier->IsDead() || !Soldier->IsUsingPeriodSoldier() || !AnimatedMesh || !Skinned || Soldier->HasHeroArms() || Soldier->IsServingGun()
 		|| GetAttachParentActor() != Soldier || AnimatedMesh->GetBoneIndex(TEXT("b_gun_LeftHandSpot")) == INDEX_NONE)
 	{
 		BodyAnim->ClearSupportHandTarget();

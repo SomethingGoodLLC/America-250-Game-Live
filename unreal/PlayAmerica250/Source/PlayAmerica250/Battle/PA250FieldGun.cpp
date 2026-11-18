@@ -209,6 +209,37 @@ FVector APA250FieldGun::GetCrewPost(int32 Index) const
 	return GetActorTransform().TransformPosition(FVector(S.X * Half, S.Y * 110.f, 90.f));
 }
 
+FTransform APA250FieldGun::GetGunSpace() const
+{
+	return Mesh ? Mesh->GetComponentTransform() : GetActorTransform();
+}
+
+bool APA250FieldGun::GetCrewStation(int32 Index, FVector& Out) const
+{
+	if (!Mesh || Index < 0 || Index >= 4) return false;
+	const FPA250ClipEntry* Entry = PA250AnimClips::FindClip(CrewStepClip(Index, Drill.GetStepIndex(), !bLoaded && Drill.IsReloading()));
+	if (!Entry || !Entry->bHasStation) return false;
+	Out = Mesh->GetComponentTransform().TransformPosition(FVector(Entry->StationCm.X, Entry->StationCm.Y, 0.f));
+	Out.Z = GetCrewPost(Index).Z;
+	return true;
+}
+
+bool APA250FieldGun::GetCrewFacePoint(int32 Index, FVector& Out) const
+{
+	if (!Mesh || Index < 0 || Index >= 4) return false;
+	const FPA250ClipEntry* Entry = PA250AnimClips::FindClip(CrewStepClip(Index, Drill.GetStepIndex(), !bLoaded && Drill.IsReloading()));
+	if (!Entry || !Entry->bHasStation) return false;
+	Out = Mesh->GetComponentTransform().TransformPosition(FVector(Entry->FaceCm.X, Entry->FaceCm.Y, 0.f));
+	Out.Z = GetCrewPost(Index).Z;
+	return true;
+}
+
+bool APA250FieldGun::IsAtCrewStation(const ARFCharacter* Man, int32 Index) const
+{
+	FVector Station;
+	return Man && GetCrewStation(Index, Station) && FVector::Dist2D(Man->GetActorLocation(), Station) <= 150.f;
+}
+
 int32 APA250FieldGun::ClaimPost(ARFCharacter* Gunner)
 {
 	if (!Gunner || Gunner->IsDead() || Gunner->FactionId != Faction) return INDEX_NONE;
@@ -232,11 +263,24 @@ int32 APA250FieldGun::ClaimPost(ARFCharacter* Gunner)
 int32 APA250FieldGun::ForceClaimPost(ARFCharacter* Gunner)
 {
 	if (!Gunner || Gunner->IsDead() || Gunner->FactionId != Faction) return INDEX_NONE;
-	if (const int32 Have = ClaimPost(Gunner); Have != INDEX_NONE) return Have;
+	if (const int32 Have = PostOf(Gunner); Have != INDEX_NONE) return Have;
 	const int32 Men = FMath::Min(Posts.Num(), pa250::battle_rules().cannon_crew_men);
 	if (Men <= 0) return INDEX_NONE;
-	Posts[0] = Gunner;
-	return 0;
+	// The player lays and fires the piece: the captain's post (the last). Until 2026-11-18 he took the
+	// first free post, or the sponger's when the crew was whole, and nobody sponged or rammed while he
+	// served. A man he finds there moves to a free post if there is one.
+	const int32 Mine = Men - 1;
+	ARFCharacter* Was = Posts[Mine].Get();
+	Posts[Mine] = Gunner;
+	if (Was && Was != Gunner && !Was->IsDead())
+	{
+		for (int32 i = 0; i < Men; ++i)
+		{
+			ARFCharacter* There = Posts[i].Get();
+			if (!There || There->IsDead()) { Posts[i] = Was; break; }
+		}
+	}
+	return Mine;
 }
 
 void APA250FieldGun::SetPlayerGunner(ARFCharacter* Player)
@@ -245,6 +289,7 @@ void APA250FieldGun::SetPlayerGunner(ARFCharacter* Player)
 	if (ARFCharacter* Was = PlayerGunner.Get())
 	{
 		if (Was != Player && Was->Musket) Was->Musket->SetActorHiddenInGame(false);
+		if (Was != Player) Was->SetServingGun(false);
 	}
 	PlayerGunner = Player;
 	if (!Player)
@@ -257,6 +302,7 @@ void APA250FieldGun::SetPlayerGunner(ARFCharacter* Player)
 	}
 	// Player artilleryman: kit stays; while serving, weapon holstered (tools in hand).
 	if (Player->Musket) Player->Musket->SetActorHiddenInGame(true);
+	Player->SetServingGun(true); // his hands hold the gunner's glass, not an unseen musket
 	if (!bPlayerChoseShot) SelectedShot = EPA250Shot::RoundShot;
 }
 
@@ -527,7 +573,10 @@ bool APA250FieldGun::Fire(const FVector& AimPoint, ARFCharacter* Gunner, bool bP
 	const float Range = FVector::Dist(Muzzle, AimPoint);
 	EPA250Shot Shot = SelectedShot;
 	const TCHAR* Refuse = nullptr;
-	if (!bPlayerChose || !bPlayerChoseShot)
+	// A player's shot is always the load his chip names (LOAD: ROUND SHOT on taking the gun, [ ] to
+	// change it). Until 2026-11-17 the crew re-picked by range unless he had pressed [ ], so the chip
+	// read round shot while canister went out. Only the crew's own fire picks by range.
+	if (!bPlayerChose)
 	{
 		// The crew's own pick, then only a load this kind of piece fires (a six-pounder never shells).
 		if (!PA250Gunnery::ChooseShot(Range, R, Shot)) Refuse = TEXT("out of range");
@@ -706,9 +755,140 @@ FName APA250FieldGun::CrewStepClip(int32 Post, int32 Step, bool bDrilling)
 	return CrewIdleClip(Post);
 }
 
+void APA250FieldGun::ClearCrewTool(int32 Post)
+{
+	if (Post < 0 || Post >= 4) return;
+	FCrewTool& T = CrewTools[Post];
+	if (UStaticMeshComponent* C = T.Comp.Get()) C->DestroyComponent();
+	if (ARFCharacter* Man = T.Man.Get(); Man && Man->Musket && !Man->IsServingGun()) Man->Musket->SetActorHiddenInGame(false);
+	T = FCrewTool();
+}
+
+void APA250FieldGun::EndPlay(const EEndPlayReason::Type Reason)
+{
+	for (int32 i = 0; i < 4; ++i) ClearCrewTool(i);
+	Super::EndPlay(Reason);
+}
+
+void APA250FieldGun::PoseCrewTool(int32 Post, ARFCharacter* Man, FName Clip, float ClipTime)
+{
+	FCrewTool& T = CrewTools[Post];
+	if (T.Man.Get() != Man) ClearCrewTool(Post);
+	T.Man = Man;
+	// The musket goes away while he works: his hands are the tool's (reel review 2026-11-16/17).
+	if (Man->Musket) Man->Musket->SetActorHiddenInGame(true);
+	const FPA250GunTools& Tools = PA250AnimClips::GunTools();
+	const FPA250CrewToolRule* Rule = PA250AnimClips::CrewToolRule(Clip);
+	USkeletalMeshComponent* Body = Man->GetMesh();
+	if (T.Clip != Clip) { T.Clip = Clip; T.bRoundIn = false; }
+	// The round leaves his hand when it reaches the muzzle (any take of the clip); until_s only if it never does.
+	const bool bShow = Rule && Body && !(Rule->Hold == EPA250ToolHold::InHand && (T.bRoundIn || ClipTime > Rule->UntilSeconds));
+	if (!bShow || T.Tool != (Rule ? Rule->Tool : NAME_None))
+	{
+		if (UStaticMeshComponent* C = T.Comp.Get()) C->DestroyComponent();
+		T.Comp = nullptr;
+		T.Tool = NAME_None;
+	}
+	if (!bShow) return;
+	if (Body->GetBoneIndex(TEXT("hand_r")) == INDEX_NONE) return;
+	UStaticMeshComponent* C = T.Comp.Get();
+	if (!C)
+	{
+		const FString* Path = Tools.Meshes.Find(Rule->Tool);
+		UStaticMesh* ToolMesh = Path ? LoadObject<UStaticMesh>(nullptr, **Path) : nullptr;
+		if (!ToolMesh)
+		{
+			static TSet<FName> Warned;
+			if (!Warned.Contains(Rule->Tool))
+			{
+				Warned.Add(Rule->Tool);
+				UE_LOG(LogTemp, Error, TEXT("PA250 gun: crew tool %s (%s) does not load"), *Rule->Tool.ToString(), Path ? **Path : TEXT("no mesh path"));
+			}
+			return;
+		}
+		C = NewObject<UStaticMeshComponent>(Man);
+		C->SetStaticMesh(ToolMesh);
+		C->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		C->SetupAttachment(Body, TEXT("hand_r"));
+		C->RegisterComponent();
+		T.Comp = C;
+		T.Tool = Rule->Tool;
+		T.bPlanted = false;
+		UE_LOG(LogTemp, Display, TEXT("PA250 gun: crew post %d holds %s for %s"), Post, *Rule->Tool.ToString(), *Clip.ToString());
+	}
+	// Planted in the ground it stays with the gun; in his hand it rides the hand bone, so it never
+	// trails the hand (its lie in the hand is worked out from the last pose).
+	const bool bPlant = Rule->Hold == EPA250ToolHold::Planted;
+	if (bPlant != T.bPlanted)
+	{
+		if (bPlant) C->AttachToComponent(Mesh, FAttachmentTransformRules::KeepWorldTransform);
+		else C->AttachToComponent(Body, FAttachmentTransformRules::KeepWorldTransform, TEXT("hand_r"));
+		T.bPlanted = bPlant;
+	}
+	// The rules of tools/anim/ue_review_render.py, in the cannon's mesh space.
+	const FTransform GunSpace = Mesh->GetComponentTransform();
+	auto Grip = [Body](const TCHAR* Side) {
+		const FVector Hand = Body->GetBoneLocation(*FString::Printf(TEXT("hand_%s"), Side), EBoneSpaces::WorldSpace);
+		const FName Tip(*FString::Printf(TEXT("middle_03_%s"), Side));
+		return Body->GetBoneIndex(Tip) != INDEX_NONE ? 0.5f * (Hand + Body->GetBoneLocation(Tip, EBoneSpaces::WorldSpace)) : Hand;
+	};
+	const FVector R = GunSpace.InverseTransformPosition(Grip(TEXT("r")));
+	const FVector L = GunSpace.InverseTransformPosition(Grip(TEXT("l")));
+	const float FeetZ = GunSpace.InverseTransformPosition(Man->GetActorLocation() - FVector(0.f, 0.f, Man->GetSimpleCollisionHalfHeight())).Z;
+	const FVector M = Tools.BoreOriginCm, B = Tools.BoreDirection;
+	FVector At = R, Dir = FVector::UpVector;
+	switch (Rule->Hold)
+	{
+	case EPA250ToolHold::Bore:
+		if ((L - R).Size() < 80.f)
+		{
+			// On the bore line when his hands are on it; off it, following the hands, the head never past the muzzle face.
+			auto OnBore = [&](const FVector& G) { return M + B * FVector::DotProduct(G - M, B); };
+			const float Off = FMath::Max((R - OnBore(R)).Size(), (L - OnBore(L)).Size());
+			const float W = FMath::Clamp(1.f - (Off - 3.f) / 12.f, 0.f, 1.f);
+			FVector D = ((L - R).GetSafeNormal() * (1.f - W) + (-B) * W).GetSafeNormal();
+			FVector Anchor = R * (1.f - W) + OnBore(R) * W;
+			const FVector Head = Anchor + D * 150.f;
+			if (W < 1.f && Head.X < M.X + 6.f && FMath::Abs(D.X) > 1.e-3f) Anchor += D * ((M.X + 6.f - Head.X) / D.X);
+			At = Anchor + D * 30.f;
+			Dir = Rule->bSpongeHead ? D : -D;
+		}
+		else
+		{
+			At = FVector(R.X, R.Y, FeetZ + 120.f);
+		}
+		break;
+	case EPA250ToolHold::Upright: At = FVector(R.X, R.Y, FeetZ + Rule->MidCm); break;
+	case EPA250ToolHold::ToVent:
+	{
+		// The match end on the vent and the staff through his hand; out of reach, the hand at its foot
+		// end. (Until 2026-11-18 its middle went offset_cm from the hand, and the match end ran some
+		// 75 cm on through the breech: crew probe.)
+		const float Half = C->GetStaticMesh() ? C->GetStaticMesh()->GetBounds().BoxExtent.X : 75.f;
+		const float Reach = (Tools.VentCm - R).Size();
+		Dir = (Tools.VentCm - R).GetSafeNormal();
+		At = Reach < 2.f * Half - 10.f ? Tools.VentCm - Dir * Half : R + Dir * (Half - 10.f);
+		break;
+	}
+	case EPA250ToolHold::InHand:
+		Dir = (R - FVector(M.X, M.Y, R.Z)).GetSafeNormal(); // powder first toward the muzzle, the ball out
+		if (FVector::DotProduct(R - M, Tools.BoreDirection) < 15.f && (R - (M + Tools.BoreDirection * FVector::DotProduct(R - M, Tools.BoreDirection))).Size() < 20.f)
+		{
+			T.bRoundIn = true; // at the mouth: it goes in
+		}
+		break;
+	case EPA250ToolHold::Planted: At = FVector(Rule->PlantedCm.X, Rule->PlantedCm.Y, FeetZ + Rule->MidCm); break;
+	}
+	if (Dir.IsNearlyZero()) Dir = FVector::UpVector;
+	const FTransform Want(FRotationMatrix::MakeFromX(GunSpace.TransformVectorNoScale(Dir)).Rotator(), GunSpace.TransformPosition(At));
+	if (bPlant) C->SetWorldTransform(Want);
+	else C->SetRelativeTransform(Want.GetRelativeTransform(Body->GetSocketTransform(TEXT("hand_r"), RTS_World)));
+}
+
 void APA250FieldGun::PoseCrew(float DeltaSeconds)
 {
 	if (!Mesh || !GetWorld()) return;
+	bool bPosed[4] = {false, false, false, false};
 	const bool bDrilling = !bLoaded && Drill.IsReloading();
 	const int32 Step = Drill.GetStepIndex();
 	const float Progress = Drill.GetPhaseProgress();
@@ -744,10 +924,30 @@ void APA250FieldGun::PoseCrew(float DeltaSeconds)
 		const float Time = bLoop ? FMath::Fmod(GetWorld()->GetTimeSeconds() + i * 0.7f, FMath::Max(0.1f, Length)) : FMath::Clamp(Progress, 0.f, 1.f) * Length;
 		const bool bAtStation = FVector::Dist2D(Here, Station) < 25.f;
 		Anim->SetPosedAction(Take, Time, bAtStation ? 1.f : 0.f, bLoop);
+		if (bAtStation && i < 4)
+		{
+			bPosed[i] = true;
+			PoseCrewTool(i, Man, Name, Time);
+		}
 		if (bAtStation && !bLoop && !CrewClipsLogged.Contains(Name))
 		{
 			CrewClipsLogged.Add(Name);
 			UE_LOG(LogTemp, Display, TEXT("PA250 gun: crew post %d acts %s at his station (step %d)"), i, *Name.ToString(), Step);
+		}
+	}
+	// A man off his station gets his musket back and leaves the tool: at once when he is gone, dead
+	// or played, after a moment when he is only nudged off it (no flicker).
+	for (int32 i = 0; i < 4; ++i)
+	{
+		FCrewTool& T = CrewTools[i];
+		if (!T.Man.IsValid()) { if (T.Comp.IsValid()) ClearCrewTool(i); continue; }
+		ARFCharacter* Man = T.Man.Get();
+		const bool bGone = Man->IsDead() || Man->IsPlayerControlled() || !Posts.IsValidIndex(i) || Posts[i].Get() != Man;
+		T.UnposedSeconds = bPosed[i] ? 0.f : T.UnposedSeconds + DeltaSeconds;
+		if (bGone || T.UnposedSeconds > 0.4f)
+		{
+			UE_LOG(LogTemp, Display, TEXT("PA250 gun: crew post %d puts the tool down (%s)"), i, bGone ? TEXT("gone") : TEXT("off his station"));
+			ClearCrewTool(i);
 		}
 	}
 }
@@ -1446,9 +1646,18 @@ void APA250AmmoChest::AttachToGun(APA250FieldGun* InGun)
 	{
 		Crate->SetStaticMesh(Cube);
 	}
+	DressChest();
 	if (InGun)
 	{
-		const FVector At = InGun->GetActorLocation() + InGun->GetActorRightVector() * 90.f + FVector(0.f, 0.f, 25.f);
+		// Behind the trail and clear of the crew's stations (battle_rules blast.chest offset_*), on the ground.
+		FVector At = InGun->GetActorLocation() + InGun->GetActorForwardVector() * R.blast_chest_offset_forward_cm
+			+ InGun->GetActorRightVector() * R.blast_chest_offset_right_cm;
+		const float HalfHeight = 50.f * Crate->GetRelativeScale3D().Z;
+		FHitResult Ground;
+		FCollisionQueryParams Q(SCENE_QUERY_STAT(PA250ChestGround), false, this);
+		Q.AddIgnoredActor(InGun);
+		At.Z = GetWorld() && GetWorld()->LineTraceSingleByObjectType(Ground, At + FVector(0.f, 0.f, 300.f), At - FVector(0.f, 0.f, 1000.f),
+			FCollisionObjectQueryParams(ECC_WorldStatic), Q) ? Ground.ImpactPoint.Z + HalfHeight : InGun->GetActorLocation().Z + HalfHeight;
 		SetActorLocation(At);
 		SetActorRotation(InGun->GetActorRotation());
 		// It goes where the piece goes (the crew run the gun up, and traverse it).
@@ -1456,6 +1665,52 @@ void APA250AmmoChest::AttachToGun(APA250FieldGun* InGun)
 	}
 	UE_LOG(LogTemp, Display, TEXT("PA250 chest: ready_rounds=%d refill=%.1fs radius=%.0fcm (GAME INVENTION)"),
 		Ready, R.blast_chest_refill_seconds, R.blast_chest_resupply_radius_cm);
+}
+
+void APA250AmmoChest::DressChest()
+{
+	if (!Trim.IsEmpty() || !Crate) return;
+	// The crate (55 x 40 x 35 cm) in wood, with a dark lid, two iron bands and rope handles: the prop
+	// materials of the gun tools (tools/anim/make_props.py). Sizes in cm, parts placed in the crate's
+	// own (scaled) space, where its cube runs -50..50 on each axis.
+	UStaticMesh* Cube = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube"));
+	UStaticMesh* Cyl = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
+	auto Mat = [](const TCHAR* Name) { return LoadObject<UMaterialInterface>(nullptr, *FString::Printf(TEXT("/Game/PA250/Props/GunTools/%s.%s"), Name, Name)); };
+	UMaterialInterface* Wood = Mat(TEXT("M_Tool_Wood"));
+	UMaterialInterface* Dark = Mat(TEXT("M_Tool_DarkWood"));
+	UMaterialInterface* Iron = Mat(TEXT("M_Tool_Iron"));
+	UMaterialInterface* Rope = Mat(TEXT("M_Tool_Match"));
+	if (!Cube || !Wood || !Dark || !Iron)
+	{
+		UE_LOG(LogTemp, Error, TEXT("PA250 chest: the gun-tool materials (/Game/PA250/Props/GunTools) do not load; the chest stays a plain box"));
+		return;
+	}
+	Crate->SetMaterial(0, Wood);
+	const FVector S = Crate->GetRelativeScale3D() * 100.f; // the crate's size in cm
+	auto Part = [&](UStaticMesh* M, UMaterialInterface* Mt, const FVector& SizeCm, const FVector& AtCm, const FRotator& Rot = FRotator::ZeroRotator) {
+		UStaticMeshComponent* P = NewObject<UStaticMeshComponent>(this);
+		P->SetStaticMesh(M);
+		P->SetMaterial(0, Mt);
+		P->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		P->SetupAttachment(Crate);
+		P->SetRelativeLocation(AtCm / S * 100.f);
+		P->SetRelativeRotation(Rot);
+		P->SetRelativeScale3D(SizeCm / S);
+		P->RegisterComponent();
+		Trim.Add(P);
+	};
+	Part(Cube, Dark, FVector(S.X + 3.f, S.Y + 3.f, 5.f), FVector(0.f, 0.f, S.Z * 0.5f + 2.f));          // lid
+	for (const float X : {-0.3f, 0.3f})
+	{
+		Part(Cube, Iron, FVector(3.f, S.Y + 1.5f, S.Z + 1.f), FVector(S.X * X, 0.f, 0.f));             // bands
+	}
+	if (Cyl && Rope)
+	{
+		for (const float Side : {-1.f, 1.f})                                                           // handles
+		{
+			Part(Cyl, Rope, FVector(3.f, 3.f, 16.f), FVector(Side * (S.X * 0.5f + 2.f), 0.f, S.Z * 0.2f), FRotator(0.f, 0.f, 90.f));
+		}
+	}
 }
 
 bool APA250AmmoChest::TakeOneForLoad()

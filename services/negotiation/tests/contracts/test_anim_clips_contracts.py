@@ -145,3 +145,17 @@ def test_source_rigs_name_what_a_retarget_needs() -> None:
     for name, rig in rigs.items():
         if name != "soldier":
             assert rig["retargeter"], name
+
+
+def test_gun_tools_name_crew_clips_and_meshes_that_exist() -> None:
+    # The crew's tools (2026-11-18): every rule names a crew clip of the registry and a mesh in the
+    # repository, and the holds carry what they need.
+    tools = CLIPS["gun_tools"]
+    for name, rule in tools["by_clip"].items():
+        assert name in CLIPS["clips"] and CLIPS["clips"][name]["group"] == "gun_crew", name
+        assert rule["tool"] in tools["meshes"], name
+        need = {"bore": "head", "upright": "mid_cm", "to_vent": "tool", "in_hand": "until_s", "planted": "planted_cm"}[rule["hold"]]
+        assert need in rule, name
+    for key, package in tools["meshes"].items():
+        on_disk = ROOT / "unreal" / "PlayAmerica250" / "Content" / (package[len("/Game/"):] + ".uasset")
+        assert on_disk.is_file(), key

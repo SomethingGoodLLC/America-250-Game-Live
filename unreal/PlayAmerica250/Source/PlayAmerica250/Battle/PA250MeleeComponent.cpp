@@ -682,6 +682,28 @@ void UPA250MeleeComponent::PublishPose()
 		Pose.Level = 0.f;
 		Pose.Guard = 0.f;
 	}
+	// At a gun his musket is put away and his right hand holds the glass (playtest 2026-11-17: the
+	// musket's carry and aim went on with nothing in his hands, palms at his face). Aiming raises it:
+	// gun_crew_observe on the upper body, scrubbed to the frame where the glass is at his eye.
+	if (Me->IsServingGun())
+	{
+		Pose.Carry = 0.f;
+		Pose.Shoulder = 0.f;
+		Pose.Reload = 0.f;
+		Pose.Level = 0.f;
+		Pose.Guard = 0.f;
+		const float Raise = Me->GetSpyglassRaise();
+		UAnimSequence* Observe = Raise > 0.f ? PA250AnimClips::ClipVariant(TEXT("gun_crew_observe"), GetTypeHash(Me->GetUniqueID())) : nullptr;
+		if (Observe)
+		{
+			const float Eye = FMath::Min(PA250BattleFeel::Get().SpyglassClipEyeSeconds, Observe->GetPlayLength());
+			Anim->SetUpperBodyClip(Observe, FMath::SmoothStep(0.f, 1.f, Raise) * Eye, FMath::Min(1.f, Raise * 2.f), false);
+		}
+		else
+		{
+			Anim->SetUpperBodyClip(nullptr, 0.f, 0.f, false);
+		}
+	}
 	Anim->SetMeleePose(Pose);
 }
 

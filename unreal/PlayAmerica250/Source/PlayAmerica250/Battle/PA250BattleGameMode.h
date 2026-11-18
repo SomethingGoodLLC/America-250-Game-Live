@@ -471,6 +471,12 @@ private:
 	void MaybeStartGunStill();
 	/** -PA250GunServe: teleport onto a gun, keep a crew, cycle the load, fire once, quit. */
 	void MaybeStartGunServe();
+	/** -PA250CrewProbe: the player put at his side's gun as an artilleryman (as the class picker does),
+	 *  the game slowed, the gun kept firing, and each drill step's working man followed by a close
+	 *  camera: six stills through his clip (docs/preview/crew_<clip>_<n>.png) and a log line each with
+	 *  where his tool is against his hands, the bore, the muzzle face and the vent. Any battle level,
+	 *  the campaign's included (with -PA250StoryProbe). Then the game quits. */
+	void MaybeStartCrewProbe();
 	/** -PA250LandingStill: stills of a landing: the boats on the way in (12 s) and the men ashore. */
 	void MaybeStartLandingStill();
 	void GatherPosts();

@@ -222,6 +222,16 @@ bool PA250BattleFeel::LoadFromFile(const FString& Path, FName Platform, TArray<F
 			R.Number(*Move, TEXT("fire_lock_seconds"), W, Feel.FireLockSeconds);
 			R.Bool(*Move, TEXT("mouse_smoothing"), W, Feel.bMouseSmoothing);
 		}
+		if (const TSharedPtr<FJsonObject>* Glass = R.Object(Root, TEXT("spyglass"), TEXT("")))
+		{
+			const FString W = TEXT("spyglass.");
+			R.Number(*Glass, TEXT("fov_narrow_deg"), W, Feel.SpyglassFovNarrowDeg);
+			R.Number(*Glass, TEXT("zoom_steps"), W, Feel.SpyglassZoomSteps);
+			R.Number(*Glass, TEXT("raise_seconds"), W, Feel.SpyglassRaiseSeconds);
+			R.Number(*Glass, TEXT("clip_eye_seconds"), W, Feel.SpyglassClipEyeSeconds);
+			R.Number(*Glass, TEXT("field_fraction"), W, Feel.SpyglassFieldFraction);
+			R.Number(*Glass, TEXT("eye_forward_cm"), W, Feel.SpyglassEyeForwardCm);
+		}
 		if (const TSharedPtr<FJsonObject>* Input = R.Object(Root, TEXT("input"), TEXT("")))
 		{
 			if (const TSharedPtr<FJsonObject>* Windows = R.Object(*Input, TEXT("buffer_seconds"), TEXT("input.")))

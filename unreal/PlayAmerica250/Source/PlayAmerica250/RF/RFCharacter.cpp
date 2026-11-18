@@ -1050,22 +1050,135 @@ void ARFCharacter::SpawnMusket()
 	}
 }
 
+void ARFCharacter::SetServingGun(bool bOn)
+{
+	if (bServingGun == bOn) return;
+	bServingGun = bOn;
+	if (bOn && !Spyglass && GetMesh())
+	{
+		// SM_Spyglass (tools/anim/make_props.py): a brass draw telescope 60 cm drawn out, eyepiece at
+		// -X, its origin 8 cm from the eyepiece where the right hand holds it.
+		UStaticMesh* Glass = LoadObject<UStaticMesh>(nullptr, TEXT("/Game/PA250/Props/GunTools/SM_Spyglass.SM_Spyglass"));
+		if (!Glass)
+		{
+			UE_LOG(LogTemp, Error, TEXT("PA250 spyglass: /Game/PA250/Props/GunTools/SM_Spyglass is missing; the gunner has no glass"));
+		}
+		else
+		{
+			Spyglass = NewObject<UStaticMeshComponent>(this, TEXT("PA250Spyglass"));
+			Spyglass->SetStaticMesh(Glass);
+			Spyglass->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+			Spyglass->SetCastShadow(true);
+			// On the hand bone, so it moves with the hand in the pose that is drawn; only its lie in the
+			// hand is worked out from the last pose (TickSpyglass).
+			Spyglass->SetupAttachment(GetMesh(), TEXT("hand_r"));
+			Spyglass->RegisterComponent();
+		}
+	}
+	if (Spyglass) Spyglass->SetVisibility(bOn);
+	if (!bOn) SpyglassRaise = 0.f;
+	UE_LOG(LogTemp, Display, TEXT("PA250 spyglass: %s %s"), *GetName(), bOn ? TEXT("takes the glass at the gun") : TEXT("puts the glass away"));
+}
+
+float ARFCharacter::SpyglassFovAt(int32 Step, int32 Steps, float Wide, float Narrow)
+{
+	if (Wide <= 0.f) return 0.f;
+	if (Steps <= 0 || Narrow <= 0.f || Narrow >= Wide) return Wide;
+	const float T = float(FMath::Clamp(Step, 0, Steps)) / float(Steps);
+	return Wide * FMath::Pow(Narrow / Wide, T);
+}
+
+float ARFCharacter::GetSpyglassFov() const
+{
+	const FPA250BattleFeel& Feel = PA250BattleFeel::Get();
+	// It opens where a man aiming his musket or rifle sees (user, 2026-11-18), and zooms in from there.
+	return SpyglassFovAt(SpyglassZoom, FMath::RoundToInt(Feel.SpyglassZoomSteps), AimedFOV, Feel.SpyglassFovNarrowDeg);
+}
+
+void ARFCharacter::ZoomSpyglass(int32 Steps)
+{
+	if (!IsLookingThroughGlass() || Steps == 0) return;
+	const int32 Max = FMath::Max(0, FMath::RoundToInt(PA250BattleFeel::Get().SpyglassZoomSteps));
+	const int32 Was = SpyglassZoom;
+	SpyglassZoom = FMath::Clamp(SpyglassZoom + Steps, 0, Max);
+	if (SpyglassZoom != Was) UE_LOG(LogTemp, Display, TEXT("PA250 spyglass: zoom %d of %d (fov %.1f)"), SpyglassZoom, Max, GetSpyglassFov());
+}
+
+bool ARFCharacter::IsLookingThroughGlass() const
+{
+	if (!bServingGun || SpyglassRaise < 0.999f || !bAiming || MountedVisual) return false;
+	const APlayerController* PC = Cast<APlayerController>(Controller);
+	return PC && PC->GetViewTarget() == this;
+}
+
+void ARFCharacter::TickSpyglass(float DeltaTime)
+{
+	if (!bServingGun) return;
+	const FPA250BattleFeel& Feel = PA250BattleFeel::Get();
+	const float Rate = Feel.SpyglassRaiseSeconds > KINDA_SMALL_NUMBER ? DeltaTime / Feel.SpyglassRaiseSeconds : 1.f;
+	const bool bWasThrough = IsLookingThroughGlass();
+	SpyglassRaise = FMath::Clamp(SpyglassRaise + (bAiming && !IsDead() ? Rate : -Rate), 0.f, 1.f);
+	const bool bThrough = IsLookingThroughGlass();
+	if (bThrough != bWasThrough)
+	{
+		SpyglassZoom = 0; // it opens wide every time
+		UE_LOG(LogTemp, Display, TEXT("PA250 spyglass: %s (fov %.0f)"), bThrough ? TEXT("looking through the glass") : TEXT("glass lowered from the eye"), GetSpyglassFov());
+	}
+	USkeletalMeshComponent* Body = GetMesh();
+	if (!Spyglass || !Body) return;
+	// Seen from his own eye it would fill the lens: the round field stands for it then.
+	Spyglass->SetVisibility(!bThrough);
+	if (Body->GetBoneIndex(TEXT("hand_r")) == INDEX_NONE || Body->GetBoneIndex(TEXT("hand_l")) == INDEX_NONE) return;
+	// Read the hands (last frame's pose); never write bones here.
+	const FVector HandR = Body->GetBoneLocation(TEXT("hand_r"), EBoneSpaces::WorldSpace);
+	const FVector HandL = Body->GetBoneLocation(TEXT("hand_l"), EBoneSpaces::WorldSpace);
+	FVector Grip = HandR;
+	if (Body->GetBoneIndex(TEXT("middle_01_r")) != INDEX_NONE)
+	{
+		const FVector Palm = 0.6f * (Body->GetBoneLocation(TEXT("middle_01_r"), EBoneSpaces::WorldSpace) - HandR);
+		if (!Palm.ContainsNaN() && Palm.Size() < 12.f) Grip += Palm;
+	}
+	// Raised, it lies along the hands (right hand at the eyepiece, left further out), as the clip and
+	// the review reels hold it; lowered, it hangs closed from his right hand.
+	// How far up his right hand has come (hip ~95 cm, eye ~158 cm above his feet) turns the glass from
+	// hanging to lying along his hands, so a hand on its way to the eye never carries it upright.
+	const FVector Along = HandL - Grip;
+	const float Span = Along.Size();
+	const float HandUp = Body->GetComponentTransform().InverseTransformPosition(HandR).Z;
+	const float Up = FMath::SmoothStep(115.f, 150.f, HandUp);
+	const FVector Hang = (-FVector::UpVector + GetActorForwardVector() * 0.25f).GetSafeNormal();
+	// Up but the left hand not yet on it: it points ahead from the right hand, the way it will lie.
+	const FVector Raised = Span > 12.f && Span < 45.f ? Along / Span : GetActorForwardVector();
+	const FVector Dir = Up > 0.f ? FMath::Lerp(Hang, Raised, Up).GetSafeNormal() : Hang;
+	// Lowered, its draws are pushed home (half length). Set in the hand's frame of the same pose.
+	const FTransform Want(FRotationMatrix::MakeFromXZ(Dir.IsNearlyZero() ? Hang : Dir, FVector::UpVector).Rotator(), Grip, FVector(FMath::Lerp(0.5f, 1.f, Up), 1.f, 1.f));
+	Spyglass->SetRelativeTransform(Want.GetRelativeTransform(Body->GetSocketTransform(TEXT("hand_r"), RTS_World)));
+}
+
 void ARFCharacter::ApplyCameraPose(float DeltaTime)
 {
 	if (!SpringArm || !Camera) return;
 	const float Y = ShoulderSign * (bAiming ? AdsSocketOffset.Y : HipSocketOffset.Y);
 	// First person (on foot): no boom, the camera a hand in front of his eyes so his own head and hat
 	// are behind it and his musket is before it.
-	const bool bEyes = bFirstPerson && !MountedVisual;
-	const FVector TargetSocket = bEyes ? FirstPersonOffset() : FVector(0.f, Y, MountedVisual ? 175.f : (bAiming ? AdsSocketOffset.Z : HipSocketOffset.Z));
+	// Through the gunner's glass the view is his eye's, narrowed (battle_feel spyglass).
+	const bool bGlass = IsLookingThroughGlass();
+	const bool bEyes = (bFirstPerson || bGlass) && !MountedVisual;
+	const FVector TargetSocket = bEyes ? FirstPersonOffset() + FVector(bGlass ? PA250BattleFeel::Get().SpyglassEyeForwardCm : 0.f, 0.f, 0.f) : FVector(0.f, Y, MountedVisual ? 175.f : (bAiming ? AdsSocketOffset.Z : HipSocketOffset.Z));
 	const float TargetArm = bEyes ? 0.f : (MountedVisual ? (bAiming ? 330.f : 550.f) : (bAiming ? AdsArmLength : HipArmLength));
 	const float Alpha = CameraBlendSeconds > KINDA_SMALL_NUMBER
 		? FMath::Clamp(DeltaTime / CameraBlendSeconds, 0.f, 1.f)
 		: 1.f;
-	CurrentArmLength = FMath::Lerp(CurrentArmLength, TargetArm, Alpha);
-	CurrentSocketOffset = FMath::Lerp(CurrentSocketOffset, TargetSocket, Alpha);
-	const float WantedFOV = TargetFOV + (MeleeComponent && MeleeComponent->IsCharging() ? ChargeFOVBoost : 0.f);
-	CurrentFOV = FMath::Lerp(CurrentFOV, WantedFOV, Alpha);
+	// The glass is at his eye or not: no slide from the shoulder to the lens.
+	CurrentArmLength = bGlass ? TargetArm : FMath::Lerp(CurrentArmLength, TargetArm, Alpha);
+	CurrentSocketOffset = bGlass ? TargetSocket : FMath::Lerp(CurrentSocketOffset, TargetSocket, Alpha);
+	const float GlassFOV = GetSpyglassFov();
+	const float WantedFOV = bGlass && GlassFOV > 0.f ? GlassFOV
+		: TargetFOV + (MeleeComponent && MeleeComponent->IsCharging() ? ChargeFOVBoost : 0.f);
+	// The glass comes to the eye at once (a lerp from 55 reads as a slow zoom, not a lens); once
+	// there, the wheel's steps ease in and out.
+	CurrentFOV = bGlass && !bGlassView ? WantedFOV : FMath::Lerp(CurrentFOV, WantedFOV, bGlass ? FMath::Clamp(DeltaTime * 12.f, 0.f, 1.f) : Alpha);
+	bGlassView = bGlass;
 	SpringArm->TargetArmLength = CurrentArmLength;
 	SpringArm->SocketOffset = CurrentSocketOffset;
 	Camera->SetFieldOfView(CurrentFOV);
@@ -1111,6 +1224,7 @@ void ARFCharacter::Tick(float DeltaTime)
 	TickViewFeedback(DeltaTime);
 	SensitivityToastTimer = FMath::Max(0.f, SensitivityToastTimer - DeltaTime);
 	ReloadFeedbackTimer = FMath::Max(0.f, ReloadFeedbackTimer - DeltaTime);
+	TickSpyglass(DeltaTime);
 	ApplyCameraPose(DeltaTime);
 	UpdateFacingMode();
 
@@ -1293,6 +1407,11 @@ void ARFCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompone
 	BuildDefaultInput();
 	PlayerInputComponent->BindKey(EKeys::H, IE_Pressed, this, &ARFCharacter::ToggleMounted);
 	PlayerInputComponent->BindKey(EKeys::Z, IE_Pressed, this, &ARFCharacter::ToggleFirstPerson); // first / third person
+	// The gunner's glass zooms (only while he looks through it): the wheel, or = and - on a trackpad.
+	PlayerInputComponent->BindKey(EKeys::MouseScrollUp, IE_Pressed, this, &ARFCharacter::OnSpyglassZoomIn);
+	PlayerInputComponent->BindKey(EKeys::MouseScrollDown, IE_Pressed, this, &ARFCharacter::OnSpyglassZoomOut);
+	PlayerInputComponent->BindKey(EKeys::Equals, IE_Pressed, this, &ARFCharacter::OnSpyglassZoomIn);
+	PlayerInputComponent->BindKey(EKeys::Hyphen, IE_Pressed, this, &ARFCharacter::OnSpyglassZoomOut);
 	PlayerInputComponent->BindKey(EKeys::B, IE_Pressed, this, &ARFCharacter::OnShovePressed);    // the shove
 	// The class verb (order a volley or a charge, rally): T. Passive verbs answer with what they do.
 	PlayerInputComponent->BindKey(EKeys::T, IE_Pressed, this, &ARFCharacter::OnAbilityPressed);
@@ -1398,7 +1517,9 @@ void ARFCharacter::Look(const FInputActionValue& Value)
 	if (Controller)
 	{
 		// Slower while aiming down sights: the narrower FOV magnifies every degree.
-		const float Scale = GetLookSensitivity() * (bAiming ? AdsLookScale : 1.f);
+		// Through the glass the look is the aim's at its widest and slows in step with the zoom.
+		const float GlassScale = AdsLookScale * (AimedFOV > 0.f ? CurrentFOV / AimedFOV : 1.f);
+		const float Scale = GetLookSensitivity() * (IsLookingThroughGlass() && GlassScale > 0.f ? GlassScale : bAiming ? AdsLookScale : 1.f);
 		AddControllerYawInput(V.X * Scale * YawLookScale);
 		AddControllerPitchInput(V.Y * Scale);
 	}

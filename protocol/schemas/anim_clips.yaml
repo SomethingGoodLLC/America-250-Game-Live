@@ -111,6 +111,33 @@ properties:
         mesh: {$ref: "#/definitions/package"}
         retargeter:
           oneOf: [{type: "null"}, {$ref: "#/definitions/package"}]
+  gun_tools:
+    type: object
+    additionalProperties: false
+    description: "What the gun crew hold while their clips play (APA250FieldGun::PoseCrew); places in the cannon's mesh space, cm."
+    required: [bore_origin_cm, bore_direction, vent_cm, meshes, by_clip]
+    properties:
+      note: {type: string}
+      bore_origin_cm: {$ref: "#/definitions/triple"}
+      bore_direction: {$ref: "#/definitions/triple"}
+      vent_cm: {$ref: "#/definitions/triple"}
+      meshes:
+        type: object
+        additionalProperties: {$ref: "#/definitions/package"}
+      by_clip:
+        type: object
+        propertyNames: {pattern: "^gun_crew_[a-z0-9_]+$"}
+        additionalProperties:
+          type: object
+          additionalProperties: false
+          required: [tool, hold]
+          properties:
+            tool: {type: string}
+            hold: {enum: [bore, upright, to_vent, in_hand, planted]}
+            head: {enum: [sponge, rammer]}
+            mid_cm: {type: number, exclusiveMinimum: 0}
+            until_s: {type: number, exclusiveMinimum: 0}
+            planted_cm: {type: array, minItems: 2, maxItems: 2, items: {type: number}}
   clips:
     type: object
     propertyNames: {pattern: "^[a-z0-9_]+$"}

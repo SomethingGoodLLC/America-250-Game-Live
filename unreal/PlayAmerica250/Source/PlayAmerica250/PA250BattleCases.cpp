@@ -3539,6 +3539,39 @@ void RunGunnery(FLog& Log)
 				Gun->ForceLoaded();
 				Log.Check(Gun->DischargeAt(Close, Server) && Gun->GetShotsFired() == 1 && Gun->GetCrew() >= R.cannon_min_crew,
 					FString::Printf(TEXT("guns: two men (crew %d) fire grape inside range"), Gun->GetCrew()));
+				// Playtest 2026-11-17: "it said round shot, but loaded grape". A player who takes the gun and
+				// never presses [ ] fires the round shot his chip names, even inside canister range.
+				Gun->SetPlayerGunner(nullptr);
+				Log.Check(!Server->IsServingGun() && (!Server->GetSpyglass() || !Server->GetSpyglass()->IsVisible()),
+					TEXT("spyglass: a man who leaves the gun puts the glass away"));
+				Gun->SetPlayerGunner(Server);
+				{
+					const UStaticMeshComponent* Glass = Server->GetSpyglass();
+					Log.Check(Server->IsServingGun() && Glass && Glass->IsVisible() && Glass->GetStaticMesh()
+						&& Glass->GetStaticMesh()->GetName() == TEXT("SM_Spyglass") && Server->GetSpyglassRaise() == 0.f && !Server->IsLookingThroughGlass(),
+						TEXT("spyglass: the player at a gun holds SM_Spyglass, lowered (playtest 2026-11-17: empty hands at his face)"));
+					Log.Check(PA250AnimClips::ClipVariant(TEXT("gun_crew_observe"), 7u) != nullptr,
+						TEXT("spyglass: gun_crew_observe (AM_Gun_Observe) loads for raising it"));
+					const FPA250GunTools& Tools = PA250AnimClips::GunTools();
+					bool bMeshes = Tools.Meshes.Num() >= 3;
+					for (const auto& M : Tools.Meshes) bMeshes &= LoadObject<UStaticMesh>(nullptr, *M.Value) != nullptr;
+					const FPA250CrewToolRule* Sponge = PA250AnimClips::CrewToolRule(TEXT("gun_crew_sponge"));
+					const FPA250CrewToolRule* Ram = PA250AnimClips::CrewToolRule(TEXT("gun_crew_ram"));
+					const FPA250CrewToolRule* Fire = PA250AnimClips::CrewToolRule(TEXT("gun_crew_fire"));
+					const FPA250CrewToolRule* Load = PA250AnimClips::CrewToolRule(TEXT("gun_crew_load"));
+					Log.Check(Tools.bLoaded && bMeshes && Sponge && Sponge->Hold == EPA250ToolHold::Bore && Sponge->bSpongeHead
+						&& Ram && Ram->Hold == EPA250ToolHold::Bore && !Ram->bSpongeHead && Fire && Fire->Hold == EPA250ToolHold::ToVent
+						&& Load && Load->Hold == EPA250ToolHold::InHand && Load->UntilSeconds > 0.f
+						&& !PA250AnimClips::CrewToolRule(TEXT("gun_crew_idle_captain")) && Tools.BoreDirection.Z > 0.1f,
+						FString::Printf(TEXT("crew tools: %d clips name a tool, every mesh loads; sponge and ram on the measured bore (rising %.1f deg), the linstock to the vent, the cartridge until it is in"),
+							Tools.ByClip.Num(), FMath::RadiansToDegrees(FMath::Asin(Tools.BoreDirection.Z))));
+				}
+				const FString ChipBefore = Gun->LoadChip();
+				Gun->ForceLoaded();
+				Log.Check(ChipBefore == TEXT("LOAD: ROUND SHOT") && Gun->PlayerFire(Close) && Gun->GetShotsFired() == 2
+					&& Gun->GetSelectedShot() == EPA250Shot::RoundShot && Gun->LoadChip() == ChipBefore,
+					FString::Printf(TEXT("guns: the player's untouched chip (%s) is what fires at %.0f m, not the crew's canister"),
+						*ChipBefore, R.cannon_grape_range_m * 0.5f));
 			}
 		}
 	}

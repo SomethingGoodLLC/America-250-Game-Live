@@ -26,6 +26,8 @@
 #include "Fonts/FontMeasure.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Rendering/DrawElements.h"
+#include "Rendering/SlateRenderer.h"
+#include "Battle/PA250BattleFeel.h"
 #include "Kismet/GameplayStatics.h"
 #include "Camera/PlayerCameraManager.h"
 
@@ -160,6 +162,57 @@ int32 UPA250BattleHUD::NativePaint(const FPaintArgs& Args, const FGeometry& G, c
 	const ARFCharacter* Me = Cast<ARFCharacter>(PC->GetPawn());
 	const FName MyFaction = Me && !Me->FactionId.IsNone() ? Me->FactionId : GM->GetPlayerFaction();
 	const FVector2D View = G.GetLocalSize();
+	if (Me && Me->IsLookingThroughGlass())
+	{
+		// The gunner's glass (battle_feel spyglass): a round field, dark outside it with a soft edge
+		// and the brass of the tube at its rim. The rest of the HUD is painted over it.
+		const float Fraction = FMath::Clamp(PA250BattleFeel::Get().SpyglassFieldFraction, 0.2f, 1.f);
+		const FVector2f C(View.X * 0.5f, View.Y * 0.5f);
+		const float Rim = 0.5f * Fraction * float(View.Y);
+		const float Soft = Rim * 0.9f, Far = float(View.Size());
+		const int32 N = 96;
+		TArray<FSlateVertex> Verts;
+		TArray<SlateIndex> Index;
+		Verts.Reserve(N * 3);
+		Index.Reserve(N * 12);
+		const FSlateRenderTransform& RT = G.GetAccumulatedRenderTransform();
+		for (int32 i = 0; i < N; ++i)
+		{
+			const float A = 2.f * PI * i / N;
+			const FVector2f D(FMath::Cos(A), FMath::Sin(A));
+			Verts.Add(FSlateVertex::Make<ESlateVertexRounding::Disabled>(RT, C + D * Soft, FVector2f::ZeroVector, FColor(0, 0, 0, 0)));
+			Verts.Add(FSlateVertex::Make<ESlateVertexRounding::Disabled>(RT, C + D * Rim, FVector2f::ZeroVector, FColor(0, 0, 0, 255)));
+			Verts.Add(FSlateVertex::Make<ESlateVertexRounding::Disabled>(RT, C + D * Far, FVector2f::ZeroVector, FColor(0, 0, 0, 255)));
+		}
+		for (int32 i = 0; i < N; ++i)
+		{
+			const int32 J = (i + 1) % N;
+			for (int32 Ring = 0; Ring < 2; ++Ring)
+			{
+				const SlateIndex A0 = SlateIndex(i * 3 + Ring), A1 = SlateIndex(i * 3 + Ring + 1);
+				const SlateIndex B0 = SlateIndex(J * 3 + Ring), B1 = SlateIndex(J * 3 + Ring + 1);
+				Index.Append({A0, A1, B1, A0, B1, B0});
+			}
+		}
+		const FSlateResourceHandle White = FSlateApplication::Get().GetRenderer()->GetResourceHandle(FPA250HudStyle::Get().White);
+		FSlateDrawElement::MakeCustomVerts(Out, ++Layer, White, Verts, Index, nullptr, 0, 0);
+		TArray<FVector2D> Ring;
+		for (int32 i = 0; i <= N; ++i)
+		{
+			const float A = 2.f * PI * i / N;
+			Ring.Add(FVector2D(C.X + FMath::Cos(A) * Rim, C.Y + FMath::Sin(A) * Rim));
+		}
+		FSlateDrawElement::MakeLines(Out, ++Layer, G.ToPaintGeometry(), Ring, ESlateDrawEffect::None, FLinearColor(0.42f, 0.31f, 0.12f, 0.85f), true, 4.f);
+		// How strong the glass is now, against the open view (80 deg), and how to change it.
+		const float Fov = FMath::Max(1.f, Me->GetSpyglassFov());
+		const float Power = FMath::Tan(FMath::DegreesToRadians(40.f)) / FMath::Tan(FMath::DegreesToRadians(Fov * 0.5f));
+		const FString Zoom = FString::Printf(TEXT("%.1fx   wheel or = / - to zoom"), Power);
+		const FSlateFontInfo ZoomFont = FCoreStyle::GetDefaultFontStyle("Bold", 12);
+		const FVector2D ZoomSize = FSlateApplication::Get().GetRenderer()->GetFontMeasureService()->Measure(Zoom, ZoomFont);
+		const FVector2D ZoomAt(C.X - ZoomSize.X * 0.5f, FMath::Min(float(View.Y) - ZoomSize.Y - 6.f, C.Y + Rim + 8.f));
+		FSlateDrawElement::MakeText(Out, ++Layer, G.ToPaintGeometry(FVector2f(ZoomSize), FSlateLayoutTransform(FVector2f(ZoomAt))), Zoom, ZoomFont,
+			ESlateDrawEffect::None, FLinearColor(0.85f, 0.72f, 0.45f, 0.9f));
+	}
 	const double Now = GetWorld() ? GetWorld()->GetRealTimeSeconds() : 0.0;
 	const FSlateFontInfo Letter = FCoreStyle::GetDefaultFontStyle("Bold", 15);
 	const FSlateFontInfo Small = FCoreStyle::GetDefaultFontStyle("Bold", 10);

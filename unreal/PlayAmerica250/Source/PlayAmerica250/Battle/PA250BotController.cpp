@@ -719,7 +719,20 @@ bool APA250BotController::TickGunner(ARFCharacter* Me, ARFCharacter* Enemy, floa
 	APA250FieldGun* Gun = GM->GunFor(Me, Post);
 	if (!Gun) return false; // his side has no gun for him: he fights as infantry
 	const FVector At = Gun->GetCrewPost(Post);
-	const bool bAtPost = FVector::Dist2D(Me->GetActorLocation(), At) <= 120.f;
+	// At the station his clips are worked from he is at his post. Near his post but not yet there, he
+	// walks the last stretch to it (the posts stand 1 to 1.5 m off the stations, clear of the wheels).
+	const bool bAtStation = Gun->IsAtCrewStation(Me, Post);
+	FVector Station;
+	if (!bAtStation && FVector::Dist2D(Me->GetActorLocation(), At) <= 120.f && Gun->GetCrewStation(Post, Station))
+	{
+		Me->SetDucking(false);
+		ClearFocus(EAIFocusPriority::Gameplay);
+		State = EBotState::Advance;
+		Me->GetCharacterMovement()->MaxWalkSpeed = Me->WalkSpeed;
+		MoveToward(Me, Station, 40.f);
+		return true;
+	}
+	const bool bAtPost = bAtStation || FVector::Dist2D(Me->GetActorLocation(), At) <= 120.f;
 	// A man with a bayonet in his face defends himself; the gun is lost if the crew are driven off.
 	if (Enemy && Dist < T.ChargeRangeCm * 0.5f && bAtPost) return false;
 	Me->SetDucking(false);
@@ -732,7 +745,11 @@ bool APA250BotController::TickGunner(ARFCharacter* Me, ARFCharacter* Enemy, floa
 		return true;
 	}
 	StopMovement();
-	SetFocalPoint(Gun->GetActorLocation() + Gun->GetActorForwardVector() * 3000.f);
+	// At his station he faces what his clip was made facing (the muzzle, the vent); a focus down the
+	// range turned him every tick and laid the sponge staff across the barrel (crew probe 2026-11-18).
+	FVector Face;
+	if (bAtStation && Gun->GetCrewFacePoint(Post, Face)) SetFocalPoint(Face);
+	else SetFocalPoint(Gun->GetActorLocation() + Gun->GetActorForwardVector() * 3000.f);
 	State = EBotState::Defend;
 	return true;
 }

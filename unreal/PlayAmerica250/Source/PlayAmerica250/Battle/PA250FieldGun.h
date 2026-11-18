@@ -350,6 +350,15 @@ public:
 	FVector GetMuzzle() const;
 	/** Where the crew stand: two by the wheels, two by the trail. */
 	FVector GetCrewPost(int32 Index) const;
+	/** He stands where PoseCrew works his clip from (its station, within the 150 cm it eases from).
+	 *  The bot counts that as at his post: the posts are 1 to 1.5 m from the stations, and a bot that
+	 *  walked back to his post while the gun eased him to the station dropped his clip and tool every
+	 *  second (2026-11-18). */
+	bool IsAtCrewStation(const ARFCharacter* Man, int32 Index) const;
+	/** Where his clip's station is (at his post's height), or false when his clip has none. */
+	bool GetCrewStation(int32 Index, FVector& Out) const;
+	/** The point his clip faces (face_cm), or false when his clip has none. */
+	bool GetCrewFacePoint(int32 Index, FVector& Out) const;
 	/** A bot gunner asks for a place; INDEX_NONE when the posts are full. He keeps it while he lives. */
 	int32 ClaimPost(ARFCharacter* Gunner);
 	/** Take a post even if full (displaces a bot). Used when the player deploys as gunner. */
@@ -400,6 +409,10 @@ public:
 	/** Pure: the registry clip a post's man shows at a drill step (an EPA250GunStep index; posts are
 	 *  0 sponger, 1 loader, 2 ventsman, 3 captain). */
 	static FName CrewStepClip(int32 Post, int32 Step, bool bDrilling);
+	/** Probes: the man at a post, the tool he holds (null: none), and the cannon's mesh space. */
+	ARFCharacter* GetPostMan(int32 Post) const { return Posts.IsValidIndex(Post) ? Posts[Post].Get() : nullptr; }
+	const UStaticMeshComponent* GetCrewTool(int32 Post) const { return Post >= 0 && Post < 4 ? CrewTools[Post].Comp.Get() : nullptr; }
+	FTransform GetGunSpace() const;
 	static FName CrewIdleClip(int32 Post);
 	/** Premature discharge (M6): the sponger first (55% WIA / 45% KIA), then the muzzle blast for the rest. */
 	void DischargePremature(FRandomStream& Hot);
@@ -409,6 +422,22 @@ public:
 private:
 	/** Eases each bot of the crew onto his drill station and shows the step's clip on him. */
 	void PoseCrew(float DeltaSeconds);
+	/** The tool his clip names (anim_clips gun_tools), on his right hand or planted by the gun; his
+	 *  musket put away while he works at his station. ClearCrewTool gives it back. */
+	void PoseCrewTool(int32 Post, ARFCharacter* Man, FName Clip, float ClipTime);
+	void ClearCrewTool(int32 Post);
+	struct FCrewTool
+	{
+		TWeakObjectPtr<ARFCharacter> Man;
+		TWeakObjectPtr<UStaticMeshComponent> Comp;
+		FName Tool;
+		bool bPlanted = false;
+		float UnposedSeconds = 0.f;
+		FName Clip;            // the clip the tool was last posed for
+		bool bRoundIn = false; // in_hand: the round has reached the muzzle in this clip
+	};
+	FCrewTool CrewTools[4];
+	virtual void EndPlay(const EEndPlayReason::Type Reason) override;
 	void FitMesh();
 	void CountMen(int32& OutOwn, int32& OutTrained, int32& OutEnemies) const;
 	/** The crew's own judgement: the nearest enemy it can see, or the work he shelters behind. */
@@ -490,6 +519,11 @@ private:
 
 	UPROPERTY()
 	TObjectPtr<UStaticMeshComponent> Crate;
+	/** The look of a wooden ammunition chest over the crate (lid, iron bands, rope handles); the crate
+	 *  alone is what shot and sight find. Until 2026-11-18 it was a bare engine cube in the grid material. */
+	UPROPERTY()
+	TArray<TObjectPtr<UStaticMeshComponent>> Trim;
+	void DressChest();
 	TWeakObjectPtr<APA250FieldGun> Gun;
 	int32 Ready = 0;
 	int32 Cap = 6;

@@ -119,6 +119,14 @@ struct FPA250BattleFeel
 	float FireLockSeconds = 0.f;
 	bool bMouseSmoothing = true;
 
+	// spyglass (the gunner's glass; battle_feel.json spyglass)
+	float SpyglassFovNarrowDeg = 0.f;
+	float SpyglassZoomSteps = 0.f;
+	float SpyglassRaiseSeconds = 0.f;
+	float SpyglassClipEyeSeconds = 0.f;
+	float SpyglassFieldFraction = 0.f;
+	float SpyglassEyeForwardCm = 0.f;
+
 	// intensity (M6)
 	float NearMissRadiusCm = 0.f;
 	float NearMissMinShotCm = 0.f;

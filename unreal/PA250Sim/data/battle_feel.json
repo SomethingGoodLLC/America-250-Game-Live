@@ -107,6 +107,15 @@
     "fire_lock_seconds": 0.35,
     "mouse_smoothing": false
   },
+  "spyglass": {
+    "note": "The gunner's glass (GAME INVENTION, 2026-11-17 playtest: his aim pose showed empty hands at his face). A player serving a gun carries the brass draw telescope SM_Spyglass in his right hand in place of the hidden musket; aiming raises it (gun_crew_observe, played on the upper body up to the frame its hands are at the eye) and, once it is there, the view is his eye through the glass (from the glass's far end, eye_forward_cm ahead of his eye, so his own hands and sleeve are not in it): a round field that opens each time the glass comes to the eye at the zoom of a man aiming his musket or rifle (RFCharacter AimedFOV, 55, at the aim's look speed; user, 2026-11-18) and zooms in and out with the mouse wheel (or = and -) in zoom_steps even steps to fov_narrow_deg, the look slowing in step with the zoom (playtest 2026-11-18: a fixed 15 degrees was hard to play).",
+    "fov_narrow_deg": 10,
+    "zoom_steps": 5,
+    "raise_seconds": 0.6,
+    "clip_eye_seconds": 1.33,
+    "field_fraction": 0.9,
+    "eye_forward_cm": 60
+  },
   "input": {
     "note": "Buffered input (GAME INVENTION). A press that cannot be acted on at once (he is held still after a shot, mid-thrust, over a wall) is remembered for its window and acted on the moment it can be; older than the window it is dropped. vault: the jump key asks for a traversal at any speed for this long.",
     "buffer_seconds": {

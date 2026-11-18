@@ -29,6 +29,29 @@ struct FPA250ClipEntry
 	FName Stance;
 };
 
+/** What a gun crewman holds while one of his clips plays (anim_clips.json gun_tools.by_clip). */
+enum class EPA250ToolHold : uint8 { Bore, Upright, ToVent, InHand, Planted };
+struct FPA250CrewToolRule
+{
+	FName Tool;               // a key of gun_tools.meshes
+	EPA250ToolHold Hold = EPA250ToolHold::Upright;
+	bool bSpongeHead = true;  // bore: the sponge (+X) into the barrel, else the rammer (-X)
+	float MidCm = 0.f;        // upright, planted: the tool's middle above the feet / the ground
+	float OffsetCm = 0.f;     // to_vent: its middle this far from the hand toward the vent
+	float UntilSeconds = 0.f; // in_hand: shown until this far into the clip
+	FVector2D PlantedCm = FVector2D::ZeroVector;
+};
+/** The crew's tools (gun_tools): the measured bore line and vent, in the cannon's mesh space (cm). */
+struct FPA250GunTools
+{
+	bool bLoaded = false;
+	FVector BoreOriginCm = FVector::ZeroVector;
+	FVector BoreDirection = FVector::ForwardVector;
+	FVector VentCm = FVector::ZeroVector;
+	TMap<FName, FString> Meshes;
+	TMap<FName, FPA250CrewToolRule> ByClip;
+};
+
 /**
  * Animation assets named by data (unreal/PA250Sim/data/anim_clips.json). M1: the motion-matching
  * databases Scripts/build_locomotion.py made on the soldier's skeleton, by gait.
@@ -61,6 +84,10 @@ PLAYAMERICA250_API bool LoadRegistry(const FString& Path, TArray<FString>* OutEr
 /** The registry's names (DataPath(), read on first use). */
 PLAYAMERICA250_API const TArray<FPA250ClipEntry>& Registry();
 PLAYAMERICA250_API const FPA250ClipEntry* FindClip(FName Name);
+/** The gun crew's tools (gun_tools; read with the registry). */
+PLAYAMERICA250_API const FPA250GunTools& GunTools();
+/** The tool rule for a crew clip, or null: he holds nothing for it. */
+PLAYAMERICA250_API const FPA250CrewToolRule* CrewToolRule(FName Clip);
 /**
  * The clip to play for a name, or null: its placeholder shows. A name with no asset (or one whose
  * asset does not load on this machine) logs "PA250 anim clips: PLACEHOLDER <name>" once; a name the

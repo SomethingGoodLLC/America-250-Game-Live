@@ -1834,9 +1834,13 @@ void APA250BattleGameMode::BeginPlay()
 			if (APlayerController* PC = GetWorld()->GetFirstPlayerController()) PC->ConsoleCommand(TEXT("Shot showui"));
 			UE_LOG(LogTemp, Display, TEXT("STORY_PROBE: shot battle_story_field"));
 		}), 10.f, false);
-		GetWorldTimerManager().SetTimer(QuitHandle, FTimerDelegate::CreateLambda([this]() {
-			UKismetSystemLibrary::QuitGame(this, nullptr, EQuitPreference::Quit, false);
-		}), 13.f, false);
+		// The crew probe rides on the story probe into a campaign battle and quits when it is done.
+		if (!FParse::Param(FCommandLine::Get(), TEXT("PA250CrewProbe")))
+		{
+			GetWorldTimerManager().SetTimer(QuitHandle, FTimerDelegate::CreateLambda([this]() {
+				UKismetSystemLibrary::QuitGame(this, nullptr, EQuitPreference::Quit, false);
+			}), 13.f, false);
+		}
 	}
 	Banner = FString::Printf(TEXT("Battle of %s"), UTF8_TO_TCHAR(Setup.province_name.c_str()));
 	if (PA250Modes::IsOrdered(ScenarioFight.Mode))
@@ -1929,6 +1933,7 @@ void APA250BattleGameMode::BeginPlay()
 	MaybeStartClassPortraits();
 	MaybeStartGunStill();
 	MaybeStartGunServe();
+	MaybeStartCrewProbe();
 	MaybeStartLandingStill();
 	// A moment after BeginPlay, so the player's pawn and its musket exist whatever the spawn order.
 	FTimerHandle ClassPick;

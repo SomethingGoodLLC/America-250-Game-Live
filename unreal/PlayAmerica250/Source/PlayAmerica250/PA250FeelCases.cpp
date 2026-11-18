@@ -187,6 +187,25 @@ void PA250FeelCases::RunLook(FCheck Check)
 		TEXT("look: the player's key steps through the tiers and round again, and every tier says what it is"));
 	Check(PA250BattleFeel::Get().BackstepSpeedCm > 0.f && PA250BattleFeel::Get().BackstepSpeedCm < PA250BattleFeel::Get().WalkSpeedCm,
 		TEXT("feel: a man facing his view steps back slower than he walks forward (playtest 2026-11-17: men ran backwards)"));
+	{
+		const FPA250BattleFeel& F = PA250BattleFeel::Get();
+		const int32 Steps = FMath::RoundToInt(F.SpyglassZoomSteps);
+		const float W = GetDefault<ARFCharacter>()->GetAimedFOV(), N = F.SpyglassFovNarrowDeg;
+		Check(N > 0.f && N < W && Steps >= 1
+			&& F.SpyglassRaiseSeconds > 0.f && F.SpyglassClipEyeSeconds > 0.f && F.SpyglassFieldFraction > 0.f && F.SpyglassFieldFraction <= 1.f,
+			*FString::Printf(TEXT("feel: the gunner's glass opens at a rifleman's aim (%.0f deg) and zooms in %d steps to %.0f, raised in %.2f s, the file's"),
+				W, Steps, N, F.SpyglassRaiseSeconds));
+		bool bEven = true;
+		for (int32 i = 1; i < Steps; ++i)
+		{
+			const float R0 = ARFCharacter::SpyglassFovAt(i, Steps, W, N) / ARFCharacter::SpyglassFovAt(i - 1, Steps, W, N);
+			const float R1 = ARFCharacter::SpyglassFovAt(i + 1, Steps, W, N) / ARFCharacter::SpyglassFovAt(i, Steps, W, N);
+			bEven &= FMath::IsNearlyEqual(R0, R1, 1.e-3f) && R0 < 1.f;
+		}
+		Check(FMath::IsNearlyEqual(ARFCharacter::SpyglassFovAt(0, Steps, W, N), W) && FMath::IsNearlyEqual(ARFCharacter::SpyglassFovAt(Steps, Steps, W, N), N)
+			&& FMath::IsNearlyEqual(ARFCharacter::SpyglassFovAt(-3, Steps, W, N), W) && FMath::IsNearlyEqual(ARFCharacter::SpyglassFovAt(Steps + 5, Steps, W, N), N) && bEven,
+			TEXT("feel: the glass zooms wide to narrow in even steps and stops at both ends (playtest 2026-11-18: start out, zoom in)"));
+	}
 	Check(D.FrameRateBar > 0.f && D.ShadowCastM >= 0.f, TEXT("look: the frame-rate bar and the soldier budget are the file's"));
 	Check(!PA250BattleLook::LoadFromFile(PA250BattleLook::DataPath() + TEXT(".absent")) && !PA250BattleLook::Get().bLoaded && !PA250BattleLook::Apply(nullptr, 12),
 		TEXT("look: without the file nothing is applied"));

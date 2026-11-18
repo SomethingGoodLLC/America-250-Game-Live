@@ -995,6 +995,10 @@ struct BattleRules {
     int blast_chest_ready_rounds = 6;              // GAME INVENTION: rounds sitting ready at the piece
     float blast_chest_refill_seconds = 12.f;       // GAME INVENTION: one round into the chest on this clock
     float blast_chest_resupply_radius_cm = 2500.f; // GAME INVENTION: must be this close to a friendly post
+    // GAME INVENTION: where the chest stands from the gun's centre (cm, its forward and right), behind
+    // the trail and clear of every crew station; until 2026-11-18 it stood at the ventsman's feet.
+    float blast_chest_offset_forward_cm = -270.f;
+    float blast_chest_offset_right_cm = -120.f;
     float blast_chest_detonate_chance_round = 0.08f;
     float blast_chest_detonate_chance_shell = 0.15f;
     float blast_chest_resolve_own = 18.f;

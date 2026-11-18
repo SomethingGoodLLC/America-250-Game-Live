@@ -3346,6 +3346,27 @@
       "retargeter": "/Game/PA250/Anim/Rig/RTG_UEFN_to_Soldier"
     }
   },
+  "gun_tools": {
+    "note": "What the gun crew hold while their clips play (display only; the rules of tools/anim/ue_review_render.py, which the user reviewed in the reels of 2026-11-16/17). Until 2026-11-18 the crew mimed every tool with a musket in hand. Places are in the cannon's mesh space (x toward the muzzle, cm), from tools/anim/gun_geometry.json: the bore line was measured from the mesh's vertices (the barrel is elevated 9.38 degrees; it is not the Muzzle socket's level line) and so was the vent. Holds: bore (the staff along his hands, put exactly on the bore line when his hands are on it, its head never past the muzzle face otherwise; head sponge or rammer into the bore), upright (standing on its foot through his right hand, its middle mid_cm above his feet), to_vent (the match end on the vent and the staff through his right hand; out of reach, his hand at its foot), in_hand (in his right hand pointing away from the muzzle until his hand is at the muzzle's mouth and the round goes in; until_s into the clip if it never gets there), planted (its foot in the ground at planted_cm, as gunners stuck the linstock; mid_cm above the ground). A man at his station puts his musket away. GAME INVENTION: the offsets and the planted place.",
+    "bore_origin_cm": [156.0, 0.0, 113.58],
+    "bore_direction": [0.98662, 0.0, 0.16303],
+    "vent_cm": [10.0, 0.0, 100.3],
+    "meshes": {
+      "sponge_rammer": "/Game/PA250/Props/GunTools/SM_SpongeRammer",
+      "linstock": "/Game/PA250/Props/GunTools/SM_Linstock",
+      "cartridge": "/Game/PA250/Props/GunTools/SM_Cartridge"
+    },
+    "by_clip": {
+      "gun_crew_sponge": {"tool": "sponge_rammer", "hold": "bore", "head": "sponge"},
+      "gun_crew_ram": {"tool": "sponge_rammer", "hold": "bore", "head": "rammer"},
+      "gun_crew_idle_sponger": {"tool": "sponge_rammer", "hold": "upright", "mid_cm": 120},
+      "gun_crew_load": {"tool": "cartridge", "hold": "in_hand", "until_s": 1.5},
+      "gun_crew_vent": {"tool": "linstock", "hold": "planted", "planted_cm": [-30.0, 85.0], "mid_cm": 75},
+      "gun_crew_prime": {"tool": "linstock", "hold": "planted", "planted_cm": [-30.0, 85.0], "mid_cm": 75},
+      "gun_crew_idle_ventsman": {"tool": "linstock", "hold": "planted", "planted_cm": [-30.0, 85.0], "mid_cm": 75},
+      "gun_crew_fire": {"tool": "linstock", "hold": "to_vent"}
+    }
+  },
   "clips": {
     "reload_stand_prime_pan": {
       "group": "loading_drill",
@@ -3744,6 +3765,18 @@
       "wired": true,
       "station_cm": [-216.6, 0.0],
       "face_cm": [10.0, 0.0]
+    },
+    "gun_crew_observe": {
+      "group": "gun_crew",
+      "asset": "/Game/PA250/Anim/Generated/Gun/AM_Gun_Observe_v0",
+      "variants": [
+        "/Game/PA250/Anim/Generated/Gun/AM_Gun_Observe_v0",
+        "/Game/PA250/Anim/Generated/Gun/AM_Gun_Observe_v1"
+      ],
+      "placeholder": "none",
+      "shows": "the player serving a gun raises the brass spyglass (SM_Spyglass, in his right hand) to his eye while he aims; with no clip his arms hang and only the view zooms",
+      "loop": false,
+      "wired": true
     },
     "volley_make_ready": {
       "group": "volley",

@@ -379,6 +379,8 @@ void load_battle_rules(const std::string& json_text) {
                 r.blast_chest_ready_rounds = std::max(0, c.value("ready_rounds", r.blast_chest_ready_rounds));
                 r.blast_chest_refill_seconds = c.value("refill_seconds", r.blast_chest_refill_seconds);
                 r.blast_chest_resupply_radius_cm = c.value("resupply_radius_cm", r.blast_chest_resupply_radius_cm);
+                r.blast_chest_offset_forward_cm = c.value("offset_forward_cm", r.blast_chest_offset_forward_cm);
+                r.blast_chest_offset_right_cm = c.value("offset_right_cm", r.blast_chest_offset_right_cm);
                 r.blast_chest_detonate_chance_round = c.value("detonate_chance_round", r.blast_chest_detonate_chance_round);
                 r.blast_chest_detonate_chance_shell = c.value("detonate_chance_shell", r.blast_chest_detonate_chance_shell);
                 r.blast_chest_resolve_own = c.value("resolve_own", r.blast_chest_resolve_own);

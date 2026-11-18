@@ -10,7 +10,7 @@ $id: "battle_feel.v1"
 title: BattleFeelFile
 type: object
 additionalProperties: false
-required: [note, animation, carry, kneel, reload, traversal, movement, input, intensity, musket, verify]
+required: [note, animation, carry, kneel, reload, traversal, movement, spyglass, input, intensity, musket, verify]
 properties:
   note: {type: string, minLength: 1}
   animation:
@@ -167,6 +167,21 @@ properties:
       camera_lag_speed: {type: number, minimum: 0, description: "The camera arm's lag speed; higher follows tighter, 0 is no lag."}
       fire_lock_seconds: {type: number, minimum: 0, description: "How long a man on foot stands still after his shot."}
       mouse_smoothing: {type: boolean}
+  spyglass:
+    type: object
+    additionalProperties: false
+    description: >-
+      The gunner's glass: a player serving a gun holds SM_Spyglass in place of his hidden musket; aiming
+      raises it (anim_clips gun_crew_observe on the upper body) and, raised, the view is through it.
+    required: [fov_narrow_deg, zoom_steps, raise_seconds, clip_eye_seconds, field_fraction, eye_forward_cm]
+    properties:
+      note: {type: string}
+      fov_narrow_deg: {type: number, exclusiveMinimum: 0, maximum: 50, description: "Zoomed all the way in. The glass opens at the man's aim (RFCharacter AimedFOV, 55: a rifleman aiming) and at the aim's look speed, which falls in step with the field of view."}
+      zoom_steps: {type: integer, minimum: 1, maximum: 12, description: "Wheel steps from the aim's view to fov_narrow_deg, each the same ratio."}
+      raise_seconds: {type: number, exclusiveMinimum: 0, description: "From the aim press to the glass at his eye (and back down)."}
+      clip_eye_seconds: {type: number, exclusiveMinimum: 0, description: "The time in gun_crew_observe at which its hands hold the glass at the eye (frame 40 of the clip's constraints at 30 fps)."}
+      field_fraction: {type: number, exclusiveMinimum: 0, maximum: 1, description: "The round field's diameter as a share of the screen's height; outside it the screen is dark."}
+      eye_forward_cm: {type: number, minimum: 0, maximum: 120, description: "The view through the glass is taken this far ahead of his eye (the tube's length), past his own hands and sleeve."}
   input:
     type: object
     additionalProperties: false

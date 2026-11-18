@@ -42,6 +42,25 @@ public:
 	 *  numbers are the persons data's. Off: his musket again. */
 	void SetHeroArms(bool bOn, float SwordDamage, float SwordReachCm, float SwordRecoverSeconds, float PistolDamage, float PistolRangeM, float PistolReloadSeconds);
 	bool HasHeroArms() const { return bHeroArms; }
+	/** A field gun's player gunner (APA250FieldGun::SetPlayerGunner): his musket is hidden, the
+	 *  musket's holds stand down and he carries the brass spyglass in his right hand. Aiming raises
+	 *  it to his eye (gun_crew_observe) and, once there, the view is through it (battle_feel spyglass). */
+	void SetServingGun(bool bOn);
+	bool IsServingGun() const { return bServingGun; }
+	/** 0 lowered .. 1 at his eye. */
+	float GetSpyglassRaise() const { return SpyglassRaise; }
+	/** Raised all the way and seen from his own eye: the round, narrow view. */
+	bool IsLookingThroughGlass() const;
+	const UStaticMeshComponent* GetSpyglass() const { return Spyglass; }
+	/** Through the glass: steps in (+) or out (-) between the man's aim (AimedFOV, a rifleman's
+	 *  view along his barrel) and battle_feel spyglass fov_narrow_deg (wheel, = and -). It opens at
+	 *  the aim's view each time it comes to the eye. */
+	void ZoomSpyglass(int32 Steps);
+	/** The field of view through the glass at its zoom now. */
+	float GetSpyglassFov() const;
+	/** Pure: the field of view at zoom step Step of Steps, an even ratio from Wide to Narrow. */
+	static float SpyglassFovAt(int32 Step, int32 Steps, float Wide, float Narrow);
+	float GetAimedFOV() const { return AimedFOV; }
 	/** Debug probes: hold or let go the aim as the player's key would. */
 	void ProbeAim(bool bOn) { if (bOn) StartAim(); else StopAim(); }
     void SelectMountedSword();
@@ -457,6 +476,15 @@ private:
 	FVector CurrentSocketOffset = FVector(0.f, 60.f, 70.f);
 	float ShoulderSign = 1.f;
 	bool bFirstPerson = false;
+	bool bServingGun = false;
+	float SpyglassRaise = 0.f;
+	int32 SpyglassZoom = 0;      // 0 widest .. zoom_steps narrowest
+	bool bGlassView = false;     // the camera was through the glass last frame
+	void OnSpyglassZoomIn() { ZoomSpyglass(+1); }
+	void OnSpyglassZoomOut() { ZoomSpyglass(-1); }
+	UPROPERTY(Transient)
+	TObjectPtr<UStaticMeshComponent> Spyglass;
+	void TickSpyglass(float DeltaTime);
 	void OnShovePressed();
 	float FaceControlYawTimer = 0.f;
 	float RecoilPitch = 0.f;
