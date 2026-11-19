@@ -8401,8 +8401,13 @@
       "attempts": [
         {
           "expect_failures": [],
-          "hand_error_m": 0.03832111518527082,
+          "hand_error_m": 0.06043134871675247,
           "seed": 614584
+        },
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.03652326242194251,
+          "seed": 615584
         }
       ],
       "cfg": {
@@ -8417,7 +8422,7 @@
         {
           "achieved_error_m": {
             "left_hand": 0.029266166782969293,
-            "right_hand": 0.02451814971864229
+            "right_hand": 0.024518147858981054
           },
           "frame": 0,
           "full_body_from_v0": false,
@@ -8444,56 +8449,56 @@
         },
         {
           "achieved_error_m": {
-            "left_hand": 0.009764864501863408,
-            "right_hand": 0.03832111518527082
+            "left_hand": 0.03652326242194251,
+            "right_hand": 0.010219112719068401
           },
           "frame": 22,
           "full_body_from_v0": false,
           "ik_residual_m": {
-            "left_hand": 0.0008634466794319451,
-            "right_hand": 0.00015394999354612082
+            "left_hand": 0.0010372555116191506,
+            "right_hand": 0.00046714869677089155
           },
-          "ik_root_shift_m": 0.0018055752152577043,
+          "ik_root_shift_m": 0.003726914757862687,
           "ik_spine": "kept",
           "targets_gun_cm": {},
           "targets_kimodo_m": {
             "left_hand": [
-              0.11844,
-              1.04622,
-              0.19740000000000002
+              0.07896,
+              1.36206,
+              0.26649
             ],
             "right_hand": [
-              0.05922,
-              1.22388,
-              0.21714
+              0.049350000000000005,
+              0.987,
+              0.26649
             ]
           },
           "type": "hands"
         },
         {
           "achieved_error_m": {
-            "left_hand": 0.02953952876468736,
-            "right_hand": 0.024551642939697277
+            "left_hand": 0.029238118922835798,
+            "right_hand": 0.02451325198233027
           },
           "frame": 46,
           "full_body_from_v0": false,
           "ik_residual_m": {
-            "left_hand": 0.0008759575430303812,
-            "right_hand": 0.0006657701451331377
+            "left_hand": 0.000987100531347096,
+            "right_hand": 0.0005006815772503614
           },
-          "ik_root_shift_m": 0.0022916223388165236,
+          "ik_root_shift_m": 0.0029103464912623167,
           "ik_spine": "kept",
           "targets_gun_cm": {},
           "targets_kimodo_m": {
             "left_hand": [
-              0.18753,
-              0.96726,
-              0.05922
+              0.07896,
+              1.22388,
+              0.27636
             ],
             "right_hand": [
-              -0.22701000000000002,
-              0.91791,
-              0.01974
+              0.049350000000000005,
+              0.987,
+              0.26649
             ]
           },
           "type": "hands"
@@ -8517,16 +8522,16 @@
       "family": "Volley",
       "files": {
         "bvh": "AM_Reload_Shoulder_v0.bvh",
-        "bvh_sha256": "88bf5b1fe50a861d6c4f330e4c6096b0825d743b6b13128f54d7efb4a7c5ee0f",
+        "bvh_sha256": "cd81b483eb0518b15765787d1f2665840184e9d5063b348417b0f8e7e64f6674",
         "npz": "AM_Reload_Shoulder_v0.npz",
-        "npz_sha256": "c2d52072b09a63ed4add1c36b1b2895fcc8bb73855a1c1f59f3deb2b2c68e414"
+        "npz_sha256": "f2ac83d4575c7a6034d4c2b35500a368418bc2020beae2245b2d17c5b7cad7e9"
       },
       "foot_lock": {
-        "after_cm": 0.10997623903676867,
-        "before_cm": 5.924278870224953,
+        "after_cm": 0.12788845924660563,
+        "before_cm": 2.4886269122362137,
         "joined": [],
-        "max_leg_change_deg": 5.50582130061239,
-        "phases": 16
+        "max_leg_change_deg": 3.7814681379765274,
+        "phases": 19
       },
       "fps": 30.0,
       "frames": 60,
@@ -8537,10 +8542,10 @@
       "model_repo": "nvidia/Kimodo-SOMA-RP-v1",
       "model_revision": "defbe1f34f5fd031eb0ccfe19f3f92a9880c287b",
       "name": "AM_Reload_Shoulder",
-      "prompt": "A soldier standing upright lifts a long gun from the ground with both hands, rests it upright against his left shoulder with his left hand under its butt at his hip, drops his right hand to his side and stands at attention.",
+      "prompt": "A soldier standing upright lifts a long gun from the ground with his left hand, grips it lower down with his right hand and holds it upright in front of his chest with both hands, standing at attention.",
       "root_motion": false,
       "scale_soma_over_soldier": 0.987,
-      "seed": 614584,
+      "seed": 615584,
       "station": null,
       "variant": 0
     },
@@ -8548,8 +8553,28 @@
       "attempts": [
         {
           "expect_failures": [],
-          "hand_error_m": 0.03095886468031327,
+          "hand_error_m": 0.07828818275932643,
           "seed": 614585
+        },
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.0630771859273402,
+          "seed": 615585
+        },
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.06295082979656132,
+          "seed": 616585
+        },
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.05774638099168097,
+          "seed": 617585
+        },
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.04600536570391893,
+          "seed": 618585
         }
       ],
       "cfg": {
@@ -8563,8 +8588,8 @@
       "constraints": [
         {
           "achieved_error_m": {
-            "left_hand": 0.02926632601028014,
-            "right_hand": 0.024518028148427067
+            "left_hand": 0.02926632783178142,
+            "right_hand": 0.02451802628877472
           },
           "frame": 0,
           "full_body_from_v0": false,
@@ -8591,56 +8616,56 @@
         },
         {
           "achieved_error_m": {
-            "left_hand": 0.03095886468031327,
-            "right_hand": 0.014134445781289737
+            "left_hand": 0.04600536570391893,
+            "right_hand": 0.022056439966221305
           },
           "frame": 22,
           "full_body_from_v0": false,
           "ik_residual_m": {
-            "left_hand": 0.0008634466794319451,
-            "right_hand": 0.00015394999354612082
+            "left_hand": 0.0010372555116191506,
+            "right_hand": 0.00046714869677089155
           },
-          "ik_root_shift_m": 0.0018055752152577043,
+          "ik_root_shift_m": 0.003726914757862687,
           "ik_spine": "kept",
           "targets_gun_cm": {},
           "targets_kimodo_m": {
             "left_hand": [
-              0.11844,
-              1.04622,
-              0.19740000000000002
+              0.07896,
+              1.36206,
+              0.26649
             ],
             "right_hand": [
-              0.05922,
-              1.22388,
-              0.21714
+              0.049350000000000005,
+              0.987,
+              0.26649
             ]
           },
           "type": "hands"
         },
         {
           "achieved_error_m": {
-            "left_hand": 0.02953952876468736,
-            "right_hand": 0.024551642939697277
+            "left_hand": 0.029238118922835798,
+            "right_hand": 0.02451325198233027
           },
           "frame": 46,
           "full_body_from_v0": false,
           "ik_residual_m": {
-            "left_hand": 0.0008759575430303812,
-            "right_hand": 0.0006657701451331377
+            "left_hand": 0.000987100531347096,
+            "right_hand": 0.0005006815772503614
           },
-          "ik_root_shift_m": 0.0022916223388165236,
+          "ik_root_shift_m": 0.0029103464912623167,
           "ik_spine": "kept",
           "targets_gun_cm": {},
           "targets_kimodo_m": {
             "left_hand": [
-              0.18753,
-              0.96726,
-              0.05922
+              0.07896,
+              1.22388,
+              0.27636
             ],
             "right_hand": [
-              -0.22701000000000002,
-              0.91791,
-              0.01974
+              0.049350000000000005,
+              0.987,
+              0.26649
             ]
           },
           "type": "hands"
@@ -8669,16 +8694,16 @@
       "family": "Volley",
       "files": {
         "bvh": "AM_Reload_Shoulder_v1.bvh",
-        "bvh_sha256": "5e6005a6c0423c221330d5f49b71b0acdbe781767410d513ac7f6aaef8f58e7d",
+        "bvh_sha256": "789f4438e13392f2e3add6ee31395ad6ab248509bf8ba4a49e41d2c125ea711e",
         "npz": "AM_Reload_Shoulder_v1.npz",
-        "npz_sha256": "9a59611e059d3480f57ac326420926b646441e3ee36d725365a811ed5329c5fc"
+        "npz_sha256": "20267493689f621dfd2edfa38b9a398cd207036af61509b0c55b80230286957b"
       },
       "foot_lock": {
-        "after_cm": 0.17333674477413297,
-        "before_cm": 4.288977012038231,
+        "after_cm": 0.13391926186159253,
+        "before_cm": 2.5281213223934174,
         "joined": [],
-        "max_leg_change_deg": 7.364441516187787,
-        "phases": 21
+        "max_leg_change_deg": 8.78087726122141,
+        "phases": 15
       },
       "fps": 30.0,
       "frames": 60,
@@ -8689,10 +8714,10 @@
       "model_repo": "nvidia/Kimodo-SOMA-RP-v1",
       "model_revision": "defbe1f34f5fd031eb0ccfe19f3f92a9880c287b",
       "name": "AM_Reload_Shoulder",
-      "prompt": "A soldier standing upright lifts a long gun from the ground with both hands, rests it upright against his left shoulder with his left hand under its butt at his hip, drops his right hand to his side and stands at attention.",
+      "prompt": "A soldier standing upright lifts a long gun from the ground with his left hand, grips it lower down with his right hand and holds it upright in front of his chest with both hands, standing at attention.",
       "root_motion": false,
       "scale_soma_over_soldier": 0.987,
-      "seed": 614585,
+      "seed": 618585,
       "station": null,
       "variant": 1
     },
@@ -8700,8 +8725,33 @@
       "attempts": [
         {
           "expect_failures": [],
-          "hand_error_m": 0.02953952876468736,
+          "hand_error_m": 0.059504362316754295,
           "seed": 614586
+        },
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.05314603236572027,
+          "seed": 615586
+        },
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.05753662867590572,
+          "seed": 616586
+        },
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.05773926949573706,
+          "seed": 617586
+        },
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.05084175988980113,
+          "seed": 618586
+        },
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.03945263534945371,
+          "seed": 619586
         }
       ],
       "cfg": {
@@ -8715,8 +8765,8 @@
       "constraints": [
         {
           "achieved_error_m": {
-            "left_hand": 0.02926632601028014,
-            "right_hand": 0.024518028148427067
+            "left_hand": 0.02926632783178142,
+            "right_hand": 0.02451802628877472
           },
           "frame": 0,
           "full_body_from_v0": false,
@@ -8743,56 +8793,56 @@
         },
         {
           "achieved_error_m": {
-            "left_hand": 0.017471165029940595,
-            "right_hand": 0.022111300385842924
+            "left_hand": 0.03945263534945371,
+            "right_hand": 0.004782662595479906
           },
           "frame": 22,
           "full_body_from_v0": false,
           "ik_residual_m": {
-            "left_hand": 0.0008634466794319451,
-            "right_hand": 0.00015394999354612082
+            "left_hand": 0.0010372555116191506,
+            "right_hand": 0.00046714869677089155
           },
-          "ik_root_shift_m": 0.0018055752152577043,
+          "ik_root_shift_m": 0.003726914757862687,
           "ik_spine": "kept",
           "targets_gun_cm": {},
           "targets_kimodo_m": {
             "left_hand": [
-              0.11844,
-              1.04622,
-              0.19740000000000002
+              0.07896,
+              1.36206,
+              0.26649
             ],
             "right_hand": [
-              0.05922,
-              1.22388,
-              0.21714
+              0.049350000000000005,
+              0.987,
+              0.26649
             ]
           },
           "type": "hands"
         },
         {
           "achieved_error_m": {
-            "left_hand": 0.02953952876468736,
-            "right_hand": 0.024551642939697277
+            "left_hand": 0.029238118922835798,
+            "right_hand": 0.02451325198233027
           },
           "frame": 46,
           "full_body_from_v0": false,
           "ik_residual_m": {
-            "left_hand": 0.0008759575430303812,
-            "right_hand": 0.0006657701451331377
+            "left_hand": 0.000987100531347096,
+            "right_hand": 0.0005006815772503614
           },
-          "ik_root_shift_m": 0.0022916223388165236,
+          "ik_root_shift_m": 0.0029103464912623167,
           "ik_spine": "kept",
           "targets_gun_cm": {},
           "targets_kimodo_m": {
             "left_hand": [
-              0.18753,
-              0.96726,
-              0.05922
+              0.07896,
+              1.22388,
+              0.27636
             ],
             "right_hand": [
-              -0.22701000000000002,
-              0.91791,
-              0.01974
+              0.049350000000000005,
+              0.987,
+              0.26649
             ]
           },
           "type": "hands"
@@ -8821,16 +8871,16 @@
       "family": "Volley",
       "files": {
         "bvh": "AM_Reload_Shoulder_v2.bvh",
-        "bvh_sha256": "e50255420032ac027250f71e9e566bc8800ed64be688d35918f0dd57c37b2f3f",
+        "bvh_sha256": "181503f80f5090e3ce5569040488fb1f152eaae375213d195623561f16f9d834",
         "npz": "AM_Reload_Shoulder_v2.npz",
-        "npz_sha256": "102fa66aa9001c90ecb722ceb82e4a111f9abd11818c776fe6551cbfccfccff5"
+        "npz_sha256": "db1b69ce1e95305c980eaa17b98bd9afd811071e814156136dd34b5d23a5f66c"
       },
       "foot_lock": {
-        "after_cm": 0.05450244061648846,
-        "before_cm": 4.5231640338897705,
+        "after_cm": 0.07559137884527445,
+        "before_cm": 2.2889316082000732,
         "joined": [],
-        "max_leg_change_deg": 4.716158942650258,
-        "phases": 18
+        "max_leg_change_deg": 3.910034115354717,
+        "phases": 22
       },
       "fps": 30.0,
       "frames": 60,
@@ -8841,10 +8891,10 @@
       "model_repo": "nvidia/Kimodo-SOMA-RP-v1",
       "model_revision": "defbe1f34f5fd031eb0ccfe19f3f92a9880c287b",
       "name": "AM_Reload_Shoulder",
-      "prompt": "A soldier standing upright lifts a long gun from the ground with both hands, rests it upright against his left shoulder with his left hand under its butt at his hip, drops his right hand to his side and stands at attention.",
+      "prompt": "A soldier standing upright lifts a long gun from the ground with his left hand, grips it lower down with his right hand and holds it upright in front of his chest with both hands, standing at attention.",
       "root_motion": false,
       "scale_soma_over_soldier": 0.987,
-      "seed": 614586,
+      "seed": 619586,
       "station": null,
       "variant": 2
     },
@@ -10569,20 +10619,43 @@
       "attempts": [
         {
           "expect_failures": [],
-          "hand_error_m": 0.07669482721807092,
+          "hand_error_m": 0.0744490673594123,
           "seed": 641161
         },
         {
-          "expect_failures": [
-            "lean 0.23 m > 0.20"
-          ],
-          "hand_error_m": 0.04576298092210276,
+          "expect_failures": [],
+          "hand_error_m": 0.06789926070082859,
           "seed": 642161
         },
         {
           "expect_failures": [],
-          "hand_error_m": 0.04864131374305204,
+          "hand_error_m": 0.05588372860967628,
           "seed": 643161
+        },
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.062008452332793465,
+          "seed": 644161
+        },
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.06343921810528369,
+          "seed": 645161
+        },
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.07317894285275615,
+          "seed": 646161
+        },
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.0637225412866788,
+          "seed": 647161
+        },
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.03973208857176441,
+          "seed": 648161
         }
       ],
       "cfg": {
@@ -10596,38 +10669,10 @@
       "constraints": [
         {
           "achieved_error_m": {
-            "left_hand": 0.02953952876468736,
-            "right_hand": 0.024551642939697277
+            "left_hand": 0.029238118922835798,
+            "right_hand": 0.02451325198233027
           },
           "frame": 0,
-          "full_body_from_v0": false,
-          "ik_residual_m": {
-            "left_hand": 0.0008759575430303812,
-            "right_hand": 0.0006657701451331377
-          },
-          "ik_root_shift_m": 0.0022916223388165236,
-          "ik_spine": "kept",
-          "targets_gun_cm": {},
-          "targets_kimodo_m": {
-            "left_hand": [
-              0.18753,
-              0.96726,
-              0.05922
-            ],
-            "right_hand": [
-              -0.22701000000000002,
-              0.91791,
-              0.01974
-            ]
-          },
-          "type": "hands"
-        },
-        {
-          "achieved_error_m": {
-            "left_hand": 0.0249967626243545,
-            "right_hand": 0.013973182217899935
-          },
-          "frame": 16,
           "full_body_from_v0": false,
           "ik_residual_m": {
             "left_hand": 0.000987100531347096,
@@ -10652,8 +10697,8 @@
         },
         {
           "achieved_error_m": {
-            "left_hand": 0.04864131374305204,
-            "right_hand": 0.008766812853264512
+            "left_hand": 0.03973208857176441,
+            "right_hand": 0.026198913541483338
           },
           "frame": 42,
           "full_body_from_v0": false,
@@ -10698,16 +10743,16 @@
       "family": "Volley",
       "files": {
         "bvh": "AM_Volley_MakeReady_v0.bvh",
-        "bvh_sha256": "d518cdc36fc12ce42274314224a03e01b6c42f29490b9d2da135561aa602927c",
+        "bvh_sha256": "a9d7cbe362d6ec4c89dedf41b5fe24c4fa6b52bcf56b2de4aaa08b4d3d727179",
         "npz": "AM_Volley_MakeReady_v0.npz",
-        "npz_sha256": "0ddcadecf262a263f79967d2b702835176a72e378415eb5a2a79e2ac26f77dbb"
+        "npz_sha256": "ce60af818c605badbf27eb13680b0b3cf57165b82abbc1a300e02287a1c4a4f1"
       },
       "foot_lock": {
-        "after_cm": 0.11705312645062804,
-        "before_cm": 2.13765986263752,
+        "after_cm": 2.268228493630886,
+        "before_cm": 4.796195775270462,
         "joined": [],
-        "max_leg_change_deg": 3.2382736712291837,
-        "phases": 17
+        "max_leg_change_deg": 21.05296256879568,
+        "phases": 10
       },
       "fps": 30.0,
       "frames": 60,
@@ -10718,10 +10763,10 @@
       "model_repo": "nvidia/Kimodo-SOMA-RP-v1",
       "model_revision": "defbe1f34f5fd031eb0ccfe19f3f92a9880c287b",
       "name": "AM_Volley_MakeReady",
-      "prompt": "A soldier standing at attention with a long gun resting upright against his left shoulder brings it up vertically in front of his chest with both hands and pulls back its hammer with his right thumb.",
+      "prompt": "A soldier standing at attention holds a long gun upright in front of his chest with both hands, raises it a little and pulls back its hammer with his right thumb, standing still.",
       "root_motion": false,
       "scale_soma_over_soldier": 0.987,
-      "seed": 643161,
+      "seed": 648161,
       "station": null,
       "variant": 0
     },
@@ -10729,7 +10774,7 @@
       "attempts": [
         {
           "expect_failures": [],
-          "hand_error_m": 0.039693762215810134,
+          "hand_error_m": 0.045910165783618465,
           "seed": 641162
         }
       ],
@@ -10744,38 +10789,10 @@
       "constraints": [
         {
           "achieved_error_m": {
-            "left_hand": 0.029539450890148252,
-            "right_hand": 0.024551695609417744
+            "left_hand": 0.02923819275188275,
+            "right_hand": 0.02451322715241935
           },
           "frame": 0,
-          "full_body_from_v0": false,
-          "ik_residual_m": {
-            "left_hand": 0.0008759575430303812,
-            "right_hand": 0.0006657701451331377
-          },
-          "ik_root_shift_m": 0.0022916223388165236,
-          "ik_spine": "kept",
-          "targets_gun_cm": {},
-          "targets_kimodo_m": {
-            "left_hand": [
-              0.18753,
-              0.96726,
-              0.05922
-            ],
-            "right_hand": [
-              -0.22701000000000002,
-              0.91791,
-              0.01974
-            ]
-          },
-          "type": "hands"
-        },
-        {
-          "achieved_error_m": {
-            "left_hand": 0.0191636015012165,
-            "right_hand": 0.02384424116197694
-          },
-          "frame": 16,
           "full_body_from_v0": false,
           "ik_residual_m": {
             "left_hand": 0.000987100531347096,
@@ -10800,8 +10817,8 @@
         },
         {
           "achieved_error_m": {
-            "left_hand": 0.039693762215810134,
-            "right_hand": 0.02835986075632919
+            "left_hand": 0.045910165783618465,
+            "right_hand": 0.03772740082050239
           },
           "frame": 42,
           "full_body_from_v0": false,
@@ -10851,16 +10868,16 @@
       "family": "Volley",
       "files": {
         "bvh": "AM_Volley_MakeReady_v1.bvh",
-        "bvh_sha256": "ae27204cedf5b5c5ecb19d2cb1a0d1b287a7a781e6210a0bba4c46d63e3c7854",
+        "bvh_sha256": "a8a101314594e15488b33b0a0b555613f389386319ab438518a310bba908bef4",
         "npz": "AM_Volley_MakeReady_v1.npz",
-        "npz_sha256": "257f50b6002eff887f502df356fabe02dd980e903582461383b2c245f64d0dea"
+        "npz_sha256": "50df27c090ae5dcae3db12043cf7b62b66e5f75a7eacda09ba6883319965f35e"
       },
       "foot_lock": {
-        "after_cm": 0.04877514729741961,
-        "before_cm": 2.795889787375927,
+        "after_cm": 0.15989189269021153,
+        "before_cm": 4.598235338926315,
         "joined": [],
-        "max_leg_change_deg": 4.082942123566568,
-        "phases": 12
+        "max_leg_change_deg": 5.6887509074673055,
+        "phases": 9
       },
       "fps": 30.0,
       "frames": 60,
@@ -10871,7 +10888,7 @@
       "model_repo": "nvidia/Kimodo-SOMA-RP-v1",
       "model_revision": "defbe1f34f5fd031eb0ccfe19f3f92a9880c287b",
       "name": "AM_Volley_MakeReady",
-      "prompt": "A soldier standing at attention with a long gun resting upright against his left shoulder brings it up vertically in front of his chest with both hands and pulls back its hammer with his right thumb.",
+      "prompt": "A soldier standing at attention holds a long gun upright in front of his chest with both hands, raises it a little and pulls back its hammer with his right thumb, standing still.",
       "root_motion": false,
       "scale_soma_over_soldier": 0.987,
       "seed": 641162,
@@ -10882,8 +10899,48 @@
       "attempts": [
         {
           "expect_failures": [],
-          "hand_error_m": 0.04226445473149462,
+          "hand_error_m": 0.05970588840886015,
           "seed": 641163
+        },
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.07374623963515356,
+          "seed": 642163
+        },
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.06378514415569381,
+          "seed": 643163
+        },
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.07923980158574544,
+          "seed": 644163
+        },
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.06319634282216356,
+          "seed": 645163
+        },
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.06422915143927582,
+          "seed": 646163
+        },
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.058523879691675246,
+          "seed": 647163
+        },
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.05477999669897414,
+          "seed": 648163
+        },
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.06554156661565685,
+          "seed": 649163
         }
       ],
       "cfg": {
@@ -10897,38 +10954,10 @@
       "constraints": [
         {
           "achieved_error_m": {
-            "left_hand": 0.029539450890148252,
-            "right_hand": 0.024551695609417744
+            "left_hand": 0.02923819275188275,
+            "right_hand": 0.02451322715241935
           },
           "frame": 0,
-          "full_body_from_v0": false,
-          "ik_residual_m": {
-            "left_hand": 0.0008759575430303812,
-            "right_hand": 0.0006657701451331377
-          },
-          "ik_root_shift_m": 0.0022916223388165236,
-          "ik_spine": "kept",
-          "targets_gun_cm": {},
-          "targets_kimodo_m": {
-            "left_hand": [
-              0.18753,
-              0.96726,
-              0.05922
-            ],
-            "right_hand": [
-              -0.22701000000000002,
-              0.91791,
-              0.01974
-            ]
-          },
-          "type": "hands"
-        },
-        {
-          "achieved_error_m": {
-            "left_hand": 0.029047792235904105,
-            "right_hand": 0.02612049539058714
-          },
-          "frame": 16,
           "full_body_from_v0": false,
           "ik_residual_m": {
             "left_hand": 0.000987100531347096,
@@ -10953,8 +10982,8 @@
         },
         {
           "achieved_error_m": {
-            "left_hand": 0.04226445473149462,
-            "right_hand": 0.01972219494258126
+            "left_hand": 0.06554156661565685,
+            "right_hand": 0.023501619984442473
           },
           "frame": 42,
           "full_body_from_v0": false,
@@ -11004,30 +11033,30 @@
       "family": "Volley",
       "files": {
         "bvh": "AM_Volley_MakeReady_v2.bvh",
-        "bvh_sha256": "d50f052a66399e24698697e5e5984014f3b11a77dfc4fc78e604ff6cc41df795",
+        "bvh_sha256": "fb306fe599031961b9a649918dca54c782aadfe1567a16facf88793597665bfc",
         "npz": "AM_Volley_MakeReady_v2.npz",
-        "npz_sha256": "15d8e4b4ed32a2a6a078ac9c682611c962ff28d4b63237d2306b85a2029e3703"
+        "npz_sha256": "a6fe45da667a1717fd53b3ed4c189dbcce6fd65ef65db0d7f4c5a991f9e9dbd4"
       },
       "foot_lock": {
-        "after_cm": 0.1811338122934103,
-        "before_cm": 3.3042248338460922,
+        "after_cm": 0.1014318666420877,
+        "before_cm": 4.348379373550415,
         "joined": [],
-        "max_leg_change_deg": 7.2549432993561025,
-        "phases": 13
+        "max_leg_change_deg": 4.179519752302766,
+        "phases": 11
       },
       "fps": 30.0,
       "frames": 60,
       "hand_error_limit_m": 0.05,
-      "hand_error_ok": true,
+      "hand_error_ok": false,
       "loop": false,
       "model": "Kimodo-SOMA-RP-v1",
       "model_repo": "nvidia/Kimodo-SOMA-RP-v1",
       "model_revision": "defbe1f34f5fd031eb0ccfe19f3f92a9880c287b",
       "name": "AM_Volley_MakeReady",
-      "prompt": "A soldier standing at attention with a long gun resting upright against his left shoulder brings it up vertically in front of his chest with both hands and pulls back its hammer with his right thumb.",
+      "prompt": "A soldier standing at attention holds a long gun upright in front of his chest with both hands, raises it a little and pulls back its hammer with his right thumb, standing still.",
       "root_motion": false,
       "scale_soma_over_soldier": 0.987,
-      "seed": 641163,
+      "seed": 649163,
       "station": null,
       "variant": 2
     },
@@ -11035,8 +11064,18 @@
       "attempts": [
         {
           "expect_failures": [],
-          "hand_error_m": 0.045252319841823055,
+          "hand_error_m": 0.061709774171932255,
           "seed": 641164
+        },
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.07221241814177302,
+          "seed": 642164
+        },
+        {
+          "expect_failures": [],
+          "hand_error_m": 0.0460936011369586,
+          "seed": 643164
         }
       ],
       "cfg": {
@@ -11050,38 +11089,10 @@
       "constraints": [
         {
           "achieved_error_m": {
-            "left_hand": 0.029539450890148252,
-            "right_hand": 0.024551695609417744
+            "left_hand": 0.02923819275188275,
+            "right_hand": 0.02451322715241935
           },
           "frame": 0,
-          "full_body_from_v0": false,
-          "ik_residual_m": {
-            "left_hand": 0.0008759575430303812,
-            "right_hand": 0.0006657701451331377
-          },
-          "ik_root_shift_m": 0.0022916223388165236,
-          "ik_spine": "kept",
-          "targets_gun_cm": {},
-          "targets_kimodo_m": {
-            "left_hand": [
-              0.18753,
-              0.96726,
-              0.05922
-            ],
-            "right_hand": [
-              -0.22701000000000002,
-              0.91791,
-              0.01974
-            ]
-          },
-          "type": "hands"
-        },
-        {
-          "achieved_error_m": {
-            "left_hand": 0.038025784701212706,
-            "right_hand": 0.020076597702651758
-          },
-          "frame": 16,
           "full_body_from_v0": false,
           "ik_residual_m": {
             "left_hand": 0.000987100531347096,
@@ -11106,8 +11117,8 @@
         },
         {
           "achieved_error_m": {
-            "left_hand": 0.045252319841823055,
-            "right_hand": 0.018133400383511997
+            "left_hand": 0.0460936011369586,
+            "right_hand": 0.022230313609493364
           },
           "frame": 42,
           "full_body_from_v0": false,
@@ -11157,16 +11168,16 @@
       "family": "Volley",
       "files": {
         "bvh": "AM_Volley_MakeReady_v3.bvh",
-        "bvh_sha256": "8aeb28ac73207984d67c321773cb899419cd6d1a10f26b691a469de54431281f",
+        "bvh_sha256": "9883a59881c1ece8f453240c79cc80466a20e88dc76ad3c6da48626bae35d2e6",
         "npz": "AM_Volley_MakeReady_v3.npz",
-        "npz_sha256": "5be9f4b4b7e981cc5475984dc4064989383202f0339c9bd48e0abdf69ac85f75"
+        "npz_sha256": "6f2c9fd540fafb442a943d4960d9a4c0369148ccdf5df3080e94d7e7d414f82c"
       },
       "foot_lock": {
-        "after_cm": 0.4089004825800657,
-        "before_cm": 3.7730861455202103,
+        "after_cm": 0.08315732702612877,
+        "before_cm": 3.248992934823036,
         "joined": [],
-        "max_leg_change_deg": 14.51548394073844,
-        "phases": 9
+        "max_leg_change_deg": 4.493103240734339,
+        "phases": 13
       },
       "fps": 30.0,
       "frames": 60,
@@ -11177,10 +11188,10 @@
       "model_repo": "nvidia/Kimodo-SOMA-RP-v1",
       "model_revision": "defbe1f34f5fd031eb0ccfe19f3f92a9880c287b",
       "name": "AM_Volley_MakeReady",
-      "prompt": "A soldier standing at attention with a long gun resting upright against his left shoulder brings it up vertically in front of his chest with both hands and pulls back its hammer with his right thumb.",
+      "prompt": "A soldier standing at attention holds a long gun upright in front of his chest with both hands, raises it a little and pulls back its hammer with his right thumb, standing still.",
       "root_motion": false,
       "scale_soma_over_soldier": 0.987,
-      "seed": 641164,
+      "seed": 643164,
       "station": null,
       "variant": 3
     },
