@@ -99,6 +99,7 @@ struct FArtilleryAccess
 	static int32 Kills(APA250BattleGameMode* GM) { return GM->PersonalKills; }
 	static FPA250AmmoPool& Ammo(APA250BattleGameMode* GM) { return GM->Ammo; }
 	static void RegisterGun(APA250BattleGameMode* GM, APA250FieldGun* Gun) { GM->Guns.AddUnique(Gun); }
+	static void AddStart(APA250BattleGameMode* GM, FName Side, AActor* At) { GM->Starts.FindOrAdd(Side).Add(At); }
 };
 
 namespace
@@ -3516,22 +3517,32 @@ void RunGunnery(FLog& Log)
 					FString::Printf(TEXT("guns: one man at the piece (crew %d) cannot fire"), Gun->GetCrew()));
 				Mate->SetActorLocation(Gun->GetActorLocation() + FVector(100.f, 40.f, 0.f));
 				Gun->ClaimPost(Mate);
-				// A six-pounder (the default kind) cycles its two loads only: never shell.
+				// A six-pounder (the default kind) cycles its three loads only: round shot, grape shot,
+				// canister (2026-11-18: grape shot proper added), never shell.
 				bool bSawShell = false;
 				Gun->CycleShot(1);
 				bSawShell |= Gun->GetSelectedShot() == EPA250Shot::Shell;
+				Log.Check(Gun->GetSelectedShot() == EPA250Shot::GrapeShot && Gun->LoadChip() == TEXT("LOAD: GRAPE SHOT")
+					&& Gun->LoadPicker().Contains(TEXT("> GRAPE SHOT")) && Gun->LoadPicker().Contains(TEXT("round shot"))
+					&& Gun->LoadPicker().Contains(TEXT("canister")) && !Gun->LoadPicker().Contains(TEXT("shell")),
+					FString::Printf(TEXT("guns: ] goes to LOAD: GRAPE SHOT; the picker lists the six-pounder's loads (%s)"), *Gun->LoadPicker()));
+				Gun->CycleShot(1);
+				bSawShell |= Gun->GetSelectedShot() == EPA250Shot::Shell;
 				Log.Check(Gun->GetSelectedShot() == EPA250Shot::Grape && Gun->LoadChip() == TEXT("LOAD: CANISTER"),
-					TEXT("guns: [ ] goes to LOAD: CANISTER"));
+					TEXT("guns: ] again goes to LOAD: CANISTER"));
 				Gun->CycleShot(1);
 				bSawShell |= Gun->GetSelectedShot() == EPA250Shot::Shell;
 				Log.Check(Gun->GetGunType() == TEXT("six_pounder") && !bSawShell && Gun->GetSelectedShot() == EPA250Shot::RoundShot,
-					TEXT("guns: a six-pounder's [ ] cycles canister and round shot, never shell (cannon.gun_types)"));
+					TEXT("guns: a six-pounder's [ ] cycles round shot, grape shot and canister, never shell (cannon.gun_types)"));
+				Gun->CycleShot(-1);
+				Log.Check(Gun->GetSelectedShot() == EPA250Shot::Grape, TEXT("guns: [ steps back from round shot to canister"));
+				Gun->CycleShot(1);
 				Gun->SetGunType(TEXT("howitzer"));
-				Gun->CycleShot(1); Gun->CycleShot(1);
+				Gun->CycleShot(1); Gun->CycleShot(1); Gun->CycleShot(1);
 				Log.Check(Gun->GetSelectedShot() == EPA250Shot::Shell, TEXT("guns: a howitzer's [ ] reaches shell"));
 				Gun->SetGunType(FString());
 				Log.Check(Gun->GetSelectedShot() != EPA250Shot::Shell, TEXT("guns: made a six-pounder again, a shell load is dropped"));
-				Gun->CycleShot(1);
+				while (Gun->GetSelectedShot() != EPA250Shot::Grape) Gun->CycleShot(1);
 				Log.Check(Gun->GetSelectedShot() == EPA250Shot::Grape && Gun->LoadChip() == TEXT("LOAD: CANISTER"),
 					TEXT("guns: [ ] cycles back to LOAD: CANISTER"));
 				const FVector Far = Muzzle + Forward * (R.cannon_grape_range_m * 2.5f * 100.f);
@@ -4369,6 +4380,33 @@ void RunBlast(FLog& Log)
 		// No friendly post near: no refill, and a refill never charges the magazine.
 		for (int32 i = 0; i < 100; ++i) Box->Tick(1.f);
 		Log.Check(Box->ReadyRounds() == 0 && Magazine.Remaining(TEXT("continental")) == 98, TEXT("ammo: no refill away from a friendly post"));
+		// Playtest 2026-11-18 ("stuck at loading", R did nothing): the HUD says why and where, and R
+		// at the stalled drill gives that notice instead of nothing.
+		Log.Check(Gun->IsWaitingForRounds() && Gun->RefillHint().StartsWith(TEXT("Chest empty")) && !Gun->RefillHint().Contains(TEXT("refilling")),
+			FString::Printf(TEXT("ammo: a drill held at Load says why (%s)"), *Gun->RefillHint()));
+		// The side's own start is where the ammunition train stands: a gun within reach of it refills
+		// without a post (the Lexington gun stood 20 m from its start and no post was within 25 m).
+		{
+			FActorSpawnParameters SP;
+			SP.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+			AActor* StartMark = W.World->SpawnActor<AActor>(AActor::StaticClass(), FTransform(Gun->GetActorLocation() + FVector(R.blast_chest_resupply_radius_cm * 0.8f, 0.f, 0.f)), SP);
+			if (StartMark && !StartMark->GetRootComponent())
+			{
+				USceneComponent* Root = NewObject<USceneComponent>(StartMark);
+				StartMark->SetRootComponent(Root);
+				Root->RegisterComponent();
+				StartMark->SetActorLocation(Gun->GetActorLocation() + FVector(R.blast_chest_resupply_radius_cm * 0.8f, 0.f, 0.f));
+			}
+			FArtilleryAccess::AddStart(GM, TEXT("continental"), StartMark);
+			Log.Check(Gun->RefillHint().Contains(TEXT("refilling")), FString::Printf(TEXT("ammo: by its start the hint says it is refilling (%s)"), *Gun->RefillHint()));
+			for (int32 i = 0; i < FMath::CeilToInt(R.blast_chest_refill_seconds) + 1; ++i) Box->Tick(1.f);
+			Log.Check(Box->ReadyRounds() == 1 && Magazine.Remaining(TEXT("continental")) == 98,
+				FString::Printf(TEXT("ammo: a chest by its side's start refills a round in %.0f s, charging nothing (chest %d)"), R.blast_chest_refill_seconds, Box->ReadyRounds()));
+			int32 T = 0;
+			while (!Gun->IsLoaded() && T < 3000) { Gun->Tick(0.05f); ++T; }
+			Log.Check(Gun->IsLoaded() && !Gun->IsWaitingForRounds(),
+				FString::Printf(TEXT("ammo: the held drill takes the new round and finishes (loaded=%d after %.0f s)"), Gun->IsLoaded(), T * 0.05f));
+		}
 	}
 
 	// Premature discharge (M6): the sponger is the sure casualty, 55% WIA / 45% KIA by the
@@ -5030,12 +5068,25 @@ void RunFXEvents(FLog& Log)
 		const int32 AfterRound = PA250BattleFX::FireCount(EPA250BattleFXEvent::CannonFired);
 		Gun->ForceLoaded();
 		Gun->SetPlayerGunner(Crew[0]);
-		Gun->CycleShot(1); // round shot -> canister
+		Gun->CycleShot(-1); // round shot -> canister (one step back along round, grape shot, canister)
 		const bool bCan = Gun->DischargeAt(Gun->GetMuzzle() + Fwd * R.cannon_grape_range_m * 50.f, Crew[0]);
 		Log.Check(bRound && bCan && AfterRound == 1 && PA250BattleFX::FireCount(EPA250BattleFXEvent::CannonFired) == 1
 			&& PA250BattleFX::FireCount(EPA250BattleFXEvent::CanisterFired) == 1,
 			FString::Printf(TEXT("fx: a real gun's report goes through the router once a shot (round %d, cannon %d, canister %d)"),
 				bRound, PA250BattleFX::FireCount(EPA250BattleFXEvent::CannonFired), PA250BattleFX::FireCount(EPA250BattleFXEvent::CanisterFired)));
+		// Grape shot proper (2026-11-18): the player's choice, a few heavy balls with the case load's report.
+		{
+			auto CountBalls = [&W](float Damage) { int32 N = 0; for (TActorIterator<AMusketProjectile> It(W.World); It; ++It) N += FMath::IsNearlyEqual(It->Damage, Damage) ? 1 : 0; return N; };
+			const int32 Before = CountBalls(R.cannon_grapeshot_damage);
+			Gun->ForceLoaded();
+			while (Gun->GetSelectedShot() != EPA250Shot::GrapeShot) Gun->CycleShot(1);
+			const float Mid = 0.5f * (R.cannon_grape_range_m + R.cannon_grapeshot_range_m);
+			const bool bGrape = Gun->DischargeAt(Gun->GetMuzzle() + Fwd * Mid * 100.f, Crew[0]);
+			const int32 Balls = CountBalls(R.cannon_grapeshot_damage) - Before;
+			Log.Check(bGrape && Balls == R.cannon_grapeshot_balls && PA250BattleFX::FireCount(EPA250BattleFXEvent::CanisterFired) == 2,
+				FString::Printf(TEXT("grape shot: fires %d heavy balls (%.0f each) at %.0f m, past canister's reach, with the case load's report (fired %d, balls %d)"),
+					R.cannon_grapeshot_balls, R.cannon_grapeshot_damage, Mid, bGrape, Balls));
+		}
 	}
 }
 
@@ -5049,6 +5100,14 @@ void RunShells(FLog& Log)
 		&& !PA250Gunnery::ShotAllowedForGun(TEXT("a_kind_not_in_the_data"), EPA250Shot::Shell, R)
 		&& PA250Gunnery::RefuseShot(EPA250Shot::Shell, R.cannon_shell_fuse_min_m * 100.f + 100.f, R, TEXT("six_pounder")) != nullptr,
 		TEXT("shells: a six-pounder (Lexington) and any unlisted piece refuse shell; a howitzer fires it"));
+	Log.Check(PA250Gunnery::ShotAllowedForGun(TEXT("six_pounder"), EPA250Shot::GrapeShot, R) && PA250Gunnery::ShotAllowedForGun(TEXT("howitzer"), EPA250Shot::GrapeShot, R)
+		&& !PA250Gunnery::ShotAllowedForGun(TEXT("mortar"), EPA250Shot::GrapeShot, R)
+		&& R.cannon_grapeshot_range_m > R.cannon_grape_range_m && R.cannon_grapeshot_balls < R.cannon_grape_balls && R.cannon_grapeshot_damage > R.cannon_grape_damage
+		&& PA250Gunnery::RefuseShot(EPA250Shot::GrapeShot, R.cannon_grapeshot_range_m * 100.f - 100.f, R, TEXT("six_pounder")) == nullptr
+		&& PA250Gunnery::RefuseShot(EPA250Shot::GrapeShot, R.cannon_grapeshot_range_m * 100.f + 100.f, R, TEXT("six_pounder")) != nullptr
+		&& FString(PA250Gunnery::ShotKey(EPA250Shot::GrapeShot)) == TEXT("grape") && FString(PA250Gunnery::ShotWords(EPA250Shot::GrapeShot)) == TEXT("grape shot"),
+		FString::Printf(TEXT("grape shot: loads from battle_rules (%d balls, %.0f m), six-pounders and howitzers fire it, fewer heavier balls than canister reaching further"),
+			R.cannon_grapeshot_balls, R.cannon_grapeshot_range_m));
 	// A real howitzer, the player's load: shell after shell; duds fly and land unburst.
 	FScopedTestWorld W(true);
 	APA250BattleGameMode* GM = W.World->GetAuthGameMode<APA250BattleGameMode>();

@@ -174,7 +174,7 @@ void APA250BattleGameMode::MaybeStartGunServe()
 			return;
 		}
 		TArray<FString> Loads;
-		for (int32 i = 0; i < 3; ++i)
+		for (int32 i = 0; i < PA250Gunnery::ShotCycleCount; ++i)
 		{
 			PlayerCycleGunShot(Me, 1);
 			Loads.Add(PA250Gunnery::ShotWords(Gun->GetSelectedShot()));
@@ -184,11 +184,11 @@ void APA250BattleGameMode::MaybeStartGunServe()
 		// until 2026-11-18 this expected shell of every gun and failed).
 		TArray<FString> Want;
 		{
-			int32 I = static_cast<int32>(EPA250Shot::RoundShot);
-			while (Want.Num() < 3)
+			int32 I = 0; // ShotCycle starts at round shot, the load he takes the gun with
+			while (Want.Num() < PA250Gunnery::ShotCycleCount)
 			{
-				I = (I + 1) % 3;
-				if (PA250Gunnery::ShotAllowedForGun(Gun->GetGunType(), static_cast<EPA250Shot>(I), Rules)) Want.Add(PA250Gunnery::ShotWords(static_cast<EPA250Shot>(I)));
+				I = (I + 1) % PA250Gunnery::ShotCycleCount;
+				if (PA250Gunnery::ShotAllowedForGun(Gun->GetGunType(), PA250Gunnery::ShotCycle[I], Rules)) Want.Add(PA250Gunnery::ShotWords(PA250Gunnery::ShotCycle[I]));
 			}
 		}
 		if (Loads != Want)
@@ -197,7 +197,7 @@ void APA250BattleGameMode::MaybeStartGunServe()
 			Fail(TEXT("load cycle was not the piece's own loads"));
 			return;
 		}
-		for (int32 Tries = 0; Tries < 3 && Gun->GetSelectedShot() != EPA250Shot::Grape; ++Tries) PlayerCycleGunShot(Me, 1);
+		for (int32 Tries = 0; Tries < PA250Gunnery::ShotCycleCount && Gun->GetSelectedShot() != EPA250Shot::Grape; ++Tries) PlayerCycleGunShot(Me, 1);
 		if (Gun->GetSelectedShot() != EPA250Shot::Grape)
 		{
 			Fail(TEXT("could not select grape"));

@@ -312,6 +312,13 @@ void load_battle_rules(const std::string& json_text) {
             r.cannon_grape_speed_m = f.value("grape_speed_m", r.cannon_grape_speed_m);
             r.cannon_grape_falloff_start_m = f.value("grape_falloff_start_m", r.cannon_grape_falloff_start_m);
             r.cannon_grape_falloff_floor = f.value("grape_falloff_floor", r.cannon_grape_falloff_floor);
+            r.cannon_grapeshot_range_m = f.value("grapeshot_range_m", r.cannon_grapeshot_range_m);
+            r.cannon_grapeshot_balls = f.value("grapeshot_balls", r.cannon_grapeshot_balls);
+            r.cannon_grapeshot_cone_degrees = f.value("grapeshot_cone_degrees", r.cannon_grapeshot_cone_degrees);
+            r.cannon_grapeshot_damage = f.value("grapeshot_damage", r.cannon_grapeshot_damage);
+            r.cannon_grapeshot_speed_m = f.value("grapeshot_speed_m", r.cannon_grapeshot_speed_m);
+            r.cannon_grapeshot_falloff_start_m = f.value("grapeshot_falloff_start_m", r.cannon_grapeshot_falloff_start_m);
+            r.cannon_grapeshot_falloff_floor = f.value("grapeshot_falloff_floor", r.cannon_grapeshot_falloff_floor);
             r.cannon_shell_range_m = f.value("shell_range_m", r.cannon_shell_range_m);
             r.cannon_shell_speed_m = f.value("shell_speed_m", r.cannon_shell_speed_m);
             r.cannon_shell_fuse_min_m = f.value("shell_fuse_min_m", r.cannon_shell_fuse_min_m);

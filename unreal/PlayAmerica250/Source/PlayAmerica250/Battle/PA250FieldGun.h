@@ -1,8 +1,8 @@
 // PA250FieldGun.h — a field gun worked by a crew through a timed drill, and its shot.
 // The drill is the musket's active reload (FActiveReloadSequencer) with the gun's own times; the
 // crew's numbers and training set how fast it runs. Round shot knocks men down and batters field
-// works at range; grape is a short-range blast of musket balls; shell is a timed fuse that bursts
-// at the mark. A gun whose crew is gone and which the enemy stands over changes hands.
+// works at range; canister (enum Grape) is a short-range blast of musket balls; grape shot
+// (GrapeShot) is a few heavy balls that carry further; shell is a timed fuse that bursts at the mark. A gun whose crew is gone and which the enemy stands over changes hands.
 // GAMEPLAY SETTINGS: battle_rules.json "cannon".
 #pragma once
 
@@ -19,8 +19,9 @@ UENUM()
 enum class EPA250Shot : uint8
 {
 	RoundShot,
-	Grape,
-	Shell
+	Grape,     // canister (the enum key predates grape shot proper; the HUD says canister)
+	Shell,
+	GrapeShot  // grape shot proper: a stand of heavy balls (cannon.grapeshot_*), the player's choice only
 };
 
 /** Pure gunnery rules (checked without a world). */
@@ -51,7 +52,21 @@ inline bool ChooseShot(float RangeCm, const pa250::BattleRules& R, EPA250Shot& O
 /** The data's word for a load (battle_rules.json cannon.gun_types). Grape is the canister load. */
 inline const char* ShotKey(EPA250Shot Shot)
 {
-	return Shot == EPA250Shot::Shell ? "shell" : Shot == EPA250Shot::Grape ? "canister" : "round_shot";
+	switch (Shot)
+	{
+	case EPA250Shot::Shell: return "shell";
+	case EPA250Shot::Grape: return "canister";
+	case EPA250Shot::GrapeShot: return "grape";
+	default: return "round_shot";
+	}
+}
+/** The order [ ] steps through the loads: from the furthest-reaching solid shot to the closest. */
+inline constexpr EPA250Shot ShotCycle[] = {EPA250Shot::RoundShot, EPA250Shot::GrapeShot, EPA250Shot::Grape, EPA250Shot::Shell};
+inline constexpr int32 ShotCycleCount = 4;
+inline int32 ShotCycleIndex(EPA250Shot Shot)
+{
+	for (int32 i = 0; i < ShotCycleCount; ++i) if (ShotCycle[i] == Shot) return i;
+	return 0;
 }
 /** The kind of piece a gun is when nothing says otherwise (cannon.default_gun_type). */
 inline FString DefaultGunType(const pa250::BattleRules& R)
@@ -79,6 +94,10 @@ inline const TCHAR* RefuseShot(EPA250Shot Shot, float RangeCm, const pa250::Batt
 	if (Shot == EPA250Shot::Grape && RangeCm > R.cannon_grape_range_m * 100.f * 1.25f)
 	{
 		return TEXT("canister too far — switch load");
+	}
+	if (Shot == EPA250Shot::GrapeShot && RangeCm > R.cannon_grapeshot_range_m * 100.f)
+	{
+		return TEXT("grape shot too far — switch load");
 	}
 	if (Shot == EPA250Shot::Shell && RangeCm > R.cannon_shell_range_m * 100.f)
 	{
@@ -108,7 +127,32 @@ inline const TCHAR* ShotWords(EPA250Shot Shot)
 	{
 	case EPA250Shot::Grape: return TEXT("canister"); // enum key stays grape; player-facing label
 	case EPA250Shot::Shell: return TEXT("shell");
+	case EPA250Shot::GrapeShot: return TEXT("grape shot");
 	default: return TEXT("round shot");
+	}
+}
+/** The next load this kind of piece fires, Delta steps along ShotCycle (wrapping). Current if none. */
+inline EPA250Shot NextShot(EPA250Shot Current, int32 Delta, const FString& GunType, const pa250::BattleRules& R)
+{
+	if (Delta == 0) return Current;
+	const int32 Step = Delta > 0 ? 1 : -1;
+	int32 I = ShotCycleIndex(Current);
+	for (int32 Tries = 0; Tries < ShotCycleCount; ++Tries)
+	{
+		I = (I + Step + ShotCycleCount) % ShotCycleCount;
+		if (ShotAllowedForGun(GunType, ShotCycle[I], R)) return ShotCycle[I];
+	}
+	return Current;
+}
+/** How far a load carries (cm), for the aim mark and the HUD. */
+inline float ShotRangeCm(EPA250Shot Shot, const pa250::BattleRules& R)
+{
+	switch (Shot)
+	{
+	case EPA250Shot::Grape: return R.cannon_grape_range_m * 100.f;
+	case EPA250Shot::GrapeShot: return R.cannon_grapeshot_range_m * 100.f;
+	case EPA250Shot::Shell: return R.cannon_shell_range_m * 100.f;
+	default: return R.cannon_round_range_m * 100.f;
 	}
 }
 /** How fast the drill runs (1 = a full trained crew). Too few men cannot work the gun at all; a
@@ -341,6 +385,13 @@ public:
 	FString StatusLine() const;
 	/** "LOAD: CANISTER" (grape enum) and the like. */
 	FString LoadChip() const;
+	/** Every load this piece fires, the chosen one in capitals between arrows, with its reach:
+	 *  "> ROUND SHOT 350 m <   grape shot   canister". */
+	FString LoadPicker() const;
+	/** The drill waits at Load: no round in hand and none in the chest. */
+	bool IsWaitingForRounds() const;
+	/** Where the chest is filled, for the HUD when it is empty. */
+	FString RefillHint() const;
 	/** Drill sequencer for the bottom-center reload widget while the player serves. */
 	const FActiveReloadSequencer& GetDrill() const { return Drill; }
 	bool IsDrillActive() const { return !bLoaded && Drill.IsReloading(); }
@@ -380,7 +431,7 @@ public:
 	void SetPlayerGunner(ARFCharacter* Player);
 	ARFCharacter* GetPlayerGunner() const { return PlayerGunner.Get(); }
 	bool PlayerFire(const FVector& AimPoint);
-	/** Cycle grape → round shot → shell → grape while the player serves. */
+	/** Step through the loads this piece fires (PA250Gunnery::ShotCycle) while the player serves. */
 	void CycleShot(int32 Delta);
 	EPA250Shot GetSelectedShot() const { return SelectedShot; }
 	/** The kind of piece (a key of battle_rules.json cannon.gun_types); empty means default_gun_type. */

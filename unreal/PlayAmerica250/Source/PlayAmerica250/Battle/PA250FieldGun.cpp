@@ -317,7 +317,7 @@ void APA250FieldGun::SetGunType(const FString& Type)
 	const pa250::BattleRules& R = pa250::battle_rules();
 	if (!PA250Gunnery::ShotAllowedForGun(GetGunType(), SelectedShot, R))
 	{
-		for (EPA250Shot S : {EPA250Shot::RoundShot, EPA250Shot::Grape, EPA250Shot::Shell})
+		for (EPA250Shot S : PA250Gunnery::ShotCycle)
 		{
 			if (PA250Gunnery::ShotAllowedForGun(GetGunType(), S, R)) { SelectedShot = S; break; }
 		}
@@ -328,18 +328,11 @@ void APA250FieldGun::SetGunType(const FString& Type)
 void APA250FieldGun::CycleShot(int32 Delta)
 {
 	if (!PlayerGunner.IsValid() || Delta == 0) return;
-	// Only the loads this kind of piece fires (cannon.gun_types): a six-pounder cycles canister and round shot.
-	const int32 N = 3;
-	const pa250::BattleRules& Rules = pa250::battle_rules();
-	int32 I = static_cast<int32>(SelectedShot);
-	for (int32 Tries = 0; Tries < N; ++Tries)
-	{
-		I = (I + Delta % N + N) % N;
-		if (PA250Gunnery::ShotAllowedForGun(GetGunType(), static_cast<EPA250Shot>(I), Rules)) break;
-	}
-	SelectedShot = static_cast<EPA250Shot>(I);
+	// Only the loads this kind of piece fires (cannon.gun_types), in PA250Gunnery::ShotCycle's order:
+	// a six-pounder steps round shot, grape shot, canister.
+	SelectedShot = PA250Gunnery::NextShot(SelectedShot, Delta, GetGunType(), pa250::battle_rules());
 	bPlayerChoseShot = true;
-	FString Line = LoadChip();
+	FString Line = LoadPicker();
 	if (APA250BattleGameMode* GM = BattleOf(this))
 	{
 		const float Range = AimMarkWorld.IsNearlyZero() ? 0.f : FVector::Dist(GetMuzzle(), AimMarkWorld);
@@ -347,7 +340,7 @@ void APA250FieldGun::CycleShot(int32 Delta)
 		{
 			if (const TCHAR* Why = PA250Gunnery::RefuseShot(SelectedShot, Range, pa250::battle_rules(), GetGunType()))
 			{
-				Line = FString::Printf(TEXT("%s — %s"), *LoadChip(), Why);
+				Line = FString::Printf(TEXT("%s\n%s"), *LoadPicker(), Why);
 			}
 		}
 		GM->ShowNotice(Line, 2.5f);
@@ -427,8 +420,10 @@ float APA250FieldGun::LayTo(const FVector& AimAt)
 	const pa250::BattleRules& R = pa250::battle_rules();
 	const FVector Muzzle = GetMuzzle();
 	const float Horiz = FMath::Max(100.f, FVector::Dist2D(AimAt, Muzzle));
-	const bool bCanister = SelectedShot == EPA250Shot::Grape;
-	const float Speed = (bCanister ? R.cannon_grape_speed_m
+	// Canister and grape shot fly as musket balls (AMusketProjectile, gravity scale 0.3, no drag).
+	const bool bCanister = SelectedShot == EPA250Shot::Grape || SelectedShot == EPA250Shot::GrapeShot;
+	const float Speed = (SelectedShot == EPA250Shot::Grape ? R.cannon_grape_speed_m
+		: SelectedShot == EPA250Shot::GrapeShot ? R.cannon_grapeshot_speed_m
 		: SelectedShot == EPA250Shot::Shell ? R.cannon_shell_speed_m : R.cannon_round_speed_m) * 100.f;
 	const float Gravity = bCanister ? FMath::Abs(GetWorld()->GetGravityZ()) * 0.3f : R.cannon_shot_gravity_cm;
 	const float Drag = bCanister ? 0.f : R.cannon_shot_drag_k;
@@ -483,6 +478,50 @@ FString APA250FieldGun::LoadChip() const
 	return FString::Printf(TEXT("LOAD: %s"), *FString(PA250Gunnery::ShotWords(SelectedShot)).ToUpper());
 }
 
+FString APA250FieldGun::LoadPicker() const
+{
+	const pa250::BattleRules& R = pa250::battle_rules();
+	FString Line = TEXT("[ ] load:");
+	for (EPA250Shot S : PA250Gunnery::ShotCycle)
+	{
+		if (!PA250Gunnery::ShotAllowedForGun(GetGunType(), S, R)) continue;
+		Line += S == SelectedShot
+			? FString::Printf(TEXT("   > %s %.0f m <"), *FString(PA250Gunnery::ShotWords(S)).ToUpper(), PA250Gunnery::ShotRangeCm(S, R) / 100.f)
+			: FString::Printf(TEXT("   %s"), PA250Gunnery::ShotWords(S));
+	}
+	return Line;
+}
+
+bool APA250FieldGun::IsWaitingForRounds() const
+{
+	return !bLoaded && !bRoundInHand && IsChestEmpty();
+}
+
+FString APA250FieldGun::RefillHint() const
+{
+	if (IsChestBlown()) return TEXT("Chest blown: this gun has no rounds left");
+	const pa250::BattleRules& R = pa250::battle_rules();
+	const float Radius = R.blast_chest_resupply_radius_cm;
+	FString Where = FString::Printf(TEXT("bring the gun within %.0f m of a post you hold or your side's start"), Radius / 100.f);
+	if (const APA250BattleGameMode* GM = BattleOf(this))
+	{
+		if (GM->MagazineSpareForChests(Faction) <= 0) return TEXT("Chest empty and the magazine has no rounds to send");
+		const FVector Here = GetActorLocation();
+		// The same far fallback as the chest's refill: a battle with no start for this side has no train.
+		const FVector Rear = GM->GetRearPoint(Faction, FVector(1e9f));
+		float Best = FVector::Dist2D(Rear, Here);
+		FString Name = TEXT("your start");
+		if (const APA250ControlPoint* Post = GM->NearestHeldPost(Faction, Here))
+		{
+			const float D = FVector::Dist2D(Post->GetActorLocation(), Here);
+			if (D < Best) { Best = D; Name = Post->GetObjectiveTitle(); }
+		}
+		if (Best <= Radius) return FString::Printf(TEXT("Chest empty: refilling (1 round every %.0f s)"), R.blast_chest_refill_seconds);
+		if (Best < 1e8f) Where = FString::Printf(TEXT("run the gun up to %s (%.0f m away; within %.0f m)"), *Name, Best / 100.f, Radius / 100.f);
+	}
+	return FString::Printf(TEXT("Chest empty: %s"), *Where);
+}
+
 FString APA250FieldGun::StatusLine() const
 {
 	const pa250::BattleRules& R = pa250::battle_rules();
@@ -493,12 +532,11 @@ FString APA250FieldGun::StatusLine() const
 	}
 	if (!bLoaded && !bRoundInHand && IsChestEmpty())
 	{
-		return FString::Printf(TEXT("%s\n%s  ·  crew %d of %d"), *Chip,
-			IsChestBlown() ? TEXT("Chest blown") : TEXT("Chest empty"), CrewNow, R.cannon_crew_men);
+		return FString::Printf(TEXT("%s\n%s  ·  crew %d of %d"), *Chip, *RefillHint(), CrewNow, R.cannon_crew_men);
 	}
 	if (bLoaded)
 	{
-		return FString::Printf(TEXT("%s\ncrew %d of %d  ·  look lays  ·  fire  ·  [ ] load"),
+		return FString::Printf(TEXT("%s\ncrew %d of %d  ·  look lays  ·  fire  ·  [ ] choose load"),
 			*Chip, CrewNow, R.cannon_crew_men);
 	}
 	const FString Step = Drill.GetStepLabel();
@@ -637,7 +675,9 @@ bool APA250FieldGun::Fire(const FVector& AimPoint, ARFCharacter* Gunner, bool bP
 	}
 	// The report, flash and shake go through the one FX router (battle_look.fx): the canister load
 	// has its own entry (tracker "grapeshot"), every other load is CannonFired, shell included.
-	PA250BattleFX::Fire(GetWorld(), Shot == EPA250Shot::Grape ? EPA250BattleFXEvent::CanisterFired : EPA250BattleFXEvent::CannonFired, Muzzle);
+	// Grape shot shares the canister's report (a case load, not a solid ball).
+	const bool bCaseLoad = Shot == EPA250Shot::Grape || Shot == EPA250Shot::GrapeShot;
+	PA250BattleFX::Fire(GetWorld(), bCaseLoad ? EPA250BattleFXEvent::CanisterFired : EPA250BattleFXEvent::CannonFired, Muzzle);
 	FActorSpawnParameters Params;
 	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 	if (Shot == EPA250Shot::RoundShot)
@@ -668,9 +708,18 @@ bool APA250FieldGun::Fire(const FVector& AimPoint, ARFCharacter* Gunner, bool bP
 	}
 	else
 	{
-		// Canister (enum grape): ~40 pellets, ~4° half-angle, falloff past 150 m.
-		const float HalfAngle = FMath::Max(0.5f, R.cannon_grape_cone_degrees);
-		for (int32 i = 0; i < FMath::Max(1, R.cannon_grape_balls); ++i)
+		// Canister (enum Grape): ~40 musket balls, ~4° half-angle, falloff past 150 m.
+		// Grape shot (GrapeShot): ~9 heavy balls, tighter, deadlier, further (cannon.grapeshot_*).
+		const bool bStand = Shot == EPA250Shot::GrapeShot;
+		const float ConeDeg = bStand ? R.cannon_grapeshot_cone_degrees : R.cannon_grape_cone_degrees;
+		const int32 Balls = bStand ? R.cannon_grapeshot_balls : R.cannon_grape_balls;
+		const float BallDamage = bStand ? R.cannon_grapeshot_damage : R.cannon_grape_damage;
+		const float FallStartM = bStand ? R.cannon_grapeshot_falloff_start_m : R.cannon_grape_falloff_start_m;
+		const float RangeM = bStand ? R.cannon_grapeshot_range_m : R.cannon_grape_range_m;
+		const float FloorScale = bStand ? R.cannon_grapeshot_falloff_floor : R.cannon_grape_falloff_floor;
+		const float SpeedM = bStand ? R.cannon_grapeshot_speed_m : R.cannon_grape_speed_m;
+		const float HalfAngle = FMath::Max(0.5f, ConeDeg);
+		for (int32 i = 0; i < FMath::Max(1, Balls); ++i)
 		{
 			const FVector D = AimRng.VRandCone(Dir, FMath::DegreesToRadians(HalfAngle)); // seeded: where each ball goes decides who is hit
 			const FTransform At(D.Rotation(), Muzzle + D * 30.f);
@@ -679,20 +728,20 @@ bool APA250FieldGun::Fire(const FVector& AimPoint, ARFCharacter* Gunner, bool bP
 			if (!Ball) continue;
 			// Flat canister damage. Falloff is by how far the pellet flies, applied in OnHit.
 			// Scaling by the aim mark here made every pellet in the cone share the mark's range.
-			Ball->Damage = R.cannon_grape_damage;
-			Ball->FalloffStartCm = R.cannon_grape_falloff_start_m * 100.f;
-			Ball->FalloffEndCm = R.cannon_grape_range_m * 100.f;
-			Ball->FalloffFloor = R.cannon_grape_falloff_floor;
+			Ball->Damage = BallDamage;
+			Ball->FalloffStartCm = FallStartM * 100.f;
+			Ball->FalloffEndCm = RangeM * 100.f;
+			Ball->FalloffFloor = FloorScale;
 			Ball->FinishSpawning(At);
 			Ball->SpawnLocation = Muzzle;
 			if (UProjectileMovementComponent* Move = Ball->GetProjectileMovement())
 			{
-				const float Speed = R.cannon_grape_speed_m * 100.f * MvSigma;
+				const float Speed = SpeedM * 100.f * MvSigma;
 				Move->Velocity = D * Speed;
 				Move->InitialSpeed = Speed;
 				Move->MaxSpeed = Speed;
 			}
-			Ball->SetLifeSpan(FMath::Max(1.f, R.cannon_grape_range_m / FMath::Max(1.f, R.cannon_grape_speed_m) + 0.5f));
+			Ball->SetLifeSpan(FMath::Max(1.f, RangeM / FMath::Max(1.f, SpeedM) + 0.5f));
 		}
 	}
 	UE_LOG(LogTemp, Display, TEXT("PA250 gun: %s gun fires %s at %.0f m (crew %d, %d gunners, heat %.2f)"), *Faction.ToString(),
@@ -1135,10 +1184,7 @@ void APA250FieldGun::Tick(float DeltaSeconds)
 		if (const APlayerController* PC = Cast<APlayerController>(Player->GetController()))
 		{
 			const FRotator Look = PC->GetControlRotation();
-			const float RangeCm = FMath::Clamp(
-				SelectedShot == EPA250Shot::Shell ? R.cannon_shell_range_m * 100.f
-					: (SelectedShot == EPA250Shot::Grape ? R.cannon_grape_range_m * 100.f : R.cannon_round_range_m * 100.f),
-				2000.f, R.cannon_round_range_m * 100.f);
+			const float RangeCm = FMath::Clamp(PA250Gunnery::ShotRangeCm(SelectedShot, R), 2000.f, R.cannon_round_range_m * 100.f);
 			// Ground mark along the look. Pitch chooses how far out the mark sits; the piece itself
 			// stays level and the shot is lofted onto that mark.
 			FHitResult Ground;
@@ -1787,6 +1833,12 @@ void APA250AmmoChest::Tick(float DeltaSeconds)
 			bNearFriendlyPost = true;
 			break;
 		}
+	}
+	// The ammunition train stands at the side's start. Until 2026-11-18 only a held post refilled the
+	// chest, and a gun placed by its start with no post within reach stood at Load after six rounds.
+	if (!bNearFriendlyPost && FVector::Dist2D(GM->GetRearPoint(Piece->GetFaction(), FVector(1e9f)), Piece->GetActorLocation()) <= Radius)
+	{
+		bNearFriendlyPost = true;
 	}
 	if (!bNearFriendlyPost) { RefillAccum = 0.f; return; }
 	// A round in the chest is a claim on the magazine, charged when it is fired (NotifyGunFired)

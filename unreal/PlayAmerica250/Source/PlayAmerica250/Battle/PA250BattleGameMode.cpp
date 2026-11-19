@@ -1016,7 +1016,7 @@ bool APA250BattleGameMode::PlayerFiresGun(ARFCharacter* Soldier)
 	}
 	if (!Gun->IsLoaded())
 	{
-		ShowNotice(TEXT("The gun is not loaded"), 2.f);
+		ShowNotice(Gun->IsWaitingForRounds() ? Gun->RefillHint() : FString(TEXT("The gun is not loaded")), 2.5f);
 		return true;
 	}
 	// Fire itself says why: too few men, or grape / shell / round too far.
@@ -1029,6 +1029,11 @@ bool APA250BattleGameMode::PlayerWorksGun(ARFCharacter* Soldier, EActiveReloadHi
 	OutHit = EActiveReloadHit::None;
 	APA250FieldGun* Gun = GunAt(Soldier);
 	if (!Gun || Gun->GetPlayerGunner() != Soldier) return false;
+	if (Gun->IsWaitingForRounds())
+	{
+		ShowNotice(Gun->RefillHint(), 3.f);
+		return true;
+	}
 	OutHit = Gun->PlayerCommit();
 	return true;
 }
@@ -4562,7 +4567,7 @@ FString APA250BattleGameMode::GetAbilityLine(const ARFCharacter* Soldier) const
 	{
 		return Gun->GetPlayerGunner() == Soldier
 			? Gun->StatusLine()
-			: FString(TEXT("T  Serve this gun (look lays · [ ] load · fire · R drill)"));
+			: FString(TEXT("T  Serve this gun (look lays · [ ] choose the load · fire · R drill)"));
 	}
 	if (Kit.bServesGuns) return TEXT("Gunner: Deploy places you at a gun; or go to one and press T to serve it");
 	if (Kit.bBuildsWorks) return TEXT("T  Dig: stand at a marked place or a battered bank and raise the work");

@@ -933,6 +933,15 @@ struct BattleRules {
     float cannon_grape_speed_m = 280.f;
     float cannon_grape_falloff_start_m = 150.f; // full damage until here, then down to the floor at grape_range
     float cannon_grape_falloff_floor = 0.25f;
+    // Grape shot proper (GAME INVENTION, 2026-11-18): a stand of a few heavy iron balls. Fewer and
+    // deadlier than canister, tighter, and reaching further. The player's load only (cannon.grapeshot_*).
+    float cannon_grapeshot_range_m = 350.f;
+    int cannon_grapeshot_balls = 9;
+    float cannon_grapeshot_cone_degrees = 2.5f;
+    float cannon_grapeshot_damage = 150.f;
+    float cannon_grapeshot_speed_m = 250.f;
+    float cannon_grapeshot_falloff_start_m = 220.f;
+    float cannon_grapeshot_falloff_floor = 0.4f;
     float cannon_shell_range_m = 300.f;        // exploding shell (GAME INVENTION)
     float cannon_shell_speed_m = 120.f;
     float cannon_shell_fuse_min_m = 40.f;

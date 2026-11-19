@@ -260,7 +260,7 @@ public:
 	void NotifyGunFired(APA250FieldGun* Gun, EPA250Shot Shot);
 	/** Deploy as gunner: place the player at a crew post and serve that gun. */
 	bool PlacePlayerAtGun(ARFCharacter* Soldier);
-	/** While serving: [ ] cycle grape / round / shell. */
+	/** While serving: [ ] step through the loads the piece fires (round shot, grape shot, canister, shell). */
 	bool PlayerCycleGunShot(ARFCharacter* Soldier, int32 Delta);
 	void NotifyRoundShot(ARFCharacter* Man, bool bStruck);
 	/** Trace only: what a formed bot was doing at one of its thinks (was he at a covered place, was

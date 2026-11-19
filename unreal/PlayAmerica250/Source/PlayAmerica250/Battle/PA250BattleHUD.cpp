@@ -471,7 +471,7 @@ TSharedRef<SWidget> UPA250BattleHUD::RebuildWidget()
 		return nullptr;
 	};
 	auto IsReloadingBar = [MeP, ServingGun]() {
-		if (const APA250FieldGun* Gun = ServingGun()) return Gun->IsDrillActive();
+		if (const APA250FieldGun* Gun = ServingGun()) return Gun->IsDrillActive() && !Gun->IsWaitingForRounds();
 		const ARFCharacter* Me = MeP();
 		return Me && Me->GetEquippedFirearm() && !Me->GetEquippedFirearm()->CanFire() && !Me->GetEquippedFirearm()->IsJammed();
 	};
@@ -479,8 +479,11 @@ TSharedRef<SWidget> UPA250BattleHUD::RebuildWidget()
 	auto Reload = [MeP, ServingGun]() {
 		if (const APA250FieldGun* Gun = ServingGun())
 		{
-			if (Gun->IsLoaded()) return FText::FromString(TEXT("Gun loaded"));
-			return FText::FromString(FString::Printf(TEXT("Gun drill   %s"), *Gun->GetDrill().GetStepLabel()));
+			// The load he will fire is on the bar he watches, and an empty chest says so instead of a
+			// drill frozen at Load (playtest 2026-11-18: "stuck at loading", R did nothing).
+			if (Gun->IsWaitingForRounds()) return FText::FromString(FString::Printf(TEXT("%s\n%s"), *Gun->LoadChip(), *Gun->RefillHint()));
+			if (Gun->IsLoaded()) return FText::FromString(FString::Printf(TEXT("Gun loaded   %s"), *Gun->LoadChip()));
+			return FText::FromString(FString::Printf(TEXT("Gun drill   %s   %s"), *Gun->GetDrill().GetStepLabel(), *Gun->LoadChip()));
 		}
 		const ARFCharacter* Me = MeP();
 		if (!Me || !Me->GetEquippedFirearm()) return FText::GetEmpty();
@@ -491,14 +494,18 @@ TSharedRef<SWidget> UPA250BattleHUD::RebuildWidget()
 		return FText::FromString(FString::Printf(TEXT("Reloading   %s"), *Me->GetEquippedFirearm()->GetReloadPhaseLabel()));
 	};
 	auto ReloadColor = [MeP, ServingGun]() {
-		if (ServingGun()) return FSlateColor(FLinearColor(1.f, 0.92f, 0.65f));
+		if (const APA250FieldGun* Gun = ServingGun()) return FSlateColor(Gun->IsWaitingForRounds() ? FLinearColor(1.f, 0.45f, 0.3f) : FLinearColor(1.f, 0.92f, 0.65f));
 		const ARFCharacter* Me = MeP();
 		if (Me && Me->GetEquippedFirearm() && Me->GetEquippedFirearm()->IsJammed()) return FSlateColor(FLinearColor(1.f, 0.3f, 0.2f));
 		if (Me && Me->GetEquippedFirearm() && Me->GetEquippedFirearm()->CanFire()) return FSlateColor(FLinearColor(0.75f, 1.f, 0.75f));
 		return FSlateColor(FLinearColor(1.f, 0.95f, 0.7f));
 	};
 	auto ReloadHint = [MeP, ServingGun]() {
-		if (ServingGun()) return FText::FromString(TEXT("Tap R on each drill step  -  full crew perfect ≈15 s  -  or wait for the crew"));
+		if (const APA250FieldGun* Gun = ServingGun())
+		{
+			return FText::FromString(Gun->IsLoaded() || Gun->IsWaitingForRounds() ? Gun->LoadPicker()
+				: Gun->LoadPicker() + TEXT("\nTap R on each drill step  -  full crew perfect ≈15 s  -  or wait for the crew"));
+		}
 		const ARFCharacter* Me = MeP();
 		if (!Me || !Me->GetEquippedFirearm() || Me->GetEquippedFirearm()->CanFire() || Me->GetEquippedFirearm()->IsJammed() || Me->GetEquippedFirearm()->IsDry()) return FText::GetEmpty();
 		return FText::FromString(TEXT("Tap R as the marker crosses the gold zone to load faster  -  3 perfect taps = +15% damage  -  or just wait"));
